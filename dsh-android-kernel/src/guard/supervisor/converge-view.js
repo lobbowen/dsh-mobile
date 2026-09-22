@@ -360,7 +360,14 @@ class ConvergeView {
         }
         case 'STARTING': {
           if (portUp && healthOk) this._enterRunning();
-          else if (Date.now() > this._mStartDeadline()) this._beginRestart('start_timeout', { countCrash: true });
+          else if (Date.now() > this._mStartDeadline()) {
+            // start_timeout 分层取证（真机 2026-09-23：SELinux 禁 /proc/net/tcp 反查，
+            // 健康的 dsh 被误判超时杀循环）：不分层上屏就无法区分
+            // 「没监听 / pid 不可见 / HTTP 不健康」三种死法。
+            this.logger.warn('start_timeout probe detail: listening=' + probeRes.listening
+              + ' pid=' + probeRes.pid + ' httpOk=' + probeRes.httpOk + ' httpStatus=' + probeRes.httpStatus);
+            this._beginRestart('start_timeout', { countCrash: true });
+          }
           break;
         }
         case 'RUNNING': {
