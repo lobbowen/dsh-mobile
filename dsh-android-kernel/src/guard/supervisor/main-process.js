@@ -5,6 +5,9 @@
 // 行为与拆分前逐字一致（含 getter/setter；class 体方法无需逗号）。
 // 依赖由拆分脚本按块内实际使用自动携带（遗漏会导致运行期 ReferenceError）。
 const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
 const pidlook = require('../../platform/os/pidlookup');
 const { LineBuffer } = require('../../platform/log');
 const platform = require('../../platform/os/index');
@@ -17,6 +20,36 @@ const runtimeContract = require('../../platform/runtime-contract');
 class MainProcess {
   spawnCommand() {
     return native.nativeCommand(this.config, this.pluginManager);
+  }
+
+  /** 回收 dsh 状态目录里持锁进程已死的孤儿锁文件（详见 _startProcess 调用点注释）。
+   *  安全边界：锁内容非纯数字 pid、或 pid 仍存活（含 EPERM）一律不动；单文件异常只跳过。 */
+  _reapOrphanDshLocks() {
+    const envHome = process.env.DSH_HOME && process.env.DSH_HOME.trim();
+    const root = envHome ? envHome.trim() : path.join(process.env.HOME || os.homedir(), '.dsh');
+    const reaped = [];
+    const walk = (dir, depth) => {
+      if (depth > 3) return;
+      let ents;
+      try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of ents) {
+        const p = path.join(dir, e.name);
+        try {
+          if (e.isDirectory()) { if (e.name !== 'node_modules') walk(p, depth + 1); continue; }
+          if (!e.isFile() || !e.name.endsWith('.lock')) continue;
+          const txt = fs.readFileSync(p, 'utf8').trim();
+          // 空锁无可见主人（写入方 create 与写 pid 间隙即死）；数字锁仅在持锁 pid 已死时回收。
+          if (txt && !/^\d+$/.test(txt)) continue;
+          if (txt && pidlook.isAlive(Number(txt))) continue;
+          fs.rmSync(p, { force: true });
+          reaped.push({ file: p, pid: txt ? Number(txt) : null });
+        } catch { /* 单个文件失败不影响其余回收 */ }
+      }
+    };
+    walk(root, 0);
+    for (const r of reaped) this.events.append('orphan_lock_reaped', r);
+    if (reaped.length) this.logger.warn('reaped orphan dsh locks: ' + reaped.map((r) => r.file + '(pid=' + r.pid + ')').join(' '));
+    return reaped;
   }
 
   // ---- 生命周期动作 ----
@@ -38,6 +71,10 @@ class MainProcess {
       this.writeState();
       return;
     }
+    // 孤儿锁回收：此刻无存活 dsh（spawn 路径），SIGKILL 残留的 <$HOME>/.dsh/**.lock
+    // 会让 dsh 启动在 30s 锁等待后崩溃（"plugin tree failed to load"），守卫再判启动失败
+    // kill 重启 → 永不就绪的重启死循环。dsh 文档定义孤儿锁清理为 operator 动作——守卫即 operator。
+    this._reapOrphanDshLocks();
     this.events.append('spawn', { command: this.spawnCommand() });
     const [cmd, ...args] = this.spawnCommand();
     let child;
