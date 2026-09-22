@@ -157,11 +157,16 @@ object KernelInstaller {
             )
         }
 
+        // 包结构契约（kernel-bundle.js:packBundle）：zip 条目恒为 kernel/<version>/...，
+        // 所以解出来的 manifest 根在 tmp/kernel/ 这一层。曾直接拿 tmp 找 <version>/，
+        // postcheck 永远失败（真机首装实测：postcheck-manifest-unreadable 无限回退探针）。
+        val stageRoot = File(tmp, "kernel").let { if (it.isDirectory) it else tmp }
+
         // 解包后**再核一次**包内 kernel.json 与校验阶段读到的一致。
         // 为什么：Node 校验是读原 zip，而落盘走的是 Java 解压 —— 两者若对
         // 同一 zip 的解读不同（历史上 zip.js 就只在 Stored 下正确），会出现
         // "验的是 A、装的是 B"。这一步把这种不一致变成硬失败。
-        val installedManifest = km.readKernelJson(version, tmp)
+        val installedManifest = km.readKernelJson(version, stageRoot)
         if (installedManifest == null) {
             tmp.deleteRecursively()
             return InstallResult(false, version, source, "postcheck-manifest-unreadable",
@@ -184,12 +189,13 @@ object KernelInstaller {
         // rename 在同一文件系统内是原子的，所以设备断电只会得到
         // "改名成功" 或 "没改名"，不会得到半成品 —— 这正是不能用 copyTo 的原因。
         dest.deleteRecursively()
-        if (!tmp.renameTo(dest)) {
+        val staged = File(stageRoot, version)
+        if (!staged.renameTo(dest)) {
             // rename 失败（跨设备/权限）时退化为拷贝，但**先拷到 .tmp 再 rename**，
             // 保住原子性。直接拷到 dest 会让窗口期内 dest 是不完整的。
             tmp.deleteRecursively()
             return InstallResult(false, version, source, "rename-failed",
-                "无法把 ${tmp.absolutePath} 重命名为 ${dest.absolutePath}", verify.raw)
+                "无法把 ${staged.absolutePath} 重命名为 ${dest.absolutePath}", verify.raw)
         }
 
         km.setCurrentVersion(version)
