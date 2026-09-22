@@ -74,7 +74,7 @@ const { identify, isPrivateIpv4 } = require('./identity');
  *  2. CSRF 深化层（originAllowed）：带 Origin 的写请求须与本服务同源——防"用户浏览器
  *     里的恶意网页"驱动 API；身份层不覆盖该威胁（浏览器发起的请求源 IP 是合法的）。
  *  3. 访问密钥层（apiAccessKey，可选）：非回环请求须携带 Bearer/?access_key=。
- *  不返回 CORS 头（面板同源托管 + 壳源白名单）→ 其他网站浏览器读不到响应。
+ *  不返回 CORS 头（面板同源托管，零合法跨源消费者）→ 其他网站浏览器读不到响应。
  */
 
 /** 有界 body 读取：超过 maxBytes 时先应答 413 再断开连接。
@@ -266,18 +266,13 @@ function createServer(sup) {
       return res.end(JSON.stringify({ error: '需要访问密钥（apiAccessKey）：请求头 Authorization: Bearer <key> 或 ?access_key=<key>' }));
     }
 
-    // OPTIONS 预检：壳源放行（含 Allow-*），其余跨站预检不给任何 CORS 头
+    // OPTIONS 预检：一律 204 空响应（零 CORS —— 面板同源托管，不存在合法的跨源消费者，
+    // 预检方读不到任何 Allow-* 也就驱动不了写操作）。
+    // ⚠ 2026-09-23 实证修复：此分支曾引用**从未声明**的 `shellOrigin`（PC 壳白名单遗留）——
+    //   任何 OPTIONS 请求都 ReferenceError → uncaughtException（守卫 bin 策略 3 次自杀重启），
+    //   一个浏览器预检即可打挂 API。门禁钉在 dsh-access-route-test.js（X-7）。
     if (req.method === 'OPTIONS') {
-      if (shellOrigin) {
-        res.writeHead(204, {
-          'Access-Control-Allow-Origin': shellOrigin,
-          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-          'Access-Control-Max-Age': '600',
-        });
-      } else {
-        res.writeHead(204);
-      }
+      res.writeHead(204);
       return res.end();
     }
 

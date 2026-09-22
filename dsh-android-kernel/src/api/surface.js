@@ -34,6 +34,7 @@ const SURFACE = [
   { path: '/logs/export',    methods: ['GET'],  domain: 'lifecycle', category: 'operational', consumers: ['审计/离线备份'], note: '审计：聚合流 JSONL 导出（离线备份/合规留痕）' },
   { path: '/lifecycle',      methods: ['GET'],  domain: 'lifecycle', category: 'public',      consumers: ['UI'], note: '模块生命周期一览（=/lifecycle/status）' },
   { path: '/lifecycle/status', methods: ['GET'], domain: 'lifecycle', category: 'public',     consumers: ['UI'], note: '同上（显式别名）' },
+  { path: '/dsh/access',     methods: ['GET'],  domain: 'lifecycle', category: 'public',      consumers: ['UI(OverviewPage 进入DSH)'], note: '带令牌 DSH Web 直连 URL（仅回环下发，令牌=会话凭据）' },
 
   // ── 守卫/设置域（guard.js）──
   { path: '/changelog',            methods: ['GET'],  domain: 'guard', category: 'public',      consumers: ['UI(AboutCard)'], note: 'DSH 更新日志（text/plain）' },

@@ -104,6 +104,8 @@ export const supervisorApi = {
   // 注：GET /lifecycle/{id} 保留为后端 REST 面（单模块查询，供脚本/curl）；UI 未使用故不设 client 方法。
 
   // ── native DSH ──
+  // DSH 访问入口：内核拼带令牌的回环直连 URL（令牌仅回环下发，非回环 403；未捕获令牌 409）
+  dshAccess: () => get<GenericOk & { url?: string }>("/dsh/access"),
   // 后端返回 { ok, ...versionInfo() }（含 updateAvailable/latest/installed）；此前误标 GenericOk → 契约漏字段。
   nativeCheckUpdate: () => post<GenericOk & { updateAvailable?: boolean; latest?: string; installed?: string | null }>("/native/check-update"),
   nativeInstall: () => post<GenericOk>("/native/install"),

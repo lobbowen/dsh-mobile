@@ -40,6 +40,8 @@ export function OverviewPage() {
 
   // ⚠ 已删除的能力（勿回潮）：「DSH Web」按钮（/instances/main/open-web）—— 服务端代开浏览器
   //   属 PC 桌面能力；安卓上 platform.os.browser.open() 无实现，面板改由容器 WebView 直接导航。
+  //   2026-09-23：该「直接导航」的落点即下方 enterDsh() + 「进入 DSH」按钮（客户端跳
+  //   window.top 到 /dsh/access 返回的回环 URL），与被删的「服务端代开」是两种能力。
   const running = Boolean(s?.dshPid);
   const upgradeRunning = upg?.state === "running";
 
@@ -66,6 +68,16 @@ export function OverviewPage() {
     setUpgradeOpen(false);
     await run("upg", () => supervisorApi.nativeUpgrade(), { success: "升级已开始，请耐心等待…" });
     // 升级为异步任务：状态机经 /status.upgrade 呈现，由 2s 轮询推进
+  }
+  async function enterDsh() {
+    // 经 /dsh/access 取带令牌的回环直连 URL（令牌只回环下发）。容器 WebView 中面板嵌在
+    // /__host 宿主帧 iframe 内 → 导航 window.top 整窗换页；浏览器直开时 top===self 语义一致。
+    // 返回面板 = 重开 App（容器固定加载 /__host）。
+    await run("enter", async () => {
+      const r = await supervisorApi.dshAccess();
+      if (!r?.ok || !r.url) throw new Error(r?.error || "未获得 DSH 访问地址");
+      (window.top ?? window).location.href = r.url;
+    }, { refresh: false });
   }
   async function installDsh() {
     if (!confirm("将在线安装最新版 DeepSeek Harness（需数分钟，自动适配最快镜像源）。确定继续？")) return;
@@ -184,6 +196,13 @@ export function OverviewPage() {
               <>
                 {/* D3-A 定案：主 DSH 由守卫统一自 spawn（始终守护拉起），无「进程守护」开关；
                     运行操作统一白底 outline（卸载 DSH 为唯一高危实色按钮） */}
+                {/* 「进入 DSH」全断点可见（2026-09-23 真机：小屏无任何入口进不了 DSH）——
+                    运行态主操作，primary 实色与 outline 运行操作区分 */}
+                {running ? (
+                  <Button disabled={busy === "enter"} onClick={() => void enterDsh()} size="sm">
+                    <ArrowUpRight className="size-4" />进入 DSH
+                  </Button>
+                ) : null}
                 <Button disabled={busy === "dsh"} onClick={() => void toggleDsh()} size="sm" variant="outline">
                   {running ? <><Power className="size-4 text-status-error" />停止 DSH</> : <><Rocket className="size-4 text-primary" />启动 DSH</>}
                 </Button>
