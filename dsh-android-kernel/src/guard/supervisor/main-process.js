@@ -53,6 +53,35 @@ class MainProcess {
   }
 
   // ---- 生命周期动作 ----
+
+  /** 子进程 stderr 取证捕获：文件 fd 而非管道。node 对文件的写是同步的，
+   *  子进程哪怕 process.exit() 急死，最后一行错误也已落盘；对管道的写是异步的，
+   *  急死会丢掉未 flush 的待发数据（真机 2026-09-22：dsh 秒退 exit:1 且屏幕零输出，
+   *  死因就丢在子进程自己的管道缓冲里）。每次 spawn 以 'w' 重开：本轮 stderr
+   *  从零计，上一轮的死因不得顶给本轮。返回 {fd, path, readNew()}，readNew 取增量。 */
+  _openStderrCapture() {
+    const p = path.join(path.dirname(this.config.dshLogFile), 'dsh-stderr.log');
+    const fd = fs.openSync(p, 'w');
+    let pos = 0;
+    return {
+      fd,
+      path: p,
+      readNew() {
+        try {
+          const size = fs.statSync(p).size;
+          if (size <= pos) return null;
+          const h = fs.openSync(p, 'r');
+          try {
+            const buf = Buffer.allocUnsafe(size - pos);
+            const n = fs.readSync(h, buf, 0, buf.length, pos);
+            pos += n;
+            return n > 0 ? buf.subarray(0, n) : null;
+          } finally { fs.closeSync(h); }
+        } catch { return null; }
+      },
+    };
+  }
+
   async _startProcess() {
     this._actNote('start', 'spawn'); // C3-3b G1 影子 actual 记账
     this._crashHalted = false; // 主动拉起 = 清除崩溃停靠（进入运行流程）
@@ -77,18 +106,22 @@ class MainProcess {
     this._reapOrphanDshLocks();
     this.events.append('spawn', { command: this.spawnCommand() });
     const [cmd, ...args] = this.spawnCommand();
+    const cap = this._openStderrCapture();
     let child;
     try {
       // detached：独立进程组，便于按组发信号（DSH 派生的子进程一并收到）。
       // 插件 --patch 覆盖层由 spawnCommand()/native.nativeCommand() 统一附加（顶层位置），此处不再重复拼接。
       // env 注入契约 PATH：DSH 自身（及其派生的 npm 操作）必须与守卫同源找到 node。
-      child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], env: runtimeContract.withPath(process.env), detached: true });
+      // stderr 走文件 fd（见 _openStderrCapture）：管道会在子进程急死时吞掉崩溃栈。
+      child = spawn(cmd, args, { stdio: ['ignore', 'pipe', cap.fd], env: runtimeContract.withPath(process.env), detached: true });
     } catch (err) {
+      try { fs.closeSync(cap.fd); } catch { /* 已无效则忽略 */ }
       this.events.append('spawn_failed', { message: err.message });
       this.logger.error('spawn failed: ' + err.message);
       this._beginRestart('spawn_error', { countCrash: true });
       return;
     }
+    try { fs.closeSync(cap.fd); } catch { /* 子进程已持有自己的重复 fd */ }
     this.logger.info('spawn pid=' + child.pid + ' cmd=' + this.spawnCommand().join(' '));
     this._mSetChild(child);
     this._mSetAdopted(false);
@@ -107,14 +140,19 @@ class MainProcess {
       // （原 raw chunk 镜像会把 ?token= 明文写进 journald）
       process.stdout.write('[dsh] ' + clean + '\n');
     });
+    const errLines = []; // 本轮已捕获的子进程 stderr（环形上限，退出时取尾部进事件）
     const errBuf = new LineBuffer((line) => {
       const clean = sanitizeToken('[stderr] ' + line);
       this.dshWriter.write(clean);
       process.stderr.write(clean + '\n');
+      errLines.push(clean);
+      if (errLines.length > 200) errLines.shift();
     });
+    const drainStderr = () => { const chunk = cap.readNew(); if (chunk) errBuf.push(chunk); };
+    const stderrTimer = setInterval(drainStderr, 250);
     child.stdout.on('data', (d) => { outBuf.push(d); });
-    child.stderr.on('data', (d) => { errBuf.push(d); });
     child.on('error', (err) => {
+      clearInterval(stderrTimer);
       this.events.append('spawn_error', { message: err.message });
       if (this._mChild() === child && this._mPhase() === 'STARTING') {
         this._mSetChild(null);
@@ -135,10 +173,16 @@ class MainProcess {
       }
     });
     child.on('exit', (code, signal) => {
+      clearInterval(stderrTimer);
+      drainStderr(); // 终读：急死时最后已落盘的行必须进本轮取证
       outBuf.flush();
       errBuf.flush();
       if (this._mChild() !== child) return; // 已被 stopProcess 接管
-      this.events.append('dsh_exited', { code, signal, phase: this._mPhase() });
+      this.events.append('dsh_exited', { code, signal, phase: this._mPhase(), stderrTail: errLines.slice(-40) });
+      if (code !== 0 && errLines.length === 0) {
+        // 零输出非零退出：把"没有输出"本身也记成一件事，避免下轮排查再猜
+        this.logger.warn('dsh exited code=' + code + ' with no output (dsh-stderr.log empty)');
+      }
       this._mSetChild(null);
       if (this._stopping) return;
       if (this._mDesired() !== 'running') return;
