@@ -111,6 +111,30 @@ def check(path: Path):
                     f"on.push 出现 {n_push} 次 —— 后一个会静默覆盖前一个，"
                     "触发条件将与预期不符。必须合并到同一个 push: 块。")
 
+        # 事件名白名单：on: 下写了非事件 key（最常见的是把 push 的子键
+        # tags/branches/paths 误提到顶层）时，YAML 解析完全合法，但 GitHub
+        # 会以【workflow 级失败、0 个 job、无步骤日志】的形式拒绝 ——
+        # 发现成本极高，必须在这里拦下（kernel-ci.yml 迁移时真实踩过）。
+        KNOWN_EVENTS = {
+            "push", "pull_request", "pull_request_target", "workflow_dispatch",
+            "workflow_call", "schedule", "release", "issues", "issue_comment",
+            "discussion", "discussion_comment", "create", "delete", "fork",
+            "label", "milestone", "page_build", "project", "project_card",
+            "public", "registry_package", "repository_dispatch", "status",
+            "watch", "merge_group", "check_run", "checks_requested",
+            "deployment", "deployment_status", "deployment_protection_rule",
+            "workflow_job", "gollum", "member", "org_block", "package",
+            "personal_access_token_request", "team_add", "meta",
+        }
+        for k in on_block:
+            if k not in KNOWN_EVENTS:
+                hint = ""
+                if k in ("tags", "tags-ignore", "branches", "branches-ignore",
+                         "paths", "paths-ignore", "types", "branches-ignore"):
+                    hint = " —— 这是 push/pull_request 的【子键】，必须缩进到对应事件块之下"
+                errs.append("on: 下的 %r 不是合法事件名（GitHub 会以 0-job 的 "
+                            "workflow 级失败拒绝）%s" % (k, hint))
+
         push = on_block.get("push")
         if isinstance(push, dict):
             if "paths" in push and "paths-ignore" in push:

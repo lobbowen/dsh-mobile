@@ -14,12 +14,15 @@ name: android-kernel-ci
 on:
   push:
     branches: [main, master]
+    tags: ['v*']
+    # 注：GitHub 一个 workflow 的 on.push 只能有一个块（重复 key 后者覆盖前者），
+    # branches/tags/paths 必须合并在这同一个 push 下。
     paths:
       - 'dsh-android-kernel/**'
+      - '.github/workflows/kernel-ci.yml'
   pull_request:
     paths:
       - 'dsh-android-kernel/**'
-  tags: ['v*']
   workflow_dispatch: {}
 
 jobs:
