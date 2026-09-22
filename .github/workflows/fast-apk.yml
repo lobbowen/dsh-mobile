@@ -422,6 +422,11 @@ jobs:
           int tgetnum(const char *id) { (void)id; return -1; }
           char *tgetstr(const char *id, char **area) { (void)id; (void)area; return 0; }
           char *tgoto(const char *cap, int col, int row) { (void)cap; (void)col; (void)row; return 0; }
+          /* 第三轮 CI 实证：桩只给函数不够 —— configure 探到 tputs 后 readline 引用
+           * termcap 填充三件套全局 PC/BC/UP（真实 termcap 库附带），必须一并定义。 */
+          char PC = 0;
+          char *BC = 0;
+          char *UP = 0;
           EOF
             "$CC" -c -O2 /tmp/termcap_stub.c -o /tmp/termcap_stub.o \
               && "$LLVM_AR" rcs /tmp/libtermcap_stub.a /tmp/termcap_stub.o
