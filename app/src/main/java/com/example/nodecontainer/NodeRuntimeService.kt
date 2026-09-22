@@ -157,8 +157,10 @@ class NodeRuntimeService : Service() {
 
             // 0b) 本地 feed：设备上（/sdcard 等）若有 kernel-<ver>.zip + manifest，就地升级。
             //     这是 A'' 自举的落点 —— 全程离线、不依赖网络与 PC。
+            //     不再限定 CURRENT 缺失：feed 的语义就是「有人明确要装这个版本」（见类注释
+            //     「放了包没反应」），旧门禁把它退化成只有首启兜底才生效。
             val feed = LocalKernelFeed.scan(this)
-            if (km.currentVersion() == null && feed != null) {
+            if (feed != null) {
                 RuntimeDiagnostics.append(
                     this, "kernel-feed", true, "发现本地内核 feed",
                     "zip=${feed.zip.absolutePath}（${feed.zip.length()} 字节）, manifest=${feed.manifest?.absolutePath ?: "(无)"}"
@@ -169,6 +171,9 @@ class NodeRuntimeService : Service() {
                     manifest = feed.manifestJson,
                     source = KernelInstaller.Source.LOCAL_FILE,
                 )
+                // 类契约：装成功即消费（删除 feed 包），避免每次开机重复安装同一包；
+                // 失败保留，下次开机照常重试。
+                if (feedResult.ok) LocalKernelFeed.consume(feed)
                 RuntimeDiagnostics.append(
                     this, "kernel-feed",
                     feedResult.ok,

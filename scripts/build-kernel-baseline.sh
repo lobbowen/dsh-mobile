@@ -27,6 +27,9 @@
 #  产物
 #  ----
 #    app/src/main/assets/kernel/baseline.zip   设备端首启解包用
+#    app/src/main/assets/kernel/baseline-<version>.zip
+#                                           同名带版本号副本：设备端基线**升级**通道
+#                                           （KernelManager 按名比对 CURRENT，只升不降）
 #    (release/kernel-<version>.zip 也会被 build-bundle 顺带产出，可忽略)
 # ============================================================================
 set -euo pipefail
@@ -134,9 +137,14 @@ SRC_ZIP="$ROOT/release/kernel-$VER.zip"
 [ -f "$SRC_ZIP" ] || { echo "[baseline] [error] 打包未产出 $SRC_ZIP" >&2; exit 1; }
 
 # ---- 投放为 assets 资产 ----
+# 带版名 baseline-<ver>.zip 是**升级通道**：设备端 KernelManager 不解包即可拿版本
+# 与 CURRENT 比较，高于现状才落地；历史名 baseline.zip 同内容一并保留（旧审计
+# 步骤与无版本名时的首启兜底仍按它走）。
 OUT_DIR="$ROOT/app/src/main/assets/kernel"
 mkdir -p "$OUT_DIR"
+rm -f "$OUT_DIR"/baseline-*.zip
 cp "$SRC_ZIP" "$OUT_DIR/baseline.zip"
+cp "$SRC_ZIP" "$OUT_DIR/baseline-$VER.zip"
 
 # ---- 自检：用**与设备端同一个校验器**验一遍 ----
 #

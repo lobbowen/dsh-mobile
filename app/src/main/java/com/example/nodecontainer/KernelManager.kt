@@ -188,10 +188,51 @@ class KernelManager(private val context: Context) {
             get() = this is NoBaselineAsset || this is BrokenBaseline
     }
 
+    /** 选基线资产：带版名 `baseline-<ver>.zip` 优先（取最高版），回落历史名 `baseline.zip`（版本未知→null）。 */
+    private fun pickBaselineAsset(names: List<String>): Pair<String, String?>? {
+        val versioned = names
+            .filter { it.startsWith("baseline-") && it.endsWith(".zip") }
+            .map { it to it.removePrefix("baseline-").removeSuffix(".zip") }
+            .filter { it.second.isNotBlank() }
+        if (versioned.isNotEmpty()) {
+            return versioned.reduce { acc, c -> if (compareKernelVersions(c.second, acc.second) > 0) c else acc }
+        }
+        return if ("baseline.zip" in names) "baseline.zip" to null else null
+    }
+
+    /** 内核版本比较：数字段按数值、其余按字符串逐 token 比较（0.1.0-android.10 > 0.1.0-android.2）。 */
+    internal fun compareKernelVersions(a: String, b: String): Int {
+        val ta = Regex("\\d+|\\D+").findAll(a).map { it.value }.toList()
+        val tb = Regex("\\d+|\\D+").findAll(b).map { it.value }.toList()
+        for (i in 0 until maxOf(ta.size, tb.size)) {
+            val x = ta.getOrNull(i) ?: return -1
+            val y = tb.getOrNull(i) ?: return 1
+            val nx = x.toLongOrNull()
+            val ny = y.toLongOrNull()
+            val c = when {
+                nx != null && ny != null -> nx.compareTo(ny)
+                nx != null -> 1
+                ny != null -> -1
+                else -> x.compareTo(y)
+            }
+            if (c != 0) return c
+        }
+        return 0
+    }
+
     /**
-     * 首启兜底：若沙箱里没有任何内核（CURRENT 缺失），且 APK 内置了基线内核包
-     * `assets/kernel/baseline.zip`，则经**完整校验**后落地并切指针。
-     * 这样无网首启也能拉起一个已知良好内核；后续 OTA 覆盖升级。
+     * 首启兜底 **＋ 基线升级通道**：APK 内置基线内核包经**完整校验**后落地并切指针。
+     *
+     * 两种资产名（CI 的 scripts/build-kernel-baseline.sh 同时产出）：
+     *   · `baseline-<version>.zip` —— 版本写在资产名里，**不解包即可与 CURRENT 比较**，
+     *     高于 CURRENT 才落地（只升不降，防止 feed/OTA 装的更新版本被旧 APK 压回）；
+     *   · `baseline.zip`（历史名）—— 版本要解包才知道，维持旧语义：仅 CURRENT 缺失时
+     *     兜底安装，避免每次开机重读 1.2MB 资产。
+     *
+     * 为什么需要升级分支：`AlreadyPresent` 让新 APK 里的新内核在已装内核的设备上
+     * 永远不生效 —— 真机上唯一被验证过的交付动作就是「装新 APK」，若内核更新
+     * 不随 APK 落地，修了也到不了设备（android.2 孤儿锁修复就是这样被挡住的）。
+     * 后续 OTA 覆盖升级仍走 [KernelInstaller] 同一入口。
      *
      * ============================================================================
      *  ⚠️ 基线包**同样必须验签** —— 不能因为"它是 APK 里带的"就跳过
@@ -210,18 +251,23 @@ class KernelManager(private val context: Context) {
      */
     fun ensureBaseline(): BaselineResult {
         val existing = currentVersion()
-        if (existing != null && File(kernelRoot, existing).isDirectory) {
-            return BaselineResult.AlreadyPresent(existing)
-        }
-
-        val baselineAsset = "kernel/baseline.zip"
         val assetNames = try {
             context.assets.list("kernel")?.toList() ?: emptyList()
         } catch (_: Throwable) {
             emptyList()
         }
+        val pick = pickBaselineAsset(assetNames)
 
-        if (!assetNames.contains("baseline.zip")) {
+        if (existing != null && File(kernelRoot, existing).isDirectory) {
+            val av = pick?.second
+            if (av == null || compareKernelVersions(av, existing) <= 0) {
+                return BaselineResult.AlreadyPresent(existing)
+            }
+            // av > existing → 继续向下走完整安装（验签 + 原子落地 + 切指针）＝ 基线升级
+        }
+
+        if (pick == null) {
+            val baselineAsset = "kernel/baseline.zip"
             // 关键：把「assets/kernel/ 下有什么」也记下来。过去这里静默返回 null，
             // 结果真机上只能看到「没有内核」，无从判断是构建漏了还是 OTA 没下发。
             return BaselineResult.NoBaselineAsset(baselineAsset).also {
@@ -232,6 +278,7 @@ class KernelManager(private val context: Context) {
                 )
             }
         }
+        val baselineAsset = "kernel/" + pick.first
 
         // 先把资产落到文件（Node 校验器要按路径读它，且 assets 本身在 APK 内
         // 是压缩存储，必须经 AssetManager 才能访问 —— 无法直接给 Node 用）。
