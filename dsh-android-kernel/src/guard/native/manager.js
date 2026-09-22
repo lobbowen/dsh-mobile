@@ -239,6 +239,7 @@ class NativeManager {
     // 启动命令写回放在 binPath 读取**之前**：清单应记录安装完成后的现行启动形态。
     this._applyLaunchCommand(npmRoot);
     this.ensureRequireBuiltinShim();
+    this.ensureFlockShim();
     const bin = this.binPath();
     let pkgDir = null;
     try { pkgDir = path.join(npmRoot, this.config.packageName || '@deepseek-ai/dsh'); } catch {}
@@ -333,6 +334,40 @@ class NativeManager {
       return r;
     } catch (e) {
       this.logger.warn && this.logger.warn('require-builtin JS 垫片检查异常（忽略）: ' + e.message);
+      return null;
+    }
+  }
+
+  /** 安卓容器自愈：给安装树里的 @deepseek-ai/node-addon-system 投放 flock 垫片
+   *  （真 flock(2) 走 APK jniLibs 的 libdshflock.so，根因见 flock-shim.js 头注释）。
+   *  门控 = 容器契约形态（同 ensureRequireBuiltinShim）**且** 容器已递来
+   *  DSH_FLOCK_NATIVE 路径 —— PC/dev 无该变量 ⇒ 树不动、行为逐字不变。
+   *  幂等；失败只告警不抛（不变量 C2）。
+   *  @param {string} [rootOverride] 显式 npm 全局根（安装完成路径传入刚解析的值） */
+  ensureFlockShim(rootOverride) {
+    try {
+      const c = runtimeContract.read();
+      if (!c || !c.npmEntry) return null;
+      const native = process.env.DSH_FLOCK_NATIVE;
+      if (!native || !String(native).trim()) return null;
+      const root = rootOverride || this.npmRoot || (this._manifest() || {}).npmRoot || null;
+      if (!root || !fs.existsSync(root)) return null;
+      const r = require('./flock-shim').ensureShim(root);
+      for (const a of r.results) {
+        if (a.status === 'applied') {
+          this.flockShimApplied = true;
+          if (this.events) this.events.append('flock_shim_applied', { dir: a.dir });
+          this.logger.info && this.logger.info('flock 原生垫片已投放: ' + a.dir);
+        } else if (a.status === 'failed') {
+          if (this.events) this.events.append('flock_shim_failed', { dir: a.dir, error: a.error });
+          this.logger.warn && this.logger.warn('flock 原生垫片投放失败: ' + a.dir + ' ' + a.error);
+        } else if (a.status === 'already') {
+          this.flockShimApplied = true;
+        }
+      }
+      return r;
+    } catch (e) {
+      this.logger.warn && this.logger.warn('flock 原生垫片检查异常（忽略）: ' + e.message);
       return null;
     }
   }

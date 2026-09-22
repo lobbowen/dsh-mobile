@@ -299,6 +299,12 @@ class NodeRuntimeService : Service() {
                             put("NODE_PATH", File(kernelDir, "node_modules").absolutePath)
                             put("PATH", nodeBin.parentFile!!.absolutePath + File.pathSeparator + (getenv("PATH") ?: ""))
                             put("LD_LIBRARY_PATH", libSearchPath)
+                            // flock(2) 原生绑定（fast-apk CI 用 NDK 现编进 jniLibs，见
+                            // native/flock/PROVENANCE.md）。nodeBin 就在 nativeLibraryDir，
+                            // 同目录即唯一事实源；守卫据此在 dsh 安装树投放 flock 垫片。
+                            // 文件缺席时垫片 dlopen 失败 ⇒ 逐字回退 vendor 原始语义，
+                            // 故此路径只是声明，不要求此刻存在。
+                            put("DSH_FLOCK_NATIVE", File(nodeBin.parentFile, "libdshflock.so").absolutePath)
                         }
                     }
             } else {

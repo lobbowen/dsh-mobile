@@ -303,6 +303,48 @@ jobs:
             echo "[ok] $f  $SIZE 字节"
           done
 
+      - name: Build libdshflock.so (NDK, flock(2) 原生绑定)
+        # 真机实证（2026-09-23）：dsh 会话持久化硬依赖
+        # @deepseek-ai/node-addon-system 的 flock 绑定，上游只发 linux(glibc/musl)/
+        # darwin 预编译件，无 android-arm64 ⇒ 设备发消息报
+        # "flock is not supported on android-arm64"。flock(2) 无 JS 等价物
+        #（O_EXCL 锁崩溃后残留=砍能力），唯一正解=NDK 现编 vendor 的 src/flock.c
+        #（源码见 native/flock/PROVENANCE.md）放进 jniLibs —— nativeLibraryDir 是
+        # W^X 下唯一可 dlopen/exec 的通道（libnode.so 同款先例）。
+        # 刻意**不**登记进 native-assets.txt：那份清单的 ≥1MB 门槛会误杀小体积绑定。
+        run: |
+          set -euo pipefail
+          NDK=""
+          for v in "${ANDROID_NDK_LATEST_HOME:-}" "${ANDROID_NDK_HOME:-}" "${ANDROID_NDK_ROOT:-}"; do
+            [ -n "$v" ] && [ -d "$v" ] && NDK="$v" && break
+          done
+          if [ -z "$NDK" ]; then
+            NDK=$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | sort -V | tail -1 || true)
+          fi
+          [ -n "$NDK" ] && [ -d "$NDK" ] || { echo "[error] runner 上找不到 NDK"; exit 1; }
+          echo "NDK=$NDK"
+          CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+          [ -x "$CC" ] || { echo "[error] 找不到 clang: $CC"; exit 1; }
+
+          # node 头（与固化运行时同版本；NAPI 只认版本宏不认实现）
+          curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-headers.tar.xz" \
+            -o /tmp/node-headers.tar.xz
+          mkdir -p /tmp/node-headers
+          tar -xJf /tmp/node-headers.tar.xz -C /tmp/node-headers --strip-components=1
+          INC=/tmp/node-headers/include/node
+          [ -f "$INC/node_api.h" ] || { echo "[error] 头文件解压异常：缺 node_api.h"; exit 1; }
+
+          # NAPI_VERSION=9：flock.c 用到 napi_add_async_cleanup_hook（v9 起声明）；
+          # vendor 注释写 v8 但其源码超出 v8 面，9 是其真实下限。
+          mkdir -p "app/src/main/jniLibs/${ABI}"
+          "$CC" -shared -fPIC -O2 -DNAPI_VERSION=9 -I "$INC" \
+            -o "app/src/main/jniLibs/${ABI}/libdshflock.so" native/flock/flock.c
+          SO="app/src/main/jniLibs/${ABI}/libdshflock.so"
+          SIZE=$(stat -c%s "$SO")
+          [ "$SIZE" -gt 1000 ] || { echo "[error] $SO 仅 $SIZE 字节，编译产物可疑"; exit 1; }
+          file "$SO" | grep -q "ELF 64-bit.*ARM aarch64" || { echo "[error] 产物不是 aarch64 ELF"; exit 1; }
+          echo "[ok] libdshflock.so $SIZE 字节 ($(file -b --mime-type "$SO" 2>/dev/null || echo ELF))"
+
       - name: Stage pinned npm into APK assets
         # npm 是**基础环境**的一部分（与 Node 版本锁死、几乎不变）⇒ 进 APK 而非内核包。
         # 版本/sha512 双钉与理由见 scripts/stage-npm-assets.sh 头部注释。
