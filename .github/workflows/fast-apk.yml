@@ -429,9 +429,9 @@ jobs:
               set -e
               cd /tmp/bash-${BASH_VER}
               ./configure --host=aarch64-linux-android --build=x86_64-pc-linux-gnu \
-                --prefix=/native --disable-nls --enable-static-link \
+                --prefix=/native --disable-nls --enable-static-link --without-bash-malloc \
                 CC="$CC" CFLAGS="-O2 -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types -Wno-error=incompatible-pointer-types" \
-                LDFLAGS="-static" LIBS="/tmp/libtermcap_stub.a" \
+                LDFLAGS="-static -Wl,--allow-multiple-definition" LIBS="/tmp/libtermcap_stub.a" \
                 bash_cv_getcwd_malloc=yes bash_cv_func_sigsetjmp=present \
                 bash_cv_printf_a_format=yes bash_cv_dev_fd_standard=yes \
                 bash_cv_unusable_rtsigs=no > /tmp/bash-configure.log 2>&1 \
@@ -439,6 +439,12 @@ jobs:
               # CFLAGS 里的 -Wno-error 族：bash 5.2 是老式 C 风格重灾区，NDK clang ≥16
               # 把 implicit-function-declaration/int-conversion 等**默认升级为 error**，
               # 老代码在新编译器下必须显式降回 warning（首轮 CI 实证的失败面）。
+              # --without-bash-malloc + --allow-multiple-definition：第二轮 CI 实证
+              # ld.lld `duplicate symbol: malloc/free/calloc/realloc/memalign/
+              # posix_memalign/malloc_usable_size/strtoimax` —— bash 自带 dmalloc 与
+              # 静态 bionic libc 正面相撞（glibc 动态链接下不暴露，静态交叉必爆）；
+              # 正解是用系统 malloc，strtoimax 兜底件残留冲突由 allow-multiple-definition
+              # 按链接序解决（先定义者胜，语义均为标准实现）。
               make -j4 bash > /tmp/bash-make.log 2>&1 || {
                 echo "=== make 失败取证（error 行 + 末 120 行）==="
                 grep -nE "error:|Error [0-9]+$|undefined symbol" /tmp/bash-make.log | head -40 || true
@@ -472,6 +478,17 @@ jobs:
             echo "::warning title=能力件缺失::libdshrg.so 未产出 —— glob/grep 工具本包不可用（SEARCH_FAILED，诚实可见）"
             rm -f "$J/libdshrg.so"
           fi
+
+          # AGP 只 strip「共享库」语义的 ELF，对这批静态可执行文件是 no-op（实证：
+          # 首轮日志 "Unable to strip ... packaging them as they are" ⇒ rg 33MB、
+          # ptyprobe 2MB 带全量符号进包）。手动 strip：NAPI 件不受影响（.dynsym
+          # 是动态符号表，strip-unneeded 不动它）。
+          for f in libbash.so libdshrg.so libdshptyprobe.so libdshflock.so libdshpublish.so; do
+            if [ -f "$J/$f" ]; then
+              before=$(stat -c%s "$J/$f"); "$TC/llvm-strip" --strip-unneeded "$J/$f" 2>/dev/null || true
+              echo "[strip] $f $before -> $(stat -c%s "$J/$f") 字节"
+            fi
+          done
 
           echo "== 能力二进制就位情况 =="
           ls -la "$J"
