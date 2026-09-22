@@ -12,6 +12,7 @@ const native = require('../../guard/native/index');
 const ports = require('../../guard/lifecycle/ports').shared;
 const { extractPortFromCommand } = require('../../platform/config');
 const guardian = require('../../guard/guardian/index');
+const runtimeContract = require('../../platform/runtime-contract');
 
 class MainProcess {
   spawnCommand() {
@@ -43,7 +44,8 @@ class MainProcess {
     try {
       // detached：独立进程组，便于按组发信号（DSH 派生的子进程一并收到）。
       // 插件 --patch 覆盖层由 spawnCommand()/native.nativeCommand() 统一附加（顶层位置），此处不再重复拼接。
-      child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], env: process.env, detached: true });
+      // env 注入契约 PATH：DSH 自身（及其派生的 npm 操作）必须与守卫同源找到 node。
+      child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], env: runtimeContract.withPath(process.env), detached: true });
     } catch (err) {
       this.events.append('spawn_failed', { message: err.message });
       this.logger.error('spawn failed: ' + err.message);

@@ -32,6 +32,11 @@ const CLI_TIMEOUT_MS = 180000; // 单次 dsh plugin CLI 超时
 class PluginManager {
   constructor(opts) {
     this.dshBin = opts.dshBin || 'dsh';
+    // dsh CLI 调用形态解析器（supervisor 注入 nativeManager.dshCliInvocation）：
+    // 安卓容器下 'dsh' 是 bin/ 里的 shim（W^X 不可 execve），必须解析成
+    // node 代跑绝对入口；返回 null 时退回裸 dshBin（PC / 未装 / 降级形态 C2）。
+    // 为什么注入而非直连 nativeManager：插件域不应依赖守卫内部对象，保持单向依赖。
+    this.resolveDshCli = typeof opts.resolveDshCli === 'function' ? opts.resolveDshCli : null;
     this.profileName = opts.profileName || 'web';
     this.profileDir = opts.profileDir;         // 原生 profile 目录
     this.overlayFile = opts.overlayFile;
@@ -353,12 +358,17 @@ class PluginManager {
           // 防止 HOME 变化（沙箱隔离）导致 ERR_PNPM_UNEXPECTED_STORE。
           const cliArgs = ['plugin', '--profile', target.profileName];
           if (target.storeDir) cliArgs.push('--store-dir', target.storeDir);
+          // 统一调用形态（与主干启动命令同源）：解析器给出 node 代跑 {bin,args} 时
+          // 前置拼接；否则维持裸 target.bin（PC/未安装/降级）。
+          const cli = this.resolveDshCli ? this.resolveDshCli() : null;
+          const bin = cli ? cli.bin : target.bin;
+          const prefix = cli ? cli.args : [];
           // ⚠ P1-7 修复（2026-09-12）：`detached: true` 让子进程**自成进程组**，
           //   这样才能用 `process.kill(-pid)` 杀**整棵树**（同 dist/index.js:452 的 npm 安装）。
           //   缺陷：原实现无 detached，且超时只用 `child.kill()` 杀**直接子进程** ——
           //     dsh plugin → pnpm 的**孙进程**（真正在跑安装的那个）会成为孤儿，
           //     继续占用 profile 目录与 pnpm store 锁。
-          child = spawn(target.bin, [...cliArgs, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: true });
+          child = spawn(bin, [...prefix, ...cliArgs, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: true });
         } catch (e) { return settle({ ok: false, error: e.message }); }
         // 整树终止（POSIX/安卓 = 进程组，与平台能力声明一致）
         const killTree = (sig) => {

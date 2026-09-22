@@ -23,6 +23,18 @@
 > **判断准则**：这个改动会不会改变 `libnode.so` 这一个字节？
 > 不会 → 走 fast-apk。会 → 手动跑 build-apk 重编，编完 pin-node 固化。
 
+### 设备内 spawn 的硬边界（改内核必读）
+
+W^X（targetSdk 29+）下 `filesDir` 里的一切**不可 execve**：`npm`/`dsh` 的 bin shim 是脚本，直接 spawn 必失败。
+所以内核里**一切** npm / dsh 子进程只许经统一解析入口拿调用形态：
+
+- npm：`runtimeContract.npmInvocation()` → 恒 `{bin, args}`（容器形态 = node 代跑 `npm-cli.js`）；
+  环境一律 `npmEnv()`（PATH + 显式 `npm_config_prefix=$HOME/.npm-global`）。
+- dsh 子命令：`NativeManager.dshCliInvocation()`（插件域经 `resolveDshCli` 注入，不许自己拼 `'dsh'`）。
+- 装机成功后 `config.command` 会被写回 `[node绝对, 入口绝对, 'web']` 并落盘 —— 新增消费方读它，不要再猜路径。
+
+行为门禁：`dsh-android-kernel/test/npm-contract-chain-test.js`（假 npm-cli/假 dsh 入口全链路，PATH 收缩保证结构上碰不到真 npm）。
+
 ---
 
 ## 2. 日常开发流程

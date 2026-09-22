@@ -235,6 +235,9 @@ class Supervisor {
     });
     this.pluginManager = new PluginManager({
       dshBin: 'dsh',
+      // dsh CLI 调用形态与主干启动命令同源（安卓容器 = node 代跑绝对入口）。
+      // 惰性取用：nativeManager 在本对象之后构造，调用发生在插件操作时。
+      resolveDshCli: () => (this.nativeManager ? this.nativeManager.dshCliInvocation() : null),
       profileName: this.config.pluginsProfileName || 'web',
       profileDir: path.join(os.homedir(), '.dsh', 'profiles', this.config.pluginsProfileName || 'web'),
       overlayFile: path.join(path.dirname(this.config.stateFile), 'plugin-states.patch.yml'),
@@ -270,6 +273,8 @@ class Supervisor {
       logger: this.logger,
       stateDir: path.dirname(this.config.stateFile),
       tasks: this.tasks,
+      // 启动命令写回落盘（安卓容器）：装完 dsh 后 config.command 转绝对形态并持久化。
+      persistCommand: (patch) => this.persistConfigPatch(patch),
       // 守卫生命周期钩子：升级需停/起 DSH 时回调
       hooks: {
         isDshActive: () => ['STARTING', 'RUNNING', 'RESTARTING', 'BACKOFF'].includes(this._mPhase()),

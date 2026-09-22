@@ -15,10 +15,14 @@ function runtimeJsonPath(home) {
 
 /**
  * 写入 runtime.json。
- * @param {object} o { home, nodePath, nodeBinDir, npmPath, minNode?, writtenBy? }
+ * @param {object} o { home, nodePath, nodeBinDir, npmPath, npmEntry?, minNode?, writtenBy? }
+ *   npmEntry = npm-cli.js 绝对路径（容器内嵌 npm 时投放）；内核以
+ *   [nodePath, npmEntry, ...npmArgs] 形态代跑 —— W^X 下 npm 不可能被直接 exec。
+ *   刻意保持 schema=2 的增量字段：OTA 下来的旧内核读未知字段会忽略，
+ *   bump schema 反而让它们直接拒读契约（新 APK + 旧内核是常态）。
  * @returns {object} 写入的对象
  */
-function writeRuntimeJson({ home, nodePath, nodeBinDir, npmPath, minNode, writtenBy }) {
+function writeRuntimeJson({ home, nodePath, nodeBinDir, npmPath, npmEntry, minNode, writtenBy }) {
   const dir = path.join(home, 'supervisor');
   fs.mkdirSync(dir, { recursive: true });
   const obj = {
@@ -26,6 +30,7 @@ function writeRuntimeJson({ home, nodePath, nodeBinDir, npmPath, minNode, writte
     nodePath,
     nodeBinDir,
     npmPath,
+    ...(npmEntry ? { npmEntry } : {}),
     minNode: minNode || 'v24.12.0',
     writtenBy: writtenBy || 'android-node-container',
   };

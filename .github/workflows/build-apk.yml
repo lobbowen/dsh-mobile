@@ -664,6 +664,11 @@ jobs:
             | sed 's/^/[dsh-signing] /' \
             || { echo "::error title=keystore 校验失败::密码错误或文件损坏"; exit 1; }
 
+      - name: Stage pinned npm into APK assets
+        # npm 属 L0 基础环境（纯 JS，由 libnode.so 代跑，从不直接 exec）。
+        # 与 fast-apk 同一份脚本，版本/sha512 双钉见脚本头注释。
+        run: ./scripts/stage-npm-assets.sh
+
       - name: Build debug APK
         id: gradlebuild
         run: |

@@ -117,6 +117,56 @@ object NodeProvisioner {
     }
 
     /**
+     * 把内置 npm 解到 `files/npm/<version>/`，返回 `bin/npm-cli.js` 的绝对路径；
+     * 失败返回 null（**不阻断启动**：没有 npm 内核照常跑，只是"面板装 Agent"不可用）。
+     *
+     * 为什么 npm 放 assets 而不是 jniLibs：npm 是纯 JS，**永远不该被直接 execve** ——
+     * 它由 libnode.so 代跑（`libnode.so <npm-cli.js 绝对路径> install ...`）。
+     * W^X 下可 exec 的只有 nativeLibraryDir 那一份，JS 文件放哪都无所谓。
+     *
+     * 为什么"版本目录 + .ready 标记"：npm 解包后约 1900 个文件，覆盖安装 APK 时
+     * 版本没变就不该重解；版本变了自然落到新目录，无需处理半旧半新的混叠。
+     */
+    fun ensureNpm(context: Context): File? {
+        return try {
+            val version = context.assets.open("npm/version.txt").bufferedReader().use { it.readText().trim() }
+            require(version.isNotEmpty()) { "npm/version.txt 为空" }
+            val dest = File(context.filesDir, "npm/$version")
+            val npmCli = File(dest, "bin/npm-cli.js")
+            if (npmCli.isFile && File(dest, ".ready").exists()) return npmCli
+
+            dest.parentFile?.mkdirs()
+            dest.deleteRecursively()   // 重来：宁可全量重解，不留半包
+            dest.mkdirs()
+            context.assets.open("npm/npm.zip").use { input ->
+                java.util.zip.ZipInputStream(input).use { zis ->
+                    val root = dest.canonicalFile
+                    var entry = zis.nextEntry
+                    while (entry != null) {
+                        val out = File(dest, entry.name).canonicalFile
+                        if (!out.path.startsWith(root.path + File.separator) && out.path != root.path) {
+                            throw IllegalStateException("npm 包条目路径越界: ${entry.name}")
+                        }
+                        if (entry.isDirectory) out.mkdirs()
+                        else {
+                            out.parentFile?.mkdirs()
+                            out.outputStream().use { os -> zis.copyTo(os) }
+                        }
+                        zis.closeEntry()
+                        entry = zis.nextEntry
+                    }
+                }
+            }
+            if (!npmCli.isFile) throw IllegalStateException("解包后仍缺 bin/npm-cli.js: ${npmCli.absolutePath}")
+            File(dest, ".ready").writeText(version)
+            npmCli
+        } catch (e: Throwable) {
+            android.util.Log.w("NodeProvisioner", "npm 解包失败（不阻断启动）", e)
+            null
+        }
+    }
+
+    /**
      * 让内核包校验器（`assets/node/kernel-verify.js`）就位。
      *
      * 为什么由 Kotlin 复制而不是直接从 assets 读：Node **读不了 APK 内的

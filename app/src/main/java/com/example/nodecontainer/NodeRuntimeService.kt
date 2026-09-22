@@ -233,12 +233,21 @@ class NodeRuntimeService : Service() {
             val script = NodeProvisioner.ensureServerScript(this)
             RuntimeDiagnostics.append(this, "script", true, "server.js 探针就位", script.absolutePath)
 
+            // ---- 2b) npm 基础环境就位（纯 JS，由 libnode.so 代跑；失败不阻断启动）----
+            val npmCli = NodeProvisioner.ensureNpm(this)
+            RuntimeDiagnostics.append(
+                this, "npm", npmCli != null,
+                if (npmCli != null) "npm 就位（面板可安装 Agent）" else "npm 未就位 —— 仅影响 Agent 安装，内核照常运行",
+                npmCli?.absolutePath ?: "assets/npm 解包失败，详见 logcat"
+            )
+
             // ---- 5) 写 runtime.json（schema 2，容器写内核读） ----
             writeRuntimeJson(
                 home = filesDir.absolutePath,
                 nodePath = nodeBin.absolutePath,
                 nodeBinDir = nodeBin.parentFile!!.absolutePath,
                 npmPath = nodeBin.absolutePath,
+                npmEntry = npmCli?.absolutePath,
                 minNode = "v24.12.0"
             )
             RuntimeDiagnostics.append(this, "runtime", true, "runtime.json 已写入（schema 2）", "home=${filesDir.absolutePath}")
@@ -453,7 +462,7 @@ class NodeRuntimeService : Service() {
 
     private fun getenv(k: String): String? = System.getenv(k)
 
-    private fun writeRuntimeJson(home: String, nodePath: String, nodeBinDir: String, npmPath: String, minNode: String) {
+    private fun writeRuntimeJson(home: String, nodePath: String, nodeBinDir: String, npmPath: String, npmEntry: String?, minNode: String) {
         val dir = File(filesDir, "supervisor")
         dir.mkdirs()
         val obj = JSONObject().apply {
@@ -461,6 +470,10 @@ class NodeRuntimeService : Service() {
             put("nodePath", nodePath)
             put("nodeBinDir", nodeBinDir)
             put("npmPath", npmPath)
+            // npmEntry：npm-cli.js 的绝对路径，内核以 [nodePath, npmEntry, ...args] 形态代跑。
+            // 保持 schema=2 是刻意的：OTA 下来的旧内核读到未知字段会忽略，
+            // 而 bump schema 会让它们直接拒读契约（新 APK + 旧内核是常态）。
+            if (npmEntry != null) put("npmEntry", npmEntry)
             put("minNode", minNode)
             put("writtenBy", "android-node-container")
         }

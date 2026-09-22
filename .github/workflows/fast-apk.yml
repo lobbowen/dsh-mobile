@@ -303,6 +303,13 @@ jobs:
             echo "[ok] $f  $SIZE 字节"
           done
 
+      - name: Stage pinned npm into APK assets
+        # npm 是**基础环境**的一部分（与 Node 版本锁死、几乎不变）⇒ 进 APK 而非内核包。
+        # 版本/sha512 双钉与理由见 scripts/stage-npm-assets.sh 头部注释。
+        run: |
+          set -euo pipefail
+          ./scripts/stage-npm-assets.sh
+
       - name: Build kernel baseline bundle
         # 生成 APK 内置的基线内核包 → app/src/main/assets/kernel/baseline.zip
         #
@@ -491,6 +498,21 @@ jobs:
             echo "  影响：设备无网首启时无内核可跑，只能回落探针模式。"
             echo "  仍可用：本地 feed（/sdcard/dsh/kernel-feed/）升级内核。"
             echo "  常见原因：OTA_PRIVATE_KEY_PEM secret 未配置、或内核仓拉取失败。"
+          fi
+
+          # --- npm 基础环境审计（硬失败）---
+          # 缺了它面板装不了任何 Agent —— 这是核心能力，不是可选增强。
+          # 与基线包不同，它没有"仍可走 feed"的降级路径，故不沿用 warning。
+          echo
+          echo "--- npm 基础环境 ---"
+          if unzip -l "$APK" | grep -q 'assets/npm/npm.zip'; then
+            SIZE=$(unzip -l "$APK" | awk '/assets\/npm\/npm\.zip/{print $1}')
+            echo "[ok] 含 assets/npm/npm.zip（$SIZE 字节，版本 $(cat app/src/main/assets/npm/version.txt)）"
+            unzip -l "$APK" | grep -q 'assets/npm/version.txt' \
+              || { echo "[error] npm.zip 在但 version.txt 缺失（解包版本戳无从确定）"; exit 1; }
+          else
+            echo "::error title=APK 无 npm::assets/npm/npm.zip 不在 APK 内 —— 面板无法安装任何 Agent。常见原因：Stage pinned npm 步骤被删/改名。"
+            exit 1
           fi
 
       - name: Upload APK artifact

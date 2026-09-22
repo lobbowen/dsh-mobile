@@ -20,6 +20,7 @@ const { writeRuntimeJson } = require('./runtime-json');
  *  - nodeBin: node 可执行文件绝对路径
  *  - nodeBinDir: node 所在目录（注入 PATH 首位）
  *  - npmPath: npm 可执行绝对路径
+ *  - npmEntry?: npm-cli.js 绝对路径（容器内嵌 npm 时投放，内核代跑）
  *  - apiPort: 内核控制面端口（健康检查用）
  *  - uiDir?: 面板产物目录（默认 <kernel>/ui/dist）
  *  - bridgeSocket?: HostBridge 抽象命名空间 socket 名（默认 dsh_hostbridge）
@@ -34,6 +35,7 @@ function bootKernel(o) {
     nodePath: o.nodeBin,
     nodeBinDir: o.nodeBinDir,
     npmPath: o.npmPath,
+    npmEntry: o.npmEntry,
     minNode: 'v24.12.0',
     writtenBy: 'android-node-container',
   });

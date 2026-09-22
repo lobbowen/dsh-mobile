@@ -500,22 +500,32 @@ class DistributionManager {
     // 唯一安装执行器：commandTemplate 支持完整替换命令（测试/特殊环境注入 fake-npm 等），
     // 收敛 native 旧 _runInstall 模板分支的重复 spawn/killTree/超时/行收集实现（2026-09 架构收敛）。
     let argv;
-    // 经统一解析：旧实现硬编码 'npm'，绕过解析入口。
-    let bin = runtimeContract.npmBin(npmBin);
+    // 统一解析入口：恒为 {bin, args} —— 安卓契约形态是「node 代跑 npm-cli.js」
+    // （bin=libnode.so，args 首项=npm-cli.js），PC 无契约时退回 PATH 的 npm。
+    // 旧实现硬编码可执行名，绕过了统一形态、且在 W^X 下 execve shim 必失败。
+    const inv = runtimeContract.npmInvocation(npmBin);
+    let bin = inv.bin;
     if (Array.isArray(o.commandTemplate) && o.commandTemplate.length) {
       argv = o.commandTemplate.map((s) => String(s).replace(/{pkg}/g, pkg).replace(/{version}/g, o.version).replace(/{prefix}/g, o.prefix || ''));
-      // ⚠ P1-C：模板首项通常就是逻辑名 `npm`（见 platform/config.js 的默认模板），
-      //   它同样需要经同一解析入口 —— 否则「走模板」这条路径绕过了统一解析。
-      //   保持模板机制不变（测试可注入 fake-npm 绝对路径），只在首项恰为逻辑名时解析。
-      bin = (argv[0] === 'npm') ? runtimeContract.npmBin(npmBin) : argv[0];
-      argv = argv.slice(1);
+      // ⚠ P1-C：模板首项通常是逻辑名 `npm`（见 platform/config.js 默认模板），
+      //   必须走同一解析入口（含契约的 node 代跑前置参数）；保持模板机制不变
+      //   是为了测试可注入 fake-npm 绝对路径 —— 首项非逻辑名时原样保留。
+      if (argv[0] === 'npm') {
+        bin = inv.bin;
+        argv = inv.args.concat(argv.slice(1));
+      } else {
+        bin = argv[0];
+        argv = argv.slice(1);
+      }
     } else {
-      argv = ['install', '-g', '--no-audit', '--no-fund'];
+      // --ignore-scripts：容器无 sh 可 spawn（W^X），生命周期脚本既必失败又是供应链面。
+      argv = inv.args.concat(['install', '-g', '--no-audit', '--no-fund', '--ignore-scripts']);
       if (o.prefix) argv.push('--prefix', o.prefix);
       argv.push(pkg + '@' + o.version);
     }
-    // 契约 PATH 注入（nodeBinDir 首位）：内核自身执行的 npm 也必须能找到 node。
-    const envVars = runtimeContract.withPath(process.env);
+    // 契约环境注入：PATH（nodeBinDir 首位）+ 容器形态的显式全局 prefix。
+    // 内核自身执行的 npm 子进程也必须能找到 node / 写进可写目录。
+    const envVars = runtimeContract.npmEnv(process.env);
     if (o.registry) { envVars.npm_config_registry = o.registry; envVars.NPM_CONFIG_REGISTRY = o.registry; }
     return new Promise((resolve) => {
       let child;

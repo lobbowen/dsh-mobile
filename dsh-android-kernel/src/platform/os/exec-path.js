@@ -10,7 +10,10 @@
 //   · Windows PATHEXT 展开（npm.cmd / npm.exe / .bat）—— 安卓没有扩展名语义；
 //   · %APPDATA%\npm、%LOCALAPPDATA%\Programs\dsh-supervisor —— Windows 专有安装目录；
 //   · macOS 的 /opt/homebrew/bin、/usr/local/bin —— Homebrew 专有。
-//   因此 npmBin()/npxBin() 不再需要平台分支，恒为 'npm' / 'npx'（由容器 PATH 命中）。
+//   因此 npmBin()/npxBin() 不再需要平台分支，恒为 'npm' / 'npx'。
+//   ⚠ 但它只是**逻辑名/降级回退**：安卓 W^X 下容器 bin/ 里的 npm shim 不可 execve，
+//     真正的调用形态必须经 platform/runtime-contract.npmInvocation() 解析
+//     （node 代跑 npm-cli.js）。直拿本函数结果去 spawn 仅限无契约的 PC 场景。
 
 const fs = require('node:fs');
 const path = require('node:path');

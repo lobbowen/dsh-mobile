@@ -20,6 +20,10 @@ app/src/main/assets/node-bin/
 #       （缺它不影响编译 —— ensureBaseline 会给出明确诊断而非静默失败）
 app/src/main/assets/kernel/baseline.zip
 
+# 内嵌 npm 资产（scripts/stage-npm-assets.sh 从 registry 拉取官方 tarball 生成；
+# 版本+sha512 双钉在脚本里，可重建、不必入库）
+app/src/main/assets/npm/
+
 # OTA 发布包
 release/
 

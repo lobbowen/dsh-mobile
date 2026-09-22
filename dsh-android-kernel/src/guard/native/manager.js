@@ -18,15 +18,19 @@ const ex = require('../../platform/exec');
 //   ⚠ 经**模块对象**调用而非解构：解构是值绑定，无法被测试替换 ——
 //     曾因此让行为测试意外执行了真实 npm（见构造函数 `_npmBin` 的说明）。
 const execPath = require('../../platform/os/exec-path');
-// npm 可执行：优先用注入值（测试），否则经跨平台解析。
-function npmExe(self) { return (self && self._npmBin) || execPath.npmBin(); }
-// 注入的**前置参数**（仅测试用；生产恒为空）。
-// 为什么需要：行为测试要造「挂起 / 正常退出」的假 npm。原实现写 POSIX 脚本
-// （#!/bin/sh + sleep），非 POSIX 环境无法执行 → spawn 立刻失败。
-// 跨平台做法：npmBin 指向 **process.execPath**（四平台同一可执行），
-// 由本函数把「要执行的 .js 路径」作为前置参数拼在前面。
-function npmExeArgs(self) {
-  return (self && Array.isArray(self._npmBinArgs)) ? self._npmBinArgs.slice() : [];
+const runtimeContract = require('../../platform/runtime-contract');
+// npm 的**唯一 spawn 调用形态**：恒返回 `{bin, args}`，调用方拼
+// `inv.args.concat(自己的参数)` 后再 spawn。
+//   · 测试注入（构造期 opts.npmBin，或赋值 _npmBinArgs）优先 —— 结构上保证
+//     不触碰真实 npm；假 npm 的做法是 bin=process.execPath + args=[要跑的 .js]，
+//     因为 POSIX #!/bin/sh 脚本在非 POSIX 环境无法执行。
+//   · 生产经契约统一解析：安卓 = node 代跑 npm-cli.js（W^X 下 bin/ 里的 npm
+//     shim 脚本不可 execve），无契约退回 ambient 'npm'（PC 形态，不变量 C2）。
+function npmSpawn(self) {
+  if (self && self._npmBin) {
+    return { bin: self._npmBin, args: Array.isArray(self._npmBinArgs) ? self._npmBinArgs.slice() : [] };
+  }
+  return runtimeContract.npmInvocation(execPath.npmBin());
 }
 const { semverCompare, VERSION_RE } = require('../../domains/dist/index');
 
@@ -52,6 +56,9 @@ class NativeManager {
     this._npmBin = opts.npmBin || null;
     this.hooks = opts.hooks || {};          // 守卫生命周期钩子（supervisor 注入）：升级需停/起 DSH 时回调
     this.tasks = opts.tasks || null;        // 统一安装/更新任务注册表（持久化历史 + 统一 API）
+    // 启动命令写回的持久化回调（supervisor 注入 persistConfigPatch）：
+    // 装完 dsh 后 config.command 必须落盘，否则守卫重启回到模板形态 → 永远拉不起。
+    this.persistCommand = opts.persistCommand || null;
     // 升级状态机字段（idle | installing | restarting | verifying | rolling_back | done | failed）
     this.upgradeState = 'idle';
     this.oldVersion = null;
@@ -189,12 +196,13 @@ class NativeManager {
     const errors = [];
     // ⚠ 经统一执行器（2026-09-11）：原为裸 execFileSync **无 timeout** ——
     //   npm/node 在 PATH 指向网络盘、或 npm 因缓存锁挂起时会无限阻塞守卫事件循环。
-    const nv = ex.runOut('node', ['--version']);
+    const nv = ex.runOut(runtimeContract.nodeBin('node'), ['--version']);
     if (!nv || !nv.trim()) errors.push('node 未安装或不可执行');
-    const npmv = ex.runOut(npmExe(this), npmExeArgs(this).concat(['--version']));
+    const inv = npmSpawn(this);
+    const npmv = ex.runOut(inv.bin, inv.args.concat(['--version']));
     if (!npmv || !npmv.trim()) errors.push('npm 未安装或不可执行');
     let npmRoot = this.npmRoot;
-    if (!npmRoot) { const r = ex.runOut(npmExe(this), ['root', '-g']); if (r) npmRoot = r.trim(); }
+    if (!npmRoot) { const r = ex.runOut(inv.bin, inv.args.concat(['root', '-g']), { env: runtimeContract.npmEnv(process.env) }); if (r) npmRoot = r.trim(); }
     return { ok: errors.length === 0, errors, npmRoot };
   }
 
@@ -224,13 +232,15 @@ class NativeManager {
       const prev = this._manifest();
       if (prev && Array.isArray(prev.dataPaths)) claim = prev.dataPaths;
     }
-    const bin = this.binPath();
     let npmRoot = this.npmRoot;
-    let pkgDir = null;
     try {
-      if (!npmRoot) { const r = ex.runOut(npmExe(this), npmExeArgs(this).concat(['root', '-g'])); if (r) npmRoot = r.trim(); }
-      pkgDir = path.join(npmRoot, this.config.packageName || '@deepseek-ai/dsh');
+      if (!npmRoot) { const inv = npmSpawn(this); const r = ex.runOut(inv.bin, inv.args.concat(['root', '-g']), { env: runtimeContract.npmEnv(process.env) }); if (r) npmRoot = r.trim(); }
     } catch {}
+    // 启动命令写回放在 binPath 读取**之前**：清单应记录安装完成后的现行启动形态。
+    this._applyLaunchCommand(npmRoot);
+    const bin = this.binPath();
+    let pkgDir = null;
+    try { pkgDir = path.join(npmRoot, this.config.packageName || '@deepseek-ai/dsh'); } catch {}
     this._saveManifest({
       installedAt: new Date().toISOString(),
       version,
@@ -241,6 +251,53 @@ class NativeManager {
       // 只保留显式/继承认领的数据路径；绝不默认写入 ~/.dsh 全部用户数据（防误删凭据/会话）
       dataPaths: claim || [],
     });
+  }
+
+  /* ═══════ 启动命令写回 + dsh CLI 调用形态（安卓容器）═══════ */
+  /** 安装/升级/回滚成功后把 config.command 落为**绝对形态**：
+   *    [契约 node（libnode.so）, <npmRoot>/<pkg> 的 bin 入口脚本绝对路径, 'web']
+   *  为什么必须写回：模板形态 ['node','dsh','web'] 依赖 PATH 与可 execve 的
+   *  dsh shim —— 安卓容器两者都不成立（W^X）；装完不写回，守卫重启即拉不起。
+   *  只认容器契约形态（npmEntry 在场）；PC（无契约）行为逐字不变。解析失败静默
+   *  保留原命令（不变量 C2：绝不让已成功的安装因写回失败而报错）。 */
+  _applyLaunchCommand(npmRoot) {
+    try {
+      const c = runtimeContract.read();
+      if (!c || !c.npmEntry) return;
+      const root = npmRoot || this.npmRoot;
+      if (!root) return;
+      const pkgDir = path.join(root, this.config.packageName || '@deepseek-ai/dsh');
+      const pj = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
+      const b = pj.bin;
+      const rel = typeof b === 'string' ? b : (b && (b.dsh || Object.values(b)[0])) || null;
+      if (!rel) return;
+      const entry = path.resolve(pkgDir, String(rel));
+      if (!fs.existsSync(entry)) return;
+      const command = [c.nodePath || process.execPath, entry, 'web'];
+      const prev = this.config.command;
+      if (Array.isArray(prev) && prev.join('\u0000') === command.join('\u0000')) return;
+      this.config.command = command;
+      if (this.persistCommand) this.persistCommand({ command });
+      if (this.events) this.events.append('native_launch_command_persisted', { command });
+      this.logger.info && this.logger.info('启动命令已写回: ' + command.join(' '));
+    } catch (e) {
+      this.logger.warn && this.logger.warn('启动命令写回失败（保留原命令）: ' + e.message);
+    }
+  }
+
+  /** dsh CLI 调用形态（插件域共用主干形态）：config.command 已是写回后的
+   *  node 代跑形态时返回 {bin, args}；否则 null（调用方退回 dsh 逻辑名）。 */
+  dshCliInvocation() {
+    try {
+      const c = runtimeContract.read();
+      if (!c || !c.npmEntry) return null;
+      const cmd = (this.config && this.config.command) || [];
+      const entry = String(cmd[1] || '');
+      if (cmd.length >= 2 && entry.endsWith('.js') && fs.existsSync(entry)) {
+        return { bin: String(cmd[0]), args: [entry] };
+      }
+    } catch {}
+    return null;
   }
 
   /** 卸载时拟删除的 DSH 用户数据路径（仅当本 supervisor 是干净 ~/.dsh 的首装者才认领）。
@@ -709,7 +766,9 @@ class NativeManager {
     const exitCode = await new Promise((resolve) => {
       let child;
       try {
-        child = spawn(npmExe(this), npmExeArgs(this).concat(uninstallArgs), { stdio: ['ignore', 'pipe', 'pipe'] });
+        const inv = npmSpawn(this);
+        // env 必须同装侧（npmEnv）：卸载要找的全局根 = 安装写入的显式 prefix，二者不同源即卸错目录。
+        child = spawn(inv.bin, inv.args.concat(uninstallArgs), { stdio: ['ignore', 'pipe', 'pipe'], env: runtimeContract.npmEnv(process.env) });
       } catch (e) { return resolve(-1); }
       child.stdout.resume(); child.stderr.resume();
       let done = false;

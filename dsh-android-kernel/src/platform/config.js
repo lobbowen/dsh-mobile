@@ -80,7 +80,9 @@ const DEFAULTS = {
   updateCheckIntervalMs: 3600000,
   initialCheckDelayMs: 20000,
   upgradeTimeoutMs: 600000,
-  installCommandTemplate: ['npm', 'install', '-g', '{pkg}@{version}'],
+  // --ignore-scripts（容器边界拍板）：安卓容器无 sh 可 spawn（W^X），lifecycle
+  // 脚本既必失败又是攻击面；git:/native 依赖在设备上永久不可用，不予支持。
+  installCommandTemplate: ['npm', 'install', '-g', '--ignore-scripts', '{pkg}@{version}'],
   // apiAccessKey（可选，2026-09 D/F2 拍板）：出回环访问密钥——仅当配置了该键时，
   // 0.0.0.0（局域网）与 FRP 公网通道的 API 请求必须携带 Authorization: Bearer <key>
   // 或 ?access_key=<key>，否则 401；本地回环（127.0.0.1/localhost/::1）豁免。

@@ -33,6 +33,8 @@ if [ ! -x gradlew ]; then
   gradle wrapper --gradle-version 8.9
   chmod +x gradlew
 fi
+# npm 基础环境进 assets（与 CI 同一份脚本；缺了它面板装不了 Agent）
+./scripts/stage-npm-assets.sh
 ./gradlew assembleDebug
 
 echo "==> [3/3] 完成"

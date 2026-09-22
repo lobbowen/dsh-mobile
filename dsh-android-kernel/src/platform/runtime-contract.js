@@ -45,19 +45,53 @@ function read() {
     nodePath: j.nodePath || node.path || null,
     nodeBinDir: j.nodeBinDir || node.binDir || null,
     npmPath: j.npmPath || npm.path || null,
+    // npm-cli.js 绝对路径（schema 2 的**新增可选键**，容器投放 npm 后写）。
+    // 为什么可选而不升 schema：新 APK + 旧内核是常态，升 schema 会让 OTA 出去的
+    // 旧内核拒绝整份契约；未知键按契约规则忽略。
+    npmEntry: j.npmEntry || npm.entry || null,
     minNode: j.minNode || null,
     writtenBy: j.writtenBy || null,
     raw: j,
   };
 }
 
-/** npm 可执行：契约优先；缺失/不可用退回 fallback（函数或字符串）。 */
-function npmBin(fallback) {
+/** node 可执行：契约优先（安卓下即 libnode.so 绝对路径）；缺失退回 fallback。 */
+function nodeBin(fallback) {
   const c = read();
-  if (c && c.npmPath) {
-    try { if (fs.existsSync(c.npmPath)) return c.npmPath; } catch {}
+  if (c && c.nodePath) {
+    try { if (fs.existsSync(c.nodePath)) return c.nodePath; } catch {}
   }
-  return typeof fallback === 'function' ? fallback() : fallback;
+  return fallback || 'node';
+}
+
+/**
+ * npm 调用的**唯一形态**：恒返回 `{bin, args}`，调用方把自己的参数拼在 args 之后
+ * （`spawn(inv.bin, inv.args.concat([...]))`）。
+ *
+ * 三种来源按优先级：
+ *   ① 契约 npmEntry —— `{bin: nodePath, args: [npm-cli.js]}`（安卓 W^X 下 npm
+ *      shim 脚本不可 execve，只能由 node 代跑）；
+ *   ② 契约 npmPath —— 旧容器只投了可执行绝对路径，直接用；
+ *   ③ 无契约 —— 退回调用方的 ambient 解析（PC 形态，不变量 C2 降级运行）。
+ * @param {string|(()=>string)} [fallback] ambient 时的回退（函数则调用取值）
+ * @returns {{bin:string, args:string[]}}
+ */
+function npmInvocation(fallback) {
+  const c = read();
+  if (c) {
+    if (c.npmEntry) {
+      try {
+        if (fs.existsSync(c.npmEntry)) {
+          return { bin: c.nodePath || process.execPath, args: [c.npmEntry] };
+        }
+      } catch {}
+    }
+    if (c.npmPath) {
+      try { if (fs.existsSync(c.npmPath)) return { bin: c.npmPath, args: [] }; } catch {}
+    }
+  }
+  const fb = typeof fallback === 'function' ? fallback() : fallback;
+  return { bin: fb || 'npm', args: [] };
 }
 
 /** 在给定 env 上注入契约 PATH（nodeBinDir 首位）；无契约时原样返回副本。 */
@@ -71,4 +105,26 @@ function withPath(env) {
   return e;
 }
 
-module.exports = { SUPPORTED_SCHEMA, file, read, npmBin, withPath };
+/**
+ * npm 子进程的标准环境：契约 PATH + （容器投放 npmEntry 时）显式全局前缀。
+ *
+ * 为什么必须显式 prefix：容器里的 node 是只读 nativeLibraryDir 下的 libnode.so，
+ * npm 默认 prefix 由它推导 → `install -g` 必然写只读目录失败。
+ * `$HOME/.npm-global`（容器 HOME=filesDir，可写）与 exec-path.standardDirs、
+ * 插件域 _pathExtra 的候选目录一致。PC（无契约）行为不变。
+ *
+ * 为什么容器形态**无条件覆盖**：设备上有且只有一个正确答案。ambient 值可能来自
+ * 任何污染源（实测：经 npm scripts 启动的开发链路会注入 npm_config_prefix=/usr/local），
+ * 让它悄悄赢会把安装写进不存在/不可写的目录。需要非默认前缀的调用方走 `--prefix`
+ * 命令行参数（npm 语义：cli 参数 > env），本函数不与之冲突。
+ */
+function npmEnv(baseEnv) {
+  const e = withPath(baseEnv);
+  const c = read();
+  if (c && c.npmEntry) {
+    e.npm_config_prefix = path.join(os.homedir(), '.npm-global');
+  }
+  return e;
+}
+
+module.exports = { SUPPORTED_SCHEMA, file, read, nodeBin, npmInvocation, npmEnv, withPath };

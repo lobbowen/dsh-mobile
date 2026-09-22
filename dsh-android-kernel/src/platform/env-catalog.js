@@ -6,11 +6,14 @@
 
 const fs = require('node:fs');
 const ex = require('./exec');
+// 单一事实源：node/npm 的可执行形态由容器投放的运行契约决定（安卓 W^X 下
+// npm 只能由 node 代跑），ambient PATH 仅作无契约时的降级回退。
+const rc = require('./runtime-contract');
 
-/** 探测某二进制版本；不可执行返回 null。 */
-function whichVersion(bin) {
+/** 探测某命令版本（args 缺省 ['--version']）；不可执行返回 null。 */
+function whichVersion(bin, args) {
   // 经统一执行器（默认有界；失败返回 null）。
-  const v = ex.runOut(bin, ['--version'], { timeoutMs: 3000 });
+  const v = ex.runOut(bin, args || ['--version'], { timeoutMs: 3000 });
   return v ? (v.trim() || null) : null;
 }
 
@@ -18,12 +21,14 @@ function whichVersion(bin) {
 // 每次都是同步 execFileSync（node/npm/git）——磁盘/进程占用且阻塞事件循环（2026-09 审计修复）。
 const _verCache = new Map();
 const CACHE_TTL = 10000;
-function cachedWhichVersion(bin) {
-  const hit = _verCache.get(bin);
+function cachedWhichVersion(bin, args) {
+  // 键含参数：同一 bin 在不同调用形态（如 node 直跑 vs 带脚本）下结果不同。
+  const key = bin + '\u0000' + (args || []).join('\u0000');
   const now = Date.now();
+  const hit = _verCache.get(key);
   if (hit && now - hit.at < CACHE_TTL) return hit.v;
-  const v = whichVersion(bin);
-  _verCache.set(bin, { at: now, v });
+  const v = whichVersion(bin, args);
+  _verCache.set(key, { at: now, v });
   if (_verCache.size > 16) { // 有界：清最旧
     let oldest = null;
     for (const [k, e] of _verCache) if (!oldest || e.at < oldest.at) oldest = { k, at: e.at };
@@ -48,7 +53,7 @@ function runtimeMeta() {
   const now = Date.now();
   if (_runtimeMetaCache && now - _runtimeMetaAt < 10000) return _runtimeMetaCache;
   // 单一事实源：与内核其它消费点共用 platform/runtime-contract（壳写、内核读）。
-  const c = require('./runtime-contract').read();
+  const c = rc.read();
   const meta = (c && c.raw) || {};
   _runtimeMetaCache = meta;
   _runtimeMetaAt = now;
@@ -79,7 +84,7 @@ function verAtLeast(a, b) {
  * @returns {{version:string, min:string, meets:boolean}|null}
  */
 function probeNode() {
-  const v = cachedWhichVersion('node');
+  const v = cachedWhichVersion(rc.nodeBin('node'), ['--version']);
   if (!v) return null;
   // `node --version` 输出形如 v22.12.0；取第一个 vX.Y.Z 片段。
   const m = /v?(\d+\.\d+\.\d+)/.exec(String(v));
@@ -91,7 +96,11 @@ function probeNode() {
 /** 系统环境条目（必要前置：Node/npm 为 DSH 与反代更新的执行器；git 可选）。 */
 const SYSTEM_ENTRIES = {
   node: { label: 'Node.js', required: true, probe: probeNode },
-  npm:  { label: 'npm',     required: true, probe: () => cachedWhichVersion('npm') },
+  npm:  { label: 'npm', required: true, probe: () => {
+    // 契约形态（安卓 = node 代跑 npm-cli.js）；无契约退回 ambient 'npm'。
+    const inv = rc.npmInvocation('npm');
+    return cachedWhichVersion(inv.bin, inv.args.concat(['--version']));
+  } },
   git:  { label: 'git',     required: false, probe: () => cachedWhichVersion('git') },
 };
 
