@@ -2,10 +2,13 @@ package com.example.nodecontainer
 
 import android.Manifest
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.View
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -90,6 +93,7 @@ class MainActivity : AppCompatActivity() {
         ) {
             requestNotif.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+        requestBatteryExemption()
 
         retryBtn.setOnClickListener { restartRuntime() }
         captureBtn.setOnClickListener { requestScreenCapture() }
@@ -99,6 +103,29 @@ class MainActivity : AppCompatActivity() {
         reuseExistingCaptureGrant()
         startRuntime()
         startPolling()
+    }
+
+    /** 电池优化豁免引导：未入白名单时弹系统确认框；ROM 拒绝该 intent 时退到
+     *  电池优化设置列表页。常驻产品的稳定性前置——Doze/省电策略会冻结 :node 心跳。 */
+    private fun requestBatteryExemption() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        if (pm.isIgnoringBatteryOptimizations(packageName)) return
+        try {
+            startActivity(
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                    .setData(Uri.parse("package:$packageName"))
+            )
+        } catch (_: Throwable) {
+            try {
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            } catch (e: Throwable) {
+                RuntimeDiagnostics.append(
+                    this, "battery", false, "电池优化豁免入口不可用",
+                    "${e::class.java.simpleName}: ${e.message}（需手动到系统设置放行）"
+                )
+            }
+        }
     }
 
     /** 尝试用上次缓存的 MediaProjection 授权直接建 projection（失败则静默，等用户手动授权）。 */

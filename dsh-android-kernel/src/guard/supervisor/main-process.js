@@ -86,8 +86,10 @@ class MainProcess {
    *  ① 经 nativeManager 幂等投放 NARB JS 垫片（dsh ≥rc.2 硬 require
    *    node-addon-require-builtin，该包无 android-arm64 预编译件 → boot 必死 exit:1）、
    *    flock 原生垫片（node-addon-system 同病，发消息即
-   *    "flock is not supported on android-arm64"）与 link 发布垫片（SELinux 禁 app
-   *    硬链接 → 会话落盘 EACCES；DSH_*_NATIVE 缺席时两者均 no-op）；
+   *    "flock is not supported on android-arm64"）、link 发布垫片（SELinux 禁 app
+   *    硬链接 → 会话落盘 EACCES；DSH_*_NATIVE 缺席时两者均 no-op）、PTC 环境垫片
+   *    （workflow 子进程 env 清洗剥掉 LD_LIBRARY_PATH → libnode.so 子进程必崩）与
+   *    能力垫片（bash/rg 二进制路径 + 终端检视 android 门 → 容器 env 旋钮）；
    *  ② 在 node 与脚本入口之间注入 --expose-internals（shim/cordis loader 的
    *    no-native 路径依赖它；不是 dsh 子命令参数，位置必须在脚本前）。
    *  恒幂等：命令已含该 flag 不再重复插入；非 node 代跑形态（args[0] 非 .js）不动。 */
@@ -103,6 +105,12 @@ class MainProcess {
       }
       if (this.nativeManager && typeof this.nativeManager.ensureLinkPublishShim === 'function') {
         this.nativeManager.ensureLinkPublishShim();
+      }
+      if (this.nativeManager && typeof this.nativeManager.ensurePtcEnvShim === 'function') {
+        this.nativeManager.ensurePtcEnvShim();
+      }
+      if (this.nativeManager && typeof this.nativeManager.ensureCapabilityEnvShim === 'function') {
+        this.nativeManager.ensureCapabilityEnvShim();
       }
       if (command.includes('--expose-internals') || !String(command[1] || '').endsWith('.js')) return command;
       const out = command.slice();

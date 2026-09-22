@@ -1,6 +1,7 @@
 package com.example.nodecontainer
 
 import android.app.ActivityManager
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -60,6 +61,12 @@ class HostBridgeService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // 自转前台（协议缺陷根治）：NodeRuntimeService 用 startForegroundService() 拉起
+        // 本服务，而本服务跑在主进程 —— Android 8+ 要求 5s 内 startForeground()，否则
+        // 系统对宿主进程抛 RemoteServiceException，主进程整体被杀（真机「初始化到一半
+        // App 被关」的根因，2026-09-23 定位）。通知渠道由 NodeContainerApp 注册
+        // （Application 每进程先于 Service 执行）。
+        promoteToForeground()
         dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
         deviceAdmin = ComponentName(this, DeviceAdminReceiver::class.java)
         notifManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
@@ -67,8 +74,28 @@ class HostBridgeService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        promoteToForeground()
         if (!running) startBridge()
         return START_STICKY
+    }
+
+    private fun promoteToForeground() {
+        startForeground(BRIDGE_NOTIF_ID, buildBridgeNotification())
+    }
+
+    private fun buildBridgeNotification(): Notification {
+        val pi = android.app.PendingIntent.getActivity(
+            this, 1,
+            Intent(this, MainActivity::class.java),
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        return androidx.core.app.NotificationCompat.Builder(this, NodeContainerApp.NOTIFICATION_CHANNEL_ID)
+            .setContentTitle(getString(R.string.notification_title))
+            .setContentText("HostBridge 能力桥在线")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(pi)
+            .setOngoing(true)
+            .build()
     }
 
     private fun startBridge() {
@@ -920,6 +947,8 @@ class HostBridgeService : Service() {
     companion object {
         const val TAG = "HostBridgeService"
         const val SOCKET_NAME = "dsh_hostbridge"
+        /** 与 NodeRuntimeService 的 1001 区分：两个前台服务各自持有常驻通知。 */
+        const val BRIDGE_NOTIF_ID = 1002
         const val CODE_CAPABILITY_MISSING = -32001
         const val CODE_TIMEOUT = -32002
         const val CODE_INVALID_PARAM = -32602

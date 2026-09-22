@@ -241,6 +241,8 @@ class NativeManager {
     this.ensureRequireBuiltinShim();
     this.ensureFlockShim();
     this.ensureLinkPublishShim();
+    this.ensurePtcEnvShim();
+    this.ensureCapabilityEnvShim();
     const bin = this.binPath();
     let pkgDir = null;
     try { pkgDir = path.join(npmRoot, this.config.packageName || '@deepseek-ai/dsh'); } catch {}
@@ -403,6 +405,72 @@ class NativeManager {
       return r;
     } catch (e) {
       this.logger.warn && this.logger.warn('link 发布垫片检查异常（忽略）: ' + e.message);
+      return null;
+    }
+  }
+
+  /** 安卓容器自愈：给 PTC/workflow 子进程环境白名单补 LD_LIBRARY_PATH
+   *  （Android linker 只认该变量/DT_RUNPATH，剥掉 ⇒ libnode.so 子进程 libc++ 符号
+   *   缺失必崩；根因见 ptc-env-shim.js 头注释）。
+   *  门控同 ensureFlockShim（DSH_FLOCK_NATIVE = 设备容器标记）；PC/dev 树不动。
+   *  幂等；失败只告警不抛（不变量 C2）。
+   *  @param {string} [rootOverride] 显式 npm 全局根（安装完成路径传入刚解析的值） */
+  ensurePtcEnvShim(rootOverride) {
+    try {
+      const c = runtimeContract.read();
+      if (!c || !c.npmEntry) return null;
+      const native = process.env.DSH_FLOCK_NATIVE;
+      if (!native || !String(native).trim()) return null;
+      const root = rootOverride || this.npmRoot || (this._manifest() || {}).npmRoot || null;
+      if (!root || !fs.existsSync(root)) return null;
+      const r = require('./ptc-env-shim').ensureShim(root);
+      for (const a of r.results) {
+        if (a.status === 'applied') {
+          this.ptcEnvShimApplied = true;
+          if (this.events) this.events.append('ptc_env_shim_applied', { file: a.file });
+          this.logger.info && this.logger.info('PTC 环境垫片已投放: ' + a.file);
+        } else if (a.status === 'failed') {
+          if (this.events) this.events.append('ptc_env_shim_failed', { file: a.file, error: a.error });
+          this.logger.warn && this.logger.warn('PTC 环境垫片投放失败: ' + a.file + ' ' + a.error);
+        } else if (a.status === 'already') {
+          this.ptcEnvShimApplied = true;
+        }
+      }
+      return r;
+    } catch (e) {
+      this.logger.warn && this.logger.warn('PTC 环境垫片检查异常（忽略）: ' + e.message);
+      return null;
+    }
+  }
+
+  /** 安卓容器自愈：bash/rg 二进制路径与终端进程检视平台门的能力垫片
+   *  （4 处桌面硬编码 → 容器 env 旋钮；根因与锚点见 capability-env-shim.js）。
+   *  门控同 ensurePtcEnvShim；PC/dev 树不动。幂等；失败只告警不抛（不变量 C2）。
+   *  @param {string} [rootOverride] 显式 npm 全局根（安装完成路径传入刚解析的值） */
+  ensureCapabilityEnvShim(rootOverride) {
+    try {
+      const c = runtimeContract.read();
+      if (!c || !c.npmEntry) return null;
+      const native = process.env.DSH_FLOCK_NATIVE;
+      if (!native || !String(native).trim()) return null;
+      const root = rootOverride || this.npmRoot || (this._manifest() || {}).npmRoot || null;
+      if (!root || !fs.existsSync(root)) return null;
+      const r = require('./capability-env-shim').ensureShim(root);
+      for (const a of r.results) {
+        if (a.status === 'applied') {
+          this.capShimApplied = true;
+          if (this.events) this.events.append('cap_shim_applied', { file: a.file });
+          this.logger.info && this.logger.info('能力垫片已投放: ' + a.file);
+        } else if (a.status === 'failed') {
+          if (this.events) this.events.append('cap_shim_failed', { file: a.file, error: a.error });
+          this.logger.warn && this.logger.warn('能力垫片投放失败: ' + a.file + ' ' + a.error);
+        } else if (a.status === 'already') {
+          this.capShimApplied = true;
+        }
+      }
+      return r;
+    } catch (e) {
+      this.logger.warn && this.logger.warn('能力垫片检查异常（忽略）: ' + e.message);
       return null;
     }
   }

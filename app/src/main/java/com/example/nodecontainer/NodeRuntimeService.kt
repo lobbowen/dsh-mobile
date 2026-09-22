@@ -6,6 +6,7 @@ import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -52,6 +53,7 @@ import java.net.URL
 class NodeRuntimeService : Service() {
 
     private var nodeProcess: Process? = null
+    private var wakeLock: PowerManager.WakeLock? = null
     private val scope = CoroutineScope(Dispatchers.IO)
     private var loopJob: Job? = null
     private var portUp = false
@@ -73,6 +75,13 @@ class NodeRuntimeService : Service() {
     override fun onCreate() {
         super.onCreate()
         startForeground(NOTIF_ID, buildNotification())
+        // partial wakelock：前台服务只保证「进程不被优先级回收」，Doze 仍会冻结
+        // 网络与 alarm；息屏常驻必须显式持锁（ROM 白名单引导在 MainActivity）。
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "dsh:runtime").apply {
+            setReferenceCounted(false)
+            acquire()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -90,6 +99,13 @@ class NodeRuntimeService : Service() {
         } catch (e: Throwable) {
             RuntimeDiagnostics.append(this, "probe", false, "预置体检异常", "${e::class.java.simpleName}: ${e.message}")
         }
+        // 写路径实证（真机报告「全盘不可写 EACCES」的定位探针）：syscall 层能否写
+        // files/cache/external/tmp 与 dsh 会话目录同进程同 uid —— 若这里全 OK，
+        // 则写失败发生在 dsh 策略层而非文件系统层；若这里就 EACCES，责任在容器/ROM。
+        probeFilesystemWrites()
+        // PTY/shell 取证（终端真假的判定实验，见 native/ptyprobe/PROVENANCE.md）：
+        // 结果上屏，决定 node-pty 移植走真 PTY 还是管道假 PTY。
+        runPtyProbe()
         // 先拉起 HostBridge（UDS 能力桥），再启动内核
         startHostBridge()
         loopJob = scope.launch { supervisorLoop() }
@@ -99,6 +115,55 @@ class NodeRuntimeService : Service() {
     private fun startHostBridge() {
         val svc = Intent(this, HostBridgeService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svc) else startService(svc)
+    }
+
+    /** 执行随包 PTY 探针（静态 C，无 libc++ 依赖，直接 exec），stdout 逐行上屏。
+     *  缺件（旧 APK/dev）静默跳过——该二进制刻意不登记进 native-assets.txt（同小体积绑定先例）。 */
+    private fun runPtyProbe() {
+        val bin = File(NativePreparer.libSearchPath(this).substringBefore(File.pathSeparatorChar), "libdshptyprobe.so")
+        if (!bin.isFile) {
+            RuntimeDiagnostics.append(this, "ptyprobe", null, "PTY 探针未随包（跳过）", bin.absolutePath)
+            return
+        }
+        val r = try {
+            val p = ProcessBuilder(bin.absolutePath).redirectErrorStream(true).start()
+            val out = p.inputStream.bufferedReader().readText()
+            if (!p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) { p.destroy(); "timeout" } else out.trim()
+        } catch (e: Throwable) {
+            "${e::class.java.simpleName}: ${e.message}"
+        }
+        RuntimeDiagnostics.append(this, "ptyprobe", null, "PTY 探针结果", r.toString())
+    }
+
+    /** 对候选写路径各做一次「写→读回→删」实测，结果上屏。异常只记录不抛出。 */
+    private fun probeFilesystemWrites() {
+        val targets = linkedMapOf(
+            "files" to File(filesDir, ".dsh-write-probe"),
+            "cache" to File(cacheDir, ".dsh-write-probe"),
+            "external" to (getExternalFilesDir(null)?.let { File(it, ".dsh-write-probe") } ?: File("<null>")),
+            "/tmp" to File("/tmp/.dsh-write-probe"),
+            "dsh-home" to File(File(filesDir, ".dsh"), ".write-probe")
+        )
+        for ((label, f) in targets) {
+            if (!f.absolutePath.startsWith("/")) {
+                RuntimeDiagnostics.append(this, "probe", false, "写探针 $label", "路径不可用")
+                continue
+            }
+            val r = try {
+                f.parentFile?.mkdirs()
+                f.writeText("probe")
+                val okRead = f.readText() == "probe"
+                f.delete()
+                if (okRead) null else "写成功但读回不符"
+            } catch (e: Throwable) {
+                "${e::class.java.simpleName}: ${e.message}"
+            }
+            if (r == null) {
+                RuntimeDiagnostics.append(this, "probe", true, "写探针 $label", "写读删 OK ${f.absolutePath}")
+            } else {
+                RuntimeDiagnostics.append(this, "probe", false, "写探针 $label 失败", "$r ${f.absolutePath}")
+            }
+        }
     }
 
     /** 监督循环：持续拉起内核，进程退出/健康失败则退避重启，避免无限紧循环。 */
@@ -308,6 +373,21 @@ class NodeRuntimeService : Service() {
                             // link(2)→renameat2(RENAME_NOREPLACE) 桥（同为 NDK 现编，
                             // 根因见 native/publish/ + link-publish-shim.js 头注释）。
                             put("DSH_PUBLISH_NATIVE", File(nodeBin.parentFile, "libdshpublish.so").absolutePath)
+                            // ── android.9 能力旋钮（配套 capability-env-shim.js / cordis.patch.yml）──
+                            // 权限模式：Android untrusted_app 无任何用户态沙箱原语
+                            //（bwrap/landlock/seatbelt 全被 SELinux 域拒），dsh 默认
+                            // workspace-write 会让 bash/PTC 每条命令 fail-closed。
+                            // danger-full-access = 放弃 dsh 层二次隔离、以外层 SELinux
+                            // 为 confinement（产品拍板 2026-09-23）。
+                            put("DSH_PERMISSION_MODE", "danger-full-access")
+                            // bash/rg 二进制：CI NDK 现编、lib*.so 形态进 nativeLibraryDir
+                            //（唯一可 exec 通道，见 NativePreparer 注释）；守卫投放的
+                            // 能力垫片把 dsh 树里硬编码的查找路径接到这两个 env 上。
+                            put("DSH_BASH_BIN", File(nodeBin.parentFile, "libbash.so").absolutePath)
+                            put("DSH_RIPGREP_BIN", File(nodeBin.parentFile, "libdshrg.so").absolutePath)
+                            // SHELL：dsh-api-terminal-controller 的默认 shell 发现走
+                            // process.env.SHELL（vendor 原样支持，无需补丁）。
+                            put("SHELL", File(nodeBin.parentFile, "libbash.so").absolutePath)
                         }
                     }
             } else {
@@ -587,6 +667,8 @@ class NodeRuntimeService : Service() {
         nodeProcess = null
         loopJob?.cancel()
         loopJob = null
+        try { wakeLock?.release() } catch (_: Throwable) { }
+        wakeLock = null
         super.onDestroy()
     }
 

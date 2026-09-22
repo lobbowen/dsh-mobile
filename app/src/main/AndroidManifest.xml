@@ -8,8 +8,14 @@
 
     <!-- 前台服务保活（防止 Doze 杀掉 Node 进程） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- Android 14+ (API 34) 要求显式声明前台服务类型；dataSync 贴切“本地运行时”语义 -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 常驻运行时的前台服务类型：specialUse。dataSync 在 Android 14+ 有每日限时
+         且开机广播路径受 one-time-work 约束，不适合无限期驻留的产品定位。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- 息屏后维持内核心跳/网络探测（Doze 会挂起普通 wakelock，前台服务+partial 是
+         无 root 常驻的标准组合） -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 引导用户把本应用移出电池优化名单（Settings 弹窗，用户可拒；拒了只是更容易被杀） -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- P5 MediaProjection 截屏所需的前台服务类型（提前声明，避免届时要重编 APK 权限面） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <!-- Android 13+ 通知授权 -->
@@ -70,17 +76,30 @@
           也不影响 minSdk/兼容性。
         -->
 
-        <!-- Node 运行时：独立进程 :node，与 UI 进程隔离；exported=false 防外部拉起 -->
+        <!-- Node 运行时：独立进程 :node，与 UI 进程隔离；exported=false 防外部拉起。
+             specialUse = 无限期驻留的本地运行时（Play 才需要审核说明；本包侧载分发）。 -->
         <service
             android:name=".NodeRuntimeService"
             android:exported="false"
             android:process=":node"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="persistent local Node.js runtime hosting the DSH kernel" />
+        </service>
 
-        <!-- HostBridge（UDS 能力桥）：随 APK 冻结；exported=false，仅本应用 :node 进程连接 -->
+        <!-- HostBridge（UDS 能力桥）：随 APK 冻结；exported=false，仅本应用 :node 进程连接。
+             必须自转前台：NodeRuntimeService 用 startForegroundService() 拉起它，Android 8+
+             要求 5s 内 startForeground()，否则系统对**其宿主进程**（=主进程）抛
+             RemoteServiceException —— 真机「初始化到一半 App 被关」的根因。 -->
         <service
             android:name=".HostBridgeService"
-            android:exported="false" />
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="host capability bridge (UDS) for the DSH kernel" />
+        </service>
 
         <!-- 截屏（ui.screenshot）：Android 14+ 硬性要求 mediaProjection 类型前台服务 -->
         <service
@@ -88,13 +107,15 @@
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
 
-        <!-- 开机自启接收器 -->
+        <!-- 开机自启 + 覆盖安装后自动复活（升级 APK 后系统杀进程但不重启服务，
+             MY_PACKAGE_REPLACED 是唯一能在“更新完”这一刻拿到的回调） -->
         <receiver
             android:name=".BootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 

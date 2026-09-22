@@ -46,6 +46,11 @@ on:
       # 原生资产清单 —— 它决定 APK 里装哪些 .so、CI 下载校验哪些资产、
       # 以及 gradle 的 keepDebugSymbols。改它就等于改了 APK 内容。
       - '.github/native-assets.txt'
+      # native/ 下的 C 源（flock/publish/ptyprobe 等）现场编译进 jniLibs ——
+      # 改源码同样等于改 APK 内容（tag 触发不受 paths 限制，但 push 直出也要能触发）。
+      - 'native/**'
+      # 内核垫片（守卫投放进 dsh 安装树的 JS）随基线包上机 —— 改它同样是改 APK。
+      - 'dsh-android-kernel/**'
     # 额外的 tag 触发：推 fast-<任意> 即可手动跑一次，不必改代码。
     # 维护环境（沙箱）无法操作网页、workflow_dispatch 点不了，
     # tag 是最干净的显式触发手段。
@@ -359,6 +364,110 @@ jobs:
           file "$SO2" | grep -q "ELF 64-bit.*ARM aarch64" || { echo "[error] publish 产物不是 aarch64 ELF"; exit 1; }
           echo "[ok] libdshpublish.so $SIZE2 字节"
 
+      - name: Build capability binaries (bash / ripgrep / PTY probe)
+        # android.9：终端三件套 + PTY 探针，全部 NDK 交叉编译**静态**产物：
+        #   · libbash.so   —— dsh-bash-local / dsh-terminal-bash 需要真 bash 二进制；
+        #                      Android 无 /bin/bash，可 exec 目录只有 nativeLibraryDir
+        #                      （W^X），文件名必须 lib*.so 形态（能力垫片经 DSH_BASH_BIN 指过来）。
+        #   · libdshrg.so  —— glob/grep 工具硬依赖 ripgrep（无 JS 等价物），经 DSH_RIPGREP_BIN。
+        #   · libdshptyprobe.so —— 真机 PTY 能力探针（native/ptyprobe/，决策 node-pty 路线）。
+        # 失败语义（刻意的不对称）：探针编译失败 = 环境问题，硬红；bash/rg 失败 = 上游
+        # 构建配方问题，记 ::warning:: 后继续 —— 生命周期/PTC 修复不该被配方陪葬，
+        # 缺件时垫片旋钮诚实回退原语义，Audit 步骤如实报告 APK 内有无，绝不静默。
+        # bash 配方要点：bionic 无 termcap/readline ⇒ 预编一个 tputs 族 no-op 桩归档
+        # 塞进 LIBS（configure 的功能探测即真实链接通过；dsh 只跑 `bash -c` 非交互
+        # 管线，readline 的美化路径不参与）；--enable-static-link 产出免动态链接器
+        # 的 ELF，绕开 PTC 垫片教训的那整类 linker/env 问题。
+        run: |
+          set -uo pipefail
+          NDK=""
+          for v in "${ANDROID_NDK_LATEST_HOME:-}" "${ANDROID_NDK_HOME:-}" "${ANDROID_NDK_ROOT:-}"; do
+            [ -n "$v" ] && [ -d "$v" ] && NDK="$v" && break
+          done
+          if [ -z "$NDK" ]; then
+            NDK=$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | sort -V | tail -1 || true)
+          fi
+          [ -n "$NDK" ] && [ -d "$NDK" ] || { echo "[error] runner 上找不到 NDK"; exit 1; }
+          TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          CC="$TC/aarch64-linux-android21-clang"
+          LLVM_AR="$TC/llvm-ar"
+          [ -x "$CC" ] || { echo "[error] 找不到 clang: $CC"; exit 1; }
+          J="app/src/main/jniLibs/${ABI}"
+          mkdir -p "$J"
+
+          check_so() { # $1=路径 $2=最小字节
+            local f="$1" min="$2"
+            [ -f "$f" ] || return 1
+            local s; s=$(stat -c%s "$f"); [ "$s" -gt "$min" ] || return 1
+            file "$f" | grep -q 'ELF 64-bit.*ARM aarch64' || return 1
+            echo "[ok] $(basename "$f") $s 字节"
+            file "$f" | sed 's/^/      /'
+          }
+
+          # ── ① PTY 探针（必须成功；见 native/ptyprobe/PROVENANCE.md）──
+          "$CC" -static -O2 -o "$J/libdshptyprobe.so" native/ptyprobe/pty-probe.c \
+            || { echo "[error] ptyprobe 编译失败（纯 C 静态，失败即环境问题）"; exit 1; }
+          check_so "$J/libdshptyprobe.so" 1000 || exit 1
+
+          # ── ② bash 5.2.15 静态交叉编译 ──
+          BASH_VER=5.2.15
+          if curl -fsSL "https://ftp.gnu.org/gnu/bash/bash-${BASH_VER}.tar.gz" -o /tmp/bash.tar.gz \
+             && echo "bash-${BASH_VER} sha256: $(sha256sum /tmp/bash.tar.gz | cut -d' ' -f1)" \
+             && tar -xzf /tmp/bash.tar.gz -C /tmp; then
+            cat > /tmp/termcap_stub.c <<'EOF'
+          /* bionic 无 termcap：readline 美化路径的 no-op 桩（dsh 只走非交互 bash -c） */
+          int tputs(const char *s, int affcnt, int (*putc_)(int)) { (void)s; (void)affcnt; (void)putc_; return 0; }
+          int tgetent(char *bp, const char *name) { (void)bp; (void)name; return -1; }
+          int tgetflag(const char *id) { (void)id; return 0; }
+          int tgetnum(const char *id) { (void)id; return -1; }
+          char *tgetstr(const char *id, char **area) { (void)id; (void)area; return 0; }
+          char *tgoto(const char *cap, int col, int row) { (void)cap; (void)col; (void)row; return 0; }
+          EOF
+            "$CC" -c -O2 /tmp/termcap_stub.c -o /tmp/termcap_stub.o \
+              && "$LLVM_AR" rcs /tmp/libtermcap_stub.a /tmp/termcap_stub.o
+            (
+              set -e
+              cd /tmp/bash-${BASH_VER}
+              ./configure --host=aarch64-linux-android --build=x86_64-pc-linux-gnu \
+                --prefix=/native --disable-nls --enable-static-link \
+                CC="$CC" CFLAGS="-O2" LDFLAGS="-static" LIBS="/tmp/libtermcap_stub.a" \
+                bash_cv_getcwd_malloc=yes bash_cv_func_sigsetjmp=present \
+                bash_cv_printf_a_format=yes bash_cv_dev_fd_standard=yes \
+                bash_cv_unusable_rtsigs=no > /tmp/bash-configure.log 2>&1 \
+                || { tail -30 /tmp/bash-configure.log; exit 1; }
+              make -j4 bash > /tmp/bash-make.log 2>&1 || { tail -40 /tmp/bash-make.log; exit 1; }
+            ) && cp -f /tmp/bash-${BASH_VER}/bash "$J/libbash.so"
+            if ! check_so "$J/libbash.so" 300000; then
+              echo "::warning title=能力件缺失::libbash.so 未产出 —— bash 工具本包不可用（终端/命令执行报 ENOENT，诚实可见）"
+              rm -f "$J/libbash.so"
+            fi
+          else
+            echo "::warning title=能力件缺失::bash 源码下载/解包失败 —— bash 工具本包不可用"
+          fi
+
+          # ── ③ ripgrep 14.1.1（cargo 交叉到 aarch64-linux-android，静态 CRT）──
+          if ! command -v cargo > /dev/null 2>&1; then
+            echo "runner 无 cargo，装最小 rustup"
+            curl -fsSf https://sh.rustup.rs -o /tmp/rustup.sh && sh /tmp/rustup.sh -y --profile minimal --default-toolchain stable >/dev/null
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup target add aarch64-linux-android > /dev/null 2>&1 || echo "[warn] rustup target add 失败（可能非 rustup 安装）"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS="-C target-feature=+crt-static"
+          export CC_aarch64_linux_android="$CC" CXX_aarch64_linux_android="$CC" AR_aarch64_linux_android="$LLVM_AR"
+          if cargo install --locked --version 14.1.1 ripgrep --target aarch64-linux-android --root /tmp/rgbin --no-track > /tmp/rg-build.log 2>&1; then
+            cp -f /tmp/rgbin/bin/rg "$J/libdshrg.so"
+          else
+            tail -30 /tmp/rg-build.log
+          fi
+          if ! check_so "$J/libdshrg.so" 300000; then
+            echo "::warning title=能力件缺失::libdshrg.so 未产出 —— glob/grep 工具本包不可用（SEARCH_FAILED，诚实可见）"
+            rm -f "$J/libdshrg.so"
+          fi
+
+          echo "== 能力二进制就位情况 =="
+          ls -la "$J"
+
       - name: Stage pinned npm into APK assets
         # npm 是**基础环境**的一部分（与 Node 版本锁死、几乎不变）⇒ 进 APK 而非内核包。
         # 版本/sha512 双钉与理由见 scripts/stage-npm-assets.sh 头部注释。
@@ -538,6 +647,20 @@ jobs:
             fi
           done
           echo "[ok] APK 审计通过（原生资产）"
+
+          # --- 小体积原生件审计（刻意不登记 native-assets.txt 的那批）---
+          # 自有 C（flock/publish/ptyprobe）编译失败即环境问题 ⇒ 硬红；
+          # bash/rg 来自上游源码配方（交叉编译有真实失败概率）⇒ 缺席只降级为
+          # ::warning::：缺件时垫片旋钮逐字回退原语义、真机侧诚实报错，
+          # 不该让生命周期/PTC 修复陪葬。
+          echo
+          echo "--- 小体积原生件 ---"
+          for b in libdshflock.so libdshpublish.so libdshptyprobe.so; do
+            if unzip -l "$APK" | grep -q "lib/${ABI}/$b"; then echo "[ok] lib/${ABI}/$b"; else echo "[error] APK 缺 lib/${ABI}/$b（自有 C，必产）"; exit 1; fi
+          done
+          for b in libbash.so libdshrg.so; do
+            if unzip -l "$APK" | grep -q "lib/${ABI}/$b"; then echo "[ok] lib/${ABI}/$b"; else echo "::warning title=能力降级::lib/${ABI}/$b 不在 APK —— 对应 dsh 能力本包不可用（诚实回退，非静默）"; fi
+          done
 
           # --- 基线内核包审计 ---
           #
