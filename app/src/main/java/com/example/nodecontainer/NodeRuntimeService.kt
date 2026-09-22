@@ -411,6 +411,7 @@ class NodeRuntimeService : Service() {
     private fun forward(stream: InputStream, tag: String) {
         Thread {
             var shown = 0
+            var childShown = 0
             stream.bufferedReader().use { r ->
                 r.forEachLine { line ->
                     Log.i("Kernel:$tag", line)
@@ -418,8 +419,19 @@ class NodeRuntimeService : Service() {
                         RuntimeDiagnostics.recordNodeStderr(this, line + "\n")
                         // stderr 必须上屏：dsh/守卫的启动崩溃**只往 stderr 抛栈**，此前只有
                         // stdout 上屏 → 屏幕上一片安静、面板却打不开，无从排查（真机 2026-09-22）。
-                        // 限 STDOUT 之外的前若干行，防 npm 海噪刷爆诊断页；全文仍在 node-stderr.log。
-                        if (shown < STDERR_SCREEN_LINES) {
+                        // 限量防 npm 海噪刷爆诊断页；全文仍在 node-stderr.log。
+                        // 守卫镜像的子进程崩溃行（"[stderr] " 前缀）单独计数：真机秒退的
+                        // 死因恰恰排在守卫自身日志之后，与 INFO 共用限量会被挡在屏幕外。
+                        val isChildLine = line.startsWith("[stderr] ")
+                        if (isChildLine) {
+                            if (childShown < CHILD_STDERR_SCREEN_LINES) {
+                                RuntimeDiagnostics.append(this, "kernel-stderr", null, line)
+                                childShown++
+                                if (childShown == CHILD_STDERR_SCREEN_LINES) {
+                                    RuntimeDiagnostics.append(this, "kernel-stderr", null, "……(子进程 stderr 上屏截断，完整见 node-stderr.log)")
+                                }
+                            }
+                        } else if (shown < STDERR_SCREEN_LINES) {
                             RuntimeDiagnostics.append(this, "kernel-stderr", null, line)
                             shown++
                             if (shown == STDERR_SCREEN_LINES) {
@@ -598,5 +610,8 @@ class NodeRuntimeService : Service() {
         const val STABLE_MS = 15000L
         /** stderr 上屏的行数上限（全文始终落 node-stderr.log）。 */
         const val STDERR_SCREEN_LINES = 60
+        /** 子进程崩溃镜像（守卫给 dsh stderr 行加 "[stderr] " 前缀）单独放宽：
+         *  真机 2026-09-22 的秒退死因恰恰排在守卫自身几十行日志之后，统一限量把它挡在了屏幕外。 */
+        const val CHILD_STDERR_SCREEN_LINES = 400
     }
 }
