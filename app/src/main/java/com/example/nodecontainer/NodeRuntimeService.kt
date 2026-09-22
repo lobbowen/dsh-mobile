@@ -305,6 +305,9 @@ class NodeRuntimeService : Service() {
                             // 文件缺席时垫片 dlopen 失败 ⇒ 逐字回退 vendor 原始语义，
                             // 故此路径只是声明，不要求此刻存在。
                             put("DSH_FLOCK_NATIVE", File(nodeBin.parentFile, "libdshflock.so").absolutePath)
+                            // link(2)→renameat2(RENAME_NOREPLACE) 桥（同为 NDK 现编，
+                            // 根因见 native/publish/ + link-publish-shim.js 头注释）。
+                            put("DSH_PUBLISH_NATIVE", File(nodeBin.parentFile, "libdshpublish.so").absolutePath)
                         }
                     }
             } else {

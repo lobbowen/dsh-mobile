@@ -303,8 +303,13 @@ jobs:
             echo "[ok] $f  $SIZE 字节"
           done
 
-      - name: Build libdshflock.so (NDK, flock(2) 原生绑定)
-        # 真机实证（2026-09-23）：dsh 会话持久化硬依赖
+      - name: Build libdshflock.so + libdshpublish.so (NDK 原生桥)
+        # 真机实证（2026-09-23）：dsh 两条设备死路都没有 JS 等价物——
+        # ① flock（下列）；② link：Android 7+ SELinux 禁 untrusted_app 硬链接，
+        #    dsh 会话/附件的 link 式独占发布报 EACCES ⇒ renameat2(RENAME_NOREPLACE)
+        #    语义等价桥（native/publish/，自有代码）→ libdshpublish.so。
+        #    两库不能合并成单一 .so：NAPI_MODULE_INIT 入口每模块唯一。
+        # 真机实证：dsh 会话持久化硬依赖
         # @deepseek-ai/node-addon-system 的 flock 绑定，上游只发 linux(glibc/musl)/
         # darwin 预编译件，无 android-arm64 ⇒ 设备发消息报
         # "flock is not supported on android-arm64"。flock(2) 无 JS 等价物
@@ -344,6 +349,15 @@ jobs:
           [ "$SIZE" -gt 1000 ] || { echo "[error] $SO 仅 $SIZE 字节，编译产物可疑"; exit 1; }
           file "$SO" | grep -q "ELF 64-bit.*ARM aarch64" || { echo "[error] 产物不是 aarch64 ELF"; exit 1; }
           echo "[ok] libdshflock.so $SIZE 字节 ($(file -b --mime-type "$SO" 2>/dev/null || echo ELF))"
+
+          # ② link 桥：renameat2 经 syscall() 包装，无 API level 头文件依赖
+          "$CC" -shared -fPIC -O2 -DNAPI_VERSION=9 -I "$INC" \
+            -o "app/src/main/jniLibs/${ABI}/libdshpublish.so" native/publish/rename-no-replace.c
+          SO2="app/src/main/jniLibs/${ABI}/libdshpublish.so"
+          SIZE2=$(stat -c%s "$SO2")
+          [ "$SIZE2" -gt 1000 ] || { echo "[error] $SO2 仅 $SIZE2 字节，编译产物可疑"; exit 1; }
+          file "$SO2" | grep -q "ELF 64-bit.*ARM aarch64" || { echo "[error] publish 产物不是 aarch64 ELF"; exit 1; }
+          echo "[ok] libdshpublish.so $SIZE2 字节"
 
       - name: Stage pinned npm into APK assets
         # npm 是**基础环境**的一部分（与 Node 版本锁死、几乎不变）⇒ 进 APK 而非内核包。

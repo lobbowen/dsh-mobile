@@ -240,6 +240,7 @@ class NativeManager {
     this._applyLaunchCommand(npmRoot);
     this.ensureRequireBuiltinShim();
     this.ensureFlockShim();
+    this.ensureLinkPublishShim();
     const bin = this.binPath();
     let pkgDir = null;
     try { pkgDir = path.join(npmRoot, this.config.packageName || '@deepseek-ai/dsh'); } catch {}
@@ -368,6 +369,40 @@ class NativeManager {
       return r;
     } catch (e) {
       this.logger.warn && this.logger.warn('flock 原生垫片检查异常（忽略）: ' + e.message);
+      return null;
+    }
+  }
+
+  /** 安卓容器自愈：把安装树 5 处 link(2) 独占发布桥到 renameat2(RENAME_NOREPLACE)
+   *  （SELinux 禁 app 硬链接，真机实证 EACCES；根因与锚点见 link-publish-shim.js）。
+   *  门控同 ensureFlockShim：契约在场 + 容器递来原生库路径声明
+   *  （DSH_PUBLISH_NATIVE 或 DSH_FLOCK_NATIVE 任一，helper 从后者目录推导前者）；
+   *  PC/dev 无这些变量 ⇒ 树不动、行为逐字不变。幂等；失败只告警不抛（不变量 C2）。
+   *  @param {string} [rootOverride] 显式 npm 全局根（安装完成路径传入刚解析的值） */
+  ensureLinkPublishShim(rootOverride) {
+    try {
+      const c = runtimeContract.read();
+      if (!c || !c.npmEntry) return null;
+      const hasNative = (v) => typeof v === 'string' && v.trim() !== '';
+      if (!hasNative(process.env.DSH_PUBLISH_NATIVE) && !hasNative(process.env.DSH_FLOCK_NATIVE)) return null;
+      const root = rootOverride || this.npmRoot || (this._manifest() || {}).npmRoot || null;
+      if (!root || !fs.existsSync(root)) return null;
+      const r = require('./link-publish-shim').ensureShim(root);
+      for (const a of r.results) {
+        if (a.status === 'applied') {
+          this.linkShimApplied = true;
+          if (this.events) this.events.append('link_shim_applied', { file: a.file });
+          this.logger.info && this.logger.info('link 发布垫片已投放: ' + a.file);
+        } else if (a.status === 'failed') {
+          if (this.events) this.events.append('link_shim_failed', { file: a.file, error: a.error });
+          this.logger.warn && this.logger.warn('link 发布垫片投放失败: ' + a.file + ' ' + a.error);
+        } else if (a.status === 'already') {
+          this.linkShimApplied = true;
+        }
+      }
+      return r;
+    } catch (e) {
+      this.logger.warn && this.logger.warn('link 发布垫片检查异常（忽略）: ' + e.message);
       return null;
     }
   }
