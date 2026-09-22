@@ -238,6 +238,7 @@ class NativeManager {
     } catch {}
     // 启动命令写回放在 binPath 读取**之前**：清单应记录安装完成后的现行启动形态。
     this._applyLaunchCommand(npmRoot);
+    this.ensureRequireBuiltinShim();
     const bin = this.binPath();
     let pkgDir = null;
     try { pkgDir = path.join(npmRoot, this.config.packageName || '@deepseek-ai/dsh'); } catch {}
@@ -296,10 +297,44 @@ class NativeManager {
       const cmd = (this.config && this.config.command) || [];
       const entry = String(cmd[1] || '');
       if (cmd.length >= 2 && entry.endsWith('.js') && fs.existsSync(entry)) {
-        return { bin: String(cmd[0]), args: [entry] };
+        // 容器契约形态（node 代跑）恒带 --expose-internals：dsh app-boot 硬 require
+        // 内部模块，JS 垫片与 cordis loader 的 no-native 路径都依赖该 flag（幂等无害）。
+        return { bin: String(cmd[0]), args: ['--expose-internals', entry] };
       }
     } catch {}
     return null;
+  }
+
+  /** 安卓容器自愈：给安装树里的 node-addon-require-builtin 投放 JS 垫片。
+   *  根因与方案见 require-builtin-shim.js 头注释。幂等（已投放即 no-op），
+   *  每次 spawn 前由守卫调用 —— 覆盖安装/内核升级后旧 dsh 不重装也能被修复。
+   *  门控同 _applyLaunchCommand：只认容器契约形态（npmEntry 在场），PC 行为逐字不变；
+   *  失败只告警不抛（不变量 C2：绝不让运行因自愈失败而中断）。
+   *  @param {string} [rootOverride] 显式 npm 全局根（安装完成路径传入刚解析的值） */
+  ensureRequireBuiltinShim(rootOverride) {
+    try {
+      const c = runtimeContract.read();
+      if (!c || !c.npmEntry) return null;
+      const root = rootOverride || this.npmRoot || (this._manifest() || {}).npmRoot || null;
+      if (!root || !fs.existsSync(root)) return null;
+      const r = require('./require-builtin-shim').ensureShim(root);
+      for (const a of r.results) {
+        if (a.status === 'applied') {
+          this.narbShimApplied = true;
+          if (this.events) this.events.append('narb_shim_applied', { dir: a.dir });
+          this.logger.info && this.logger.info('require-builtin JS 垫片已投放: ' + a.dir);
+        } else if (a.status === 'failed') {
+          if (this.events) this.events.append('narb_shim_failed', { dir: a.dir, error: a.error });
+          this.logger.warn && this.logger.warn('require-builtin JS 垫片投放失败: ' + a.dir + ' ' + a.error);
+        } else if (a.status === 'already') {
+          this.narbShimApplied = true;
+        }
+      }
+      return r;
+    } catch (e) {
+      this.logger.warn && this.logger.warn('require-builtin JS 垫片检查异常（忽略）: ' + e.message);
+      return null;
+    }
   }
 
   /** 卸载时拟删除的 DSH 用户数据路径（仅当本 supervisor 是干净 ~/.dsh 的首装者才认领）。

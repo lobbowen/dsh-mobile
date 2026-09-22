@@ -82,6 +82,49 @@ class MainProcess {
     };
   }
 
+  /** 安卓容器启动形态整备（仅契约在场时生效，PC 逐字不变）：
+   *  ① 经 nativeManager 幂等投放 NARB JS 垫片（dsh ≥rc.2 硬 require
+   *    node-addon-require-builtin，该包无 android-arm64 预编译件 → boot 必死 exit:1）；
+   *  ② 在 node 与脚本入口之间注入 --expose-internals（shim/cordis loader 的
+   *    no-native 路径依赖它；不是 dsh 子命令参数，位置必须在脚本前）。
+   *  恒幂等：命令已含该 flag 不再重复插入；非 node 代跑形态（args[0] 非 .js）不动。 */
+  _androidLaunchReady(command) {
+    try {
+      const c = runtimeContract.read();
+      if (!c || !c.npmEntry) return command;
+      if (this.nativeManager && typeof this.nativeManager.ensureRequireBuiltinShim === 'function') {
+        this.nativeManager.ensureRequireBuiltinShim();
+      }
+      if (command.includes('--expose-internals') || !String(command[1] || '').endsWith('.js')) return command;
+      const out = command.slice();
+      out.splice(1, 0, '--expose-internals');
+      return out;
+    } catch { return command; }
+  }
+
+  /** 非零退出取证：dsh reportStartupFailure 把完整崩溃报告写到
+   *  <$DSH_HOME|~/.dsh>/logs/startup-<ts>-<uuid>.log。收集 mtime 晚于本轮
+   *  spawn 时刻的报告尾部（含 2s 时钟粒度余量），供 dsh_exited 事件上屏。 */
+  _collectStartupReports(sinceMs) {
+    const envHome = process.env.DSH_HOME && process.env.DSH_HOME.trim();
+    const root = envHome ? envHome.trim() : path.join(process.env.HOME || os.homedir(), '.dsh');
+    const dir = path.join(root, 'logs');
+    const out = [];
+    let names;
+    try { names = fs.readdirSync(dir); } catch { return out; }
+    for (const name of names) {
+      if (!/^startup-.*\.log$/.test(name)) continue;
+      const p = path.join(dir, name);
+      try {
+        const st = fs.statSync(p);
+        if (!st.isFile() || st.mtimeMs < sinceMs - 2000) continue;
+        const tail = fs.readFileSync(p, 'utf8').split(/\r?\n/).slice(-60);
+        out.push({ file: name, tail });
+      } catch { /* 单文件失败不影响其余取证 */ }
+    }
+    return out.slice(-3); // 只要最近 3 份，防极端刷屏
+  }
+
   async _startProcess() {
     this._actNote('start', 'spawn'); // C3-3b G1 影子 actual 记账
     this._crashHalted = false; // 主动拉起 = 清除崩溃停靠（进入运行流程）
@@ -104,9 +147,14 @@ class MainProcess {
     // 会让 dsh 启动在 30s 锁等待后崩溃（"plugin tree failed to load"），守卫再判启动失败
     // kill 重启 → 永不就绪的重启死循环。dsh 文档定义孤儿锁清理为 operator 动作——守卫即 operator。
     this._reapOrphanDshLocks();
-    this.events.append('spawn', { command: this.spawnCommand() });
-    const [cmd, ...args] = this.spawnCommand();
+    // 安卓容器形态：spawn 前幂等投放 NARB JS 垫片 + 注入 --expose-internals
+    // （dsh ≥rc.2 硬 require node-addon-require-builtin，无 android 预编译件 → 秒退）。
+    // PC 无契约 → _androidLaunchReady 原样返回，行为逐字不变。
+    const launchCommand = this._androidLaunchReady(this.spawnCommand());
+    this.events.append('spawn', { command: launchCommand });
+    const [cmd, ...args] = launchCommand;
     const cap = this._openStderrCapture();
+    const spawnAt = Date.now(); // 本轮取证时间戳：晚于此的 startup-*.log 才算本轮死因
     let child;
     try {
       // detached：独立进程组，便于按组发信号（DSH 派生的子进程一并收到）。
@@ -122,7 +170,7 @@ class MainProcess {
       return;
     }
     try { fs.closeSync(cap.fd); } catch { /* 子进程已持有自己的重复 fd */ }
-    this.logger.info('spawn pid=' + child.pid + ' cmd=' + this.spawnCommand().join(' '));
+    this.logger.info('spawn pid=' + child.pid + ' cmd=' + launchCommand.join(' '));
     this._mSetChild(child);
     this._mSetAdopted(false);
     this._mSetAdoptPid(null);
@@ -178,10 +226,14 @@ class MainProcess {
       outBuf.flush();
       errBuf.flush();
       if (this._mChild() !== child) return; // 已被 stopProcess 接管
-      this.events.append('dsh_exited', { code, signal, phase: this._mPhase(), stderrTail: errLines.slice(-40) });
+      const startupReports = code !== 0 ? this._collectStartupReports(spawnAt) : [];
+      this.events.append('dsh_exited', { code, signal, phase: this._mPhase(), stderrTail: errLines.slice(-40), startupReports });
       if (code !== 0 && errLines.length === 0) {
-        // 零输出非零退出：把"没有输出"本身也记成一件事，避免下轮排查再猜
-        this.logger.warn('dsh exited code=' + code + ' with no output (dsh-stderr.log empty)');
+        // 零输出非零退出：把"没有输出"本身也记成一件事，避免下轮排查再猜；
+        // dsh 的 reportStartupFailure 会把完整崩溃报告写进 <$HOME>/.dsh/logs/startup-*.log，
+        // 即便 stderr 全丢也能从报告取证（本轮新写者才计入，防旧报告顶缸）。
+        this.logger.warn('dsh exited code=' + code + ' with no output (dsh-stderr.log empty)'
+          + (startupReports.length ? '; startup reports: ' + startupReports.map((r) => r.file).join(' ') : '; no startup report this round'));
       }
       this._mSetChild(null);
       if (this._stopping) return;

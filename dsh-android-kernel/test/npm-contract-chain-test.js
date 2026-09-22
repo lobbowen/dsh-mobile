@@ -104,7 +104,7 @@ async function main() {
   check('C-2 写回经 persistCommand 落盘（重启沿用）', patches.length === 1 && JSON.stringify(patches[0].command) === JSON.stringify(config.command), JSON.stringify(patches));
   check('C-2 installedVersion 从写回后的 command[1] 反查成功', nm.installedVersion() === '9.9.9', String(nm.installedVersion()));
   const cli = nm.dshCliInvocation();
-  check('C-2 dshCliInvocation 返回 node 代跑形态', !!cli && cli.bin === process.execPath && cli.args[0] === entryAbs, JSON.stringify(cli));
+  check('C-2 dshCliInvocation 返回 node 代跑形态（含 --expose-internals）', !!cli && cli.bin === process.execPath && cli.args[0] === '--expose-internals' && cli.args[1] === entryAbs, JSON.stringify(cli));
 
   // ── C-3 PluginManager：dsh 子命令走同一形态 ──
   const pm = new PluginManager({
