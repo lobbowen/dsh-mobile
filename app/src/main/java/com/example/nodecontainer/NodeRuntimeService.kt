@@ -402,14 +402,28 @@ class NodeRuntimeService : Service() {
         } catch (_: Throwable) {}
     }
 
-    /** 转发子进程 stdout/stderr：都进 logcat，stderr 额外落盘供失败时回看。 */
+    /** 转发子进程 stdout/stderr：都进 logcat；stderr 落盘**并限量上屏**。 */
     private fun forward(stream: InputStream, tag: String) {
         Thread {
+            var shown = 0
             stream.bufferedReader().use { r ->
                 r.forEachLine { line ->
                     Log.i("Kernel:$tag", line)
-                    if (tag == "stderr") RuntimeDiagnostics.recordNodeStderr(this, line + "\n")
-                    else RuntimeDiagnostics.append(this, "kernel-$tag", null, line)
+                    if (tag == "stderr") {
+                        RuntimeDiagnostics.recordNodeStderr(this, line + "\n")
+                        // stderr 必须上屏：dsh/守卫的启动崩溃**只往 stderr 抛栈**，此前只有
+                        // stdout 上屏 → 屏幕上一片安静、面板却打不开，无从排查（真机 2026-09-22）。
+                        // 限 STDOUT 之外的前若干行，防 npm 海噪刷爆诊断页；全文仍在 node-stderr.log。
+                        if (shown < STDERR_SCREEN_LINES) {
+                            RuntimeDiagnostics.append(this, "kernel-stderr", null, line)
+                            shown++
+                            if (shown == STDERR_SCREEN_LINES) {
+                                RuntimeDiagnostics.append(this, "kernel-stderr", null, "……(stderr 上屏截断，完整见 node-stderr.log)")
+                            }
+                        }
+                    } else {
+                        RuntimeDiagnostics.append(this, "kernel-$tag", null, line)
+                    }
                 }
             }
         }.start()
@@ -497,7 +511,9 @@ class NodeRuntimeService : Service() {
     private fun isStatusUp(): Boolean = try {
         val c = URL("http://127.0.0.1:$KERNEL_CONTROL_PORT/status").openConnection() as HttpURLConnection
         c.connectTimeout = 300
-        c.readTimeout = 300
+        // 读超时 1.5s：dsh 启动/安装期设备 CPU 饱和，守卫事件循环排不出 300ms；
+        // 太紧会把「活着但忙」误判成「死了」（真机 2026-09-22 面板打不开的直接观感）。
+        c.readTimeout = 1500
         c.requestMethod = "GET"
         c.responseCode == 200
     } catch (_: Throwable) {
@@ -575,5 +591,7 @@ class NodeRuntimeService : Service() {
         const val BACKOFF_MAX_MS = 30000L
         /** 内核连续存活超过该时长才算真实成功，退避计数才允许清零。 */
         const val STABLE_MS = 15000L
+        /** stderr 上屏的行数上限（全文始终落 node-stderr.log）。 */
+        const val STDERR_SCREEN_LINES = 60
     }
 }

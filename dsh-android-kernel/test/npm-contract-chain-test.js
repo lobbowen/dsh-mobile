@@ -8,7 +8,7 @@
 //   C-1 dist.runNpmInstall：spawn(node, [npm-cli.js, install, -g, --ignore-scripts, ...])，
 //       env 带显式 npm_config_prefix（容器只读前缀下 -g 必失败的根治）。
 //   C-2 NativeManager：checkEnvironment 经契约探测；安装清单落盘前把 config.command
-//       写回 [node绝对, 入口脚本绝对, 'web'] 并经 persistCommand 落盘。
+//       写回 [node绝对, 入口脚本绝对, 'web', '--no-open'] 并经 persistCommand 落盘。
 //   C-3 PluginManager._runCli：经 resolveDshCli 用与主干同代的 node 代跑形态。
 //
 // ## 安全设计（test-safety-gate 的 B 规约）
@@ -99,8 +99,8 @@ async function main() {
 
   nm._recordManifest('9.9.9');
   const entryAbs = path.join(pkgDir, 'bin', 'dsh.js');
-  check('C-2 config.command 写回 [node绝对, 入口绝对, web]',
-    JSON.stringify(config.command) === JSON.stringify([process.execPath, entryAbs, 'web']), JSON.stringify(config.command));
+  check('C-2 config.command 写回 [node绝对, 入口绝对, web, --no-open]',
+    JSON.stringify(config.command) === JSON.stringify([process.execPath, entryAbs, 'web', '--no-open']), JSON.stringify(config.command));
   check('C-2 写回经 persistCommand 落盘（重启沿用）', patches.length === 1 && JSON.stringify(patches[0].command) === JSON.stringify(config.command), JSON.stringify(patches));
   check('C-2 installedVersion 从写回后的 command[1] 反查成功', nm.installedVersion() === '9.9.9', String(nm.installedVersion()));
   const cli = nm.dshCliInvocation();

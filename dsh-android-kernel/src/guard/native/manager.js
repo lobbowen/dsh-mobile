@@ -255,7 +255,9 @@ class NativeManager {
 
   /* ═══════ 启动命令写回 + dsh CLI 调用形态（安卓容器）═══════ */
   /** 安装/升级/回滚成功后把 config.command 落为**绝对形态**：
-   *    [契约 node（libnode.so）, <npmRoot>/<pkg> 的 bin 入口脚本绝对路径, 'web']
+   *    [契约 node（libnode.so）, <npmRoot>/<pkg> 的 bin 入口脚本绝对路径, 'web', '--no-open']
+   *  --no-open：dsh web 启动后会 spawn xdg-open/open 打开默认浏览器 —— 安卓无此命令，
+   *  且面板本就由容器 WebView 呈现，URL 交给外部打开没有意义。
    *  为什么必须写回：模板形态 ['node','dsh','web'] 依赖 PATH 与可 execve 的
    *  dsh shim —— 安卓容器两者都不成立（W^X）；装完不写回，守卫重启即拉不起。
    *  只认容器契约形态（npmEntry 在场）；PC（无契约）行为逐字不变。解析失败静默
@@ -273,7 +275,7 @@ class NativeManager {
       if (!rel) return;
       const entry = path.resolve(pkgDir, String(rel));
       if (!fs.existsSync(entry)) return;
-      const command = [c.nodePath || process.execPath, entry, 'web'];
+      const command = [c.nodePath || process.execPath, entry, 'web', '--no-open'];
       const prev = this.config.command;
       if (Array.isArray(prev) && prev.join('\u0000') === command.join('\u0000')) return;
       this.config.command = command;

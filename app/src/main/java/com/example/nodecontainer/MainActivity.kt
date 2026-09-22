@@ -248,7 +248,9 @@ class MainActivity : AppCompatActivity() {
     private fun isPortUp(): Boolean = try {
         val c = java.net.URL("http://127.0.0.1:${NodeRuntimeService.KERNEL_CONTROL_PORT}/status").openConnection() as java.net.HttpURLConnection
         c.connectTimeout = 300
-        c.readTimeout = 300
+        // 与容器侧 isStatusUp 同理：设备忙时 300ms 读超时会把「活着但忙」误判成死，
+        // 表现为面板永远进不去、一直停在诊断页（真机 2026-09-22）。
+        c.readTimeout = 1500
         c.requestMethod = "GET"
         c.responseCode == 200
     } catch (_: Throwable) {
