@@ -430,12 +430,20 @@ jobs:
               cd /tmp/bash-${BASH_VER}
               ./configure --host=aarch64-linux-android --build=x86_64-pc-linux-gnu \
                 --prefix=/native --disable-nls --enable-static-link \
-                CC="$CC" CFLAGS="-O2" LDFLAGS="-static" LIBS="/tmp/libtermcap_stub.a" \
+                CC="$CC" CFLAGS="-O2 -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types -Wno-error=incompatible-pointer-types" \
+                LDFLAGS="-static" LIBS="/tmp/libtermcap_stub.a" \
                 bash_cv_getcwd_malloc=yes bash_cv_func_sigsetjmp=present \
                 bash_cv_printf_a_format=yes bash_cv_dev_fd_standard=yes \
                 bash_cv_unusable_rtsigs=no > /tmp/bash-configure.log 2>&1 \
-                || { tail -30 /tmp/bash-configure.log; exit 1; }
-              make -j4 bash > /tmp/bash-make.log 2>&1 || { tail -40 /tmp/bash-make.log; exit 1; }
+                || { echo "=== configure 失败取证 ==="; tail -40 /tmp/bash-configure.log; exit 1; }
+              # CFLAGS 里的 -Wno-error 族：bash 5.2 是老式 C 风格重灾区，NDK clang ≥16
+              # 把 implicit-function-declaration/int-conversion 等**默认升级为 error**，
+              # 老代码在新编译器下必须显式降回 warning（首轮 CI 实证的失败面）。
+              make -j4 bash > /tmp/bash-make.log 2>&1 || {
+                echo "=== make 失败取证（error 行 + 末 120 行）==="
+                grep -nE "error:|Error [0-9]+$|undefined symbol" /tmp/bash-make.log | head -40 || true
+                tail -120 /tmp/bash-make.log
+                exit 1; }
             ) && cp -f /tmp/bash-${BASH_VER}/bash "$J/libbash.so"
             if ! check_so "$J/libbash.so" 300000; then
               echo "::warning title=能力件缺失::libbash.so 未产出 —— bash 工具本包不可用（终端/命令执行报 ENOENT，诚实可见）"
