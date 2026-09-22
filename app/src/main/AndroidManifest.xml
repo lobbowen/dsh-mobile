@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- WebView 加载本地 HTTP 服务、Node 打开网络/本地端口 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- 前台服务保活（防止 Doze 杀掉 Node 进程） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Android 14+ (API 34) 要求显式声明前台服务类型；dataSync 贴切“本地运行时”语义 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- P5 MediaProjection 截屏所需的前台服务类型（提前声明，避免届时要重编 APK 权限面） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- Android 13+ 通知授权 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+      悬浮窗（bridge:ui_automation 的辅助能力，也是无障碍不可用时的降级路径）。
+      同样属 AppOps 特殊权限：声明后还需 Settings.canDrawOverlays() 授权的跳转。
+      Device Owner 可经 setPermissionGrantState 静默授予，无需用户点确认。
+    -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!--
+      外部存储全量访问（bridge:storage 的代表能力）。
+      ⚠ 这是 AppOps 特殊权限（非运行时权限）：Manifest 声明后，还需跳到
+        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION 由用户/Device Owner 授权，
+        授权后 Environment.isExternalStorageManager() 才为 true。
+      tools:ignore 抑制 Lint 对「全文件访问」的强提示（本应用定位即为受管设备上的容器）。
+    -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+
+    <!-- 开机/重启后自启容器（拉起 NodeRuntimeService） -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- HostBridge：静默安装应用（Device Owner） -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- HostBridge：列举全部已装应用 -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+    <!-- 16KB 页对齐要求（Node 24 / 原生模块） -->
+    <uses-feature android:name="android.hardware.ram.normal" android:required="false" />
+
+    <application
+        android:name=".NodeContainerApp"
+        android:allowBackup="false"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.NodeContainer"
+        tools:targetApi="34"
+        tools:ignore="UnusedAttribute"
+        android:extractNativeLibs="true">
+        <!--
+          android:extractNativeLibs="true" 是必须的，且与 packaging.jniLibs.
+          useLegacyPackaging = true 是同一件事的两种写法（两处都写，双保险）。
+
+          原因：我们要 exec 的 node 二进制，以 jniLibs/arm64-v8a/libnode.so 的形式
+          打包。只有 extractNativeLibs=true，Android 才会在【安装时】把这个 .so
+          从 APK 里解压到
+              /data/app/~~xxxx/<pkg>-yyyy/lib/arm64-v8a/libnode.so
+          而那个目录是 SELinux 唯一允许 exec 的应用目录（label exec_type）。
+
+          若为 false（AGP 3.6+ 的默认），.so 会以压缩形式留在 APK 内、运行时直接
+          mmap 加载，不会在文件系统上落盘 —— 我们就拿不到可执行的路径，
+          ProcessBuilder 会以 error=2 (No such file) 或 error=13 失败。
+
+          顺带说明：这个属性只影响「.so 是否解压落盘」，不改变任何权限语义，
+          也不影响 minSdk/兼容性。
+        -->
+
+        <!-- Node 运行时：独立进程 :node，与 UI 进程隔离；exported=false 防外部拉起 -->
+        <service
+            android:name=".NodeRuntimeService"
+            android:exported="false"
+            android:process=":node"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- HostBridge（UDS 能力桥）：随 APK 冻结；exported=false，仅本应用 :node 进程连接 -->
+        <service
+            android:name=".HostBridgeService"
+            android:exported="false" />
+
+        <!-- 截屏（ui.screenshot）：Android 14+ 硬性要求 mediaProjection 类型前台服务 -->
+        <service
+            android:name=".ScreenCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <!-- 开机自启接收器 -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- PackageInstaller 会话结果回传（exported=false：PendingIntent 定向投递） -->
+        <receiver
+            android:name=".PackageInstallReceiver"
+            android:exported="false" />
+
+        <!-- Device Owner 接收器（静默装卸/锁屏/密码/Kiosk/用户限制） -->
+        <receiver
+            android:name=".DeviceAdminReceiver"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 无障碍服务（bridge:ui_automation 能力） -->
+        <service
+            android:name=".DshAccessibilityService"
+            android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

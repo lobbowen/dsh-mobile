@@ -1,0 +1,57 @@
+# 构建产物
+.gradle/
+app/build/
+build/
+local.properties
+*.iml
+.idea/
+
+# 编译出的 Node 二进制（体积大，按需本地生成，不入库）
+app/src/main/assets/node-bin/
+
+# 基线内核包（构建产物，由 scripts/build-kernel-baseline.sh 从内核仓实时生成）
+#
+# 为什么不入库：它是「内核仓某个 commit + 某个私钥」的函数，入库会立刻脱节
+# （内核改了、包还是旧的），且每次构建都产生新的字节 → 无意义的 diff。
+# 与 node-bin/ 同理：体积大、可重建、正确来源在别处。
+#
+# CI 侧：fast-apk.yml 的 "Build kernel baseline bundle" 步骤实时生成。
+# 本地：跑 ./scripts/build-kernel-baseline.sh ../dsh-android-kernel
+#       （缺它不影响编译 —— ensureBaseline 会给出明确诊断而非静默失败）
+app/src/main/assets/kernel/baseline.zip
+
+# OTA 发布包
+release/
+
+# 内核 feed 目录（由 scripts/build-kernel-feed.sh 产出，是**投递产物**而非源码）
+#
+# 与服务端 feed 同理：它内容是「内核仓某 commit + 某个私钥」的函数，
+# 入库会立刻脱节，且每次构建字节都不同 → 无意义的 diff。
+# 它存在的意义是「投给设备」，而投递本身走 Release / adb push，不需要经过 git。
+feed/
+
+# 沙箱产物
+*.log
+.DS_Store
+
+# ============================================================================
+#  密钥目录：**白名单制**（默认全忽略，只放行明确安全的文件）
+# ============================================================================
+#  为什么改成白名单（真实踩过的坑）：
+#  原先这里是按后缀拉黑的 —— `keys/ota-private.pem` + `keys/*.pem`。
+#  本轮新增 APK 签名 keystore（keys/release.keystore）后，它**不在**这两条
+#  规则里，于是 `git add -A` 直接把签名私钥和它的密码文件（keystore.properties）
+#  暂存了。本地 `git status` 里它们和普通改动长得一模一样，极易顺手提交。
+#
+#  按后缀拉黑的根本问题：每引入一种新密钥形态，都必须记得回来补一条规则，
+#  漏一次就是一次不可逆的私钥泄漏（推到远端就等于换 key 身份，Android 生态
+#  没有"换回旧签名"的机制）。白名单反过来 —— 默认拒绝，只放行显式安全的，
+#  漏配的代价只是"某个文件没被跟踪"，而不是"私钥被公开"。
+#
+#  放行的只有 README（纯文档）。其余一律忽略，包括：
+#    · ota-private.pem     内核 ed25519 私钥
+#    · release.keystore    APK 签名 keystore
+#    · keystore.properties 上述两者的密码
+# ============================================================================
+keys/*
+!keys/README.md

@@ -1,0 +1,269 @@
+/*
+ * ============================================================================
+ * DSH 通用 UI 框架 — 应用壳（App Shell）布局样式
+ * ============================================================================
+ * 提供侧边栏 + 主内容区的整体网格布局，以及窗口标题栏模式下的样式适配。
+ *
+ * 命名约定：
+ *  - fw-shell    ：应用外壳（含启动光效动画）
+ *  - fw-layout   ：侧边栏 + 内容区 的两栏网格
+ *  - fw-sidebar  ：侧边栏
+ *  - fw-content  ：主内容区
+ * ============================================================================
+ */
+
+/* ── 全局横向防线（架构层）──────────────────────────────
+ * 面板为桌面运维工具；移动端窄屏不允许出现横向整页滚动。
+ * html/body 固定 overflow-x；壳容器横向裁剪（clip 不产生滚动容器，
+ * 纵向滚动不受影响）。任何单点溢出（grid 轨道 min-content 等）都不会
+ * 撑破整页 —— 溢出应在其源头容器被约束，此处为兜底防线。 */
+html, body {
+  overflow-x: hidden;
+}
+
+.fw-shell {
+  overflow-x: clip;
+}
+
+/* ── 布局双维自约束 ─────────────────────────────
+ * 行轨道固定为视口剩余高 minmax(0,1fr)：任何子内容超高都在其自身
+ * 容器内滚动（sidebar/content 各自 min-h-0），绝不把 grid 行撑破，
+ * 从而矮窗口（横屏手机/桌面小窗）不会溢出视口。
+ * （固定视口模型 —— web 模式见下方 data-host="web" 覆盖）
+ */
+.fw-layout {
+  grid-template-columns: 232px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.fw-layout[data-mode="wide-sidebar"] {
+  grid-template-columns: clamp(320px, 28vw, 560px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/* 系统标题栏模式：侧边栏与工具栏背景渐变衔接 */
+.fw-system-titlebar {
+  --fw-left-column: 232px;
+  background:
+    linear-gradient(
+      90deg,
+      #f4f6fa 0,
+      #f4f6fa var(--fw-left-column),
+      #fafbfc var(--fw-left-column),
+      #fafbfc 100%
+    );
+}
+
+.fw-system-titlebar[data-mode="wide-sidebar"] {
+  --fw-left-column: clamp(320px, 28vw, 560px);
+}
+
+.fw-system-titlebar .fw-sidebar,
+.fw-system-titlebar .fw-space-sidebar {
+  padding-top: 18px;
+}
+
+.fw-system-titlebar .fw-toolbar {
+  min-height: 82px;
+  border-bottom-color: rgb(0 0 0 / 4%);
+  background:
+    linear-gradient(180deg, rgb(243 245 247 / 74%) 0%, rgb(247 248 246 / 98%) 54%, #fafbfc 100%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 70%);
+}
+
+/* ── 响应式布局（现代自适应）──────────────────────────────
+ * ≥641px（桌面/平板竖屏及以上）：恒为左右常驻两列，宽度连续由 grid 承担。
+ * ≤640px（真手机）：侧边栏变为 fixed 左侧抽屉 —— 默认移出视口，
+ *   由 .fw-layout[data-sidebar-open="true"] 滑入；遮罩与菜单按钮在 App 层。
+ * 内容区在任何宽度都独占主轨，不做"上下堆叠"旧式切换。
+ */
+@media (min-width: 641px) {
+  .fw-layout .fw-sidebar {
+    /* 常驻列：恢复静态定位（防手机态 fixed 残留）；min-h-0 + 纵向滚动：
+       矮窗口下品牌/导航/状态总高超视口时在列内滚动，footer 经 mt-auto 贴底 */
+    position: static;
+    transform: none;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .fw-layout .fw-space-sidebar {
+    min-height: 0;
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .fw-layout,
+  .fw-layout[data-mode="wide-sidebar"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fw-layout .fw-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 60;
+    width: min(280px, 85vw);
+    border-right: 1px solid rgb(0 0 0 / 8%);
+    box-shadow: 0 0 40px rgb(15 23 42 / 18%);
+    transform: translateX(-102%);
+    transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .fw-layout[data-sidebar-open="true"] .fw-sidebar {
+    transform: translateX(0);
+  }
+
+  .fw-layout .fw-space-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 60;
+    width: min(320px, 88vw);
+    transform: translateX(-102%);
+    transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .fw-layout[data-sidebar-open="true"] .fw-space-sidebar {
+    transform: translateX(0);
+  }
+
+  /* 系统标题栏在窄屏为纯内容底 */
+  .fw-system-titlebar {
+    background: #fafbfc;
+  }
+}
+
+/* 抽屉遮罩（AppLayout 渲染为 .fw-layout 的子元素，仅手机宽度生效） */
+.fw-layout .fw-drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: none;
+  background: rgb(15 23 42 / 45%);
+}
+
+@media (max-width: 640px) {
+  .fw-layout .fw-drawer-scrim {
+    display: block;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 220ms ease;
+  }
+  .fw-layout[data-sidebar-open="true"] .fw-drawer-scrim {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/*
+ * 应用壳启动光效（一次性入场动画，尊重 prefers-reduced-motion）
+ */
+.fw-shell {
+  --fw-glow: 47 84 235;
+  --fw-flare: 56 189 248;
+  position: relative;
+  isolation: isolate;
+}
+
+.fw-shell[data-mode="classic"] {
+  --fw-glow: 47 84 235;
+  --fw-flare: 250 204 21;
+}
+
+.fw-shell::before,
+.fw-shell::after {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  content: "";
+}
+
+.fw-shell::before {
+  background:
+    radial-gradient(circle at 50% 50%, rgb(255 255 255 / 58%) 0 8%, rgb(var(--fw-glow) / 18%) 18%, rgb(var(--fw-glow) / 0%) 46%),
+    linear-gradient(90deg, rgb(var(--fw-glow) / 0%) 0%, rgb(var(--fw-glow) / 13%) 36%, rgb(255 255 255 / 74%) 50%, rgb(var(--fw-flare) / 16%) 64%, rgb(var(--fw-glow) / 0%) 100%);
+  mix-blend-mode: screen;
+  opacity: 0;
+  transform: scaleX(0.04);
+  transform-origin: center;
+  animation: fw-shell-light-open 640ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.fw-shell::after {
+  background:
+    linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0%) 42%, rgb(255 255 255 / 62%) 50%, rgb(255 255 255 / 0%) 58%, transparent 100%),
+    repeating-linear-gradient(0deg, rgb(var(--fw-glow) / 0%) 0 26px, rgb(var(--fw-glow) / 8%) 27px 28px);
+  mix-blend-mode: screen;
+  opacity: 0;
+  transform: translateX(-38%);
+  animation: fw-shell-scan 640ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes fw-shell-light-open {
+  0% {
+    opacity: 0;
+    transform: scaleX(0.04);
+  }
+
+  18% {
+    opacity: 0.95;
+  }
+
+  52% {
+    opacity: 0.62;
+    transform: scaleX(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scaleX(1.08);
+  }
+}
+
+@keyframes fw-shell-scan {
+  0% {
+    opacity: 0;
+    transform: translateX(-38%);
+  }
+
+  26% {
+    opacity: 0.46;
+  }
+
+  78% {
+    opacity: 0;
+    transform: translateX(38%);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(38%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fw-shell::before,
+  .fw-shell::after {
+    display: none;
+  }
+}
+
+/* 进度条扫光动画（供 ActivityPanel 等复用） */
+@keyframes fw-sweep {
+  0% {
+    transform: translateX(-110%);
+  }
+
+  50% {
+    transform: translateX(92%);
+  }
+
+  100% {
+    transform: translateX(250%);
+  }
+}

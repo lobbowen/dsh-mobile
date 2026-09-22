@@ -1,0 +1,42 @@
+# dsh-android-kernel —— Android 内核仓（全新项目，无 PC 遗留）
+
+# 依赖
+node_modules/
+
+# 构建产物（可重新生成，绝不入库）
+dist/release
+dist/sea
+dist/npm
+**/dist/
+# ⚠ src/domains/dist/ 是**源码域**（npm 分发/镜像源测速），不是构建产物 ——
+# 上面 **/dist/ 曾把它整个吞掉，导致内核测试链在 require('../dist/index')
+# 处断裂（交接包里该文件缺失即此事故的产物）。这里显式回救该目录。
+!src/domains/dist/
+
+# React UI 构建产物
+ui-react/
+**/ui-react/
+
+# 测试残留/临时目录
+tmp-iso/
+
+# 系统/编辑器
+.DS_Store
+*.log
+
+# 本地运行/状态（Agent 会话等，不入库）
+.dsh/
+.memory/
+**/.dsh/
+**/.memory/
+
+# 签名密钥与密钥材料（绝不入库：私钥泄露 = 账号被接管）
+*.key
+*.key.pub
+.ssh/
+*.pem
+id_ed25519*
+id_rsa*
+
+# 临时文件
+*.tmp

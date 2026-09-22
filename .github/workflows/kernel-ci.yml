@@ -1,0 +1,100 @@
+name: android-kernel-ci
+
+# dsh-android-kernel（L1 内核）持续集成 —— 单仓 dsh-mobile 内的子目录版。
+#
+# 内核 = 纯 Node.js（≥18 运行时，无第三方依赖）+ ui/（React + Vite 面板）。
+# 关键事实：
+#   · 内核更新是**单写入者契约** —— 由安卓容器 OTA 执行，内核不发布 npm、不持有自更新端点。
+#   · 本目录**无发布工程**：无四平台 launcher、无 SEA 打包、无 Tauri 桌面壳。
+#   · CI 唯一交付物（tag 触发）：构建好的 UI 面板产物，作为 OTA 资源挂到 GitHub Release。
+#   · 签名内核包**不在这里产**（归容器侧 kernel-ota.yml，它能拿到 OTA 私钥）；
+#     本 workflow 只做回归与面板门禁。
+#   · 测试自包含：不读取容器引擎源码；跨仓桥互通由容器侧 bridge-interop 承担
+#     （单仓下内核源码就在 dsh-android-kernel/，那边无需再配 DSH_KERNEL_REPO）。
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'dsh-android-kernel/**'
+  pull_request:
+    paths:
+      - 'dsh-android-kernel/**'
+  tags: ['v*']
+  workflow_dispatch: {}
+
+jobs:
+  # ══════════════════════════════════════════════════════════════════════════
+  # verify：内核回归 + 前端门禁（每次 push / PR 都跑，不依赖 tag）
+  # ══════════════════════════════════════════════════════════════════════════
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dsh-android-kernel
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 安卓路径门禁：以 DSH_ANDROID=1 跑全链，确保 Android 能力矩阵与单写入者契约被真实执行。
+      - name: 内核回归测试（安卓路径 · DSH_ANDROID=1）
+        env:
+          DSH_ANDROID: '1'
+        run: npm test
+
+      # UI 门禁：typecheck + lint + unit test + build（见 ui/package.json#verify）。
+      - name: 前端门禁（typecheck + lint + test + build）
+        working-directory: dsh-android-kernel/ui
+        run: |
+          npm install --no-audit --no-fund
+          npm run verify
+
+      # 仅在 tag 时上传产物，供下方 release job 打包为 OTA 资源。
+      - name: 上传前端构建产物
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-dist
+          path: dsh-android-kernel/ui/dist
+          if-no-files-found: error
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # release：tag 触发 —— 把面板产物作为 OTA 资源挂到 GitHub Release。
+  # 不做 npm 发布、不产出 launcher（内核更新归安卓容器 OTA）。
+  # ══════════════════════════════════════════════════════════════════════════
+  release:
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 挂 Release 需 GITHUB_TOKEN contents:write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载前端构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: ui-dist
+
+      - name: 打包面板产物（OTA 资源）
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="$(node -p "require('./dsh-android-kernel/package.json').version")"
+          echo "  版本: $VER"
+          # 断言：必须有产物，否则「静默挂空 Release」比失败更糟。
+          if [ -z "$(ls -A ui-dist 2>/dev/null)" ]; then
+            echo "::error::未生成任何 UI 构建产物"; exit 1
+          fi
+          tar -czf "dsh-android-kernel-panel-$VER.tar.gz" -C ui-dist .
+          ls -lh "dsh-android-kernel-panel-$VER.tar.gz"
+
+      - name: 附加到 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dsh-android-kernel-panel-*.tar.gz
+          generate_release_notes: true

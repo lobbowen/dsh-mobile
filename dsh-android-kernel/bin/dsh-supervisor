@@ -1,0 +1,499 @@
+#!/usr/bin/env node
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const http = require('node:http');
+// Android 内核 CLI：不调用任何 PC 服务管理器（systemd / launchctl / schtasks 已随桌面壳删除），
+// 也不创建桌面入口 / 命令行软链。内核由 APK 容器 / Android Service 拉起与保活。
+
+// 包根解析（2026-09-11 修复 off-by-one）：
+//   本文件有两种运行形态，__dirname 语义不同：
+//     源码态：node <repo>/bin/dsh-supervisor            -> __dirname = <repo>/bin
+//     发行态：esbuild 打成 core.cjs 后 require 执行      -> __dirname = <pkg>（core.cjs 旁）
+//   旧实现硬写 path.join(__dirname, '..')：源码态正确，发行态却指向**包外**，
+//   导致模板路径错位、命令入口指向不存在的文件。
+//   现从 __dirname 逐级向上找含 package.json 的目录作为包根，两种形态均正确。
+function findPackageRoot(start) {
+  let d = start;
+  for (let i = 0; i < 6; i += 1) {
+    try { if (fs.existsSync(path.join(d, 'package.json'))) return d; } catch {}
+    const up = path.dirname(d);
+    if (up === d) break;
+    d = up;
+  }
+  return path.join(__dirname, '..');
+}
+const ROOT = findPackageRoot(__dirname);
+// 产品状态根（独立于 DSH 的 ~/.dsh）——单一事实源 = src/platform/state-root.js。
+const stateRoot = require('../src/platform/state-root');
+const SUPERVISOR_DIR = stateRoot.supervisorDir();
+const USER_CONFIG = path.join(SUPERVISOR_DIR, 'config.json');
+
+// 内嵌默认配置（发行态唯一模板源）：发布物不再依赖 ROOT/config.json 外置文件（fresh-HOME 自举必需）。
+// command 用 PATH 查找的 'dsh'（用户本机路径由 install/壳写入用户配置；nativeCommand 会注入 --port）。
+// 配置单一事实源 = src/infra/config.js 的 DEFAULTS；此处仅补充 DEFAULTS 未含的「模板必填项」
+// command（DSH 启动命令）与 healthUrl（探活地址）——避免默认配置在多处复制漂移（2026-09 收敛）。
+const DEFAULT_CONFIG = Object.assign(
+  {},
+  require('../src/platform/config').DEFAULTS,
+  { command: ['node', 'dsh', 'web'], healthUrl: 'http://127.0.0.1:3080/' }
+);
+const STATE_FILE = path.join(SUPERVISOR_DIR, 'state.json');
+const EVENTS_FILE = path.join(SUPERVISOR_DIR, 'events', 'guard.events.log');
+// 无 systemd unit / launchd plist / XDG autostart .desktop / Windows .cmd 垫片：
+// 拉起与保活归 APK 容器 / Android Service，命令行入口由容器直接提供。
+
+// ---- 配置解析 ----
+// 解析顺序：DSH_SUPERVISOR_CONFIG 环境变量 → -c 参数 → 用户默认配置。
+// 注意：只有 daemon/install 会自动从模板创建配置；status 等查询命令不产生写副作用。
+function findConfigPath() {
+  const envCfg = process.env.DSH_SUPERVISOR_CONFIG;
+  if (envCfg) return envCfg;
+  const args = process.argv.slice(3);
+  if (args[0] === '-c' && args[1]) return args[1];
+  if (fs.existsSync(USER_CONFIG)) return USER_CONFIG;
+  return null;
+}
+
+function resolveConfigPath({ autoCopy = false } = {}) {
+  const found = findConfigPath();
+  if (found) return found;
+  if (!autoCopy) return USER_CONFIG; // 仅作读取兜底，不落盘
+  // 写内嵌默认配置（发行态不自带 config.json 模板文件——发布物必须自足）
+  console.warn('[warn] 未找到用户配置，写入默认配置到', USER_CONFIG);
+  fs.mkdirSync(SUPERVISOR_DIR, { recursive: true });
+  fs.writeFileSync(USER_CONFIG, JSON.stringify(DEFAULT_CONFIG, null, 2), { mode: 0o600 });
+  return USER_CONFIG;
+}
+
+// ---- 读取 API 地址（尊重自定义配置路径）----
+function readApiAddress() {
+  const cfgPath = findConfigPath() || USER_CONFIG;
+  try {
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    let host = cfg.apiHost || '127.0.0.1';
+    // apiHost 可能是 0.0.0.0（面板对局域网开放）；CLI/本地连接统一走回环
+    if (host === '0.0.0.0' || host === '::') host = '127.0.0.1';
+    return { host, port: cfg.apiPort || 36360 }; // 与内核默认 apiPort 一致（3100 是历史坑位）
+  } catch {
+    return { host: '127.0.0.1', port: 36360 }; // 与内核默认一致
+  }
+}
+
+// ---- 日志路径（尊重自定义配置）----
+function logFilePaths() {
+  const cfgPath = findConfigPath();
+  let cfg = {};
+  try {
+    cfg = JSON.parse(fs.readFileSync(cfgPath || USER_CONFIG, 'utf8'));
+  } catch {}
+  const base = SUPERVISOR_DIR;
+  return {
+    supervisor: cfg.supervisorLogFile ? cfg.supervisorLogFile.replace(/^~/, os.homedir()) : path.join(base, 'log', 'guard.log'),
+    dsh: cfg.dshLogFile ? cfg.dshLogFile.replace(/^~/, os.homedir()) : path.join(base, 'log', 'dsh.log'),
+    upgrade: cfg.upgradeLogFile ? cfg.upgradeLogFile.replace(/^~/, os.homedir()) : path.join(base, 'log', 'upgrade.log'),
+    events: cfg.logFile ? cfg.logFile.replace(/^~/, os.homedir()) : EVENTS_FILE,
+  };
+}
+
+function cmdLogs(name, lines) {
+  const files = logFilePaths();
+  const key = name && files[name] ? name : 'supervisor';
+  const n = Number(lines) || 50;
+  const target = files[key];
+  try {
+    const all = fs.readFileSync(target, 'utf8').split('\n').filter(Boolean);
+    console.log('== ' + key + ' (' + target + ') 最近 ' + Math.min(n, all.length) + ' 行 ==');
+    all.slice(-n).forEach((l) => console.log(l));
+  } catch {
+    console.log('日志不存在或为空: ' + target);
+  }
+}
+
+function printSelfVersion() {
+  // 统一走 infra/version.guardVersion()：SEA 形态由 esbuild --define 注入 __DSH_VERSION__，
+  // 任意 cwd 自报正确版本；源码形态回退读仓库 package.json。独立读 ROOT/package.json 会让
+  // SEA 二进制 --version 恒报 vunknown（2026-09 实证修复）。
+  const { guardVersion } = require('../src/platform/version');
+  console.log('dsh-supervisor v' + guardVersion());
+}
+
+// ---- HTTP API 调用 ----
+function apiRequest(method, apiPath) {
+  return new Promise((resolve) => {
+    const addr = readApiAddress();
+    const req = http.request(
+      { hostname: addr.host, port: addr.port, path: apiPath, method, timeout: 5000 },
+      (res) => {
+        let body = '';
+        res.on('data', (d) => (body += d));
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(body));
+          } catch {
+            resolve({ error: 'parse error', raw: body });
+          }
+        });
+        res.on('error', () => resolve({ error: 'response error' }));
+      }
+    );
+    req.on('error', () => resolve({ error: 'daemon 未运行或连接失败' }));
+    req.end();
+  });
+}
+
+// ---- 单实例锁：O_EXCL 原子创建 + pid 存活检测 + 崩溃残留清理 ----
+// 守卫是「唯一监管者」，两个守卫并存会双写状态文件、双 tick、竞态 spawn（双实例风险）。
+// 锁文件（可用 DSH_SUPERVISOR_LOCK_FILE 覆盖路径，供测试隔离/多实例部署）
+// 默认 ~/.dsh/supervisor/guard.lock 内容为本进程 pid：
+//  - O_EXCL 创建保证原子性（并发启动只有一个成功）；
+//  - 已存在时读 pid：进程存活 → 拒绝启动并退出非零；进程已死（崩溃残留）→ 清锁重试；
+//  - SIGTERM/SIGINT/exit 统一释放；SIGKILL 无法捕获，靠下次启动的 pid 存活检测自愈。
+const LOCK_FILE = process.env.DSH_SUPERVISOR_LOCK_FILE || path.join(SUPERVISOR_DIR, 'guard.lock');
+
+function acquireLock() {
+  fs.mkdirSync(SUPERVISOR_DIR, { recursive: true });
+  const tryCreate = () => {
+    try {
+      const fd = fs.openSync(LOCK_FILE, 'wx');
+      fs.writeSync(fd, String(process.pid));
+      fs.closeSync(fd);
+      return true;
+    } catch (e) {
+      if (e.code === 'EEXIST') return false;
+      // 非 EEXIST（EACCES/EROFS 等）：fail-closed——锁写不出 = 单实例保证失效，
+      // 双守卫并存（双写状态/竞态 spawn）比不启动严重得多，明确报错交由容器重试。
+      console.error('[supervisor] 守卫锁创建失败（' + (e.code || e.message) + '）：' + LOCK_FILE);
+      process.exit(1);
+    }
+  };
+  if (tryCreate()) return true;
+  // 锁已存在：检查持有者 pid
+  let holder = null;
+  try {
+    holder = parseInt(fs.readFileSync(LOCK_FILE, 'utf8'), 10);
+  } catch {}
+  if (Number.isInteger(holder) && holder > 0) {
+    try {
+      process.kill(holder, 0);
+      return false; // 持有者存活：已有守卫在运行
+    } catch (err) {
+      if (err.code === 'EPERM') return false; // 存在但无权发信号：视为存活
+      // ESRCH：持有者已退出（崩溃残留），继续清理
+    }
+  }
+  try {
+    fs.unlinkSync(LOCK_FILE);
+  } catch {}
+  return tryCreate();
+}
+
+function releaseLock() {
+  try {
+    if (fs.existsSync(LOCK_FILE)) {
+      const holder = parseInt(fs.readFileSync(LOCK_FILE, 'utf8'), 10);
+      // 只释放自己的锁：避免误删后来者重建的锁
+      if (holder === process.pid) fs.unlinkSync(LOCK_FILE);
+    }
+  } catch {}
+}
+
+// ---- 子命令 ----
+function cmdDaemon() {
+  // ⚠ 原「前向自愈迁移」（旧 PC 布局 ~/.dsh/supervisor → 产品状态根）已删除：
+  //   本仓是全新安卓内核仓，不存在需要从 PC 布局迁移的存量数据。
+  if (!acquireLock()) {
+    console.error('[supervisor] 已有守卫实例在运行（锁 ' + LOCK_FILE + '），本进程退出。');
+    process.exit(1);
+  }
+  process.on('exit', releaseLock); // SIGTERM/SIGINT/process.exit 统一走这里释放
+  const cfgPath = resolveConfigPath({ autoCopy: true });
+  let cfg;
+  try {
+    cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  } catch (e) {
+    // 配置损坏时明确退出非零，交给容器 / Android Service 重启策略处理（带 StartLimit 防循环）
+    console.error('[supervisor] 配置解析失败:', cfgPath, e.message);
+    releaseLock();
+    process.exit(1);
+  }
+  // 静态 require（esbuild 可跟随，使内核完整打入 bundle/打包态）——不能再用 path.join 动态拼接，
+  // 否则打包产物只含 CLI 壳、daemon 运行期仍依赖发行目录旁置的 src/（2026-09 架构审计实证）。
+  const { Supervisor } = require('../src/supervisor');
+  const sup = new Supervisor(cfg, cfgPath);
+  // ⚠ 2026-09-12（P1 修复）：**必须等 shutdown 真正完成再退出**。
+  //
+  //   缺陷：原为 `sup.shutdown(); process.exit(0);` —— 但 `shutdown()` 内部要
+  //     `await lifecycleManager.stopAll()`（停内嵌 router：反代实例、端口释放）。
+  //     那是**异步**的，而 `process.exit` 立即终止进程 → stop 只跑了同步前缀，
+  //     子进程与端口**残留成孤儿**（正是 shutdown 里那段注释声称要防的事）。
+  //
+  //   修法：等 shutdown 的 Promise settle 后再 exit；并加**兜底超时**（8s），
+  //     防止某个模块的 stop 卡住导致进程永不退出（容器会再 SIGKILL，但那样更难排查）。
+  //     重复信号：第二次直接强退（用户/服务管理器连续发信号时不该再等）。
+  let _exiting = false;
+  function gracefulExit(code) {
+    if (_exiting) { process.exit(code); }
+    _exiting = true;
+    const bail = setTimeout(() => {
+      console.error('[supervisor] shutdown 超时（8s），强制退出');
+      process.exit(code);
+    }, 8000);
+    if (bail.unref) bail.unref();
+    Promise.resolve()
+      .then(() => sup.shutdown())
+      .catch((e) => { console.error('[supervisor] shutdown 异常:', (e && e.message) || e); })
+      .then(() => { clearTimeout(bail); process.exit(code); });
+  }
+  process.on('SIGTERM', () => { gracefulExit(0); });
+  process.on('SIGINT', () => { gracefulExit(0); });
+  // uncaughtException：守卫尽量自愈；但短时间内反复异常说明内部状态已坏，
+  // 以非零退出交给容器 / Android Service 拉起（比带病运行更安全）。
+  let excCount = 0;
+  let excWindowStart = 0;
+  process.on('uncaughtException', (e) => {
+    console.error('[supervisor] uncaughtException:', (e && e.stack) || e);
+    try {
+      sup.events.append('guard_uncaught_exception', { message: e && e.message });
+    } catch {}
+    const now = Date.now();
+    if (now - excWindowStart > 60000) {
+      excWindowStart = now;
+      excCount = 0;
+    }
+    excCount += 1;
+    if (excCount >= 3) {
+      console.error('[supervisor] 60s 内第 ' + excCount + ' 次未捕获异常，退出交由容器拉起。');
+      // 同样等 shutdown 完成（P1 修复）；此处已有强退意图，故用优雅退出+超时兜底。
+      gracefulExit(1);
+    }
+  });
+  process.on('unhandledRejection', (e) => {
+    console.error('[supervisor] unhandledRejection:', e && (e.stack || e.message) || e);
+  });
+  sup.start();
+  console.log('[supervisor] daemon started, pid=' + process.pid);
+}
+
+function cmdStatus() {
+  apiRequest('GET', '/status').then((r) => {
+    if (r.error) {
+      // fallback: 读状态文件
+      try {
+        const s = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+        printStatus(s);
+      } catch {
+        console.log('daemon 未运行且无状态文件');
+      }
+    } else {
+      printStatus(r);
+    }
+  });
+}
+
+function printStatus(s) {
+  console.log('desired:          ' + s.desired);
+  console.log('phase:            ' + s.phase);
+  console.log('dshPid:           ' + (s.dshPid || '—') + (s.adopted ? ' (adopted)' : ''));
+  console.log('guardPid:         ' + s.guardPid);
+  console.log('lastProbe:        ' + (s.lastProbeAt || '—') + '  ok=' + s.lastProbeOk);
+  console.log('restartCount:     ' + s.restartCount);
+  console.log('lastFailure:      ' + (s.lastFailure || '—'));
+  console.log('lastRestartAt:    ' + (s.lastRestartAt || '—'));
+  if (s.upgradeHold) {
+    console.log('upgradeHold:      true（升级安装中，暂停自动拉起）');
+  }
+  if (s.backoffLevel > 0 || s.backoffUntil) {
+    console.log('backoff:          level=' + s.backoffLevel + '  until=' + (s.backoffUntil || '—'));
+  }
+  if (s.crashWindowRestarts > 0) {
+    console.log('crashWindow:      ' + s.crashWindowRestarts + ' restarts since ' + (s.crashWindowStart || '—'));
+  }
+}
+
+function cmdControl(action) {
+  // 唯一入口：main 启停经统一生命周期 /lifecycle/dsh/{start|stop|restart}。
+  // ⚠ 旧 /start|/stop|/restart 路由与其"旧版 daemon 回退"兼容分支已删除（新仓无旧客户端）。
+  apiRequest('POST', '/lifecycle/dsh/' + action).then(finishControl);
+}
+
+function finishControl(r) {
+  if (!r || r.error) {
+    console.log((r && r.error) || '请求失败');
+    process.exitCode = 1; // 拒绝（如 desired=stopped 时 restart）以非零退出
+  } else {
+    console.log('ok — desired=' + r.desired + ' phase=' + r.phase);
+  }
+}
+
+function cmdInstall() {
+  fs.mkdirSync(SUPERVISOR_DIR, { recursive: true });
+  // 配置文件（内嵌默认模板；源码态与打包态一致，不再依赖仓库 config.json 外置文件）
+  if (!fs.existsSync(USER_CONFIG)) {
+    fs.mkdirSync(SUPERVISOR_DIR, { recursive: true });
+    fs.writeFileSync(USER_CONFIG, JSON.stringify(DEFAULT_CONFIG, null, 2), { mode: 0o600 });
+    console.log('[install] 配置文件已创建: ' + USER_CONFIG);
+  } else {
+    console.log('[install] 配置文件已存在，跳过: ' + USER_CONFIG);
+  }
+  // 安装到此为止：服务定义、自启、命令行入口一律归 APK 容器，内核只准备自己需要的 config。
+  console.log('[install] 内核本体配置已就绪。启动由 APK 容器 / Android Service 发起：dsh-supervisor daemon');
+}
+
+function cmdEvents() {
+  const limit = Number(process.argv[3] || 50); // 修正 off-by-one（events [N] 的 N 在 argv[3]）
+  const files = logFilePaths();
+  const target = files.events;
+  try {
+    const lines = fs.readFileSync(target, 'utf8').split('\n').filter(Boolean);
+    const tail = lines.slice(-limit);
+    tail.forEach((l) => {
+      try {
+        const e = JSON.parse(l);
+        console.log(e.ts + '  [' + e.type + '] ' + (e.data ? JSON.stringify(e.data) : ''));
+      } catch {
+        console.log(l);
+      }
+    });
+  } catch {
+    console.log('事件日志不存在或无法读取: ' + target);
+  }
+}
+
+function cmdVersion() {
+  apiRequest('GET', '/native/status').then((r) => {
+    if (r.error) return console.log(r.error);
+    const v = r.versionInfo || {};
+    console.log('已安装版本: ' + (v.installed || '—'));
+    console.log('最新版本:   ' + (v.latest || '—'));
+    console.log('上次检查:   ' + (v.lastCheckAt || '—'));
+    if (v.updateAvailable) console.log('→ 有可用更新！执行: dsh-supervisor upgrade');
+    else if (!v.checking) console.log('已是最新。');
+  });
+}
+
+function cmdUpgrade(requested) {
+  const post = () =>
+    new Promise((resolve) => {
+      const addr = readApiAddress();
+      const body = requested ? JSON.stringify({ version: requested }) : undefined;
+      const req = http.request(
+        {
+          hostname: addr.host,
+          port: addr.port,
+          path: '/native/upgrade',
+          method: 'POST',
+          timeout: 5000,
+          headers: body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {},
+        },
+        (res) => {
+          let b = '';
+          res.on('data', (d) => (b += d));
+          res.on('end', () => resolve({ code: res.statusCode, body: b }));
+        }
+      );
+      req.on('error', () => resolve({ code: 0, body: '' }));
+      if (body) req.write(body);
+      req.end();
+    });
+
+  post().then(({ code, body }) => {
+    if (code !== 202) {
+      console.log('升级未被接受:', body || 'HTTP ' + code);
+      process.exit(1);
+    }
+    console.log('升级已开始，跟踪进度（先停 DSH → 安装 → 自动拉起，需数分钟）…');
+    const started = Date.now();
+    let lastState = '';
+    const timer = setInterval(() => {
+      apiRequest('GET', '/native/status').then((r) => {
+        if (!r || r.error) return;
+        const s = r.upgrade || {};
+        if (s.state !== lastState) {
+          lastState = s.state;
+          console.log('[' + new Date().toISOString().slice(11, 19) + '] state=' + s.state);
+        }
+        if (s.state === 'done' || s.state === 'failed') {
+          clearInterval(timer);
+          console.log(s.state === 'done' ? '完成' + (s.rolledBack ? '（已回滚到旧版本）' : '') + '。' : '失败：' + (s.lastError || '未知原因'));
+          (s.logTail || []).slice(-8).forEach((l) => console.log('  ' + l));
+          process.exit(s.state === 'done' ? 0 : 1);
+        }
+        if (Date.now() - started > 20 * 60000) {
+          clearInterval(timer);
+          console.log('超时未结束，稍后用 dsh-supervisor status 查看。');
+          process.exit(1);
+        }
+      });
+    }, 3000);
+  });
+}
+
+function usage() {
+  console.log('用法: dsh-supervisor <command> [options]');
+  console.log('');
+  console.log('命令:');
+  console.log('  daemon [-c <config>]      启动守护进程（由 APK 容器 / Android Service 调用）');
+  console.log('  status [-c <config>]      查看当前状态');
+  console.log('  start [-c <config>]       设置 desired=running 并启动 DSH');
+  console.log('  stop [-c <config>]        设置 desired=stopped 并停止 DSH');
+  console.log('  restart [-c <config>]     立即重启一次（不改变 desired）');
+  console.log('  install                   安装：准备内核本体配置（服务/自启归 APK 容器）');
+  console.log('  events [N]                显示最近 N 条事件日志（默认 50）');
+  console.log('  logs [supervisor|dsh|upgrade|events] [N]');
+  console.log('                            查看对应运行日志末尾（默认 supervisor 50 行）');
+  console.log('  version [-c <config>]     查看 已安装/最新 版本与更新状态');
+  console.log('  upgrade [version]         一键升级到最新版（或指定版本），失败自动回滚');
+  console.log('环境变量 DSH_SUPERVISOR_CONFIG 等价于 -c。');
+  process.exit(1);
+}
+
+// ---- 入口 ----
+const cmd = process.argv[2];
+if (cmd === '--version' || cmd === '-v') {
+  printSelfVersion();
+  process.exit(0);
+}
+switch (cmd) {
+  case 'daemon':
+    cmdDaemon();
+    break;
+  case 'status':
+    cmdStatus();
+    break;
+  case 'start':
+  case 'stop':
+  case 'restart':
+    cmdControl(cmd);
+    break;
+  case 'install':
+    cmdInstall();
+    break;
+  case 'events':
+    cmdEvents();
+    break;
+  case 'logs':
+    cmdLogs(process.argv[3], process.argv[4]);
+    break;
+  case 'self-check':
+    // 发布物内核冒烟：纯逻辑自检（不依赖资产目录/网络），供构建后验证产物可自举。
+    {
+      const { guardVersion } = require('../src/platform/version');
+      console.log('dsh-supervisor core self-check');
+      console.log('guardVersion=' + (typeof guardVersion === 'function' ? guardVersion() : 'unknown'));
+      console.log('node=' + process.version);
+      console.log('platform=' + process.platform + ' arch=' + process.arch);
+      console.log('self-check: OK');
+    }
+    process.exit(0);
+  case 'version':
+    cmdVersion();
+    break;
+  case 'upgrade':
+    cmdUpgrade(process.argv[3]);
+    break;
+  default:
+    usage();
+}
