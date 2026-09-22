@@ -6,6 +6,7 @@ import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.nodecontainer.native.AssetStatus
@@ -13,6 +14,7 @@ import com.example.nodecontainer.native.NativeAssetRegistry
 import com.example.nodecontainer.native.NativePreparer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -51,6 +53,7 @@ class NodeRuntimeService : Service() {
 
     private var nodeProcess: Process? = null
     private val scope = CoroutineScope(Dispatchers.IO)
+    private var loopJob: Job? = null
     private var portUp = false
     private var healthUp = false
     private var keepRunning = true
@@ -73,6 +76,11 @@ class NodeRuntimeService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 幂等闸门：重复 startService（重试按钮 / Activity 重建 / START_STICKY 重投递 /
+        // BootReceiver 撞车）**不得**再叠一个 supervisorLoop。真机 2026-09-22 实锤：
+        // 双循环共享 nodeProcess/healthUp，把活内核误判成死 → 反复 spawn 必死进程
+        // （guard.lock 被占 → 内核 exit(1)）→ 1s 紧循环重启 → 闪屏。
+        if (loopJob?.isActive == true) return START_STICKY
         RuntimeDiagnostics.clear(this)
         keepRunning = true
         // 先把预置体检结果写进诊断（PROVISIONING §4），再拉起 HostBridge 与内核 ——
@@ -84,7 +92,7 @@ class NodeRuntimeService : Service() {
         }
         // 先拉起 HostBridge（UDS 能力桥），再启动内核
         startHostBridge()
-        scope.launch { supervisorLoop() }
+        loopJob = scope.launch { supervisorLoop() }
         return START_STICKY
     }
 
@@ -98,12 +106,19 @@ class NodeRuntimeService : Service() {
         while (keepRunning) {
             val backoff = minOf(BACKOFF_BASE_MS shl restartCount.coerceAtMost(5), BACKOFF_MAX_MS)
             val ok = bootKernelOnce()
+            var bornAt = 0L
             if (ok) {
-                restartCount = 0
                 // 内核在跑；等待其退出或被外部停止
+                bornAt = SystemClock.elapsedRealtime()
                 while (keepRunning && nodeProcess?.isAlive == true && (healthUp || portUp)) {
                     delay(1000)
                 }
+            }
+            // 退避清零以**存活时长**为准，不以「health 探到 200」为准：残留守卫占着
+            // 36360 时新进程秒死，但探测照样秒回 200（假成功）——若据此清零，
+            // 退避永远停在 1s，形成紧循环风暴（真机 2026-09-22 实锤）。
+            if (ok && SystemClock.elapsedRealtime() - bornAt >= STABLE_MS) {
+                restartCount = 0
             } else {
                 restartCount += 1
             }
@@ -255,6 +270,11 @@ class NodeRuntimeService : Service() {
             // ---- 6) 启动内核 ----
             // 有内核包：跑内核入口（控制面 36360）；无内核包：回落内置探针 server.js（便于首启验证 Node 原生链路）。
             //
+            // spawn 前必须回收残留守卫：内核单实例锁（supervisor/guard.lock）持锁者
+            // 存活时，新进程 acquireLock 失败即 exit(1) —— 不回收就是必死重启循环。
+            reapOrphanKernel()
+
+            //
             // ⚠️ 注意第一个参数是 nodeBin（nativeLibraryDir 下的 libnode.so，唯一可 exec 的东西），
             //    entry 是**脚本参数**、不是被 exec 的目标 —— 它落在 filesDir（app_data_file），
             //    W^X 禁止 execve。把两者顺序写反必在真机上 error=13。
@@ -350,6 +370,38 @@ class NodeRuntimeService : Service() {
         }.getOrNull() ?: "n/a"
     }
 
+    /**
+     * spawn 前回收上一轮的残留内核进程。
+     *
+     * 内核（bin/dsh-supervisor daemon）用 guard.lock 做单实例锁：持锁进程存活时
+     * 新进程直接 exit(1)。容器是唯一合法拉起者，一旦上一轮守卫因服务重启竞态、
+     * START_STICKY 重投递等成为**无人跟踪的孤儿**，此后每次 spawn 都必死 ——
+     * 而它占着 36360，健康探测秒回 200，把失败循环伪装成"启动成功"（真机 2026-09-22 实锤）。
+     *
+     * 守卫与容器同 uid，killProcess 有权限；lock 内容就是持锁 pid（内核侧写入）。
+     * 路径与内核 state-root.js 对齐：DSH_SUPERVISOR_HOME(=filesDir)/supervisor/guard.lock。
+     */
+    private fun reapOrphanKernel() {
+        try { nodeProcess?.takeIf { it.isAlive }?.destroy() } catch (_: Throwable) {}
+        // 本轮 stderr 从零计（recordNodeStderr 是累积追加，不清空会把上一轮的死因顶给本轮）。
+        RuntimeDiagnostics.clearNodeStderr(this)
+        try {
+            val lock = File(File(filesDir, "supervisor"), "guard.lock")
+            if (!lock.exists()) return
+            val pid = lock.readText().trim().toIntOrNull()
+            if (pid != null && pid > 0 && File("/proc/$pid").exists()) {
+                // PID 可能已被系统复用：cmdline 不含 libnode 就不是本应用的守卫，只清锁不杀进程。
+                val cmdline = try { File("/proc/$pid/cmdline").readText() } catch (_: Throwable) { "" }
+                if (cmdline.contains("libnode")) {
+                    RuntimeDiagnostics.append(this, "reap", null, "回收残留内核进程", "pid=$pid（guard.lock 持锁者）")
+                    android.os.Process.killProcess(pid)
+                    Thread.sleep(200)
+                }
+            }
+            lock.delete()
+        } catch (_: Throwable) {}
+    }
+
     /** 转发子进程 stdout/stderr：都进 logcat，stderr 额外落盘供失败时回看。 */
     private fun forward(stream: InputStream, tag: String) {
         Thread {
@@ -384,9 +436,12 @@ class NodeRuntimeService : Service() {
         val p = nodeProcess ?: return
         Thread {
             val code = runCatching { p.waitFor() }.getOrDefault(-1)
-            if (portUp || healthUp) return@Thread
-
-            RuntimeDiagnostics.append(this, "process", false, "内核/node 进程已退出", "exitCode=$code")
+            // 主动停机不算故障；但**任何非主动退出都必须记录** —— 旧实现在
+            // portUp/healthUp=true 时直接 return，「起来过又秒死」这一失败形态
+            // 的 exitCode/stderr 永远进不了诊断（真机 2026-09-22 排查实锤的盲区）。
+            if (!keepRunning) return@Thread
+            val readyNote = if (healthUp || portUp) "（曾就绪后退出 —— 排查方向：启动后崩溃/单实例锁冲突，而非拉不起）" else ""
+            RuntimeDiagnostics.append(this, "process", false, "内核/node 进程已退出", "exitCode=$code$readyNote")
 
             var err = RuntimeDiagnostics.readNodeStderr(this)
             var waited = 0
@@ -488,6 +543,8 @@ class NodeRuntimeService : Service() {
         keepRunning = false
         nodeProcess?.destroy()
         nodeProcess = null
+        loopJob?.cancel()
+        loopJob = null
         super.onDestroy()
     }
 
@@ -516,5 +573,7 @@ class NodeRuntimeService : Service() {
         const val PORT = 3080
         const val BACKOFF_BASE_MS = 1000L
         const val BACKOFF_MAX_MS = 30000L
+        /** 内核连续存活超过该时长才算真实成功，退避计数才允许清零。 */
+        const val STABLE_MS = 15000L
     }
 }

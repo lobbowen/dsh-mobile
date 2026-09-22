@@ -60,6 +60,12 @@ object RuntimeDiagnostics {
         if (text.isNotBlank()) nodeErrFile(ctx).appendText(text)
     }
 
+    /** 每次 spawn 前清空：stderr 是跨轮累积追加的，不清空会把上一轮进程的死因顶给本轮。 */
+    @Synchronized
+    fun clearNodeStderr(ctx: Context) {
+        if (nodeErrFile(ctx).exists()) nodeErrFile(ctx).delete()
+    }
+
     fun readNodeStderr(ctx: Context): String =
         if (nodeErrFile(ctx).exists()) nodeErrFile(ctx).readText() else ""
 }
