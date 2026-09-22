@@ -12,8 +12,8 @@
 //
 // 本门禁确保不再回归：
 //   W1 _workflow.normalize 对 CRLF / CR / LF 归一化结果一致
-//   W2 jobSection 在 CRLF 下与 LF 下结果**完全相同**（用真实 build.yml 实测）
-//   W3 真实 build.yml 在 CRLF 下仍能取到 verify / release 两个 job 段（非空），
+//   W2 jobSection 在 CRLF 下与 LF 下结果**完全相同**（用真实 kernel-ci.yml 实测）
+//   W3 真实 kernel-ci.yml 在 CRLF 下仍能取到 verify / release 两个 job 段（非空），
 //      且安卓内核已删除的 PC 发布结构（precheck / build 矩阵 / launcher / npm 发布）不得复活。
 //   W4 任何测试不得用裸 fs.readFileSync 读 .github/workflows（必须经 _workflow.js）
 
@@ -36,10 +36,12 @@ console.log('== W1 行尾归一化 ==');
   check('W1-d 混合行尾归一', W.normalize('a\r\nb\nc\r') === lf);
 }
 
-// ── W2/W3 真实 build.yml 在 CRLF 下解析一致 ──
+// ── W2/W3 真实 kernel-ci.yml 在 CRLF 下解析一致 ──
 console.log('== W2/W3 CRLF 下 jobSection 一致 ==');
 {
-  const lf = W.readWorkflow('build.yml');
+  // 单仓 dsh-mobile：内核 workflow 住在仓库根的 .github/workflows/kernel-ci.yml
+  // （旧内核独立仓的 build.yml 已并入其中），所以 root 要指到仓根而不是内核目录。
+  const lf = W.readWorkflow('kernel-ci.yml', path.join(ROOT, '..'));
   const crlf = lf.replace(/\n/g, '\r\n');   // 模拟 Windows 检出
   check('W2-a 确认构造成 CRLF', crlf.includes('\r\n'));
 
