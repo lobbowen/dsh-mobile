@@ -106,11 +106,38 @@ object KernelOtaUpdater {
         val remote = manifest.optString("version", "").trim().ifBlank { null }
             ?: return Outcome(true, false, false, current, null, "manifest 缺 version 字段")
 
+        // ── C3 新鲜度一：过期即拒（防"永久冻结在旧版本"）──
+        val expMs = manifest.optLong("expiresEpochMs", 0L)
+        if (expMs > 0L && System.currentTimeMillis() > expMs) {
+            return Outcome(true, false, false, current, remote,
+                "manifest 已过期（expiresEpochMs=" + expMs + "）—— 拒绝使用；检查发布流水线是否仍在签发")
+        }
+        // ── C3 新鲜度二：sequence 不得低于本通道已见最大值（防重放旧 manifest）──
+        val seq = manifest.optLong("sequence", 0L)
+        val st = loadState(context)
+        val lastSeq = st.optLong("lastSequence", 0L)
+        if (seq in 1..lastSeq) {
+            return Outcome(true, false, false, current, remote,
+                "manifest sequence=" + seq + " 不高于已见 " + lastSeq + " —— 疑似重放，拒绝")
+        }
+
         if (current != null && km.compareKernelVersions(remote, current) <= 0) {
             return Outcome(true, false, false, current, remote, "已是最新（本地 $current，远端 $remote）")
         }
         if (checkOnly) {
             return Outcome(true, true, false, current, remote, "发现新版本 $remote（checkOnly：未安装）")
+        }
+
+        // ── C4 灰度放量：安装 ID + 版本 → 确定性分桶 ──
+        // 无需后端即可灰度：同一台设备对同一版本永远落在同一个桶里（不是随机），
+        // rolloutPercent=0 即"停发"。100 表示全量。
+        val rollout = manifest.optInt("rolloutPercent", 100).coerceIn(0, 100)
+        if (rollout < 100) {
+            val bucket = Math.abs((installId(context) + ":" + remote).hashCode()) % 100
+            if (bucket >= rollout) {
+                return Outcome(true, true, false, current, remote,
+                    "灰度未命中（bucket=" + bucket + " >= rolloutPercent=" + rollout + "）—— 本次不安装，下次启动再试")
+            }
         }
 
         // 启动预算用完就**不下载**：宁可下次启动再升，也不把开机拖住。
@@ -131,6 +158,11 @@ object KernelOtaUpdater {
         } finally {
             tmp.delete()
         }
+        // 安装成功才推进 sequence 水位：失败不推进，下次仍可重试同一个 sequence。
+        if (result.ok && seq > 0L) {
+            st.put("lastSequence", seq)
+            saveState(context, st)
+        }
         return Outcome(
             checked = true,
             available = true,
@@ -139,6 +171,29 @@ object KernelOtaUpdater {
             remote = result.version ?: remote,
             detail = result.toDiagnosticLine(),
         )
+    }
+
+    // ---- 通道状态（sequence 水位 + 安装 ID）----
+    // 为什么必须落盘：sequence 水位要**跨启动**记住，否则重放旧 manifest 每次都能通过；
+    // 安装 ID 要稳定，否则灰度分桶每次重启都换桶 —— "灰度"就退化成随机。
+
+    private fun stateFile(context: Context) = File(context.filesDir, "kernel-feed-state.json")
+
+    private fun loadState(context: Context): JSONObject =
+        try { JSONObject(stateFile(context).readText()) } catch (_: Throwable) { JSONObject() }
+
+    private fun saveState(context: Context, o: JSONObject) {
+        try { stateFile(context).writeText(o.toString()) } catch (_: Throwable) { }
+    }
+
+    private fun installId(context: Context): String {
+        val st = loadState(context)
+        val id = st.optString("installId", "")
+        if (id.isNotBlank()) return id
+        val gen = java.util.UUID.randomUUID().toString()
+        st.put("installId", gen)
+        saveState(context, st)
+        return gen
     }
 
     /** [budgetMs] <= 0 用默认超时；否则夹逼到 [1s, 默认] —— 预算就是硬上限。 */

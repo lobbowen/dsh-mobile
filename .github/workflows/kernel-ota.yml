@@ -44,6 +44,10 @@ on:
         type: boolean
         required: false
         default: false
+      rollout_percent:
+        description: '灰度放量百分比（0-100；100=全量）。设备按 安装ID+版本 确定性分桶'
+        required: false
+        default: '100'
       channel:
         description: '发布通道：canary=灰度测试（先发这里真机验证），stable=生产'
         type: choice
@@ -140,21 +144,30 @@ jobs:
           chmod +x scripts/build-kernel-bundle.sh
           ./scripts/build-kernel-bundle.sh "$PWD/kernel-src" "$KERNEL_VER" "$KERNEL_ABI" "$OTA_URL_BASE"
 
-      - name: Assemble device-consumable feed
-        # 把上一步的散件（kernel-<ver>.zip + kernel-manifest.json）组织成
-        # 设备侧 LocalKernelFeed.scan() 期望的**目录约定**，产出可直接整体投递的 feed/。
+      - name: Sign feed manifest (freshness + signature)
+        # ADR-0005 C3：manifest 是**先被读**的那一个，必须自带新鲜度与签名 ——
+        # sequence 单调（防重放/冻结）、expires 过期即拒、signature 供设备端校验。
         #
-        # 为什么需要这一步：Release 附件是给人下载的散件，而设备期望的是
-        # kernel-feed/ 目录下「kernel-*.zip + kernel-manifest.json」这一组
-        # 固定命名的文件。缺了这一层，用户拿到 Release 后仍要手工猜
-        # 「放哪、命名成什么」——「自举」在最后一百米断掉。
-        #
-        # 本步骤同时做两件构建期校验（比运行时才发现便宜得多）：
-        #   · manifest.sha256 与 zip 实际字节一致（不一致 → 设备判 sha256-mismatch）
-        #   · 用**设备端同一个校验器**验一遍签名
+        # 说明：S1 删除了设备端的"本地 feed 目录"路径，因此原先的
+        # "Assemble device-consumable feed"（调 scripts/build-kernel-feed.sh）已无消费者，
+        # 一并删除；这里只对 release/kernel-manifest.json 做签发。
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          chmod +x scripts/build-kernel-feed.sh
-          ./scripts/build-kernel-feed.sh "$PWD/kernel-src" "$KERNEL_VER" "$KERNEL_ABI" "$PWD/feed"
+          set -euo pipefail
+          ROLL="kernel-$KERNEL_CHANNEL"
+          BASE=0
+          if gh release view "$ROLL" --repo '${{ github.repository }}' >/dev/null 2>&1; then
+            TMPD="$(mktemp -d)"
+            if gh release download "$ROLL" -p kernel-manifest.json -O "$TMPD/prev.json" --repo '${{ github.repository }}' 2>/dev/null; then
+              BASE="$(node -p "require('$TMPD/prev.json').sequence || 0" 2>/dev/null || echo 0)"
+            else
+              echo "::warning title=sequence 基线未知::未取到 $ROLL 的上一份 manifest，sequence 从 1 起"
+            fi
+          fi
+          echo "[manifest] 上一份 sequence=$BASE"
+          DSH_MANIFEST_SEQUENCE_BASE="$BASE" \
+            node scripts/sign-kernel-manifest.js release/kernel-manifest.json keys/ota-private.pem "${{ github.event.inputs.rollout_percent || 100 }}"
 
       - name: Upload bundle artifacts
         uses: actions/upload-artifact@v4
@@ -163,7 +176,6 @@ jobs:
           path: |
             release/kernel-${{ env.KERNEL_VER }}.zip
             release/kernel-manifest.json
-            feed/
           if-no-files-found: error
 
       - name: Publish to Release
@@ -171,10 +183,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # feed/ 单独打成一个 zip 一并发布 —— 这是**设备投递包**：
-          # 解开就是 kernel-feed/ 该有的内容，可直接 adb push。
-          # 同时保留散件（有人就是要单拿 manifest / 单拿 zip）。
-          ( cd feed && zip -q -r "../release/kernel-feed-${{ env.KERNEL_VER }}.zip" . )
           ls -la release/
 
           # 发布说明写到文件再 --notes-file 读入。
@@ -185,21 +193,16 @@ jobs:
           cat > /tmp/notes.md <<'NOTES'
           Signed kernel OTA bundle. Verify with the welded APK public key.
 
-          ## 投递到设备（三种方式任选其一）
+          ## 设备如何拿到（OTA，唯一路径 —— ADR-0005）
 
-          1. 下载 `kernel-feed-<ver>.zip`，解开后整体推送到设备：
-             ```
-             adb push . /sdcard/dsh/kernel-feed/
-             ```
-          2. 只推两个文件：
-             ```
-             adb push kernel-<ver>.zip kernel-manifest.json /sdcard/dsh/kernel-feed/
-             ```
-          3. 推到应用专属目录（无需任何存储权限）：
-             ```
-             adb push kernel-<ver>.zip kernel-manifest.json \
-               /sdcard/Android/data/<包名>/files/kernel-feed/
-             ```
+          设备启动时读该**通道**的 manifest 并自动安装/升级：
+          ```
+          <baseUrl>/kernel-<channel>/kernel-manifest.json
+          <baseUrl>/kernel-<channel>/kernel-<version>.zip
+          ```
+          通道 = `canary`（灰度真机验证）或 `stable`（生产）；设备侧在
+          `container/app/src/main/assets/kernel-feed.json` 里选通道。
+          本地 feed（adb 投放）与 APK 内置基线均已删除 —— 只有一个安装来源。
 
           ## 生效方式
 
@@ -242,7 +245,6 @@ jobs:
             gh release create "kernel-${{ env.KERNEL_VER }}" \
               release/kernel-${{ env.KERNEL_VER }}.zip \
               release/kernel-manifest.json \
-              release/kernel-feed-${{ env.KERNEL_VER }}.zip \
               --title "Kernel OTA ${{ env.KERNEL_VER }}" \
               --notes-file /tmp/notes.md
           fi
