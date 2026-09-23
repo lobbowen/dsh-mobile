@@ -799,8 +799,18 @@ jobs:
               --notes "Android 原生 Node 容器 APK（由 fast-apk 构建，运行时来自 ${{ env.runtime-tag }}）。"
           fi
 
-          gh release upload "$TAG" "$APK#app-debug.apk" \
-            --repo '${{ github.repository }}' --clobber
+          # 覆盖上传。--clobber 在「同名资产记录在、但后端对象孤立/损坏」时会 404
+          # （2026-09-23 实证：Release 在、asset 按 id 访问 404 → clobber 必失败）。
+          # 故失败时回退为「按名字删资产再上传」；两条路都失败才红。
+          if ! gh release upload "$TAG" "$APK#app-debug.apk" --repo '${{ github.repository }}' --clobber; then
+            echo "::warning title=clobber 失败::回退为按名字删资产后重传"
+            gh api "repos/${{ github.repository }}/releases/tags/$TAG" \
+              --jq '.assets[] | select(.name=="app-debug.apk") | .id' 2>/dev/null \
+              | while read -r id; do
+                  [ -n "$id" ] && gh api -X DELETE "repos/${{ github.repository }}/releases/assets/$id"
+                done || true
+            gh release upload "$TAG" "$APK#app-debug.apk" --repo '${{ github.repository }}'
+          fi
 
           echo
           echo "=== 已发布 ==="
