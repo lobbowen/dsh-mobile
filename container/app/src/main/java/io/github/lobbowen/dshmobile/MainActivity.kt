@@ -42,6 +42,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var captureBtn: Button
     private val handler = Handler(Looper.getMainLooper())
     private var uiMode = false // false=诊断面板, true=WebView(内核 /__host 宿主帧 + 面板 iframe)
+    /** 设备端自检结果（后台算一次，渲染时前缀到诊断面板）。 */
+    @Volatile private var selfCheckText: String = ""
 
     /** 内核更新桥协议版本：必须与内核 kernelUpdateBridge.ts 的 BRIDGE_PROTOCOL_VERSION 一致。 */
     private val kernelUpdateProtocol = 1
@@ -103,6 +105,25 @@ class MainActivity : AppCompatActivity() {
         reuseExistingCaptureGrant()
         startRuntime()
         startPolling()
+        runSelfCheckOnce()
+    }
+
+    /**
+     * 设备端自检：**后台**跑一次，结果前缀到诊断面板。
+     *
+     * 为什么显示在界面上而不是只写文件：目标设备的 **adb 是关闭的**，
+     * 用户无法用 adb 把 provisioning.json 拉出来看。把结论直接显示在屏幕上，
+     * 是唯一可行的验证方式（见 docs/runbook/kernel-device-verification.md）。
+     */
+    private fun runSelfCheckOnce() {
+        Thread {
+            val text = try {
+                KernelSelfCheck.runAndFormat(this)
+            } catch (e: Throwable) {
+                "自检异常: " + e::class.java.simpleName + ": " + (e.message ?: "")
+            }
+            selfCheckText = text
+        }.apply { isDaemon = true }.start()
     }
 
     /** 电池优化豁免引导：未入白名单时弹系统确认框；ROM 拒绝该 intent 时退到
@@ -301,7 +322,9 @@ class MainActivity : AppCompatActivity() {
             override fun run() {
                 if (!uiMode) {
                     val log = RuntimeDiagnostics.read(this@MainActivity)
-                    diagText.text = if (log.isBlank()) "初始化中..." else log
+                    val body = if (log.isBlank()) "初始化中..." else log
+                    // 自检结论**常驻在顶部**：它是"绿没绿"的答案，不该被后续日志冲掉。
+                    diagText.text = if (selfCheckText.isBlank()) body else selfCheckText + "\n" + body
                     scroll.post { scroll.fullScroll(ScrollView.FOCUS_DOWN) }
                     if (isPortUp()) enterWebView()
                 }
