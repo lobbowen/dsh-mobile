@@ -32,7 +32,9 @@ object KernelOtaUpdater {
 
     data class Config(
         val baseUrl: String,
+        /** 解析后的滚动 tag：`kernel-<channel>`，或被 kernel-feed.json 的 releaseTag 显式覆盖（调试用）。 */
         val releaseTag: String,
+        val channel: String,
         val manifestName: String,
         val autoCheck: Boolean,
         /** 启动链的**总预算**：超时就放弃本次升级（下次启动/手动再试），绝不拖住开机。0=不限。 */
@@ -60,11 +62,14 @@ object KernelOtaUpdater {
         val text = context.assets.open(CONFIG_ASSET).bufferedReader().use { it.readText() }
         val o = JSONObject(text)
         val base = o.optString("baseUrl", "").trim().trimEnd('/')
-        val tag = o.optString("releaseTag", "kernel-latest").trim().ifBlank { "kernel-latest" }
+        val channel = o.optString("channel", "stable").trim().ifBlank { "stable" }
+        // releaseTag 显式覆盖优先（调试用）；否则由通道推导 —— 通道是投递语义，版本号不是。
+        val override = o.optString("releaseTag", "").trim()
+        val tag = if (override.isNotBlank()) override else "kernel-" + channel
         val name = o.optString("manifestName", "kernel-manifest.json").trim().ifBlank { "kernel-manifest.json" }
         val auto = o.optBoolean("autoCheck", true)
         val budget = o.optLong("startupBudgetMs", 12000L)
-        if (!base.startsWith("https://")) null else Config(base, tag, name, auto, budget)
+        if (!base.startsWith("https://")) null else Config(base, tag, channel, name, auto, budget)
     } catch (e: Throwable) {
         Log.w(TAG, "kernel-feed.json 不可用: ${e.message}")
         null

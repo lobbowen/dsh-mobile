@@ -1,8 +1,9 @@
 {
   "schema": 1,
-  "$comment": "远端内核 OTA feed。设备端只认这一个稳定入口；zip 由 manifest.url 或 <baseUrl>/<releaseTag>/kernel-<version>.zip 推导。autoCheck=true = 启动即检测并自动升级（手动入口仍为面板按钮 / build.kernelUpdate）。",
+  "$comment": "远端内核 OTA feed。设备端读 <baseUrl>/kernel-<channel>/kernel-manifest.json。autoCheck=true = 启动即检测并自动升级（手动入口仍为面板按钮 / build.kernelUpdate）。releaseTag 非空时覆盖 channel 推导（调试用）。",
   "baseUrl": "https://github.com/lobbowen/dsh-mobile/releases/download",
-  "releaseTag": "kernel-latest",
+  "channel": "stable",
+  "releaseTag": "",
   "manifestName": "kernel-manifest.json",
   "autoCheck": true,
   "startupBudgetMs": 12000
