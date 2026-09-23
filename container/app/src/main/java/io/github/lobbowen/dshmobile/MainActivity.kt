@@ -181,33 +181,80 @@ class MainActivity : AppCompatActivity() {
      * 缺 v / ok 会导致内核侧直接丢弃消息（面板超时）。
      */
     fun handleKernelUpdateRequest(json: String) {
-        try {
-            val req = org.json.JSONObject(json)
-            val requestId = req.optString("requestId", "")
-            // 重启前先尽力读一次内核只读版本端点（供面板展示；失败不阻断）。
-            val version = tryReadKernelVersion()
-            // 处理：重启 :node 进程（重读 CURRENT / OTA 钩子由 Node 侧承接），拉起最新内核。
-            restartRuntime()
-            val result = org.json.JSONObject().apply {
-                put("v", kernelUpdateProtocol)
-                put("type", "dsh:kernel-update-result")
-                put("requestId", requestId)
-                put("ok", true)
-                put("stage", "restarting")
-                if (version != null) put("version", version) else put("version", org.json.JSONObject.NULL)
-                // 重启是「结果不确定」操作：拉起后是否真的加载了新版本由内核自行确认。
-                put("restartUncertain", true)
-                put("error", org.json.JSONObject.NULL)
+        val requestId = try { org.json.JSONObject(json).optString("requestId", "") } catch (_: Throwable) { "" }
+        // 网络 + 安装都是**阻塞**操作：必须离开主线程，否则 WebView 与 UI 一起卡死。
+        Thread {
+            deliverToHost(runKernelUpdate(requestId).toString())
+        }.start()
+    }
+
+    /**
+     * 真正执行一次内核 OTA，并**如实**回报（修复前的实现只做 restartRuntime() 就无条件 ok=true ——
+     * 无论有没有新内核、网络通不通都报"成功"，这是假成功）。
+     *
+     * 语义：
+     *   · 未配置 feed / 取 manifest 失败 / 下载失败 / 校验失败 → ok=false + 真实 error（**不重启**）
+     *   · 已是最新 → ok=true, stage=up-to-date（**不重启**：无谓重启是有代价的）
+     *   · 安装成功 → 重启 :node 拉起新内核，ok=true, stage=updated, restartUncertain=true
+     */
+    private fun runKernelUpdate(requestId: String): org.json.JSONObject {
+        val km = KernelManager(this)
+        return try {
+            if (KernelOtaUpdater.loadConfig(this) == null) {
+                return resultJson(requestId, false, "failed", null, "未配置 kernel-feed.json：远端内核 OTA 未启用")
             }
-            val jsonStr = result.toString()
-            webView.post {
-                // 宿主帧暴露 dshDeliverResult(json)；用 JSON 字符串安全注入（避免拼接注入）。
-                webView.evaluateJavascript(
-                    "window.dshDeliverResult && window.dshDeliverResult(${org.json.JSONObject.quote(jsonStr)})",
-                    null
-                )
+            progressToHost(requestId, "checking")
+            val outcome = KernelOtaUpdater.checkAndUpdate(this, km, checkOnly = false)
+            when {
+                !outcome.checked -> resultJson(requestId, false, "failed", outcome.remote, outcome.detail)
+                !outcome.available -> resultJson(requestId, true, "up-to-date", outcome.current, null)
+                outcome.updated -> {
+                    progressToHost(requestId, "restarting")
+                    restartRuntime()
+                    resultJson(requestId, true, "updated", outcome.remote, null, restartUncertain = true)
+                }
+                else -> resultJson(requestId, false, "failed", outcome.remote, outcome.detail)
             }
-        } catch (_: Throwable) {
+        } catch (e: Throwable) {
+            resultJson(requestId, false, "failed", null, "${e::class.java.simpleName}: ${e.message}")
+        }
+    }
+
+    private fun resultJson(
+        requestId: String,
+        ok: Boolean,
+        stage: String,
+        version: String?,
+        error: String?,
+        restartUncertain: Boolean = false,
+    ): org.json.JSONObject = org.json.JSONObject().apply {
+        put("v", kernelUpdateProtocol)
+        put("type", "dsh:kernel-update-result")
+        put("requestId", requestId)
+        put("ok", ok)
+        put("stage", stage)
+        if (version != null) put("version", version) else put("version", org.json.JSONObject.NULL)
+        put("restartUncertain", restartUncertain)
+        if (error != null) put("error", error) else put("error", org.json.JSONObject.NULL)
+    }
+
+    private fun progressToHost(requestId: String, stage: String) {
+        val o = org.json.JSONObject().apply {
+            put("v", kernelUpdateProtocol)
+            put("type", "dsh:kernel-update-progress")
+            put("requestId", requestId)
+            put("stage", stage)
+        }
+        deliverToHost(o.toString())
+    }
+
+    /** 宿主帧暴露 dshDeliverResult(json)；用 JSON 字符串安全注入（避免拼接注入）。 */
+    private fun deliverToHost(jsonStr: String) {
+        webView.post {
+            webView.evaluateJavascript(
+                "window.dshDeliverResult && window.dshDeliverResult(${org.json.JSONObject.quote(jsonStr)})",
+                null
+            )
         }
     }
 
