@@ -1,0 +1,27 @@
+ADMIN_REPORT
+time  : 2026-09-23 10:39:17 UTC
+tag   : admin-status-35847427161
+kind  : status
+target: 35847427161
+
+== run 35847427161 详情 ==
+ wf : Fast APK (no Node rebuild)
+ sha : fe86216
+ status: completed
+ concl : success
+ start : 2026-09-23T10:12:16Z
+ end : 2026-09-23T10:17:58Z
+ url : https://github.com/lobbowen/dsh-mobile/actions/runs/35847427161
+
+=== artifact 列表 ===
+ id=10743763672 android-node-container-apk 55559732B expired=false digest=sha256:2cbd4cc5d703442bea2220aa88aa070a00743820022c5bd5261736b5f3a4af27
+
+=== 最近 8 个 run ===
+ 35850018629 84a9e65 in_progress/ Admin (cancel / status)
+ 35850013229 84a9e65 completed/success Admin (cancel / status)
+ 35849977583 84a9e65 in_progress/ CI (gates)
+ 35849693335 ddd0fb0 completed/success CI (gates)
+ 35849258771 703823b completed/success Fast APK (no Node rebuild)
+ 35849258473 703823b completed/success CI (gates)
+ 35848999054 5ab7495 completed/success CI (gates)
+ 35848659142 45a3239 completed/failure CI (gates)
