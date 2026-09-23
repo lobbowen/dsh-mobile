@@ -10,6 +10,7 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import io.github.lobbowen.dshmobile.kernel.KernelResolution
 import io.github.lobbowen.dshmobile.kernel.SupervisorPolicy
 import io.github.lobbowen.dshmobile.native.AssetStatus
 import io.github.lobbowen.dshmobile.native.NativeAssetRegistry
@@ -249,7 +250,11 @@ class NodeRuntimeService : Service() {
             val kVersion = km.currentVersion()
             val kernelDir = if (!kVersion.isNullOrBlank()) km.kernelDir(kVersion) else null
             val entry = if (!kVersion.isNullOrBlank()) km.entryPath(kVersion) else null
-            val hasKernel = entry != null && entry.exists()
+            // 归因**三态**（纯逻辑 + 单测，见 KernelResolution）：
+            //   从未安装 / CURRENT 在但入口缺失（只落地一半）/ 就位。
+            // 旧实现只有两态，把"只落地一半"也说成"尚未安装成功"，排查方向被带偏。
+            val res = KernelResolution.resolve(kVersion, entry?.absolutePath, entry != null && entry.exists())
+            val hasKernel = res.state == KernelResolution.State.READY
             // 不变式守护：内核入口是【脚本】，必须交给 node 解释执行。
             // 它落在 filesDir（app_data_file），W^X 禁止 execve —— 直接 ProcessBuilder
             // 它在真机上必然 error=13。这个断言把「注释与实现矛盾」的雷变成可执行检查。
@@ -269,12 +274,7 @@ class NodeRuntimeService : Service() {
                     this, "kernel-integrity", false, "内核布局不自洽", integrity.joinToString("; ")
                 )
             }
-            RuntimeDiagnostics.append(
-                this, "kernel", hasKernel,
-                if (hasKernel) "内核版本=$kVersion" else "尚无内核包（OTA 尚未安装成功）",
-                if (hasKernel) "入口=${entry!!.absolutePath}"
-                else "files/kernel/CURRENT 缺失；本次回落到 assets/node/server.js 探针模式（内核需经 OTA 安装）"
-            )
+            RuntimeDiagnostics.append(this, "kernel", res.ok, res.title, res.detail)
 
             // ---- 1) 原生资产统一准备（存在性 → 依赖前置 → exec-probe） ----
             //
