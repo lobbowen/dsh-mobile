@@ -16,11 +16,12 @@
 **禁止在第二个地方复制同一个版本号。** `gen-version.js` 只做**汇总**，不产生新事实
 （例如它从 `node-versions.json` 读运行时，而不是再定义一遍）。
 
-## 2. 生成产物与门禁
+## 2. 校验与报告（全部在 CI 侧）
 
-- `scripts/gen-version.js` → `.github/version-manifest.json`（**进 git、可评审**）。
-- `ci.yml` 门禁：`node scripts/gen-version.js && git diff --exit-code -- .github/version-manifest.json`。
-  任何版本漂移都会红，评审时一眼看到"这次动了哪个版本"。
+- `scripts/gen-version.js --check`：校验各单一事实源齐全/合法 → 不合法即红（`ci.yml`）。
+- `scripts/gen-version.js`：把**聚合清单**打进 CI 日志，评审/回溯时一眼看到各层版本。
+- **刻意不生成**进 git 的清单文件 —— 那会要求"本地先跑生成器再提交"，
+  与 [testing-standard.md](testing-standard.md) 的红线（本地不得调起任何仓内执行）冲突。
 
 ## 3. 什么时候 bump 什么
 

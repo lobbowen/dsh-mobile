@@ -1,52 +1,64 @@
 # 测试规范（TESTING-STANDARD）
 
-- 状态：v1 · 2026-09-23
-- 红线：**本地禁止任何测试执行**。本项目是公开发行产品，唯一合法的验证通道是 **GitHub Actions**。
+- 状态：**v2** · 2026-09-23
+- 红线：**本地不存在"测试"这一层。** 所有验证只发生在 GitHub Actions；**CI 跑通才算通**。
 
 ---
 
 ## 1. 为什么
 
-本机（Android/bionic、`/tmp` 只读、无 Android SDK/JDK/Gradle）与 CI runner 不是同一环境：
-本地跑出来的"绿"或"红"都**不代表**发布环境，只会制造错误信心，并消耗时间。
+本机（Android/bionic、`/tmp` 只读、无 Android SDK/JDK/Gradle）与 CI runner **不是同一环境**。
+本地跑出来的"绿"或"红"都**不代表**发布环境，只会制造错误信心、掩盖真实缺陷、浪费时间。
 真实验证必须以 CI 构建产物为准。
 
 ## 2. 红线（禁止事项）
 
-**禁止**在本地执行任何会对被测代码求值的命令，包括但不限于：
+**禁止**在本地执行任何会让**仓内代码运行**的命令，包括但不限于：
 
 - `node test/*.js`、`node --check`、`npm test` / `npm run *`
-- `./gradlew *`、`gradle`、任何编译/打包
-- 直接执行仓库内脚本（`scripts/*.sh`、`*.py`、`container/engine/bin/*`）做自检
+- `./gradlew *`、gradle、任何编译 / 打包
+- 直接执行仓库内脚本（`scripts/*.js|sh|py`、`container/engine/bin/*`）做**自检或生成**
 - 任何形式的"我先本地试一下"
 
-## 3. 允许的本地操作（白名单）
+> 判据：**是否让仓内代码运行**。跑 = 违规；只看 / 只改 = 允许。
 
-- 编辑文件（write/edit）
+## 3. 机制强制（v2 新增：不靠自觉，靠跑不起来）
+
+- `scripts/require-ci.js`：**非 CI 环境（无 `CI` 环境变量）直接拒绝**，退出码 **86**
+  （与"测试失败 = 1"刻意区分：这是**策略拒绝**，不是结果红）。
+- 已接入的入口：
+  - `container/engine` 的 `test` / `test:logic` / `test:baseline`；
+  - `kernel` 的**全部**测试 —— 守卫写在每个测试都会 `--require` 的 `kernel/test/_preload.js`，
+    因此**直接调用单个测试文件也拦得住**。
+- 结论：本地跑测试不是"不该做"，而是**做不了**。
+
+## 4. 允许的本地操作（白名单）
+
+- 编辑文件（write / edit）
 - 只读检查：`read` / `grep` / `glob` / `ls` / 统计
-- `git` 级别的提交与推送（本仓由 API 代执行）
-- **对账的"报告模式"**（只列事实、不做断言）——它不是测试
+- 提交与推送（经 API 代执行）
+- **对账的"报告模式"**（只列事实、不做断言）—— 它不是测试
 
-> 判据：**是否让被测代码运行**。跑代码 = 违规；只看文件 = 允许。
-
-## 4. 唯一合法验证通道
+## 5. 唯一合法验证通道
 
 ```
-编辑 → 提交 → 推分支 → 触发 CI（main/master 推送，或 fast-* tag）→ 读 CI 结果 → 修复 → 再推
+编辑 → 提交 → 推分支/PR → CI 执行 → 读 CI 结果 → 修复 → 再推
 ```
 
 读取 CI 结果的两条通道：
 
-1. **API**（本会话使用）：`GET /actions/runs/{id}`、`/jobs`、`/jobs/{job_id}/logs`
-2. **admin 回执通道**（沙箱无法直连 API 时）：`git push origin HEAD:refs/tags/admin-<cmd> …`，结果写 `ci-admin` 分支
+1. **API**：`GET /actions/runs/{id}`、`/jobs`、`/jobs/{job_id}/logs`
+2. **admin 回执通道**：`git push origin HEAD:refs/tags/admin-<cmd>` → 结果写 `ci-admin` 分支
 
-## 5. 门禁归属
+## 6. 门禁归属
 
-所有门禁（对账 `layout-manifest-test`、`dead-path-gate`、原生资产一致性、桥协议、OTA）**只作为 CI 步骤存在**，
-本地不得单独调用。它们已被接入 `container/engine/package.json` 的 `test:logic`（CI 执行）。
+所有门禁（目录对账、dead-path、原生资产一致性、分层依赖、契约 schema、桥协议、OTA、
+跨层版本校验）**只作为 CI 步骤存在**，本地不得单独调用。
 
-## 6. 违规记录
+## 7. 违规记录
 
 | 日期 | 违规 | 处置 |
 |---|---|---|
-| 2026-09-23 | 本地执行引擎测试（`node test/*.js`）做验证 | 停止；本规范确立；本地测试工具（`_tools/bin/node`）删除 |
+| 2026-09-23 | 本地执行引擎测试（`node test/*.js`）做验证 | 停止；v1 确立；本地测试工县删除 |
+| 2026-09-23 | 本地执行仓内生成器（`scripts/gen-version.js`）以产出待提交清单 | 取消进 git 的生成清单，改为 **CI 侧校验 + 日志报告** |
+| 2026-09-23 | 以"**本地测不出来**"作为结论依据（把本地当作验证环境） | 纠正表述与心智模型：**不存在本地验证层**；判据改为"CI 是否观察到"；v2 确立，并加机制守卫 |

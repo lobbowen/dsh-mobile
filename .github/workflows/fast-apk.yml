@@ -803,11 +803,12 @@ jobs:
           # ── versionCode 单调门禁 ──────────────────────────────────────────────
           # 为什么必须拦：versionCode 回退 = 已升级的设备**永远收不到**新版本，
           # 且不可逆（只能卸载重装）。宁可发不出去，也不能发一个"更旧"的号。
-          # 注意：gh 的 -O 若指向**已存在**的文件会直接报错 —— mktemp 已建好文件，
-          # 所以给一个临时**目录**让它自己写（这是本门禁第一次跑时踩到的真实坑）。
-          # 另外：失败不再静默吞掉，而是打 warning + gh 原始错误，避免"门禁没生效"伪装成"首次发布"。
+          # 注意：gh 的 -O 是**文件路径**（不是目录），且目标已存在时会直接报错。
+          # 所以：建一个临时目录，`-O` 指向其下**尚不存在**的文件。
+          # （这一步连续踩了两次：mktemp 建文件 → 冲突；/tmp 目录传给 -O → 仍冲突。
+          #   两次都是 CI 日志暴露的，本地无从发现 —— 也正因如此失败必须**可见**。）
           PREVDIR="$(mktemp -d)"
-          if gh release download "$TAG" -p version.json -O "$PREVDIR" --repo '${{ github.repository }}' 2>"$PREVDIR/err"; then
+          if gh release download "$TAG" -p version.json -O "$PREVDIR/version.json" --repo '${{ github.repository }}' 2>"$PREVDIR/err"; then
             PVC="$(node -p "require('$PREVDIR/version.json').shell.versionCode" 2>/dev/null || echo 0)"
             echo "[version] 已发布 versionCode=$PVC，本次=$VC"
             if [ "$VC" -lt "$PVC" ]; then
