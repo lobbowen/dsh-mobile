@@ -168,3 +168,25 @@ DSH（`dsh-attachment-local.ensureDurableHome`）把边界写成 `parse(home).ro
 - 路线 B（用户态）：`libdshposix` 内实现路径命名空间（绝对路径解析进 `$DSH_ROOT`，
   `/proc`、`/dev`、`/system`、nativeLibraryDir 直通）。无特权，覆盖 Node 及其原生插件。
 - 选定顺序：A 可行则 A；否则 B。二者都会让症状级补丁（如 `open-fallback`）变为多余并删除。
+
+## 追加决策：底座是系统服务（Tier S），不是普通应用（2026-09-23）
+
+### 事实基础（实测）
+
+目标机 OPPO PLP120 / SM8850：`ro.build.type=user`、`ro.secure=1`、`ro.boot.flash.locked=1`、
+`verifiedbootstate=green`、`ro.oem_unlock_supported` 空、adb 关闭、无 su/Magisk。
+在该设备上，已安装 APK 不存在通往系统级的软件路径。
+
+### 结论：四条封死来自「普通应用」身份，不是缺 API
+
+`untrusted_app` 域下：自家目录禁 execve、link(2) neverallow、祖先目录不可读、
+unshare(CLONE_NEWUSER) 被应用 seccomp 挡成 EINVAL（内核其实编了 CONFIG_USER_NS）。
+因此 targetSdk=28、libdshposix、libdshrootns、PrefixProvisioner 这一整套都是**兼容垫片**，
+不是架构终点。
+
+### 决策
+
+- Tier S（正解）：容器以 priv-app + 自有域 `dsh_container` + init 服务 + Binder 接口随 ROM 出厂；
+  四条封死同时消失，路线 A（真命名空间容器）重新可用，垫片全部删除。集成面见 `system/`。
+- Tier A（兼容）：普通应用形态保留给碰不到的设备，作为降级层，不再作为设计基准。
+- 交付通道：厂商预装 / 工程机 userdebug / 自有可解锁设备；产线锁定用户机只能走厂商预装。

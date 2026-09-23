@@ -1,0 +1,26 @@
+# 容器自有 SELinux 域：最小权限，只解掉 untrusted_app 强加的四条封死。
+# 本文件是集成模板，必须过 AOSP 整编的 neverallow 校验。
+
+type dsh_container, domain;
+type dsh_container_exec, exec_type, file_type, vendor_file_type;
+init_daemon_domain(dsh_container)
+
+# 1) 自家目录可执行与可链接：替代 targetSdk=28 与 libdshposix 的 link 替代。
+allow dsh_container dsh_container_data_file:dir { create_dir_perms relabelfrom };
+allow dsh_container dsh_container_data_file:file { create_file_perms execute execute_no_trans };
+allow dsh_container dsh_container_data_file:file link;
+
+# 2) 数据分区祖先可读：让 durable 目录 fsync 能走完到 /（替代 rootns 与 open 回退）。
+allow dsh_container system_data_file:dir r_dir_perms;
+allow dsh_container system_data_file:file r_file_perms;
+
+# 3) 命名空间与挂载：真容器根（路线 A），需内核 CONFIG_USER_NS。
+allow dsh_container self:capability sys_admin;
+allow dsh_container self:userns { create };
+allow dsh_container self:mounton mounton;
+
+# 4) 网络与本地端口：面板与外部访问。
+allow dsh_container self:tcp_socket { create_socket_perms };
+allow dsh_container self:udp_socket { create_socket_perms };
+allow dsh_container self:unix_stream_socket { create_stream_socket_perms };
+allow dsh_container port_type:tcp_socket name_bind;

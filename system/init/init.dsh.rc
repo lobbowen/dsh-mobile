@@ -1,0 +1,12 @@
+# 容器作系统服务：开机即起、崩溃重启、自有域与 capabilities。
+service dsh_container /system/bin/dsh-container
+    class main
+    user system
+    group system inet
+    capabilities SYS_ADMIN NET_BIND_SERVICE
+    seclabel u:r:dsh_container:s0
+    oneshot
+    disabled
+
+on property:sys.boot_completed=1
+    start dsh_container
