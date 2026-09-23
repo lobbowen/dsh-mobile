@@ -410,7 +410,7 @@ jobs:
           check_so "$J/libdshptyprobe.so" 1000 || exit 1
           "$CC" -static -O2 -o "$J/libdshrootprobe.so" native/rootprobe/root-probe.c || exit 1
           check_so "$J/libdshrootprobe.so" 1000 || exit 1
-          "$CC" -shared -fPIC -O2 -I "$INC" -o "$J/libdshrootns.so" native/rootns/path-namespace.c || exit 1
+          "$CC" -shared -fPIC -O2 -o "$J/libdshrootns.so" native/rootns/path-namespace.c || exit 1
           check_so "$J/libdshrootns.so" 1000 || exit 1
 
           # ── ② bash 5.2.15 静态交叉编译 ──
