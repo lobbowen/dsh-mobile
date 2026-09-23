@@ -252,13 +252,14 @@ class NodeRuntimeService : Service() {
             // 为什么必须在 spawn **之前**：升级完成后 CURRENT 已指向新内核，
             // 本次启动就直接跑新版，**不需要额外重启**。
             // 失败只落诊断 —— 离线/服务端故障时开机流程必须照常走完。
-            // 默认**手动**触发（由内核经桥方法 build.kernelUpdate 调起）；
-            // 只有 kernel-feed.json 里 autoCheck=true 时才在启动链主动检查 ——
-            // 稳定态不该有意外动作。
+            // 启动即检测（需求）：autoCheck=true 时在 spawn **之前**查一次远端 feed，
+            // 有更新就下载+校验+安装 —— 本次启动直接跑新内核，无需额外重启。
+            // 有**启动预算**兜底：离线/慢网时超时即放弃（下次启动或手动再试），绝不拖住开机。
+            // 手动入口：面板按钮（dsh:kernel-update-request）/ 桥方法 build.kernelUpdate。
             val otaCfg = KernelOtaUpdater.loadConfig(this)
             if (otaCfg != null && otaCfg.autoCheck) {
                 try {
-                    val ota = KernelOtaUpdater.checkAndUpdate(this, km)
+                    val ota = KernelOtaUpdater.checkAndUpdate(this, km, budgetMs = otaCfg.startupBudgetMs)
                     if (ota.checked) {
                         RuntimeDiagnostics.append(
                             this, "kernel-ota", ota.updated,

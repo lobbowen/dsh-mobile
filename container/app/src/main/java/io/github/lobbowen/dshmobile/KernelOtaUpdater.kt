@@ -35,6 +35,8 @@ object KernelOtaUpdater {
         val releaseTag: String,
         val manifestName: String,
         val autoCheck: Boolean,
+        /** 启动链的**总预算**：超时就放弃本次升级（下次启动/手动再试），绝不拖住开机。0=不限。 */
+        val startupBudgetMs: Long,
     ) {
         val manifestUrl: String get() = "$baseUrl/$releaseTag/$manifestName"
         fun zipUrl(version: String) = "$baseUrl/$releaseTag/kernel-$version.zip"
@@ -60,8 +62,9 @@ object KernelOtaUpdater {
         val base = o.optString("baseUrl", "").trim().trimEnd('/')
         val tag = o.optString("releaseTag", "kernel-latest").trim().ifBlank { "kernel-latest" }
         val name = o.optString("manifestName", "kernel-manifest.json").trim().ifBlank { "kernel-manifest.json" }
-        val auto = o.optBoolean("autoCheck", false)
-        if (!base.startsWith("https://")) null else Config(base, tag, name, auto)
+        val auto = o.optBoolean("autoCheck", true)
+        val budget = o.optLong("startupBudgetMs", 12000L)
+        if (!base.startsWith("https://")) null else Config(base, tag, name, auto, budget)
     } catch (e: Throwable) {
         Log.w(TAG, "kernel-feed.json 不可用: ${e.message}")
         null
@@ -71,13 +74,20 @@ object KernelOtaUpdater {
      * 查一次；[checkOnly] 为 true 时**只报告不安装**。
      * **永不抛异常** —— 调用方可能是启动链或桥方法，必须总能拿到结果。
      */
-    fun checkAndUpdate(context: Context, km: KernelManager, checkOnly: Boolean = false): Outcome {
+    fun checkAndUpdate(
+        context: Context,
+        km: KernelManager,
+        checkOnly: Boolean = false,
+        budgetMs: Long = 0L,
+    ): Outcome {
+        val deadline = if (budgetMs > 0L) System.currentTimeMillis() + budgetMs else 0L
+        fun left(): Long = if (deadline == 0L) Long.MAX_VALUE else deadline - System.currentTimeMillis()
         val cfg = loadConfig(context)
             ?: return Outcome(false, false, false, km.currentVersion(), null, "未配置 kernel-feed.json（远端 OTA 关闭）")
 
         val current = km.currentVersion()
         val manifestText = try {
-            httpGetText(cfg.manifestUrl, MAX_MANIFEST_BYTES)
+            httpGetText(cfg.manifestUrl, MAX_MANIFEST_BYTES, left())
         } catch (e: Throwable) {
             return Outcome(true, false, false, current, null, "取 manifest 失败（离线或不可达）：${e::class.java.simpleName}: ${e.message}")
         }
@@ -98,10 +108,14 @@ object KernelOtaUpdater {
             return Outcome(true, true, false, current, remote, "发现新版本 $remote（checkOnly：未安装）")
         }
 
+        // 启动预算用完就**不下载**：宁可下次启动再升，也不把开机拖住。
+        if (left() <= 0L) {
+            return Outcome(true, true, false, current, remote, "启动预算已耗尽（${budgetMs}ms）：本次不下载，下次启动或手动触发重试")
+        }
         val url = manifest.optString("url", "").trim().ifBlank { cfg.zipUrl(remote) }
         val tmp = File(context.cacheDir, "kernel-ota-$remote.zip")
         try {
-            download(url, tmp)
+            download(url, tmp, left())
         } catch (e: Throwable) {
             tmp.delete()
             return Outcome(true, true, false, current, remote, "下载失败（$url）：${e::class.java.simpleName}: ${e.message}")
@@ -122,16 +136,18 @@ object KernelOtaUpdater {
         )
     }
 
-    private fun open(url: String): HttpURLConnection =
+    /** [budgetMs] <= 0 用默认超时；否则夹逼到 [1s, 默认] —— 预算就是硬上限。 */
+    private fun open(url: String, budgetMs: Long): HttpURLConnection =
         (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
+            val cap = if (budgetMs <= 0L) Long.MAX_VALUE else budgetMs.coerceAtLeast(1_000L)
+            connectTimeout = minOf(CONNECT_TIMEOUT_MS.toLong(), cap).toInt()
+            readTimeout = minOf(READ_TIMEOUT_MS.toLong(), cap).toInt()
             instanceFollowRedirects = true
             setRequestProperty("User-Agent", "dsh-kernel-ota")
         }
 
-    private fun httpGetText(url: String, maxBytes: Int): String {
-        val conn = open(url)
+    private fun httpGetText(url: String, maxBytes: Int, budgetMs: Long): String {
+        val conn = open(url, budgetMs)
         val code = conn.responseCode
         if (code !in 200..299) throw IllegalStateException("HTTP $code")
         return conn.inputStream.use { ins ->
@@ -146,8 +162,8 @@ object KernelOtaUpdater {
         }
     }
 
-    private fun download(url: String, dest: File) {
-        val conn = open(url)
+    private fun download(url: String, dest: File, budgetMs: Long) {
+        val conn = open(url, budgetMs)
         val code = conn.responseCode
         if (code !in 200..299) throw IllegalStateException("HTTP $code")
         conn.inputStream.use { ins ->
