@@ -247,6 +247,27 @@ class NodeRuntimeService : Service() {
                 )
             }
 
+            // 0b.5) 远端内核 OTA：查一次 feed，有更新就自动升级。
+            //
+            // 为什么必须在 spawn **之前**：升级完成后 CURRENT 已指向新内核，
+            // 本次启动就直接跑新版，**不需要额外重启**。
+            // 失败只落诊断 —— 离线/服务端故障时开机流程必须照常走完。
+            try {
+                val ota = KernelOtaUpdater.checkAndUpdate(this, km)
+                if (ota.checked) {
+                    RuntimeDiagnostics.append(
+                        this, "kernel-ota", ota.updated,
+                        if (ota.updated) "远端内核已升级到 ${ota.version}" else "远端内核检查完成（无更新）",
+                        ota.detail
+                    )
+                }
+            } catch (e: Throwable) {
+                RuntimeDiagnostics.append(
+                    this, "kernel-ota", false, "远端内核检查异常",
+                    "${e::class.java.simpleName}: ${e.message}"
+                )
+            }
+
             // 0c) 内置基线兜底（含完整验签，见 KernelManager.ensureBaseline 注释）
             val baseline = km.ensureBaseline()
             if (baseline.isDefect) {

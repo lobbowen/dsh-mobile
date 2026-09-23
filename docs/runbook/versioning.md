@@ -1,7 +1,7 @@
 # 版本管理（Versioning）
 
 > 一句话：**任何发出去的东西都必须能回答"它是哪个版本"**，而**壳与内核是两条独立版本流**。
-> 定义与理由（含两条流的对照表、兼容契约、防静默失效门禁）见 **[ADR-0004](../adr/0004-dual-version-streams.md)**。
+> 定义与理由（两条流对照表、兼容契约、防静默失效门禁）见 **[ADR-0004](../adr/0004-dual-version-streams.md)**。
 > 本页只讲**怎么用**。
 
 ---
@@ -16,7 +16,7 @@
 | 面板版本 | `kernel/ui/package.json` | — |
 | Node 运行时 | `container/app/src/main/assets/node-versions.json` | — |
 
-**两条流的版本号从不互相比较。** "壳 0.2.0 / 内核 0.1.0-android.11" 是正常状态。
+**两条流的版本号从不互相比较。** "壳 1.0.0 / 内核 0.1.0-android.11" 是正常状态。
 
 ## 2. 改哪层，bump 哪个
 
@@ -28,17 +28,20 @@
 | 只改 `kernel/ui/**` | `kernel/ui/package.json` 的 `version` | 以上都不动 |
 | 换 Node 运行时 | `node-versions.json` 的 `default` | — |
 
+> `versionCode` 是**单调整数**，只增不减（Android 升级判定用它）；`versionName` 是给人看的 semver。
+
 ## 3. CI 门禁（都在 CI 侧，本地不执行任何东西）
 
 | 门禁 | 位置 | 拦的是 |
 |---|---|---|
-| 跨层版本校验 | `ci.yml` → `scripts/gen-version.js --check` | 事实源缺失/非法；`protocol.js` 与 `version.json` 的协议号**漂移**；内核要求协议 > 壳实现协议 |
-| 壳 versionCode 单调 | `fast-apk` 发布步骤 | `versionCode` 回退 → 已升级设备永远收不到新版本 |
+| workflow YAML 校验 | `ci.yml` + `fast-apk` → `scripts/validate-workflows.py` | workflow 写坏（GitHub 表现是"0 个 job"，伪装成"没触发"） |
+| 跨层版本校验 | `ci.yml` → `scripts/gen-version.js --check` | 事实源缺失/非法；`protocol.js` 与 `version.json` 协议号**漂移**；内核要求协议 > 壳实现协议 |
+| 壳 versionCode 单调 | `fast-apk` 发布步骤 | 回退 → 已升级设备永远收不到新版本 |
 | 内核版本唯一 | `kernel-ota` 发布步骤 | 版本复用 → 设备端判为"无更新" → **静默不生效** |
 
 ## 4. 发布物
 
-**壳**（`apk-latest` Release，每轮三个资产）：
+**壳**（`apk-latest` Release）：
 
 | 资产 | 用途 |
 |---|---|
@@ -46,13 +49,18 @@
 | `app-debug-<versionName>+<versionCode>.apk` | 版本化（可追溯） |
 | `version.json` | 壳版本清单（下次单调性检查的输入） |
 
-**内核**（`kernel-<version>` Release）：
+**内核**：
 
-| 资产 | 用途 |
-|---|---|
-| `kernel-<version>.zip` | 签名 OTA 包（设备端验签 + sha256 + 原子切换） |
-| `kernel-manifest.json` | 清单（version / sha256 / engines / requires / requiresProtocol） |
-| `kernel-feed-<version>.zip` | 投递包（解开设备直推） |
+| Release | 资产 | 用途 |
+|---|---|---|
+| `kernel-<version>` | `kernel-<v>.zip` · `kernel-manifest.json` · `kernel-feed-<v>.zip` | 版本化（可追溯） |
+| **`kernel-latest`** | `kernel-manifest.json` · `kernel-<v>.zip` | **设备端唯一入口**（滚动） |
+
+设备端配置在 `container/app/src/main/assets/kernel-feed.json`：
+```
+<baseUrl>/<releaseTag>/kernel-manifest.json      ← 判断有没有更新
+<baseUrl>/<releaseTag>/kernel-<version>.zip      ← 或 manifest.url
+```
 
 ## 5. 设备端"我是谁"
 
@@ -66,4 +74,16 @@
 - [ ] `ci.yml` 的跨层版本校验绿（日志里有 `[version] ... protocol shell vN / kernel requires vN`）
 - [ ] `fast-apk` 日志出现 `[version] 本次发布 x.y.z (versionCode=N)`，且 Release 三资产齐全
 - [ ] 只更新内核时：`kernel-ota` 成功，且**壳版本未变**
+- [ ] `kernel-latest` Release 上 `kernel-manifest.json` 指向最新内核
 - [ ] 设备 `provisioning.json` 的 `appVersion` / `kernelVersion` / `bridgeProtocol` 三者自洽
+
+## 7. 一次性基线重置（只做一次，2026-09-23）
+
+产品线起点定为 **`1.0.0 (versionCode 1)`**（开发期是 `0.2.0 (versionCode 2)`）。
+因为 versionCode 单调门禁会拦"回退"，所以**一次性**清掉了 `apk-latest` 上已发布的
+`version.json`，使下一次发布被识别为"首次带版本发布"。
+
+**前提（不满足就不能重置）**：没有任何设备安装过旧版本。若有设备装过 `versionCode=2`，
+重置会让那些设备**永远收不到**后续更新（不可逆）。
+
+**重置后 versionCode 单调门禁即为权威，不得再重置**；此后一切发布只能递增。
