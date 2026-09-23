@@ -262,6 +262,9 @@ object ProvisioningProbe {
                 put("appVersionCode", BuildConfig.VERSION_CODE)
                 put("bridgeProtocol", BuildConfig.BRIDGE_PROTOCOL)
                 put("kernelVersion", KernelManager(ctx).currentVersion() ?: "")
+                // C1/C2 可观测：版本下限（只增不减）与"已安装但尚未提交"的版本。
+                put("kernelFloor", KernelManager(ctx).floorVersion() ?: "")
+                put("kernelPending", KernelManager(ctx).pending()?.version ?: "")
                 put("checkedAt", System.currentTimeMillis())
                 put("androidApi", Build.VERSION.SDK_INT)
                 put("device", "${Build.MANUFACTURER} ${Build.MODEL}")

@@ -582,6 +582,8 @@ class NodeRuntimeService : Service() {
         repeat(100) {
             if (isStatusUp()) {
                 healthUp = true
+                // 提交（ADR-0005 C2）：**首次健康检查通过**才把"已安装"提升为"已提交"。
+                commitPendingKernel()
                 RuntimeDiagnostics.append(
                     this, "health", true,
                     "内核控制面就绪 (127.0.0.1:$KERNEL_CONTROL_PORT/status)",
@@ -599,11 +601,54 @@ class NodeRuntimeService : Service() {
             }
             Thread.sleep(300)
         }
+        // 回滚（ADR-0005 C2）：新内核待命却始终没通过健康检查 → 它跑不了。
+        rollbackIfPendingFailed()
         RuntimeDiagnostics.append(
             this, "health", false, "控制面在 30s 内未就绪",
             "可能原因：node/内核崩溃 / 端口被占用 / 二进制不兼容当前 ROM（如非 16KB 页对齐）。\n" +
                 "查看上方 [FAIL] process 与 node-stderr。"
         )
+    }
+
+    /**
+     * 内核**提交**（ADR-0005 C2）：首次健康检查通过 = 这个内核真的能跑。
+     * 提升版本下限（只增不减）并清除待命标记。
+     */
+    private fun commitPendingKernel() {
+        try {
+            val km = KernelManager(this)
+            val pend = km.pending() ?: return
+            if (pend.version != km.currentVersion()) return
+            km.setFloor(pend.version)
+            km.clearPending()
+            RuntimeDiagnostics.append(
+                this, "kernel-commit", true,
+                "内核 " + pend.version + " 已提交（版本下限提升）",
+                "from=" + (pend.from ?: "(无)") + "；floor=" + (km.floorVersion() ?: "(未设)")
+            )
+        } catch (e: Throwable) {
+            RuntimeDiagnostics.append(this, "kernel-commit", false, "内核提交失败", err(e))
+        }
+    }
+
+    /**
+     * 内核**回滚**（ADR-0005 C2）：有新内核待命却始终未通过健康检查 → 退回 from。
+     * **下限不降** —— 否则"回滚"就成了降级的后门。
+     */
+    private fun rollbackIfPendingFailed() {
+        try {
+            val km = KernelManager(this)
+            val pend = km.pending() ?: return
+            val from = pend.from ?: return
+            if (km.rollbackTo(from)) {
+                RuntimeDiagnostics.append(
+                    this, "kernel-rollback", false,
+                    "内核 " + pend.version + " 未通过健康检查，已回滚到 " + from,
+                    "版本下限保持 " + (km.floorVersion() ?: "(未设)") + " 不变（防止回退后再被更旧的包覆盖）"
+                )
+            }
+            km.clearPending()
+        } catch (_: Throwable) { }
     }
 
     private fun isStatusUp(): Boolean = try {
