@@ -154,8 +154,9 @@ on:
 
 ## 9. 大文件与生成物
 
-- 不入库：`app/src/main/assets/{kernel/baseline.zip,npm/,node-bin/}`、`feed/`、`release/`、`*.log`（现有 `.gitignore` 已覆盖）。
-- `_artifacts/baseline/baseline.zip` 已入库（历史遗留）；**新的**大产物一律走 Release 附件。
+- 不入库：`app/src/main/assets/{npm/,node-bin/}`、`feed/`、`release/`、`*.log`（`.gitignore` 已覆盖）。
+- **APK 里不允许有内核资产**（ADR-0005）：`.gitignore` **刻意不再忽略**内核包 —— 目的是让"把内核塞回 `assets/kernel/`"这件事在 **APK 审计里可见**（硬失败），而不是被 ignore 静默吞掉。历史上 `_artifacts/baseline/baseline.zip`（1.2 MB 内核）正是被 ignore 掩盖而签进仓库的，已删除。
+- **新的**大产物一律走 Release 附件。
 - 任何单文件 > 5MB 前先停下确认。
 
 ---

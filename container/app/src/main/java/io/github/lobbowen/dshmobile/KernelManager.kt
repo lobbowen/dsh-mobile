@@ -146,58 +146,13 @@ class KernelManager(private val context: Context) {
 
     /**
      * 设置当前版本（原子写：先写临时再 rename）。
-     * 调用方需保证目标版本已落盘（由 OTA 引擎 apply 完成，或由 ensureBaseline 落地）。
+     * 调用方需保证目标版本已落盘（唯一来源是 OTA 安装器，见 ADR-0005）。
      */
     fun setCurrentVersion(version: String) {
         kernelRoot.mkdirs()
         val tmp = File(kernelRoot, "CURRENT.tmp")
         tmp.writeText(version)
         tmp.renameTo(currentPointer)
-    }
-
-    /**
-     * 基线内核的落地结果。
-     *
-     * 为什么不用 `String?`（历史实现）：「已经有内核」与「没有基线包」两种情况
-     * 都返回 null，调用方无法区分 —— 于是真机上「无网首启起不来」这条故障
-     * 永远只表现为一句 "尚无内核包"。把结果显式化，才能把「缺基线」这个
-     * **构建期缺陷**和「等待 OTA」这个**正常状态**分开归因。
-     */
-    sealed class BaselineResult {
-        /** 已有可用内核（CURRENT 指向的目录确实存在）。 */
-        data class AlreadyPresent(val version: String) : BaselineResult()
-
-        /** 本次从内置基线包落地成功。 */
-        data class Installed(val version: String, val bytes: Long) : BaselineResult()
-
-        /** APK 里没有基线包 —— 构建期没注入。无网时设备将无内核可用。 */
-        data class NoBaselineAsset(val assetPath: String) : BaselineResult()
-
-        /** 有基线包但不可用（zip 损坏 / 缺 kernel.json / 解压失败）。 */
-        data class BrokenBaseline(val assetPath: String, val reason: String) : BaselineResult()
-
-        val versionOrNull: String?
-            get() = when (this) {
-                is AlreadyPresent -> version
-                is Installed -> version
-                else -> null
-            }
-
-        /** 是否属于「需要人工/构建期修复」的异常，而非正常等待 OTA。 */
-        val isDefect: Boolean
-            get() = this is NoBaselineAsset || this is BrokenBaseline
-    }
-
-    /** 选基线资产：带版名 `baseline-<ver>.zip` 优先（取最高版），回落历史名 `baseline.zip`（版本未知→null）。 */
-    private fun pickBaselineAsset(names: List<String>): Pair<String, String?>? {
-        val versioned = names
-            .filter { it.startsWith("baseline-") && it.endsWith(".zip") }
-            .map { it to it.removePrefix("baseline-").removeSuffix(".zip") }
-            .filter { it.second.isNotBlank() }
-        if (versioned.isNotEmpty()) {
-            return versioned.reduce { acc, c -> if (compareKernelVersions(c.second, acc.second) > 0) c else acc }
-        }
-        return if ("baseline.zip" in names) "baseline.zip" to null else null
     }
 
     /** 内核版本比较：数字段按数值、其余按字符串逐 token 比较（0.1.0-android.10 > 0.1.0-android.2）。 */
@@ -218,104 +173,6 @@ class KernelManager(private val context: Context) {
             if (c != 0) return c
         }
         return 0
-    }
-
-    /**
-     * 首启兜底 **＋ 基线升级通道**：APK 内置基线内核包经**完整校验**后落地并切指针。
-     *
-     * 两种资产名（CI 的 scripts/build-kernel-baseline.sh 同时产出）：
-     * · `baseline-<version>.zip` —— 版本写在资产名里，**不解包即可与 CURRENT 比较**，
-     * 高于 CURRENT 才落地（只升不降，防止 feed/OTA 装的更新版本被旧 APK 压回）；
-     * · `baseline.zip`（历史名）—— 版本要解包才知道，维持旧语义：仅 CURRENT 缺失时
-     * 兜底安装，避免每次开机重读 1.2MB 资产。
-     *
-     * 为什么需要升级分支：`AlreadyPresent` 让新 APK 里的新内核在已装内核的设备上
-     * 永远不生效 —— 真机上唯一被验证过的交付动作就是「装新 APK」，若内核更新
-     * 不随 APK 落地，修了也到不了设备（android.2 孤儿锁修复就是这样被挡住的）。
-     * 后续 OTA 覆盖升级仍走 [KernelInstaller] 同一入口。
-     *
-     * ============================================================================
-     * 基线包**同样必须验签** —— 不能因为"它是 APK 里带的"就跳过
-     * ============================================================================
-     * 直觉上「APK 已经验过签名了，里面的资产自然是可信的」。
-     * 这个直觉在这里**不成立**，原因是信任根不同：
-     * · APK 签名锚定的是 **Play/发布者**（Android 平台信任）；
-     * · 内核签名锚定的是 **容器私钥**（`ota-public.pem`，本架构自己的信任根）。
-     * 二者是两把独立的钥匙。若基线包跳过内核验签，那么：
-     * 任何能重打 APK 的人（不必持有容器私钥）都能塞进一个任意内核，
-     * 双信任根就退化成了单信任根。
-     * 所以 [KernelInstaller.install] 对基线包与外部包一视同仁。
-     *
-     * 返回结构化的 [BaselineResult]，而不是历史上的 `String?` —— 后者让
-     * 「缺基线包」与「已有内核」都返回 null，真机上无从区分。
-     */
-    fun ensureBaseline(): BaselineResult {
-        val existing = currentVersion()
-        val assetNames = try {
-            context.assets.list("kernel")?.toList() ?: emptyList()
-        } catch (_: Throwable) {
-            emptyList()
-        }
-        val pick = pickBaselineAsset(assetNames)
-
-        if (existing != null && File(kernelRoot, existing).isDirectory) {
-            val av = pick?.second
-            if (av == null || compareKernelVersions(av, existing) <= 0) {
-                return BaselineResult.AlreadyPresent(existing)
-            }
-            // av > existing → 继续向下走完整安装（验签 + 原子落地 + 切指针）＝ 基线升级
-        }
-
-        if (pick == null) {
-            val baselineAsset = "kernel/baseline.zip"
-            // 关键：把「assets/kernel/ 下有什么」也记下来。过去这里静默返回 null，
-            // 结果真机上只能看到「没有内核」，无从判断是构建漏了还是 OTA 没下发。
-            return BaselineResult.NoBaselineAsset(baselineAsset).also {
-                RuntimeDiagnostics.append(
-                    context, "kernel", false, "APK 未内置基线内核包",
-                    "查找 assets/$baselineAsset 失败；assets/kernel/ 现有内容=${assetNames.ifEmpty { listOf("(空)") }}。" +
-                        "无网首启将没有内核可跑，只能回落探针模式。"
-                )
-            }
-        }
-        val baselineAsset = "kernel/" + pick.first
-
-        // 先把资产落到文件（Node 校验器要按路径读它，且 assets 本身在 APK 内
-        // 是压缩存储，必须经 AssetManager 才能访问 —— 无法直接给 Node 用）。
-        val zip = File(context.cacheDir, "kernel-baseline.zip")
-        try {
-            context.assets.open(baselineAsset).use { input ->
-                zip.outputStream().use { out -> input.copyTo(out) }
-            }
-        } catch (e: Throwable) {
-            return BaselineResult.BrokenBaseline(baselineAsset, "资产复制失败: ${errText(e)}")
-                .also { RuntimeDiagnostics.append(context, "kernel", false, "基线包复制失败", errText(e)) }
-        }
-        val bytes = zip.length()
-
-        // 走统一安装器：sha256（无外部锚点，只做包内自校验）+ ed25519 验签 + 结构检查。
-        val result = KernelInstaller.install(
-            context = context,
-            zip = zip,
-            manifest = null,          // 基线没有外部 manifest；签名仍照验
-            source = KernelInstaller.Source.APK_ASSET,
-        )
-        zip.delete()
-
-        return if (result.ok && result.version != null) {
-            BaselineResult.Installed(result.version, bytes)
-        } else {
-            BaselineResult.BrokenBaseline(
-                baselineAsset,
-                "reason=${result.reason}；${result.detail}"
-            ).also {
-                RuntimeDiagnostics.append(
-                    context, "kernel", false, "基线内核校验/落地未通过",
-                    "reason=${result.reason}；${result.detail}\n" +
-                        "校验器输出:\n${result.nodeVerifyOutput.take(1000)}"
-                )
-            }
-        }
     }
 
     /** 结构性内核健康检查：CURRENT 指针与目录、entry 是否自洽。 */

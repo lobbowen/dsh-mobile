@@ -243,15 +243,12 @@ class NodeRuntimeService : Service() {
                 }
             }
 
-            // 0c) 内置基线兜底（含完整验签，见 KernelManager.ensureBaseline 注释）
-            val baseline = km.ensureBaseline()
-            if (baseline.isDefect) {
-                RuntimeDiagnostics.append(
-                    this, "kernel-baseline", false, "无可用内置基线内核",
-                    baseline.toString()
-                )
-            }
-            val kVersion = baseline.versionOrNull
+            // 0c) 取当前内核 —— ADR-0005：APK **不含**内核，来源只有 OTA。
+            //
+            // 不再有"内置基线兜底"：内核要么已被 OTA 装好（CURRENT 指向它），
+            // 要么就是没有。后者是**合法状态**（首装尚未成功），照实记录即可 ——
+            // 靠"APK 里塞一个"来掩盖它，正是过去"内核一改就要重出 APK"的根因。
+            val kVersion = km.currentVersion()
             val kernelDir = if (!kVersion.isNullOrBlank()) km.kernelDir(kVersion) else null
             val entry = if (!kVersion.isNullOrBlank()) km.entryPath(kVersion) else null
             val hasKernel = entry != null && entry.exists()
@@ -276,9 +273,9 @@ class NodeRuntimeService : Service() {
             }
             RuntimeDiagnostics.append(
                 this, "kernel", hasKernel,
-                if (hasKernel) "内核版本=$kVersion" else "尚无内核包（无本地 feed、且无内置基线，先跑内置探针）",
+                if (hasKernel) "内核版本=$kVersion" else "尚无内核包（OTA 尚未安装成功）",
                 if (hasKernel) "入口=${entry!!.absolutePath}"
-                else "files/kernel/CURRENT 缺失，且 assets/kernel/baseline.zip 不可用；本次将回落到 assets/node/server.js 探针模式"
+                else "files/kernel/CURRENT 缺失；本次回落到 assets/node/server.js 探针模式（内核需经 OTA 安装）"
             )
 
             // ---- 1) 原生资产统一准备（存在性 → 依赖前置 → exec-probe） ----

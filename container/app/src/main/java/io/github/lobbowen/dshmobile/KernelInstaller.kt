@@ -67,10 +67,11 @@ object KernelInstaller {
 
     const val TAG = "KernelInstaller"
 
-    /** 候选包来源。归因时区分来源很重要 —— 「APK 里没带」和「用户放的坏了」是两类问题。 */
+    /**
+     * 候选包来源。**只剩 OTA 一种真实来源**（ADR-0005：本地 feed 与 APK 内置基线已收敛删除）。
+     * 保留枚举是为了归因可扩展，而不是留后门 —— 新增来源必须同时回答"它能否绕过版本下限"。
+     */
     enum class Source(val label: String) {
-        APK_ASSET("APK 内置基线"),
-        LOCAL_FILE("本地文件 feed"),
         OTA("远端 OTA"),
         NONE("无"),
     }

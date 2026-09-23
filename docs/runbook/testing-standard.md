@@ -27,7 +27,7 @@
 - `scripts/require-ci.js`：**非 CI 环境（无 `CI` 环境变量）直接拒绝**，退出码 **86**
   （与"测试失败 = 1"刻意区分：这是**策略拒绝**，不是结果红）。
 - 已接入的入口：
-  - `container/engine` 的 `test` / `test:logic` / `test:baseline`；
+  - `container/engine` 的 `test` / `test:logic`；
   - `kernel` 的**全部**测试 —— 守卫写在每个测试都会 `--require` 的 `kernel/test/_preload.js`，
     因此**直接调用单个测试文件也拦得住**。
 - 结论：本地跑测试不是"不该做"，而是**做不了**。
