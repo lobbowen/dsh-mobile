@@ -131,6 +131,8 @@ console.log('[baseline] 公私钥配对校验通过 ✓');
 NODE
 
 # ---- 打包（复用 build-bundle，产物在 release/）----
+# 内核要求的最低桥协议版本：从其**单一事实源**读取（ADR-0004 §3），不在这里写死。
+export DSH_KERNEL_REQUIRES_PROTOCOL="$(node -p "require('$ROOT/kernel/package.json').dsh.requiresProtocol || 0")"
 node "$ROOT/container/engine/bin/build-bundle.js" "$SRC" "$VER" "$ABI" "" >/dev/null
 
 SRC_ZIP="$ROOT/release/kernel-$VER.zip"

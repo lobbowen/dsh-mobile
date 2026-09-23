@@ -58,12 +58,29 @@ jobs:
     env:
       KERNEL_REPO: ${{ github.event.inputs.kernel_repo }}
       KERNEL_REF: ${{ github.event.inputs.kernel_ref || 'main' }}
-      KERNEL_VER: ${{ github.event.inputs.version || '1.0.0' }}
+      # 版本号**不写死**：留空时由下一步从内核的单一事实源（kernel/package.json）解析。
+      # 原先这里默认 '1.0.0'，与 kernel/package.json 的版本是两个源 —— 会静默分叉（ADR-0004）。
+      KERNEL_VER: ${{ github.event.inputs.version || '' }}
       KERNEL_ABI: ${{ github.event.inputs.abi || 'node24-arm64-android35' }}
       OTA_URL_BASE: ${{ github.event.inputs.url_base || '' }}
     steps:
       - name: Checkout container repo
         uses: actions/checkout@v4
+
+      - name: Resolve kernel version + requiresProtocol (SSOT: kernel/package.json)
+        run: |
+          set -euo pipefail
+          V="${{ github.event.inputs.version }}"
+          if [ -z "$V" ]; then
+            V="$(node -p "require('./kernel/package.json').version")"
+            echo "[version] 内核版本（来自 kernel/package.json）: $V"
+          else
+            echo "[version] 内核版本（显式指定）: $V"
+          fi
+          echo "KERNEL_VER=$V" >> "$GITHUB_ENV"
+          P="$(node -p "require('./kernel/package.json').dsh.requiresProtocol || 0")"
+          echo "DSH_KERNEL_REQUIRES_PROTOCOL=$P" >> "$GITHUB_ENV"
+          echo "[version] 内核要求的最低桥协议: $P"
 
       - name: Restore signing private key from secret
         env:
@@ -180,6 +197,13 @@ jobs:
           安装**必须**验签通过；未签名或签名不匹配的包会被拒绝 ——
           设备只安装已签名内核，不生产内核。
           NOTES
+
+          # 内核版本唯一性门禁（ADR-0004 §2）：版本一经发布即冻结。
+          # 复用版本号 → 设备端版本比较判为"无更新" → **静默不生效**（与壳的 versionCode 回退同类）。
+          if gh release view "kernel-${{ env.KERNEL_VER }}" --repo '${{ github.repository }}' >/dev/null 2>&1; then
+            echo "::error title=内核版本已存在::kernel-${{ env.KERNEL_VER }} 已发布。请 bump kernel/package.json 的 version 后重发（见 docs/adr/0004-dual-version-streams.md §2）。"
+            exit 1
+          fi
 
           gh release create "kernel-${{ env.KERNEL_VER }}" \
             release/kernel-${{ env.KERNEL_VER }}.zip \
