@@ -44,6 +44,14 @@ on:
         type: boolean
         required: false
         default: false
+      channel:
+        description: '发布通道：canary=灰度测试（先发这里真机验证），stable=生产'
+        type: choice
+        options:
+          - canary
+          - stable
+        required: false
+        default: canary
   push:
     tags:
       - 'kernel-ota-*'
@@ -62,6 +70,8 @@ jobs:
       # 原先这里默认 '1.0.0'，与 kernel/package.json 的版本是两个源 —— 会静默分叉（ADR-0004）。
       KERNEL_VER: ${{ github.event.inputs.version || '' }}
       KERNEL_ABI: ${{ github.event.inputs.abi || 'node24-arm64-android35' }}
+      # 通道：默认 canary —— 内核推送必须先在灰度真机跑过，再提升到 stable。
+      KERNEL_CHANNEL: ${{ github.event.inputs.channel || 'canary' }}
       OTA_URL_BASE: ${{ github.event.inputs.url_base || '' }}
     steps:
       - name: Checkout container repo
@@ -198,66 +208,69 @@ jobs:
           设备只安装已签名内核，不生产内核。
           NOTES
 
-          # ── 版本前进门禁（ADR-0004 §2）────────────────────────────────────
-          # 设备端的更新判定是**版本比较**（只有比 CURRENT 新才切换指针）。
-          # 因此发布一个"不大于已发布"的版本 = 设备永远不更新，且**没有任何报错**。
-          # 用与设备端**同一规则**的比较器，避免出现两套语义。
-          LATEST="kernel-latest"
+          # ── 通道（灰度）：canary = 灰度真机验证；stable = 生产 ──────────────
+          # 为什么必须有：内核推送**必须先在灰度通道真实跑过**，否则只能靠祈祷。
+          # 设备端读 <base>/<rolling>/kernel-manifest.json，rolling = kernel-<channel>。
+          ROLL="kernel-$KERNEL_CHANNEL"
+          echo "[channel] channel=$KERNEL_CHANNEL rolling=$ROLL"
+
+          # ── 版本前进门禁（**按通道**比较）────────────────────────────────
+          # 发布一个"不大于本通道已发布"的版本 = 该通道设备永远不更新且无报错。
+          # 按通道而非全局：canary 可以领先 stable；提升(promote)到 stable 时对 stable 仍需前进。
           CUR=""
-          if gh release view "$LATEST" --repo '${{ github.repository }}' >/dev/null 2>&1; then
+          if gh release view "$ROLL" --repo '${{ github.repository }}' >/dev/null 2>&1; then
             TMPD="$(mktemp -d)"
-            if gh release download "$LATEST" -p kernel-manifest.json -O "$TMPD/m.json" --repo '${{ github.repository }}' 2>/dev/null; then
+            if gh release download "$ROLL" -p kernel-manifest.json -O "$TMPD/m.json" --repo '${{ github.repository }}' 2>/dev/null; then
               CUR="$(node -p "require('$TMPD/m.json').version || ''" 2>/dev/null || true)"
             else
-              echo "::warning title=feed 读取失败::未取到 kernel-latest 的 manifest，本次跳过版本前进检查"
+              echo "::warning title=feed 读取失败::未取到 $ROLL 的 manifest，本次跳过版本前进检查"
             fi
           fi
           if [ -n "$CUR" ]; then
-            echo "[version] 已发布内核=$CUR，本次=$KERNEL_VER"
+            echo "[version] $ROLL 已发布=$CUR，本次=$KERNEL_VER"
             node -e "const {isNewer}=require('./container/engine/src/kernel-version'); if(!isNewer(process.argv[1],process.argv[2])){process.exit(1)}" "$KERNEL_VER" "$CUR" \
-              || { echo "::error title=内核版本未前进::本次 $KERNEL_VER 不大于已发布 $CUR —— 设备端会判为「无更新」而静默失效。请递增 kernel/package.json 的 version（见 docs/adr/0004-dual-version-streams.md §2）。"; exit 1; }
+              || { echo "::error title=内核版本未前进::$ROLL 上本次 $KERNEL_VER 不大于已发布 $CUR —— 该通道设备会判为「无更新」而静默失效。请递增 kernel/package.json 的 version。"; exit 1; }
             echo "[ok] 版本前进（$CUR → $KERNEL_VER）"
           fi
 
-          # 内核版本唯一性门禁（ADR-0004 §2）：版本一经发布即冻结。
-          # 复用版本号 → 设备端版本比较判为"无更新" → **静默不生效**（与壳的 versionCode 回退同类）。
+          # ── 版本化归档（全局唯一一次）────────────────────────────────────
+          # kernel-<version> 只创建一次。**从 canary 提升到 stable 时不再重建** ——
+          # 提升是标准动作，若把"同版本第二次发布"判为错误，就无法提升。
           if gh release view "kernel-${{ env.KERNEL_VER }}" --repo '${{ github.repository }}' >/dev/null 2>&1; then
-            echo "::error title=内核版本已存在::kernel-${{ env.KERNEL_VER }} 已发布。请 bump kernel/package.json 的 version 后重发（见 docs/adr/0004-dual-version-streams.md §2）。"
-            exit 1
+            echo "[promote] kernel-${{ env.KERNEL_VER }} 已存在（灰度→生产提升），跳过归档创建"
+          else
+            gh release create "kernel-${{ env.KERNEL_VER }}" \
+              release/kernel-${{ env.KERNEL_VER }}.zip \
+              release/kernel-manifest.json \
+              release/kernel-feed-${{ env.KERNEL_VER }}.zip \
+              --title "Kernel OTA ${{ env.KERNEL_VER }}" \
+              --notes-file /tmp/notes.md
           fi
-
-          gh release create "kernel-${{ env.KERNEL_VER }}" \
-            release/kernel-${{ env.KERNEL_VER }}.zip \
-            release/kernel-manifest.json \
-            release/kernel-feed-${{ env.KERNEL_VER }}.zip \
-            --title "Kernel OTA ${{ env.KERNEL_VER }}" \
-            --notes-file /tmp/notes.md
 
           # ---- 滚动 feed：设备端只认一个**不动**的入口 ----
           # 每次发布的 tag 是 kernel-<version>，设备端不该追着版本号跑。
           # 所以额外把 manifest（+ 本次 zip）挂到一个固定 tag 上：
           #   <baseUrl>/kernel-latest/kernel-manifest.json
           # 与 apk-latest 同一个思路：版本化资产用于追溯，latest 用于稳定入口。
-          LATEST="kernel-latest"
-          if gh release view "$LATEST" --repo '${{ github.repository }}' >/dev/null 2>&1; then
-            gh release upload "$LATEST" release/kernel-manifest.json \
+          if gh release view "$ROLL" --repo '${{ github.repository }}' >/dev/null 2>&1; then
+            gh release upload "$ROLL" release/kernel-manifest.json \
               --repo '${{ github.repository }}' --clobber
-            gh release upload "$LATEST" "release/kernel-${{ env.KERNEL_VER }}.zip" \
+            gh release upload "$ROLL" "release/kernel-${{ env.KERNEL_VER }}.zip" \
               --repo '${{ github.repository }}' --clobber
-            # 清理：滚动 feed 只保留**本次**的 zip（否则会随每次发布无限堆积历史包）。
+            # 清理：通道 feed 只保留**本次**的 zip（否则会随每次发布无限堆积历史包）。
             KEEP="kernel-${{ env.KERNEL_VER }}.zip"
-            gh api "repos/${{ github.repository }}/releases/tags/$LATEST" \
+            gh api "repos/${{ github.repository }}/releases/tags/$ROLL" \
               --jq ".assets[] | select(.name | test(\"^kernel-[0-9]\")) | select(.name != \"$KEEP\") | .id" 2>/dev/null \
               | while read -r id; do
                   [ -n "$id" ] && gh api -X DELETE "repos/${{ github.repository }}/releases/assets/$id"
                 done || true
           else
-            gh release create "$LATEST" \
+            gh release create "$ROLL" \
               release/kernel-manifest.json \
               "release/kernel-${{ env.KERNEL_VER }}.zip" \
               --repo '${{ github.repository }}' \
-              --title "Kernel OTA (latest feed)" \
-              --notes "滚动内核 feed：设备端读 kernel-latest/kernel-manifest.json 判断是否有更新。"
+              --title "Kernel OTA channel $KERNEL_CHANNEL" \
+              --notes "通道 feed（$KERNEL_CHANNEL）：设备端读 $ROLL/kernel-manifest.json 判断是否有更新。"
           fi
 
 
