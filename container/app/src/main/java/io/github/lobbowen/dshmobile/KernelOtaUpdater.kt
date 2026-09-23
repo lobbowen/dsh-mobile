@@ -8,16 +8,17 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * 远端内核 OTA：启动时查一次 feed；有更新就 **下载 → 校验 → 安装**。
+ * 远端内核 OTA 的**能力本体**：查 feed → 比较版本 → （可选）下载 → 校验 → 安装。
  *
- * 为什么放在启动链、且在 spawn 之前：
- *   内核进程在后面的步骤才 spawn，此时 CURRENT 指针已确定。在这一步之前完成升级，
- *   本次启动就直接跑新内核 —— **不需要额外重启**。
+ * 触发方式（刻意如此）：
+ *   · **默认手动** —— 由内核/面板经桥方法 `build.kernelUpdate` 触发（内核侧本就有版本检测）。
+ *     `kernel-feed.json` 的 `autoCheck=false` 时启动链**不**主动检查 —— 稳定态就该没有意外动作。
+ *   · 需要"启动即自动升级"时把 `autoCheck` 置 `true`。
  *
- * 三条硬约束（每一条都是"别把开机搞死"）：
- *   1. 只查一次、全程超时、失败只落诊断 —— 离线或服务端故障必须仍能开机；
- *   2. **只升不降**（用 KernelManager 的版本比较，与本地 feed 同一套语义）；
- *   3. 下载物与本地 feed 走**同一条校验链**（KernelInstaller：验签 + sha256 + 协议兼容），
+ * 三条硬约束（都是"别把开机/调用搞死"）：
+ *   1. 全程超时（连接 5s / 读 20s）、失败只返回 Outcome、**永不抛异常**；
+ *   2. **只升不降**（复用 KernelManager 的版本比较，与本地 feed 同一语义）；
+ *   3. 下载物与本地 feed 走**同一条校验链**（KernelInstaller：验签 + sha256 + 协议兼容）——
  *      远端拿到的包不比本地文件更可信。
  */
 object KernelOtaUpdater {
@@ -29,15 +30,26 @@ object KernelOtaUpdater {
     private const val MAX_MANIFEST_BYTES = 64 * 1024
     private const val MAX_ZIP_BYTES = 32L * 1024 * 1024
 
-    data class Config(val baseUrl: String, val releaseTag: String, val manifestName: String) {
+    data class Config(
+        val baseUrl: String,
+        val releaseTag: String,
+        val manifestName: String,
+        val autoCheck: Boolean,
+    ) {
         val manifestUrl: String get() = "$baseUrl/$releaseTag/$manifestName"
         fun zipUrl(version: String) = "$baseUrl/$releaseTag/kernel-$version.zip"
     }
 
+    /**
+     * 一次检查/升级的结果。
+     * [available] 与 [updated] 必须分开："有新版本但没装"（checkOnly）与"装了"是两件事。
+     */
     data class Outcome(
         val checked: Boolean,
+        val available: Boolean,
         val updated: Boolean,
-        val version: String?,
+        val current: String?,
+        val remote: String?,
         val detail: String,
     )
 
@@ -48,37 +60,42 @@ object KernelOtaUpdater {
         val base = o.optString("baseUrl", "").trim().trimEnd('/')
         val tag = o.optString("releaseTag", "kernel-latest").trim().ifBlank { "kernel-latest" }
         val name = o.optString("manifestName", "kernel-manifest.json").trim().ifBlank { "kernel-manifest.json" }
-        if (!base.startsWith("https://")) null else Config(base, tag, name)
+        val auto = o.optBoolean("autoCheck", false)
+        if (!base.startsWith("https://")) null else Config(base, tag, name, auto)
     } catch (e: Throwable) {
         Log.w(TAG, "kernel-feed.json 不可用: ${e.message}")
         null
     }
 
     /**
-     * 查一次并（必要时）安装。**永不抛异常** —— 调用方是启动链，必须总能继续。
+     * 查一次；[checkOnly] 为 true 时**只报告不安装**。
+     * **永不抛异常** —— 调用方可能是启动链或桥方法，必须总能拿到结果。
      */
-    fun checkAndUpdate(context: Context, km: KernelManager): Outcome {
+    fun checkAndUpdate(context: Context, km: KernelManager, checkOnly: Boolean = false): Outcome {
         val cfg = loadConfig(context)
-            ?: return Outcome(false, false, null, "未配置 kernel-feed.json（远端 OTA 关闭）")
+            ?: return Outcome(false, false, false, km.currentVersion(), null, "未配置 kernel-feed.json（远端 OTA 关闭）")
 
         val current = km.currentVersion()
         val manifestText = try {
             httpGetText(cfg.manifestUrl, MAX_MANIFEST_BYTES)
         } catch (e: Throwable) {
-            return Outcome(true, false, null, "取 manifest 失败（离线或不可达）：${e::class.java.simpleName}: ${e.message}")
+            return Outcome(true, false, false, current, null, "取 manifest 失败（离线或不可达）：${e::class.java.simpleName}: ${e.message}")
         }
 
         val manifest = try {
             JSONObject(manifestText)
         } catch (e: Throwable) {
-            return Outcome(true, false, null, "manifest 不是合法 JSON：${e.message}")
+            return Outcome(true, false, false, current, null, "manifest 不是合法 JSON：${e.message}")
         }
 
         val remote = manifest.optString("version", "").trim().ifBlank { null }
-            ?: return Outcome(true, false, null, "manifest 缺 version 字段")
+            ?: return Outcome(true, false, false, current, null, "manifest 缺 version 字段")
 
         if (current != null && km.compareKernelVersions(remote, current) <= 0) {
-            return Outcome(true, false, current, "已是最新（本地 $current，远端 $remote）")
+            return Outcome(true, false, false, current, remote, "已是最新（本地 $current，远端 $remote）")
+        }
+        if (checkOnly) {
+            return Outcome(true, true, false, current, remote, "发现新版本 $remote（checkOnly：未安装）")
         }
 
         val url = manifest.optString("url", "").trim().ifBlank { cfg.zipUrl(remote) }
@@ -87,7 +104,7 @@ object KernelOtaUpdater {
             download(url, tmp)
         } catch (e: Throwable) {
             tmp.delete()
-            return Outcome(true, false, null, "下载失败（$url）：${e::class.java.simpleName}: ${e.message}")
+            return Outcome(true, true, false, current, remote, "下载失败（$url）：${e::class.java.simpleName}: ${e.message}")
         }
 
         val result = try {
@@ -97,8 +114,10 @@ object KernelOtaUpdater {
         }
         return Outcome(
             checked = true,
+            available = true,
             updated = result.ok,
-            version = result.version ?: remote,
+            current = current,
+            remote = result.version ?: remote,
             detail = result.toDiagnosticLine(),
         )
     }

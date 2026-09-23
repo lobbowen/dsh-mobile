@@ -111,6 +111,7 @@
 |---|---|---|---|
 | `build.kernelInstall` | `feed?` 或 `zipPath`/`sha256`/`version` | `kernel_update` | ✅ |
 | `build.kernelStatus` | — | `kernel_update` | ✅ |
+| `build.kernelUpdate` | `checkOnly?` | `kernel_update` | ✅ 手动触发远端检查/升级 |
 | `build.apk` | — | — | ⚠️ 废弃，返回带迁移指引的 `-32602` |
 | `build.status` | — | `kernel_update` | ✅（旧名，保留兼容） |
 

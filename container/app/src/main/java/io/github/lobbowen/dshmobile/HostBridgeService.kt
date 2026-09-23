@@ -860,6 +860,29 @@ class HostBridgeService : Service() {
                 put("feedPending", feed?.zip?.absolutePath ?: JSONObject.NULL)
             }
         },
+        // 手动触发远端内核升级 —— 内核/面板在"用户点了检查更新"时调用。
+        //
+        // 与 build.kernelInstall 的分工：
+        //   · kernelInstall —— 从**本地** feed 安装（adb 投放，离线，明确意图）；
+        //   · kernelUpdate  —— 从**远端** feed 检查/升级（联网）。
+        // 两者共用同一条校验链（KernelInstaller：验签 + sha256 + 协议兼容）。
+        //
+        // 参数：{ checkOnly?: bool } —— true 时只报告是否有更新，**不安装**（用于"检查更新"按钮）。
+        // 返回：{ checked, available, updated, current, remote, restartRequired, detail }
+        //   restartRequired=true 表示装了新内核，但正在跑的内核进程仍是旧的，需调用方重启。
+        "build.kernelUpdate" to MethodDef(listOf("kernel_update"), true) { p ->
+            val checkOnly = p.optBoolean("checkOnly", false)
+            val ota = KernelOtaUpdater.checkAndUpdate(this, KernelManager(this), checkOnly)
+            JSONObject().apply {
+                put("checked", ota.checked)
+                put("available", ota.available)
+                put("updated", ota.updated)
+                put("current", ota.current ?: JSONObject.NULL)
+                put("remote", ota.remote ?: JSONObject.NULL)
+                put("restartRequired", ota.updated)
+                put("detail", ota.detail)
+            }
+        },
         // 保留旧名以兼容存量调用方，但指向内核安装（语义已修正）。
         "build.apk" to MethodDef(listOf("kernel_update"), true) { p ->
             throw BridgeError(

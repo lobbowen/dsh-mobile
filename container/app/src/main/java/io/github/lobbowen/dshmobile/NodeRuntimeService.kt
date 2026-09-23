@@ -252,20 +252,26 @@ class NodeRuntimeService : Service() {
             // 为什么必须在 spawn **之前**：升级完成后 CURRENT 已指向新内核，
             // 本次启动就直接跑新版，**不需要额外重启**。
             // 失败只落诊断 —— 离线/服务端故障时开机流程必须照常走完。
-            try {
-                val ota = KernelOtaUpdater.checkAndUpdate(this, km)
-                if (ota.checked) {
+            // 默认**手动**触发（由内核经桥方法 build.kernelUpdate 调起）；
+            // 只有 kernel-feed.json 里 autoCheck=true 时才在启动链主动检查 ——
+            // 稳定态不该有意外动作。
+            val otaCfg = KernelOtaUpdater.loadConfig(this)
+            if (otaCfg != null && otaCfg.autoCheck) {
+                try {
+                    val ota = KernelOtaUpdater.checkAndUpdate(this, km)
+                    if (ota.checked) {
+                        RuntimeDiagnostics.append(
+                            this, "kernel-ota", ota.updated,
+                            if (ota.updated) "启动自动升级内核到 ${ota.remote}" else "启动内核检查完成（无更新）",
+                            ota.detail
+                        )
+                    }
+                } catch (e: Throwable) {
                     RuntimeDiagnostics.append(
-                        this, "kernel-ota", ota.updated,
-                        if (ota.updated) "远端内核已升级到 ${ota.version}" else "远端内核检查完成（无更新）",
-                        ota.detail
+                        this, "kernel-ota", false, "启动内核检查异常",
+                        "${e::class.java.simpleName}: ${e.message}"
                     )
                 }
-            } catch (e: Throwable) {
-                RuntimeDiagnostics.append(
-                    this, "kernel-ota", false, "远端内核检查异常",
-                    "${e::class.java.simpleName}: ${e.message}"
-                )
             }
 
             // 0c) 内置基线兜底（含完整验签，见 KernelManager.ensureBaseline 注释）
