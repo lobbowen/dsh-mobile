@@ -91,6 +91,32 @@ function probeNative(entry) {
   fs.rmSync(contractFile, { force: true });
   check('S3 无契约 → dshCliInvocation 退回 null（PC 逐字不变）', nm.dshCliInvocation() === null);
 
+  // ── S3b 覆盖安装自愈（真机 2026-09-23：/data/app 随机段目录随重装消失，
+  //    持久化 command[0] 变死路径 → ENOENT 60s 冷静期死循环）──
+  const staleSo = path.join(TMP, 'dead-install-SvdHit', 'lib', 'arm64', 'libnode.so');
+  const liveSo = path.join(TMP, 'live-install-gf2ok', 'lib', 'arm64', 'libnode.so');
+  fs.mkdirSync(path.dirname(liveSo), { recursive: true }); fs.writeFileSync(liveSo, '#!/x');
+  const persisted = [];
+  const evb = [];
+  const mkb = (cmd) => new NativeManager({ config: { command: cmd, packageName: '@deepseek-ai/dsh', targetPort: 3080 }, logger: { info() {}, warn() {}, error() {} }, events: { append: (n, d) => evb.push({ n, d }) }, stateDir: path.join(TMP, 'state3b'), persistCommand: (p) => persisted.push(JSON.parse(JSON.stringify(p))) });
+  const nmPc = mkb([staleSo, flat, 'web', '--no-open']);
+  check('S3b 无契约（PC）→ 绝不改命令', nmPc.repairLaunchNodePath() === false && nmPc.config.command[0] === staleSo && persisted.length === 0);
+  writeContract(); // nodePath = process.execPath（存在）
+  const nm1 = mkb([staleSo, flat, 'web', '--no-open']);
+  check('S3b 死绝对路径 + 契约 nodePath 在场 → 修复+回写+记事件', nm1.repairLaunchNodePath() === true && nm1.config.command[0] === process.execPath && persisted.length === 1 && JSON.stringify(persisted[0].command) === JSON.stringify([process.execPath, flat, 'web', '--no-open']) && evb.some((e) => e.n === 'native_launch_node_repaired' && e.d.from === staleSo && e.d.to === process.execPath), JSON.stringify(evb.map((e) => e.n)));
+  check('S3b 二次调用幂等（路径已存活）', nm1.repairLaunchNodePath() === false && persisted.length === 1);
+  const nm2 = mkb(['node', 'dsh', 'web']);
+  check('S3b 裸名/相对命令（PC 模板）不动', nm2.repairLaunchNodePath() === false && nm2.config.command[0] === 'node');
+  const nm3 = mkb([liveSo, flat, 'web', '--no-open']);
+  check('S3b command[0] 仍存在 → 不动', nm3.repairLaunchNodePath() === false && nm3.config.command[0] === liveSo);
+  const nm4 = mkb([staleSo, flat, 'web', '--no-open']);
+  fs.writeFileSync(contractFile, JSON.stringify({ schema: 2, nodePath: staleSo, npmEntry: npmEntryFile, nodeBinDir: path.dirname(process.execPath) }));
+  nm4.repairLaunchNodePath();
+  check('S3b 契约 nodePath 也失效 → 回退 process.execPath（本进程镜像即容器实际解释器）', nm4.config.command[0] === process.execPath);
+  writeContract();
+  check('S3b dshCliInvocation 消费前同批自愈', (() => { const nm5 = mkb([staleSo, flat, 'web', '--no-open']); const i5 = nm5.dshCliInvocation(); return i5 && i5.bin === process.execPath && nm5.config.command[0] === process.execPath; })());
+  fs.rmSync(contractFile, { force: true });
+
   // ── S4 Supervisor._startProcess：spawn 前自愈 + flag 注入（makeFake 形态）──
   const realErr = process.stderr.write.bind(process.stderr);
   process.stderr.write = (chunk, ...rest) => (String(chunk).startsWith('[stderr]') ? true : realErr(chunk, ...rest));

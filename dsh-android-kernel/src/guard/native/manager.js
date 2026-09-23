@@ -260,6 +260,31 @@ class NativeManager {
   }
 
   /* ═══════ 启动命令写回 + dsh CLI 调用形态（安卓容器）═══════ */
+  /** 覆盖安装自愈：config.command[0] 若是指向 /data/app 随机段的绝对 libnode.so，
+   *  覆盖安装后该目录整体消失（实测 2026-09-23：spawn pid=undefined + ENOENT，
+   *  60s 冷静期无限循环，面板永不可用）。runtime.json 契约由容器每次启动前用当前
+   *  安装路径重写（NodeRuntimeService.writeRuntimeJson）⇒ 契约在场且其 nodePath
+   *  存在、而 command[0] 不存在时，用契约值修复并回写。
+   *  门控与 _applyLaunchCommand 相同（npmEntry 在场=容器形态）；PC 逐字不变。
+   *  脚本入口 cmd[1] 在 filesDir（覆盖安装保留），不随随机段失效，故不修。 */
+  repairLaunchNodePath() {
+    try {
+      const c = runtimeContract.read();
+      if (!c || !c.npmEntry) return false;
+      const cmd = this.config.command;
+      if (!Array.isArray(cmd) || !cmd[0] || !path.isAbsolute(String(cmd[0]))) return false;
+      if (fs.existsSync(String(cmd[0]))) return false;
+      const fresh = c.nodePath && fs.existsSync(c.nodePath) ? c.nodePath : process.execPath;
+      if (fresh === cmd[0]) return false;
+      const prev = cmd.slice();
+      cmd[0] = fresh;
+      if (this.persistCommand) this.persistCommand({ command: cmd.slice() });
+      if (this.events) this.events.append('native_launch_node_repaired', { from: prev[0], to: fresh });
+      this.logger.info && this.logger.info('启动 node 路径已随覆盖安装自愈: ' + prev[0] + ' → ' + fresh);
+      return true;
+    } catch { return false; }
+  }
+
   /** 安装/升级/回滚成功后把 config.command 落为**绝对形态**：
    * [契约 node（libnode.so）, <npmRoot>/<pkg> 的 bin 入口脚本绝对路径, 'web', '--no-open']
    * --no-open：dsh web 启动后会 spawn xdg-open/open 打开默认浏览器 —— 安卓无此命令，
@@ -299,6 +324,8 @@ class NativeManager {
     try {
       const c = runtimeContract.read();
       if (!c || !c.npmEntry) return null;
+      // 消费侧同样先自愈：本方法可能在首次 spawn 修复前被插件域调用。
+      this.repairLaunchNodePath();
       const cmd = (this.config && this.config.command) || [];
       const entry = String(cmd[1] || '');
       if (cmd.length >= 2 && entry.endsWith('.js') && fs.existsSync(entry)) {

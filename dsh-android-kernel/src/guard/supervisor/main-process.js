@@ -91,6 +91,11 @@ class MainProcess {
     try {
       const c = runtimeContract.read();
       if (!c || !c.npmEntry) return command;
+      // 覆盖安装后 /data/app 随机段目录消失 → 持久化 command[0] 失效（ENOENT 冷静期
+      // 死循环，真机 2026-09-23）。契约是容器每次启动前重写的当前事实源，据此自愈。
+      if (this.nativeManager && typeof this.nativeManager.repairLaunchNodePath === 'function') {
+        this.nativeManager.repairLaunchNodePath();
+      }
       if (this.nativeManager && typeof this.nativeManager.ensureRequireBuiltinShim === 'function') {
         this.nativeManager.ensureRequireBuiltinShim();
       }
