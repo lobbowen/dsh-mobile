@@ -49,6 +49,15 @@ jobs:
           node scripts/gen-native-assets.js
           git diff --exit-code -- .github/native-assets.txt
 
+      - name: Gate — version manifest is generated from the sources
+        # 各层版本（壳/引擎/内核/UI/运行时）必须与 .github/version-manifest.json 一致；
+        # 漂移 → 直接红，迫使评审看到"这次动了哪个版本"。
+        working-directory: .
+        run: |
+          set -euo pipefail
+          node scripts/gen-version.js
+          git diff --exit-code -- .github/version-manifest.json
+
       - name: Container engine tests (logic)
         run: |
           set -euo pipefail

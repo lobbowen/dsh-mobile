@@ -1,0 +1,7 @@
+{
+  "$comment": "壳（APK）分发身份的单一事实源。规则见 docs/runbook/versioning.md；改这里 → CI 的 gen-version 门禁会同步 .github/version-manifest.json。",
+  "shell": {
+    "versionName": "0.2.0",
+    "versionCode": 2
+  }
+}

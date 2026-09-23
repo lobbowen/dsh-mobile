@@ -20,14 +20,25 @@ android {
     compileSdk = 35
     buildToolsVersion = "35.0.0"
 
+    // =========================================================================
+    // 版本单一事实源：仓根 version.json（规则见 docs/runbook/versioning.md）
+    // =========================================================================
+    // 为什么不写死在 build 脚本里：versionCode/versionName 是**分发身份**，必须与
+    // 内核 / 引擎 / UI / 运行时 的版本一起被审计；散落在这里既看不全，也拦不住漏 bump。
+    // 用 Groovy 的 JsonSlurper 解析（Gradle 自带 Groovy 运行时，无需额外依赖）。
+    val verJson = groovy.json.JsonSlurper().parse(rootProject.file("version.json")) as Map<*, *>
+    val shellVer = verJson["shell"] as Map<*, *>
+    val appVersionName = shellVer["versionName"] as String
+    val appVersionCode = (shellVer["versionCode"] as Number).toInt()
+
     defaultConfig {
         applicationId = "io.github.lobbowen.dshmobile"
         minSdk = 24
         // targetSdk 决定 SELinux 域：28 落在 untrusted_app_27，允许 exec app home。
         // 取舍与依据见 docs/ADR-001；link(2) 不在此豁免内，走自有原语。
         targetSdk = 28
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
         // 当前仅支持 arm64-v8a（bionic 链接的 Node 二进制只编这个 ABI）。
         // 需要 32 位设备时，扩展 build-node-android.sh 增加 armeabi-v7a 产物即可。
         ndk {

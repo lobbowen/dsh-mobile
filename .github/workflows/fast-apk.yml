@@ -785,8 +785,12 @@ jobs:
           set -euo pipefail
           APK="$(find container/app/build/outputs/apk/debug -name '*.apk' -type f | head -1)"
           TAG="apk-latest"
+          VN="$(node -p "require('./version.json').shell.versionName")"
+          VC="$(node -p "require('./version.json').shell.versionCode")"
+          VAPK="app-debug-${VN}+${VC}.apk"
+          echo "[version] 本次发布 $VN (versionCode=$VC) → $VAPK"
 
-          # 固定 tag、每轮覆盖：下载网址稳定，不必每轮去查新地址。
+          # 固定 tag、每轮覆盖：latest 下载网址稳定。
           if gh release view "$TAG" --repo '${{ github.repository }}' >/dev/null 2>&1; then
             echo "Release $TAG 已存在，覆盖资产。"
           else
@@ -796,18 +800,53 @@ jobs:
               --notes "Android 原生 Node 容器 APK（由 fast-apk 构建，运行时来自 ${{ env.runtime-tag }}）。"
           fi
 
-          # 覆盖上传。--clobber 在「同名资产记录在、但后端对象孤立/损坏」时会 404
-          # （2026-09-23 实证：Release 在、asset 按 id 访问 404 → clobber 必失败）。
-          # 故失败时回退为「按名字删资产再上传」；两条路都失败才红。
-          if ! gh release upload "$TAG" "$APK#app-debug.apk" --repo '${{ github.repository }}' --clobber; then
-            echo "::warning title=clobber 失败::回退为按名字删资产后重传"
-            gh api "repos/${{ github.repository }}/releases/tags/$TAG" \
-              --jq '.assets[] | select(.name=="app-debug.apk") | .id' 2>/dev/null \
-              | while read -r id; do
-                  [ -n "$id" ] && gh api -X DELETE "repos/${{ github.repository }}/releases/assets/$id"
-                done || true
-            gh release upload "$TAG" "$APK#app-debug.apk" --repo '${{ github.repository }}'
+          # ── versionCode 单调门禁 ──────────────────────────────────────────────
+          # 为什么必须拦：versionCode 回退 = 已升级的设备**永远收不到**新版本，
+          # 且不可逆（只能卸载重装）。宁可发不出去，也不能发一个"更旧"的号。
+          PREV="$(mktemp)"
+          if gh release download "$TAG" -p version.json -O "$PREV" --repo '${{ github.repository }}' 2>/dev/null; then
+            PVC="$(node -p "require('$PREV').shell.versionCode" 2>/dev/null || echo 0)"
+            echo "[version] 已发布 versionCode=$PVC，本次=$VC"
+            if [ "$VC" -lt "$PVC" ]; then
+              echo "::error title=versionCode 回退::本次 $VC < 已发布 $PVC —— 已升级的设备将永远收不到新版本。请 bump version.json 的 shell.versionCode（见 docs/runbook/versioning.md）。"
+              exit 1
+            fi
+            if [ "$VC" -eq "$PVC" ]; then
+              echo "[version] 同版本重发（versionCode=$VC，latest 滚动通道允许）"
+            fi
+          else
+            echo "[version] 未发现已发布的 version.json（首次带版本发布，跳过单调性检查）"
           fi
+
+          # ── 覆盖上传（含孤立资产回退）────────────────────────────────────────
+          # 注意：gh 的 `file#label` 里 # 后面是 **label**，资产名取 file 的 basename。
+          # 所以"版本化资产名"必须靠**先改名再上传**实现，不能写进 # 后面。
+          #
+          # --clobber 在「同名资产记录在、但后端对象孤立/损坏」时会 404
+          # （2026-09-23 实证：Release 在、asset 按 id 访问 404 → clobber 必失败）。
+          upload() {
+            local src="$1"
+            local name
+            name="$(basename "$src")"
+            if ! gh release upload "$TAG" "$src" --repo '${{ github.repository }}' --clobber; then
+              echo "::warning title=clobber 失败::回退为按名字删资产后重传（$name）"
+              gh api "repos/${{ github.repository }}/releases/tags/$TAG" \
+                --jq ".assets[] | select(.name==\"$name\") | .id" 2>/dev/null \
+                | while read -r id; do
+                    [ -n "$id" ] && gh api -X DELETE "repos/${{ github.repository }}/releases/assets/$id"
+                  done || true
+              gh release upload "$TAG" "$src" --repo '${{ github.repository }}'
+            fi
+          }
+
+          VDIR="$(mktemp -d)"
+          cp "$APK" "$VDIR/$VAPK"
+
+          upload "$APK"            # 稳定别名 → app-debug.apk（latest 地址永久不变）
+          upload "$VDIR/$VAPK"     # 版本化   → app-debug-<versionName>+<versionCode>.apk
+          upload "version.json"    # 版本清单 → version.json（下次发布的单调性输入）
+
+          rm -rf "$VDIR"
 
           echo
           echo "=== 已发布 ==="
@@ -815,7 +854,8 @@ jobs:
             --jq '.assets[] | "  \(.name)  \(.size) 字节  digest=\(.digest // "n/a")"'
           echo
           echo "下载地址:"
-          echo "https://github.com/${{ github.repository }}/releases/download/${TAG}/app-debug.apk"
+          echo "  https://github.com/${{ github.repository }}/releases/download/${TAG}/app-debug.apk   （latest 别名）"
+          echo "  https://github.com/${{ github.repository }}/releases/download/${TAG}/${VAPK}   （版本化）"
 
       - name: Report to ci-ok
         if: success()
