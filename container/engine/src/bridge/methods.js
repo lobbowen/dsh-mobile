@@ -72,9 +72,9 @@ const METHODS = {
   'fs.list':              { group: 'storage', caps: ['manage_external_storage'] },
   'fs.mkdir':             { group: 'storage', caps: ['manage_external_storage'], audit: true },
 
+  // 内核**安装/升级的唯一入口**，且只从 OTA 源（ADR-0005）。参数 { checkOnly? }。
   'build.kernelInstall':  { group: 'build', caps: ['kernel_update'], audit: true },
   'build.kernelStatus':   { group: 'build', caps: ['kernel_update'] },
-  'build.kernelUpdate':   { group: 'build', caps: ['kernel_update'], audit: true },   // 手动触发远端检查/升级
   // 旧名保留但语义已修正：不再是"编 APK"，而是内核安装。
   // 保留它们是为了让存量内核的调用不会突然变成 METHOD_NOT_FOUND（-32601），
   // 而是拿到一个**带解释的错误**（-32602 + 迁移指引）。

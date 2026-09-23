@@ -109,9 +109,8 @@
 ### 3.6 build（内核安装 —— **不是**编译）
 | 方法 | 参数 | 依赖 | 落地 |
 |---|---|---|---|
-| `build.kernelInstall` | `feed?` 或 `zipPath`/`sha256`/`version` | `kernel_update` | ✅ |
+| `build.kernelInstall` | `checkOnly?` | `kernel_update` | ✅ **唯一入口**：从 OTA 源安装/升级 |
 | `build.kernelStatus` | — | `kernel_update` | ✅ |
-| `build.kernelUpdate` | `checkOnly?` | `kernel_update` | ✅ 手动触发远端检查/升级 |
 | `build.apk` | — | — | ⚠️ 废弃，返回带迁移指引的 `-32602` |
 | `build.status` | — | `kernel_update` | ✅（旧名，保留兼容） |
 
@@ -120,42 +119,39 @@
 > 解包实为 x86-64 + glibc，exec 四道关的后三关装机后无法补救。
 > 完整论证见 [ARCHITECTURE.md §2.2–2.3](ARCHITECTURE.md)。
 >
-> 现在的语义是「**从本地 feed 安装已签名内核**」：设备不生产内核，只安装。
-> 全程离线，不需要网络、不需要 PC、不需要新原生二进制。
+> 现在的语义是「**从 OTA 源安装/升级已签名内核**」（ADR-0005）：设备不生产内核，只安装。
+> **来源只有一个**（远端 feed）—— 本地 feed 与 APK 内置基线已收敛删除：
+> 来源一多就会出现多份"安装语义"，且其中任何一条都能**绕过版本下限**。
 > 验签由 Node 侧完成（Android 要 API 33+ 才有 Ed25519，而 minSdk=24）。
 
 **`build.kernelInstall` 请求 / 响应：**
 
 ```jsonc
-// 方式一：扫本地 feed 目录并安装
-{ "method": "build.kernelInstall", "params": { "feed": true } }
+// 只检查（不下载、不安装）—— "检查更新"用
+{ "method": "build.kernelInstall", "params": { "checkOnly": true } }
 
-// 方式二：指定包路径（可附锚点）
-{ "method": "build.kernelInstall",
-  "params": { "zipPath": "/sdcard/dsh/downloads/k1.zip",
-              "sha256": "e8586375...", "version": "0.1.0-android.1" } }
+// 安装或升级到 feed 上的最新版
+{ "method": "build.kernelInstall", "params": {} }
 ```
 
 ```jsonc
-// 成功
-{ "result": {
-    "ok": true,
-    "version": "0.1.0-android.1",
-    "source": "本地文件 feed",
-    "reason": null,
-    "detail": "已落盘并切换指针: /data/.../files/kernel/0.1.0-android.1",
-    "verifierOutput": "[verify] ed25519 验签通过\nDSH_VERIFY_RESULT {...}",
-    "restartRequired": true
-} }
+// 检查：发现新版本但**未安装**（available 与 updated 必须分开报）
+{ "result": { "ok": true, "checked": true, "available": true, "updated": false,
+              "current": "0.1.0-android.11", "version": "0.2.0",
+              "source": "远端 OTA", "restartRequired": false,
+              "detail": "发现新版本 0.2.0（checkOnly：未安装）" } }
+
+// 安装成功
+{ "result": { "ok": true, "checked": true, "available": true, "updated": true,
+              "current": "0.1.0-android.11", "version": "0.2.0",
+              "source": "远端 OTA", "restartRequired": true,
+              "detail": "内核 0.2.0 已安装" } }
 
 // 失败（**不抛错，返回结构化结果** —— 便于调用方区分"可重试"与"包有问题"）
-{ "result": {
-    "ok": false,
-    "version": null,
-    "reason": "signature-invalid",
-    "detail": "ed25519 验签未通过（公钥 /data/.../files/ota-public.pem）",
-    "restartRequired": false
-} }
+{ "result": { "ok": false, "checked": true, "available": true, "updated": false,
+              "current": "0.1.0-android.11", "version": "0.2.0",
+              "source": "远端 OTA", "restartRequired": false,
+              "detail": "下载失败（https://...）：HTTP 404" } }
 ```
 
 > **失败绝不破坏现状**：校验在解包**之前**发生，失败时不碰任何已有文件。
@@ -164,14 +160,11 @@
 > **`restartRequired` 刻意由调用方处理**：本方法**不**自己重启进程 ——
 > 重启会让调用方（内核自己）在半途消失，无法收到回执。
 
-**feed 目录约定**（`LocalKernelFeed` 扫描顺序）：
+**channel（通道）约定**：设备读 `<baseUrl>/<rolling>/kernel-manifest.json`，
+其中 `rolling = kernel-<channel>`，通道由 `container/app/src/main/assets/kernel-feed.json` 的
+`channel` 决定（`canary` 灰度 / `stable` 生产）。完整链路见 [kernel-ota.md](../runbook/kernel-ota.md)。
 
-| 优先级 | 路径 | 说明 |
-|---|---|---|
-| 1 | `<externalFilesDir>/kernel-feed/` | 应用专属外部目录，**无需任何权限**，保底可用 |
-| 2 | `/sdcard/dsh/kernel-feed/` | 可直接 `adb push` / 文件管理器投递 |
-
-目录内：`kernel-*.zip`（候选包，必须带 ed25519 签名）+ 可选 `kernel-manifest.json`（提供 sha256/version 锚点）。多个候选时取**文件名倒序**第一个，装成功后自动清理。
+本地 feed 与 APK 内置基线已于 **ADR-0005** 收敛删除；`build.kernelInstall` 是唯一安装入口。
 
 ### 3.7 notification（通知）
 | 方法 | 参数 | 依赖 | 落地 |

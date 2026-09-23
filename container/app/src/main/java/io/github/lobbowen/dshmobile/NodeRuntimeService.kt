@@ -209,45 +209,13 @@ class NodeRuntimeService : Service() {
 
             // ---- 0) 内核版本指针 ----
             //
-            // 顺序是刻意设计的，每一步解决不同的失败模式：
+            // 顺序是刻意设计的（ADR-0005：内核**只**来自 OTA）：
             // 0a) 已有内核 → 直接用（最常见路径，零额外开销）
-            // 0b) 无内核 → 尝试本地 feed（A'' 自举：用户把新包放到 /sdcard）
-            // 0c) 仍无内核 → 落到 APK 内置基线（无网首启的兜底）
-            // 0d) 都没有 → 回落探针模式，并把「缺基线」记为构建缺陷
-            //
-            // 为什么本地 feed 优先于内置基线：本地 feed 意味着"有人明确要装这个版本"，
-            // 意图比"用出厂版本"更强；而基线只是"什么都没有时的兜底"。反过来的话，
-            // 用户放的新包会被出厂版本一直压着，表现为"放了包没反应"。
+            // 0b) OTA      → CURRENT 缺失则**首次安装**；存在则按需**升级**
+            // 0c) 仍无内核 → 回落探针模式（把"未安装"如实记为状态，不伪造内核）
             val km = KernelManager(this)
 
-            // 0b) 本地 feed：设备上（/sdcard 等）若有 kernel-<ver>.zip + manifest，就地升级。
-            // 这是 A'' 自举的落点 —— 全程离线、不依赖网络与 PC。
-            // 不再限定 CURRENT 缺失：feed 的语义就是「有人明确要装这个版本」（见类注释
-            // 「放了包没反应」），旧门禁把它退化成只有首启兜底才生效。
-            val feed = LocalKernelFeed.scan(this)
-            if (feed != null) {
-                RuntimeDiagnostics.append(
-                    this, "kernel-feed", true, "发现本地内核 feed",
-                    "zip=${feed.zip.absolutePath}（${feed.zip.length()} 字节）, manifest=${feed.manifest?.absolutePath ?: "(无)"}"
-                )
-                val feedResult = KernelInstaller.install(
-                    context = this,
-                    zip = feed.zip,
-                    manifest = feed.manifestJson,
-                    source = KernelInstaller.Source.LOCAL_FILE,
-                )
-                // 类契约：装成功即消费（删除 feed 包），避免每次开机重复安装同一包；
-                // 失败保留，下次开机照常重试。
-                if (feedResult.ok) LocalKernelFeed.consume(feed)
-                RuntimeDiagnostics.append(
-                    this, "kernel-feed",
-                    feedResult.ok,
-                    if (feedResult.ok) "本地 feed 内核已安装" else "本地 feed 内核未生效",
-                    "${feedResult.toDiagnosticLine()}\n校验器输出:\n${feedResult.nodeVerifyOutput.take(1200)}"
-                )
-            }
-
-            // 0b.5) 远端内核 OTA：查一次 feed，有更新就自动升级。
+            // 0b) 远端内核 OTA：查一次 feed，有更新就自动升级。
             //
             // 为什么必须在 spawn **之前**：升级完成后 CURRENT 已指向新内核，
             // 本次启动就直接跑新版，**不需要额外重启**。

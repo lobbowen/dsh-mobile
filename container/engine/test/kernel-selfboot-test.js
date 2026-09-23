@@ -444,29 +444,30 @@ check('build 组不再依赖永不具备的 build_chain',
 check('kernel_update 在 DEVICE_CAPS 里', methods.DEVICE_CAPS.includes('kernel_update'));
 check('build.apk 仍可解析（老调用方拿到带解释的错误而非 -32601）',
   methods.methodCaps('build.apk') !== null);
+// ADR-0005：内核安装**只有一个入口**（本地 feed 与内置基线已收敛掉）。
+check('不存在第二个安装入口 build.kernelUpdate', methods.METHODS['build.kernelUpdate'] === undefined);
 
-// 校验器契约：Kotlin 侧约定的前缀必须与 JS 一致
-const KOTLIN_VERIFIER = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'com', 'example', 'nodecontainer', 'NodeKernelVerifier.kt');
+// 校验器契约：Kotlin 侧约定的前缀必须与 JS 一致。
+//
+// ⚠ 这里曾经是**分段字符串**拼路径（'com','example','nodecontainer'）—— 包名改成
+// io.github.lobbowen.dshmobile 后，existsSync 变 false，下面的断言就被**静默跳过**了。
+// 所以现在把"文件必须存在"本身也作为一条断言：静默跳过 = 红。
+const KT_DIR = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'io', 'github', 'lobbowen', 'dshmobile');
+const KOTLIN_VERIFIER = path.join(KT_DIR, 'NodeKernelVerifier.kt');
+check('Kotlin 校验器文件存在（路径必须与包名一致）', fs.existsSync(KOTLIN_VERIFIER));
 if (fs.existsSync(KOTLIN_VERIFIER)) {
   const kt = fs.readFileSync(KOTLIN_VERIFIER, 'utf8');
   check('Kotlin 侧结果前缀与 JS 一致', kt.includes('DSH_VERIFY_RESULT '));
-  check('Kotlin 侧引用 kernel-verify.js 资产',
-    kt.includes('kernel-verify.js') || fs.readFileSync(
-      path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'com', 'example', 'nodecontainer', 'NodeProvisioner.kt'), 'utf8'
-    ).includes('kernel-verify.js'));
+  check('Kotlin 侧引用 kernel-verify.js 资产', kt.includes('kernel-verify.js'));
 }
+// ADR-0005：本地 feed 路径已删除，源码不得复现
+check('LocalKernelFeed 已删除', !fs.existsSync(path.join(KT_DIR, 'LocalKernelFeed.kt')));
 
-// feed 目录约定（LocalKernelFeed）必须与文档/脚本一致
-const FEED_KT = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'com', 'example', 'nodecontainer', 'LocalKernelFeed.kt');
-if (fs.existsSync(FEED_KT)) {
-  const fk = fs.readFileSync(FEED_KT, 'utf8');
-  check('feed 目录名约定为 kernel-feed', fk.includes('"kernel-feed"'));
-  check('feed 包名前缀约定为 kernel-', fk.includes('"kernel-"'));
-  check('feed manifest 名约定为 kernel-manifest.json', fk.includes('kernel-manifest.json'));
-}
-
-// KernelInstaller 必须复用 Node 校验器（不能自己验签）
-const INSTALLER_KT = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'com', 'example', 'nodecontainer', 'KernelInstaller.kt');
+// KernelInstaller 必须复用 Node 校验器（不能自己验签）。
+// ⚠ 同上：这里的路径也是分段拼接的 —— 包名变更后曾失配，断言被静默跳过。
+// 因此把"文件存在"本身也断言出来：静默跳过 = 红。
+const INSTALLER_KT = path.join(KT_DIR, 'KernelInstaller.kt');
+check('KernelInstaller.kt 存在（包名与路径一致）', fs.existsSync(INSTALLER_KT));
 if (fs.existsSync(INSTALLER_KT)) {
   const ik = fs.readFileSync(INSTALLER_KT, 'utf8');
   check('KernelInstaller 调用 NodeKernelVerifier', ik.includes('NodeKernelVerifier.verify'));

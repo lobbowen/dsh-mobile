@@ -132,20 +132,22 @@ class BridgeServer {
       // 注意与旧 mock 的区别：旧的是"提交编译任务 → 返回 job id → 轮询"，
       // 新的**同步返回结果**。因为内核安装本身是秒级操作（验签 + 解包 + 改名），
       // 不像编译要几十分钟。为它引入任务队列只会增加状态而没有任何收益。
+      // ADR-0005：内核安装/升级**唯一入口**，只走 OTA 源。
       case 'build.kernelInstall': return {
         ok: true,
+        checked: true,
+        available: true,
+        updated: !params.checkOnly,
+        current: null,
         version: '0.1.0-android.1',
-        source: params.feed ? 'APK 内置基线' : '本地文件 feed',
-        reason: null,
+        source: '远端 OTA',
         detail: '已落盘并切换指针',
-        verifierOutput: 'DSH_VERIFY_RESULT {"ok":true,...}',
-        restartRequired: true,
+        restartRequired: !params.checkOnly,
       };
       case 'build.kernelStatus': return {
         current: '0.1.0-android.1',
         installed: ['0.1.0-android.1'],
         integrity: [],
-        feedPending: null,
       };
       // 旧名：返回**带解释的错误**而不是静默失败，便于存量调用方迁移。
       case 'build.status': return { current: '0.1.0-android.1', installed: ['0.1.0-android.1'] };
