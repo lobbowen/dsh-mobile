@@ -275,4 +275,26 @@ jobs:
               --notes "通道 feed（$KERNEL_CHANNEL）：设备端读 $ROLL/kernel-manifest.json 判断是否有更新。"
           fi
 
+      - name: Publish to Qiniu (the channel devices actually read)
+        # 为什么必须有这一步：**GitHub 在目标网络不可达**（实测 github.com / raw.githubusercontent.com
+        # 均失败），所以 Release 只能当**归档**，设备端真正读的是对象存储。
+        # 缺配置就**硬失败** —— 发一个设备读不到的包，等于假装发布成功。
+        if: ${{ github.event.inputs.publish == 'true' || startsWith(github.ref, 'refs/tags/kernel-ota-') }}
+        env:
+          QINIU_AK: ${{ secrets.QINIU_AK }}
+          QINIU_SK: ${{ secrets.QINIU_SK }}
+          QINIU_BUCKET: ${{ secrets.QINIU_BUCKET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${QINIU_AK:-}" ] || [ -z "${QINIU_SK:-}" ] || [ -z "${QINIU_BUCKET:-}" ]; then
+            echo "::error title=对象存储未配置::需要 secrets QINIU_AK / QINIU_SK / QINIU_BUCKET。设备端只从对象存储取内核（GitHub 在目标网络不可达，已实测）。"
+            exit 1
+          fi
+          CH="kernel-$KERNEL_CHANNEL"
+          # manifest 短缓存（否则设备永远读到旧 manifest，表现为"发了没更新"）；
+          # 内核包长缓存（文件名带版本号，内容不可变）。
+          node scripts/upload-qiniu.js release/kernel-manifest.json "$CH/kernel-manifest.json" --cache-control=60
+          node scripts/upload-qiniu.js "release/kernel-$KERNEL_VER.zip" "$CH/kernel-$KERNEL_VER.zip" --cache-control=31536000
+          echo "[qiniu] 通道 $CH 已更新：$KERNEL_VER"
+
 
