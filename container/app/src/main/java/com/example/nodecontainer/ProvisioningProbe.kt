@@ -12,6 +12,7 @@ import androidx.core.content.ContextCompat
 import com.example.nodecontainer.permissions.LifecycleChecks
 import com.example.nodecontainer.permissions.PermissionCatalog
 import com.example.nodecontainer.permissions.PermissionCenter
+import com.example.nodecontainer.shizuku.ShizukuShell
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -148,54 +149,36 @@ object ProvisioningProbe {
      * `shell.exec` 仍以**应用 uid** 执行（privileged=false），不会冒充 shell uid(2000)。
      * 真正的特权 shell 需要 Shizuku SDK 的 `Shell.newProcess(...)` 通道。
      */
-    private fun checkShizuku(ctx: Context): ProbeResult {
-        // ① 是否安装（包存在性）
+    private fun checkShizuku(ctx: Context): ProbeResult {  // ADR-0003：Shizuku 为必备能力
+        // ① 是否安装（包存在性）—— 仅用于把"没装"与"装了没启动"分开
         val installedVersion = try {
             @Suppress("DEPRECATION")
             val pi = ctx.packageManager.getPackageInfo("moe.shizuku.privileged.api", 0)
             pi.versionName ?: "unknown"
         } catch (_: Throwable) { null }
 
-        // ② 守护进程是否在跑（binder 服务名固定为 "shizuku"）
-        val binderAlive = try {
-            Class.forName("android.os.ServiceManager")
-                .getMethod("getService", String::class.java)
-                .invoke(null, "shizuku") != null
-        } catch (_: Throwable) { false }
+        // ②/③ 走真实 SDK：binder 是否在 + 是否已授权本应用（不再反射 ServiceManager / 猜设置键名）
+        val binderAlive = ShizukuShell.binderAlive()
+        val granted = ShizukuShell.permissionGranted()
+        val ok = binderAlive && granted
 
-        // ③ 是否已授权本应用。
-        // Shizuku 的授权记录存在 Settings.Secure 的 "shizuku_authorized_packages" 之类字段上，
-        // 不同版本键名不一致；稳妥做法是「binder 在跑 + 本包已安装」即视为可尝试授权，
-        // 这里额外读一次常见键做增强判断，读不到不影响主判定。
-        val authedPkgs = try {
-            Settings.Secure.getString(ctx.contentResolver, "shizuku_authorized_packages") ?: ""
-        } catch (_: Throwable) { "" }
-        val selfAuthorized = authedPkgs.contains(ctx.packageName)
-
-        val ok = binderAlive
         val status = when {
-            binderAlive && selfAuthorized -> "已授权且守护进程在跑"
-            binderAlive -> "守护进程在跑（本应用可能尚未授权）"
+            ok -> "已授权且守护进程在跑"
+            binderAlive -> "守护进程在跑，但本应用尚未授权"
             installedVersion != null -> "已安装 v$installedVersion 但守护进程未启动"
             else -> "未安装"
         }
 
         val hint = when {
-            !ok && installedVersion == null ->
-                "两条路二选一：\n" +
-                    "  A) 安装 Shizuku（moe.shizuku.privileged.api）并启动，然后在其中授权本应用；\n" +
-                    "  B) 用无线调试：开发者选项 → 无线调试 → 配对（Android 11+，adb 一次即可）。\n" +
-                    "⚠ 容器尚未内置 Shizuku SDK（P4 决策），当前 shell.exec 以**应用 uid** 执行兜底，" +
-                    "能跑 getprop / pm list 等只读命令，但不具备 shell uid(2000) 特权。"
-            !ok ->
-                "Shizuku 已安装但守护进程没起来。打开 Shizuku App 点一次「启动」（Android 11+ 需先经无线调试配对）。\n" +
-                    "启动后 bridge 握手会多出 shizuku 能力标记。"
-            !selfAuthorized ->
-                "守护进程在跑，但本应用可能还没在 Shizuku 里授权。打开 Shizuku → 已授权应用 → 添加本应用。\n" +
-                    "⚠ 容器尚未内置 Shizuku SDK（P4 决策），shell.exec 仍走应用 uid 兜底。"
+            ok -> "shell.exec 以 shell uid(2000) 执行（privileged=true）。"
+            binderAlive -> "打开 Shizuku → 已授权应用 → 添加本应用；授权后 shell.exec 立即可用。"
+            installedVersion != null ->
+                "Shizuku 已安装但守护进程没起来：打开 Shizuku 点一次「启动」" +
+                    "（非 root 机型每次重启都需启动；Android 11+ 可用无线调试在本机完成）。"
             else ->
-                "Shizuku 完全就绪。⚠ 但容器尚未内置 Shizuku SDK（P4 决策），" +
-                    "shell.exec 目前仍以应用 uid 执行（privileged=false）。接入 SDK 后可解锁 shell uid(2000)。"
+                "shell.exec 依赖 Shizuku（必备能力，ADR-0003）。请安装 Shizuku（moe.shizuku.privileged.api）" +
+                    "并以 adb / 无线调试启动，然后授权本应用。\n" +
+                    "未满足前 shell 能力组不可用，调用返回 -32001。"
         }
 
         return ProbeResult(SHIZUKU, "Shizuku / 无线调试", ok, status, hint)

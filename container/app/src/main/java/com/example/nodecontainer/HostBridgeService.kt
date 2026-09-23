@@ -21,6 +21,7 @@ import com.example.nodecontainer.native.AssetStatus
 import com.example.nodecontainer.native.NativeAssetRegistry
 import com.example.nodecontainer.native.NativePreparer
 import com.example.nodecontainer.native.PrepareReport
+import com.example.nodecontainer.shizuku.ShizukuShell
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -626,52 +627,45 @@ class HostBridgeService : Service() {
         },
         // 3.3 shell / 3.6 build：仍为能力门禁占位（P3/P4 待落地）。
         // 能力缺失时返回 -32001（与 spec 降级语义一致）。
+        // shell.exec：**以 shell uid(2000) 经 Shizuku UserService 执行**。
+        // Shizuku 是必备能力（ADR-0003）：不可用时按契约返回 -32001，
+        // **不做应用 uid 兜底**（兜底会让"能力有没有"这件事变得不可判定）。
         "shell.exec" to MethodDef(listOf("shizuku"), true) { p ->
-            // 「兜底」实现：无 Shizuku 时，本应用 uid 仍能跑一部分命令（getprop / pm list /
-            // am 查询等只读或本应用权限内的操作）。明确不冒充 shell uid(2000)。
-            // 设计取舍见类注释「shell.exec 的兜底语义」。
             val cmd = p.optString("cmd", "")
             if (cmd.isBlank()) throw BridgeError(CODE_INVALID_PARAM, "cmd 为空")
-            val uid = android.os.Process.myUid()
-            if (uid == 2000 || uid == 0) {
-                throw BridgeError(CODE_CAPABILITY_MISSING, "意外的 uid=$uid（不该出现在应用进程中）")
-            }
             val arr = p.optJSONArray("args")?.let { a -> (0 until a.length()).map { a.optString(it) } }
                 ?: emptyList()
             val timeoutMs = p.optLong("timeoutMs", 10_000L).coerceIn(1L, 60_000L)
-            try {
-                val proc = ProcessBuilder(listOf(cmd) + arr)
-                    .redirectErrorStream(true)
-                    .start()
-                val out = StringBuilder()
-                val reader = proc.inputStream.bufferedReader()
-                // 读线程与 waitFor 并行，避免管道写满导致子进程阻塞（经典死锁）。
-                val pump = Thread {
-                    reader.forEachLine { line ->
-                        if (out.length < MAX_SHELL_OUTPUT) out.append(line).append('\n')
-                    }
-                }
-                pump.start()
-                val finished = proc.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-                if (!finished) {
-                    proc.destroyForcibly()
-                    throw BridgeError(CODE_TIMEOUT, "命令超时 ${timeoutMs}ms: $cmd")
-                }
-                pump.join(1000)
-                val text = out.toString()
-                JSONObject().apply {
-                    put("ok", proc.exitValue() == 0)
-                    put("exitCode", proc.exitValue())
-                    put("stdout", if (text.length > MAX_SHELL_OUTPUT) text.take(MAX_SHELL_OUTPUT) + "\n…(截断)" else text)
-                    put("uid", uid)
-                    put("privileged", false)
-                    put("note", "以应用 uid($uid) 执行，非 shell uid(2000)。需特权请接入 Shizuku（P4）。")
-                }
-            } catch (e: java.io.IOException) {
+
+            if (!ShizukuShell.binderAlive()) {
                 throw BridgeError(
-                    CODE_INVALID_PARAM,
-                    "无法执行 $cmd：${e.message}。注意：PATH 受限，且多数系统命令需 shell uid（Shizuku）。"
+                    CODE_CAPABILITY_MISSING,
+                    "Shizuku 未运行。shell.exec 依赖 Shizuku（必备能力，ADR-0003）：" +
+                        "请安装并在设备上启动 Shizuku（非 root 机型需 adb / 无线调试启动一次）。"
                 )
+            }
+            if (!ShizukuShell.permissionGranted()) {
+                throw BridgeError(
+                    CODE_CAPABILITY_MISSING,
+                    "Shizuku 未授权本应用：请在 Shizuku → 已授权应用中添加本应用后重试。"
+                )
+            }
+            val res = ShizukuShell.exec(cmd, arr, timeoutMs)
+                ?: throw BridgeError(
+                    CODE_CAPABILITY_MISSING,
+                    "Shizuku UserService 绑定失败，请重启 Shizuku 后重试。"
+                )
+            JSONObject().apply {
+                put("ok", res.exitCode == 0)
+                put("exitCode", res.exitCode)
+                put(
+                    "stdout",
+                    if (res.output.length > MAX_SHELL_OUTPUT) res.output.take(MAX_SHELL_OUTPUT) + "\n…(截断)"
+                    else res.output
+                )
+                put("uid", res.uid)
+                put("privileged", true)
+                put("note", "以 shell uid(${res.uid}) 经 Shizuku UserService 执行。")
             }
         },
         // ---- 3.5 storage：fs.* 真实实现（P5，2026-09）----
