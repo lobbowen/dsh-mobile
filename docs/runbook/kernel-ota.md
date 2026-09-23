@@ -35,7 +35,15 @@
 | 判断有没有更新 | `<base>/kernel-<channel>/kernel-manifest.json` |
 | 下载内核包 | `<base>/kernel-<channel>/kernel-<version>.zip`（或 manifest 里的 `url`） |
 
-`<base>` 由 APK 资产 `kernel-feed.json` 决定（默认本仓 Release，public 无需鉴权）。
+`<base>` 由 APK 资产 `kernel-feed.json` 决定。**它必须是一个设备网络可达的对象存储/CDN**。
+
+> ⚠️ **实测结论（2026-09-24，本设备网络）**：
+> `github.com` / `raw.githubusercontent.com` **不可达** —— 因此 GitHub Release **不能**作为设备下载源；
+> `hubcdn.zll.ink`（七牛 + 自有域名 + HTTPS）✅ 可达、`X-Reqid` 正常、延迟约 300–760ms；
+> 阿里云 OSS / 腾讯云 COS / 华为云 OBS 默认域名亦实测可达（190–360ms）。
+>
+> 因此发布流程是：**GitHub Release = 归档**，**对象存储 = 设备真正读取的通道**
+> （`kernel-ota` 里的 "Publish to Qiniu" 步骤；缺配置会**硬失败**，避免"发了个设备读不到的包"却显示成功）。
 
 ## 3. 设备侧：怎么下
 
