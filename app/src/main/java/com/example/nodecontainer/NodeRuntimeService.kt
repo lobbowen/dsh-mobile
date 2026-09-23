@@ -109,6 +109,7 @@ class NodeRuntimeService : Service() {
         // 结果上屏，决定 node-pty 移植走真 PTY 还是管道假 PTY。
         runPtyProbe()
         runRootProbe()
+        runPtraceProbe()
         // 先拉起 HostBridge（UDS 能力桥），再启动内核
         startHostBridge()
         loopJob = scope.launch { supervisorLoop() }
@@ -154,6 +155,21 @@ class NodeRuntimeService : Service() {
             "${e::class.java.simpleName}: ${e.message}"
         }
         RuntimeDiagnostics.append(this, "rootprobe", null, "容器根可行性结果", r)
+    }
+
+    /** 用户态 root（ptrace）可行性探针：能否拦截 syscall 并改写路径。 */
+    private fun runPtraceProbe() {
+        val bin = File(NativePreparer.libSearchPath(this).substringBefore(File.pathSeparatorChar), "libdshptraceprobe.so")
+        if (!bin.isFile) {
+            RuntimeDiagnostics.append(this, "ptraceprobe", null, "ptrace 探针未随包（跳过）", bin.absolutePath)
+            return
+        }
+        val r = try {
+            val p = ProcessBuilder(bin.absolutePath).redirectErrorStream(true).start()
+            val out = p.inputStream.bufferedReader().readText()
+            if (!p.waitFor(20, java.util.concurrent.TimeUnit.SECONDS)) { p.destroy(); "timeout" } else out.trim()
+        } catch (e: Throwable) { "${e::class.java.simpleName}: ${e.message}" }
+        RuntimeDiagnostics.append(this, "ptraceprobe", null, "用户态 root 可行性结果", r)
     }
 
     private fun probeFilesystemWrites() {
