@@ -231,9 +231,17 @@ jobs:
           fi
           if [ -n "$CUR" ]; then
             echo "[version] $ROLL 已发布=$CUR，本次=$KERNEL_VER"
-            node -e "const {isNewer}=require('./container/engine/src/kernel-version'); if(!isNewer(process.argv[1],process.argv[2])){process.exit(1)}" "$KERNEL_VER" "$CUR" \
-              || { echo "::error title=内核版本未前进::$ROLL 上本次 $KERNEL_VER 不大于已发布 $CUR —— 该通道设备会判为「无更新」而静默失效。请递增 kernel/package.json 的 version。"; exit 1; }
-            echo "[ok] 版本前进（$CUR → $KERNEL_VER）"
+            # 门禁只拦**回退**，放行**同版本重发**（与 APK 侧 versionCode 门禁同一策略）。
+            # 为什么同版本必须放行：修投递通道、重传、补签，都发生在"版本没变"的时候；
+            # 若判成错误，这些修复就永远落不了地。而且同版本重发不会让设备"看起来有更新"
+            # ——它本来就不会更新（版本相等），这只是把同一份产物重新送到目标位置。
+            if [ "$KERNEL_VER" = "$CUR" ]; then
+              echo "[ok] 同版本重发（$CUR）：允许，用于修复投递/重传"
+            else
+              node -e "const {isNewer}=require('./container/engine/src/kernel-version'); if(isNewer(process.argv[1],process.argv[2])){process.exit(1)}" "$CUR" "$KERNEL_VER" \
+                || { echo "::error title=内核版本回退::$ROLL 上本次 $KERNEL_VER 低于已发布 $CUR —— 设备有版本下限，会拒绝安装；且该通道设备也判为无更新。请递增 kernel/package.json 的 version。"; exit 1; }
+              echo "[ok] 版本前进（$CUR → $KERNEL_VER）"
+            fi
           fi
 
           # ── 版本化归档（全局唯一一次）────────────────────────────────────
