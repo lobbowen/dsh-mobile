@@ -138,12 +138,12 @@ LAYOUT_ENFORCE=1 node container/engine/test/layout-manifest-test.js
 
 ### 7.2 对账口径
 1. **路径对账**：`moves` 逐条 `from` 必须消失、`to` 必须存在；
-2. **数量对账**：`to` 的**文件数必须等于 `expectFiles`**（P1 迁移前后逐目录守恒，少一个即失败）；
+2. **数量对账（下限语义）**：`to` 的文件数**不得少于 `expectFiles`**（迁移基线）。少于 = 丢件，失败；多于 = 正常演进（如新增测试/契约），放行；
 3. **根对账**：仓库根只允许 `rootAllow` 列出的条目；
 4. **反残留**：`legacyForbidden` 任一存在即失败；
 5. **入库对账**：`generated`/`secrets` 不得出现在 git 索引中（配合 `.gitignore` + gate 测试）。
 
-### 7.3 迁移前后基线（当前存量 = 迁移前）
+### 7.3 迁移基线（P1 迁移前的存量；门禁按"不得少于"校验）
 
 | 目录 | 文件数 | 目录 | 文件数 |
 |---|---|---|---|
@@ -160,7 +160,7 @@ LAYOUT_ENFORCE=1 node container/engine/test/layout-manifest-test.js
 
 - [ ] `node container/engine/test/layout-manifest-test.js` 报告全部 `done`、0 `conflict`
 - [ ] `LAYOUT_ENFORCE=1` 通过
-- [ ] 各目录文件数与 §7.3 基线**逐一相等**（总计 361；`docs` 因新增契约/规范文件为 11）
+- [ ] 各目录文件数**不低于 §7.3 迁移基线**（不得少于；允许因新增文件而增长）
 - [ ] `settings.gradle.kts` 指向 `container/app`；CI 触发路径已更新
 - [ ] `fast-apk` 在分支上构建通过（Kotlin 编译 + APK 产出）
 - [ ] 内核测试 `npm test`（在 `kernel/`）通过
