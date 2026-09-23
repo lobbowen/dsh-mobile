@@ -151,26 +151,13 @@ jobs:
         # ADR-0005 C3：manifest 是**先被读**的那一个，必须自带新鲜度与签名 ——
         # sequence 单调（防重放/冻结）、expires 过期即拒、signature 供设备端校验。
         #
-        # 说明：S1 删除了设备端的"本地 feed 目录"路径，因此原先的
-        # "Assemble device-consumable feed"（调 scripts/build-kernel-feed.sh）已无消费者，
-        # 一并删除；这里只对 release/kernel-manifest.json 做签发。
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # sequence 由脚本内部取**时间戳**，不再依赖"上一份 Release 的 sequence + 1"。
+        # 那个做法在 Release 被删除/重建时会**倒退**，而设备把水位持久化在自己身上 ——
+        # 会把倒退后的 sequence 判为重放并拒绝，导致设备**永久卡住**（实测撞到过）。
+        # 因此这里不再需要下载上一份 manifest，步骤也少一个失败点。
         run: |
           set -euo pipefail
-          ROLL="kernel-$KERNEL_CHANNEL"
-          BASE=0
-          if gh release view "$ROLL" --repo '${{ github.repository }}' >/dev/null 2>&1; then
-            TMPD="$(mktemp -d)"
-            if gh release download "$ROLL" -p kernel-manifest.json -O "$TMPD/prev.json" --repo '${{ github.repository }}' 2>/dev/null; then
-              BASE="$(node -p "require('$TMPD/prev.json').sequence || 0" 2>/dev/null || echo 0)"
-            else
-              echo "::warning title=sequence 基线未知::未取到 $ROLL 的上一份 manifest，sequence 从 1 起"
-            fi
-          fi
-          echo "[manifest] 上一份 sequence=$BASE"
-          DSH_MANIFEST_SEQUENCE_BASE="$BASE" \
-            node scripts/sign-kernel-manifest.js release/kernel-manifest.json keys/ota-private.pem "${{ github.event.inputs.rollout_percent || 100 }}"
+          node scripts/sign-kernel-manifest.js release/kernel-manifest.json keys/ota-private.pem "${{ github.event.inputs.rollout_percent || 100 }}"
 
       - name: Upload bundle artifacts
         uses: actions/upload-artifact@v4

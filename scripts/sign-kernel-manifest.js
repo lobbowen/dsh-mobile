@@ -30,9 +30,15 @@ if (!manifestPath || !keyPath) {
 const key = fs.readFileSync(keyPath, 'utf8');
 const m = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
-const base = Number(process.env.DSH_MANIFEST_SEQUENCE_BASE || 0);
 m.manifestSchema = 1;
-m.sequence = (Number.isFinite(base) && base > 0 ? base : 0) + 1;
+// sequence 用**时间戳（epoch 秒）**，而不是"上一份 manifest 的 sequence + 1"。
+//
+// 为什么不用 +1：那依赖**外部状态**——上一份 manifest 挂在 Release 上。一旦该 Release 被删除、
+// 重建，或换了发布入口，sequence 就会**倒退**。而设备把水位持久化在**自己身上**，
+// 它会把更小的 sequence 判为"重放"并拒绝 —— 结果是**设备永久卡住**，直到 sequence 重新涨过旧水位。
+// 实测中我为清理被污染的通道删除 Release 时，正好撞上这条隐患。
+// 时间戳天然单调、不依赖任何外部状态，换 CI、换机器、删 Release 都不会分叉。
+m.sequence = Math.floor(Date.now() / 1000);
 
 const days = Number(process.env.DSH_MANIFEST_TTL_DAYS || 30);
 const expMs = Date.now() + (Number.isFinite(days) ? days : 30) * 86400_000;
