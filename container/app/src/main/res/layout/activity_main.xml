@@ -53,6 +53,17 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="8dp"
                     android:text="@string/screenshot_grant_hint" />
+
+                <!--
+                  复制自检：目标设备 **adb 是关闭的**，剪贴板是唯一能把报告交给外部的通道。
+                  点它 = 重跑一次自检 + 全量复制到剪贴板（含诊断日志尾部）。
+                -->
+                <Button
+                    android:id="@+id/copyBtn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="复制自检" />
             </LinearLayout>
         </LinearLayout>
     </ScrollView>

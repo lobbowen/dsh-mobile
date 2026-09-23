@@ -40,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private lateinit var retryBtn: Button
     private lateinit var captureBtn: Button
+    private lateinit var copyBtn: Button
     private val handler = Handler(Looper.getMainLooper())
     private var uiMode = false // false=诊断面板, true=WebView(内核 /__host 宿主帧 + 面板 iframe)
     /** 设备端自检结果（后台算一次，渲染时前缀到诊断面板）。 */
@@ -88,6 +89,7 @@ class MainActivity : AppCompatActivity() {
         webView = findViewById(R.id.webview)
         retryBtn = findViewById(R.id.retryBtn)
         captureBtn = findViewById(R.id.captureBtn)
+        copyBtn = findViewById(R.id.copyBtn)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
@@ -99,6 +101,8 @@ class MainActivity : AppCompatActivity() {
 
         retryBtn.setOnClickListener { restartRuntime() }
         captureBtn.setOnClickListener { requestScreenCapture() }
+        // 一键把自检结果交出去：设备 adb 关闭，剪贴板是唯一可行的导出方式。
+        copyBtn.setOnClickListener { copySelfCheck() }
 
         setupWebView()
         // 复用上次授权：进程/设备重启后若 grant 仍在，直接拉起服务，无需用户再点一次。
@@ -124,6 +128,45 @@ class MainActivity : AppCompatActivity() {
             }
             selfCheckText = text
         }.apply { isDaemon = true }.start()
+    }
+
+    /**
+     * 一键复制自检：**重跑一次**（拿到最新状态）再把报告放进剪贴板。
+     *
+     * 为什么必须有这个按钮：自检段虽然置顶，但日志很长、自动滚动又会打扰拖动，
+     * 用户很难把那段完整取出来；而设备 **adb 关闭**、文件在应用私有目录，
+     * 剪贴板是**唯一可行**的导出通道（真机反馈）。
+     */
+    private fun copySelfCheck() {
+        copyBtn.isEnabled = false
+        Thread {
+            val text = try {
+                KernelSelfCheck.runAndFormat(this)
+            } catch (e: Throwable) {
+                "自检异常: " + e::class.java.simpleName + ": " + (e.message ?: "")
+            }
+            selfCheckText = text
+            handler.post {
+                try {
+                    val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("DSH 自检", text))
+                    android.widget.Toast.makeText(
+                        this, "已复制到剪贴板 —— 直接粘贴发我即可", android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                } catch (e: Throwable) {
+                    android.widget.Toast.makeText(
+                        this, "复制失败: " + e.message, android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+                copyBtn.isEnabled = true
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
+    /** 用户是否已贴到底部（决定要不要自动跟随滚动）。 */
+    private fun isAtBottom(): Boolean {
+        val child = scroll.getChildAt(0) ?: return true
+        return scroll.scrollY + scroll.height >= child.height - 8
     }
 
     /** 电池优化豁免引导：未入白名单时弹系统确认框；ROM 拒绝该 intent 时退到
@@ -325,7 +368,10 @@ class MainActivity : AppCompatActivity() {
                     val body = if (log.isBlank()) "初始化中..." else log
                     // 自检结论**常驻在顶部**：它是"绿没绿"的答案，不该被后续日志冲掉。
                     diagText.text = if (selfCheckText.isBlank()) body else selfCheckText + "\n" + body
-                    scroll.post { scroll.fullScroll(ScrollView.FOCUS_DOWN) }
+                    // ⚠ 只在用户**已经在底部**时才自动跟随。
+                    // 无脑 fullScroll(FOCUS_DOWN) 会把置顶的自检段压在屏幕外、用户又拖不上去
+                    // —— 真机实测到的可用性问题（自检做了却看不见）。
+                    if (isAtBottom()) scroll.post { scroll.fullScroll(ScrollView.FOCUS_DOWN) }
                     if (isPortUp()) enterWebView()
                 }
                 handler.postDelayed(this, 500)
