@@ -67,7 +67,7 @@
 
 | 字段 | 含义 | 设备端行为 |
 |---|---|---|
-| `sequence` | 单调递增的"第几版 manifest" | 低于本通道**已见水位**即拒（判为疑似重放） |
+| `sequence` | **epoch 秒时间戳**（天然单调） | 低于本设备**已见水位**即拒（判为疑似重放）。用时间戳而非"上一份 +1"：后者依赖 Release 存在，删/重建会**倒退** → 设备水位高于它 → **永久卡住** |
 | `expires` / `expiresEpochMs` | 有效期（默认 30 天） | 过期即拒（防"永久冻结在旧版本"） |
 | `rolloutPercent` | 灰度放量 0–100 | 按 `安装ID+版本` **确定性分桶**：`bucket >= rolloutPercent` 则本次不装（下次启动再试） |
 | `signature` | manifest 的 ed25519 签名 | ✅ 设备端**校验**（与 zip 同一个 Node 校验器进程、同一把焊死公钥；失败即 `manifest-signature-invalid`） |
