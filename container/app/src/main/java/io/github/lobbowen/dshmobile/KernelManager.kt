@@ -1,6 +1,9 @@
 package io.github.lobbowen.dshmobile
 
 import android.content.Context
+import io.github.lobbowen.dshmobile.kernel.KernelArchive
+import io.github.lobbowen.dshmobile.kernel.KernelStateStore
+import io.github.lobbowen.dshmobile.kernel.KernelVersions
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
@@ -54,8 +57,7 @@ class KernelManager(private val context: Context) {
     private val kernelRoot = File(context.filesDir, "kernel")
     private val currentPointer = File(kernelRoot, "CURRENT")
 
-    fun currentVersion(): String? =
-        if (currentPointer.exists()) currentPointer.readText().trim().ifBlank { null } else null
+    fun currentVersion(): String? = store.currentVersion()
 
     /** 已安装（落盘）的内核版本目录名。 */
     fun installedVersions(): List<String> {
@@ -148,12 +150,7 @@ class KernelManager(private val context: Context) {
      * 设置当前版本（原子写：先写临时再 rename）。
      * 调用方需保证目标版本已落盘（唯一来源是 OTA 安装器，见 ADR-0005）。
      */
-    fun setCurrentVersion(version: String) {
-        kernelRoot.mkdirs()
-        val tmp = File(kernelRoot, "CURRENT.tmp")
-        tmp.writeText(version)
-        tmp.renameTo(currentPointer)
-    }
+    fun setCurrentVersion(version: String) = store.setCurrentVersion(version)
 
     // =========================================================================
     // 版本下限与提交/回滚（ADR-0005 收尾条款 C1 / C2）
@@ -168,73 +165,20 @@ class KernelManager(private val context: Context) {
     //   在此之前它只是 pending；健康始终起不来 → 回滚到 from，且**下限不降**
     //   （否则"回滚"就成了降级的后门）。
 
-    private val floorFile: File get() = File(kernelRoot, "FLOOR")
-    private val pendingFile: File get() = File(kernelRoot, "PENDING")
+    private val store by lazy { KernelStateStore(kernelRoot) }
 
-    fun floorVersion(): String? = try {
-        floorFile.readText().trim().ifBlank { null }
-    } catch (_: Throwable) { null }
-
-    /** 提升下限（**只增不减**：不高于现有下限的调用被忽略）。 */
-    fun setFloor(version: String) {
-        val cur = floorVersion()
-        if (cur != null && compareKernelVersions(version, cur) <= 0) return
-        kernelRoot.mkdirs()
-        val tmp = File(kernelRoot, "FLOOR.tmp")
-        tmp.writeText(version)
-        tmp.renameTo(floorFile)
-    }
-
-    /** 候选是否**低于下限** → 拒绝安装（即使签名合法）。 */
-    fun isBelowFloor(version: String): Boolean {
-        val f = floorVersion() ?: return false
-        return compareKernelVersions(version, f) < 0
-    }
+    fun floorVersion(): String? = store.floorVersion()
+    fun setFloor(version: String) = store.setFloor(version)
+    fun isBelowFloor(version: String): Boolean = store.isBelowFloor(version)
 
     data class Pending(val version: String, val from: String?)
+    fun markPending(version: String, from: String?) = store.markPending(version, from)
+    fun pending(): Pending? = store.pending()?.let { Pending(it.version, it.from) }
+    fun clearPending() = store.clearPending()
+    fun rollbackTo(from: String): Boolean = store.rollbackTo(from)
 
-    /** 记录"已安装但尚未提交"的版本及其来源版本（首行 version，次行 from）。 */
-    fun markPending(version: String, from: String?) {
-        kernelRoot.mkdirs()
-        pendingFile.writeText(version + "\n" + (from ?: ""))
-    }
-
-    fun pending(): Pending? = try {
-        val lines = pendingFile.readText().split("\n")
-        val v = lines.getOrNull(0)?.trim().orEmpty()
-        if (v.isBlank()) null else Pending(v, lines.getOrNull(1)?.trim()?.ifBlank { null })
-    } catch (_: Throwable) { null }
-
-    fun clearPending() {
-        try { pendingFile.delete() } catch (_: Throwable) { }
-    }
-
-    /** 回滚：把 CURRENT 指回 [from]（目录仍在时）。**下限不动**。 */
-    fun rollbackTo(from: String): Boolean {
-        if (!File(kernelRoot, from).isDirectory) return false
-        setCurrentVersion(from)
-        return true
-    }
-
-    /** 内核版本比较：数字段按数值、其余按字符串逐 token 比较（0.1.0-android.10 > 0.1.0-android.2）。 */
-    internal fun compareKernelVersions(a: String, b: String): Int {
-        val ta = Regex("\\d+|\\D+").findAll(a).map { it.value }.toList()
-        val tb = Regex("\\d+|\\D+").findAll(b).map { it.value }.toList()
-        for (i in 0 until maxOf(ta.size, tb.size)) {
-            val x = ta.getOrNull(i) ?: return -1
-            val y = tb.getOrNull(i) ?: return 1
-            val nx = x.toLongOrNull()
-            val ny = y.toLongOrNull()
-            val c = when {
-                nx != null && ny != null -> nx.compareTo(ny)
-                nx != null -> 1
-                ny != null -> -1
-                else -> x.compareTo(y)
-            }
-            if (c != 0) return c
-        }
-        return 0
-    }
+    /** 内核版本比较（实现见 [KernelVersions]；与 JS 侧共用同一份用例表）。 */
+    internal fun compareKernelVersions(a: String, b: String): Int = KernelVersions.compare(a, b)
 
     /** 结构性内核健康检查：CURRENT 指针与目录、entry 是否自洽。 */
     fun integrityChecks(): List<String> {
@@ -262,24 +206,7 @@ class KernelManager(private val context: Context) {
      *
      * 返回 null 表示"取不到或不可解析"，调用方据此归为 BrokenBaseline。
      */
-    private fun readKernelJsonFromZip(zip: File): String? {
-        return try {
-            java.util.zip.ZipInputStream(zip.inputStream()).use { zis ->
-                var entry = zis.nextEntry
-                while (entry != null) {
-                    if (!entry.isDirectory && entry.name.endsWith("kernel.json")) {
-                        val text = zis.bufferedReader().readText()
-                        if (text.isNotBlank()) return text
-                    }
-                    zis.closeEntry()
-                    entry = zis.nextEntry
-                }
-                null
-            }
-        } catch (_: Throwable) {
-            null
-        }
-    }
+    private fun readKernelJsonFromZip(zip: File): String? = KernelArchive.readKernelJsonFromZip(zip)
 
     private fun readVersionFromZip(zip: File): String? {
         val text = readKernelJsonFromZip(zip) ?: return null
@@ -304,30 +231,7 @@ class KernelManager(private val context: Context) {
      * 因此逐条做**目录穿越**检查。历史实现直接 `File(dest, entry.name)`，
      * 一个名为 `../../shared_prefs/x.xml` 的条目就能写出沙箱之外。
      */
-    private fun unzip(zip: File, dest: File) {
-        val destRoot = dest.canonicalFile
-        java.util.zip.ZipInputStream(zip.inputStream()).use { zis ->
-            var entry = zis.nextEntry
-            var count = 0
-            while (entry != null) {
-                val name = entry.name
-                val out = File(dest, name).canonicalFile
-                if (!out.path.startsWith(destRoot.path + File.separator) && out.path != destRoot.path) {
-                    throw IllegalStateException("内核包条目路径越界（疑似目录穿越）: $name")
-                }
-                if (entry.isDirectory) {
-                    out.mkdirs()
-                } else {
-                    out.parentFile?.mkdirs()
-                    out.outputStream().use { os -> zis.copyTo(os) }
-                    count += 1
-                }
-                zis.closeEntry()
-                entry = zis.nextEntry
-            }
-            if (count == 0) throw IllegalStateException("内核包内没有任何文件条目")
-        }
-    }
+    private fun unzip(zip: File, dest: File) = KernelArchive.unzip(zip, dest)
 
     companion object {
         const val TAG = "KernelManager"

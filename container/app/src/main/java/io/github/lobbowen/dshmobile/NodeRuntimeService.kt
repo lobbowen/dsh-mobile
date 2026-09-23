@@ -10,6 +10,7 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import io.github.lobbowen.dshmobile.kernel.SupervisorPolicy
 import io.github.lobbowen.dshmobile.native.AssetStatus
 import io.github.lobbowen.dshmobile.native.NativeAssetRegistry
 import io.github.lobbowen.dshmobile.native.PrefixProvisioner
@@ -169,7 +170,7 @@ class NodeRuntimeService : Service() {
     /** 监督循环：持续拉起内核，进程退出/健康失败则退避重启，避免无限紧循环。 */
     private suspend fun supervisorLoop() {
         while (keepRunning) {
-            val backoff = minOf(BACKOFF_BASE_MS shl restartCount.coerceAtMost(5), BACKOFF_MAX_MS)
+            val backoff = SupervisorPolicy.backoffMs(restartCount)
             val ok = bootKernelOnce()
             var bornAt = 0L
             if (ok) {
@@ -179,14 +180,11 @@ class NodeRuntimeService : Service() {
                     delay(1000)
                 }
             }
-            // 退避清零以**存活时长**为准，不以「health 探到 200」为准：残留守卫占着
-            // 36360 时新进程秒死，但探测照样秒回 200（假成功）——若据此清零，
-            // 退避永远停在 1s，形成紧循环风暴（真机 2026-09-22 实锤）。
-            if (ok && SystemClock.elapsedRealtime() - bornAt >= STABLE_MS) {
-                restartCount = 0
-            } else {
-                restartCount += 1
-            }
+            // 退避清零的判据见 SupervisorPolicy.nextRestartCount（以**存活时长**为准，
+            // 不以「health 探到 200」为准 —— 真机 2026-09-22 的紧循环风暴实锤）。
+            restartCount = SupervisorPolicy.nextRestartCount(
+                restartCount, ok, SystemClock.elapsedRealtime() - bornAt,
+            )
             if (!keepRunning) break
             RuntimeDiagnostics.append(this, "supervisor", null, "退避 ${backoff}ms 后重启", "attempt=$restartCount")
             delay(backoff)
@@ -552,7 +550,7 @@ class NodeRuntimeService : Service() {
             // portUp/healthUp=true 时直接 return，「起来过又秒死」这一失败形态
             // 的 exitCode/stderr 永远进不了诊断（真机 2026-09-22 排查实锤的盲区）。
             if (!keepRunning) return@Thread
-            val readyNote = if (healthUp || portUp) "（曾就绪后退出 —— 排查方向：启动后崩溃/单实例锁冲突，而非拉不起）" else ""
+            val readyNote = SupervisorPolicy.exitNote(healthUp || portUp)
             RuntimeDiagnostics.append(this, "process", false, "内核/node 进程已退出", "exitCode=$code$readyNote")
 
             var err = RuntimeDiagnostics.readNodeStderr(this)
@@ -732,10 +730,11 @@ class NodeRuntimeService : Service() {
         const val KERNEL_CONTROL_PORT = 36360
         /** 内置探针 server.js 端口（无内核包时的首启验证）。 */
         const val PORT = 3080
-        const val BACKOFF_BASE_MS = 1000L
-        const val BACKOFF_MAX_MS = 30000L
+        // 单一事实源：退避/稳定阈值由 SupervisorPolicy 定义（那里有单测）。
+        const val BACKOFF_BASE_MS = SupervisorPolicy.BACKOFF_BASE_MS
+        const val BACKOFF_MAX_MS = SupervisorPolicy.BACKOFF_MAX_MS
         /** 内核连续存活超过该时长才算真实成功，退避计数才允许清零。 */
-        const val STABLE_MS = 15000L
+        const val STABLE_MS = SupervisorPolicy.STABLE_MS
         /** stderr 上屏的行数上限（全文始终落 node-stderr.log）。 */
         const val STDERR_SCREEN_LINES = 60
         /** 子进程崩溃镜像（守卫给 dsh stderr 行加 "[stderr] " 前缀）单独放宽：

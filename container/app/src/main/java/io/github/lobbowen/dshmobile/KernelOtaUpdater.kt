@@ -2,6 +2,7 @@ package io.github.lobbowen.dshmobile
 
 import android.content.Context
 import android.util.Log
+import io.github.lobbowen.dshmobile.kernel.OtaPolicy
 import io.github.lobbowen.dshmobile.kernel.ResumableDownloader
 import org.json.JSONObject
 import java.io.File
@@ -115,38 +116,30 @@ object KernelOtaUpdater {
         val remote = manifest.optString("version", "").trim().ifBlank { null }
             ?: return Outcome(true, false, false, current, null, "manifest 缺 version 字段")
 
-        // ── C3 新鲜度一：过期即拒（防"永久冻结在旧版本"）──
-        val expMs = manifest.optLong("expiresEpochMs", 0L)
-        if (expMs > 0L && System.currentTimeMillis() > expMs) {
-            return Outcome(true, false, false, current, remote,
-                "manifest 已过期（expiresEpochMs=" + expMs + "）—— 拒绝使用；检查发布流水线是否仍在签发")
-        }
-        // ── C3 新鲜度二：sequence 不得低于本通道已见最大值（防重放旧 manifest）──
+        // ── 准入判定：**纯逻辑**，见 kernel/OtaPolicy（五条规则各有单测）──
+        // 顺序即语义：过期 → 重放 → 是否更新 → 只检查 → 版本下限 → 灰度。
         val seq = manifest.optLong("sequence", 0L)
         val st = loadState(context)
-        val lastSeq = st.optLong("lastSequence", 0L)
-        if (seq in 1..lastSeq) {
-            return Outcome(true, false, false, current, remote,
-                "manifest sequence=" + seq + " 不高于已见 " + lastSeq + " —— 疑似重放，拒绝")
-        }
-
-        if (current != null && km.compareKernelVersions(remote, current) <= 0) {
-            return Outcome(true, false, false, current, remote, "已是最新（本地 $current，远端 $remote）")
-        }
-        if (checkOnly) {
-            return Outcome(true, true, false, current, remote, "发现新版本 $remote（checkOnly：未安装）")
-        }
-
-        // ── C4 灰度放量：安装 ID + 版本 → 确定性分桶 ──
-        // 无需后端即可灰度：同一台设备对同一版本永远落在同一个桶里（不是随机），
-        // rolloutPercent=0 即"停发"。100 表示全量。
-        val rollout = manifest.optInt("rolloutPercent", 100).coerceIn(0, 100)
-        if (rollout < 100) {
-            val bucket = Math.abs((installId(context) + ":" + remote).hashCode()) % 100
-            if (bucket >= rollout) {
-                return Outcome(true, true, false, current, remote,
-                    "灰度未命中（bucket=" + bucket + " >= rolloutPercent=" + rollout + "）—— 本次不安装，下次启动再试")
-            }
+        val verdict = OtaPolicy.evaluate(
+            OtaPolicy.Input(
+                remoteVersion = remote,
+                currentVersion = current,
+                floorVersion = km.floorVersion(),
+                expiresEpochMs = manifest.optLong("expiresEpochMs", 0L),
+                sequence = seq,
+                lastSequence = st.optLong("lastSequence", 0L),
+                rolloutPercent = manifest.optInt("rolloutPercent", 100),
+                installId = installId(context),
+                nowMs = System.currentTimeMillis(),
+            ),
+            checkOnly = checkOnly,
+        )
+        when (verdict) {
+            is OtaPolicy.Verdict.Reject -> return Outcome(true, false, false, current, remote, verdict.message)
+            is OtaPolicy.Verdict.UpToDate -> return Outcome(true, false, false, current, remote, verdict.message)
+            is OtaPolicy.Verdict.Available -> return Outcome(true, true, false, current, remote, verdict.message)
+            is OtaPolicy.Verdict.Holdback -> return Outcome(true, true, false, current, remote, verdict.message)
+            OtaPolicy.Verdict.Install -> Unit
         }
 
         // 启动预算用完就**不下载**：宁可下次启动再升，也不把开机拖住。
