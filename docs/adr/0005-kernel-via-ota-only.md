@@ -99,8 +99,14 @@ APK（L0 宿主）= Node 运行时 + 原生库 + HostBridge + **OTA 子系统**�
 | C3 | **元数据新鲜度（防 freeze）** | TUF timestamp/snapshot | manifest 未签名、无 expires：可被"一直返回当前版本"冻结（伪版本/混搭已被**版本交叉校验**挡住） | manifest 增加签名 + 单调 `sequence` + `expires`；设备校验失败即拒绝 |
 | C4 | **灰度通道 + 放量** | Chrome/Android staged rollout | **内核无法真实推送测试**（没有灰度就只能全量赌） | 通道 canary/stable（✅ 本次已落地）；再补按比例放量（`rolloutPercent` + 设备确定性分桶）与**可中止** |
 
-**已落地**：C4 的**通道部分**（`kernel-canary` / `kernel-stable`，提升时归档不重建，版本前进门禁按通道比较）。
-**待实施**：C1、C2、C3、C4 的放量部分。
+**落地状态（2026-09-24）**：
+
+| 条款 | 状态 |
+|---|---|
+| **C1 版本下限** | ✅ `files/kernel/FLOOR`（只增不减）；`KernelInstaller` 拒绝低于下限的包（`version-below-floor`），**即使签名合法** |
+| **C2 commit/rollback** | ✅ 安装只写 `PENDING`；启动链**首次健康检查通过**才提交（提升下限 + 清 pending）；起不来则回滚 `CURRENT`，且**下限不降** |
+| **C3 元数据新鲜度** | ⚠️ **部分**：发布侧签发 manifest（`sequence` 单调 + `expires`/`expiresEpochMs` + ed25519 `signature`）；设备侧**已强制** `expires` 与 `sequence` 水位（防冻结/重放）。**待接线**：设备侧对 manifest `signature` 的密码学校验（需复用 Node 校验器）。影响有限——zip 本身已验签，且 manifest 版本会与包内签名版本交叉校验，"装任意包"不可行 |
+| **C4 通道 + 放量** | ✅ 通道 `canary`/`stable`（提升时归档不重建、门禁按通道比较）+ `rolloutPercent` **确定性分桶**放量；`rolloutPercent=0` 即停发 |
 
 > 说明：C1/C2/C3 都属于**设备端**的能力，必须与"路径收敛（删本地 feed / 删内置基线）"一起做 ——
 > 因为收敛正好消掉那条"可绕过下限"的手动降级入口（`build.kernelInstall` 的 `zipPath` 语义）。
