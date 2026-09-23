@@ -54,6 +54,28 @@ if (errors.length === 0) {
   req(typeof ui.version === 'string' && ui.version !== '', 'kernel/ui/package.json: version 缺失');
   req(typeof nodeVersions.default === 'string' && nodeVersions.default !== '', 'assets/node-versions.json: default 缺失');
   req(typeof nodeVersions.abi === 'string' && nodeVersions.abi !== '', 'assets/node-versions.json: abi 缺失');
+
+  // ---- 两条版本流的兼容契约（ADR-0004 §3）----
+  const bridgeProtocol = Number(shell.bridgeProtocol);
+  const kernelRequires = Number((kernel.dsh || {}).requiresProtocol);
+  req(Number.isInteger(bridgeProtocol) && bridgeProtocol >= 1, 'version.json: shell.bridgeProtocol 必须是 >= 1 的整数');
+  req(Number.isInteger(kernelRequires) && kernelRequires >= 0, 'kernel/package.json: dsh.requiresProtocol 缺失/非法');
+  req(kernelRequires <= bridgeProtocol,
+    '兼容性不成立：内核要求桥协议 v' + kernelRequires + ' > 壳实现的 v' + bridgeProtocol);
+
+  // "声明的协议"必须等于"实现的协议"，否则声明毫无意义。
+  let protoSrc = '';
+  try {
+    protoSrc = fs.readFileSync(path.join(ROOT, 'container/engine/src/bridge/protocol.js'), 'utf8');
+  } catch (e) {
+    errors.push('container/engine/src/bridge/protocol.js 读取失败：' + e.message);
+  }
+  const pm = /const PROTOCOL_VERSION\s*=\s*(\d+)/.exec(protoSrc);
+  req(pm !== null, 'container/engine/src/bridge/protocol.js: 未找到 PROTOCOL_VERSION');
+  if (pm) {
+    req(Number(pm[1]) === bridgeProtocol,
+      '漂移：protocol.js 的 PROTOCOL_VERSION=' + pm[1] + ' 与 version.json 的 shell.bridgeProtocol=' + bridgeProtocol + ' 不一致');
+  }
 }
 
 if (errors.length > 0) {
@@ -70,4 +92,5 @@ line('engine', engine.name + ' ' + engine.version);
 line('kernel', kernel.name + ' ' + kernel.version);
 line('ui', ui.name + ' ' + ui.version);
 line('runtime', 'node-runtime-' + nodeVersions.default + '-' + nodeVersions.abi);
+line('protocol', 'shell v' + shell.bridgeProtocol + '  /  kernel requires v' + (kernel.dsh || {}).requiresProtocol);
 line('apk', 'app-debug-' + shell.versionName + '+' + shell.versionCode + '.apk  （发布资产名）');

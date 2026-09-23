@@ -15,7 +15,7 @@ const DEFAULT_ABI = 'node24-arm64-android35';
 const DEFAULT_ENGINES = { node: '>=24 <25' };
 
 /** 组装 kernel.json（不含签名）。 */
-function buildKernelJson({ version, abi, engines, entry, requires, managedAgents }) {
+function buildKernelJson({ version, abi, engines, entry, requires, managedAgents, requiresProtocol }) {
   return {
     name: 'dsh-kernel',
     version,
@@ -24,6 +24,10 @@ function buildKernelJson({ version, abi, engines, entry, requires, managedAgents
     entry: entry || DEFAULT_ENTRY,
     requires: requires || [],
     managedAgents: managedAgents || [],
+    // 内核要求的**最低桥协议版本**（ADR-0004 §3）：壳在安装前校验，
+    // 不满足即拒绝（protocol-unsatisfied）——与 engines/requires 一样，
+    // 回答的是"能不能装在这台壳上"，而不是"哪个更新"。
+    requiresProtocol: Number(requiresProtocol || 0),
   };
 }
 
@@ -156,6 +160,7 @@ function packBundle(o) {
     abi: kernelJson.abi,
     engines: kernelJson.engines,
     requires: kernelJson.requires,
+    requiresProtocol: kernelJson.requiresProtocol,
     url: o.url || '',
     sha256: sha256(zipBuf),
     signature: kernelJson.signature,

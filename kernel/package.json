@@ -15,5 +15,8 @@
   "_uninstallTests": "卸载类测试政策（Android 内核版）：native-test.js（原生 DSH 卸载全量清理）、plugin-change-restart-test.js（含插件卸载场景）禁止进入自动测试链（npm test），仅允许作为独立脚本被显式单独调用（node --require ./test/_preload.js test/<file> 或 npm run test:native-uninstall / test:plugin-change-restart）；除非用户明确指令，禁止擅自运行。原 api-contract-test.js 已随 PC 三域删除。",
   "engines": {
     "node": ">=18"
+  },
+  "dsh": {
+    "requiresProtocol": 1
   }
 }

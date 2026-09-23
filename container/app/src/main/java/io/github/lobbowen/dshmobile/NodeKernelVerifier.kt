@@ -86,6 +86,10 @@ object NodeKernelVerifier {
             "--zip", zip.absolutePath,
             "--pubkey", pubKeyPath,
         )
+        // 壳实现的桥协议版本：内核据此判断"能不能装在这台壳上"（ADR-0004 §3）。
+        // 这是**必传**参数 —— 校验器在内核声明了要求却收不到它时会直接失败，
+        // 不允许"少传就悄悄跳过"。
+        args += listOf("--shell-protocol", BuildConfig.BRIDGE_PROTOCOL.toString())
         manifest?.optString("sha256", "")?.ifBlank { null }?.let { args += listOf("--sha256", it) }
         manifest?.optString("version", "")?.ifBlank { null }?.let { args += listOf("--version", it) }
 

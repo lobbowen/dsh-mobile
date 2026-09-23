@@ -1,63 +1,69 @@
 # 版本管理（Versioning）
 
-> 一句话：**任何发出去的东西都必须能回答"它是哪个版本"。**
+> 一句话：**任何发出去的东西都必须能回答"它是哪个版本"**，而**壳与内核是两条独立版本流**。
+> 定义与理由（含两条流的对照表、兼容契约、防静默失效门禁）见 **[ADR-0004](../adr/0004-dual-version-streams.md)**。
+> 本页只讲**怎么用**。
 
-## 1. 各层版本与单一事实源
+---
 
-| 层 | 版本 | 单一事实源 | 消费方 |
-|---|---|---|---|
-| L0 壳 APK | `versionName` + `versionCode` | `version.json`（仓根） | `build.gradle.kts` 派生；Release 资产名；`provisioning.json` |
-| L0 引擎 | semver | `container/engine/package.json` | gen-version 汇总 |
-| L1 内核 | semver | `kernel/package.json` | OTA 包名/manifest（`build-bundle.js <ver>`）；gen-version 汇总 |
-| 面板 | semver | `kernel/ui/package.json` | gen-version 汇总 |
-| L2 Node 运行时 | `<ver>-<abi>` | `container/app/src/main/assets/node-versions.json` | fast-apk 下载该 tag；gen-version 汇总 |
-| L3 Agents | npm semver | npm registry | npm 自身 |
+## 1. 两条流，各自的单一事实源
 
-**禁止在第二个地方复制同一个版本号。** `gen-version.js` 只做**汇总**，不产生新事实
-（例如它从 `node-versions.json` 读运行时，而不是再定义一遍）。
+| | 壳流（APK / L0） | 内核流（kernel / L1） |
+|---|---|---|
+| 版本字段 | `versionName` + `versionCode` + `bridgeProtocol` | `version` + `dsh.requiresProtocol` |
+| 单一事实源 | **`version.json`**（仓根） | **`kernel/package.json`** |
+| 引擎侧版本 | `container/engine/package.json` | — |
+| 面板版本 | `kernel/ui/package.json` | — |
+| Node 运行时 | `container/app/src/main/assets/node-versions.json` | — |
 
-## 2. 校验与报告（全部在 CI 侧）
+**两条流的版本号从不互相比较。** "壳 0.2.0 / 内核 0.1.0-android.11" 是正常状态。
 
-- `scripts/gen-version.js --check`：校验各单一事实源齐全/合法 → 不合法即红（`ci.yml`）。
-- `scripts/gen-version.js`：把**聚合清单**打进 CI 日志，评审/回溯时一眼看到各层版本。
-- **刻意不生成**进 git 的清单文件 —— 那会要求"本地先跑生成器再提交"，
-  与 [testing-standard.md](testing-standard.md) 的红线（本地不得调起任何仓内执行）冲突。
+## 2. 改哪层，bump 哪个
 
-## 3. 什么时候 bump 什么
+| 改动范围 | 必须 bump | 不动的 |
+|---|---|---|
+| `kernel/**`（内核逻辑/面板） | `kernel/package.json` 的 `version` | **壳版本不动**（这就是"只更新内核"） |
+| `container/app/**` | `version.json` 的 `shell.versionCode` +1（`versionName` 视语义） | 内核版本不动 |
+| 桥协议语义变更 | 两边都动：壳 `shell.bridgeProtocol` +1、内核 `dsh.requiresProtocol` 跟上 | — |
+| 只改 `kernel/ui/**` | `kernel/ui/package.json` 的 `version` | 以上都不动 |
+| 换 Node 运行时 | `node-versions.json` 的 `default` | — |
 
-| 改动 | 必须 bump |
-|---|---|
-| `container/app/**`（Kotlin / 资源 / 清单） | `version.json` 的 `shell.versionCode` **+1**；`shell.versionName` 视语义 |
-| `container/engine/**` | `container/engine/package.json` 的 `version` |
-| `kernel/**`（ui 除外） | `kernel/package.json` 的 `version`（OTA 包名随之变化） |
-| `kernel/ui/**` | `kernel/ui/package.json` 的 `version` |
-| 换 Node 运行时 | `node-versions.json` 的 `default`（并确保对应 Release tag 存在） |
+## 3. CI 门禁（都在 CI 侧，本地不执行任何东西）
 
-语义：`versionCode` = **单调递增整数**（只增不减，Android 升级判定用它）；
-`versionName` = 给人看的 semver。
+| 门禁 | 位置 | 拦的是 |
+|---|---|---|
+| 跨层版本校验 | `ci.yml` → `scripts/gen-version.js --check` | 事实源缺失/非法；`protocol.js` 与 `version.json` 的协议号**漂移**；内核要求协议 > 壳实现协议 |
+| 壳 versionCode 单调 | `fast-apk` 发布步骤 | `versionCode` 回退 → 已升级设备永远收不到新版本 |
+| 内核版本唯一 | `kernel-ota` 发布步骤 | 版本复用 → 设备端判为"无更新" → **静默不生效** |
 
-## 4. versionCode 单调门禁（不可逆事故的唯一防线）
+## 4. 发布物
 
-`fast-apk` 的发布步骤会：
-
-1. 从 `apk-latest` 下载**已发布**的 `version.json`；
-2. 断言本次 `versionCode` **严格大于**已发布值，否则**硬红并拒绝发布**。
-
-为什么：`versionCode` 回退 = 已升级的设备**永远收不到**新版本，且只能卸载重装 —— 不可逆。
-
-## 5. 发布物命名
-
-`apk-latest` Release 每轮携带三个资产：
+**壳**（`apk-latest` Release，每轮三个资产）：
 
 | 资产 | 用途 |
 |---|---|
-| `app-debug.apk` | **稳定别名**：latest 下载地址永久不变 |
-| `app-debug-<versionName>+<versionCode>.apk` | **版本化**：任何一次发布都可追溯 |
-| `version.json` | 版本清单：下次发布的单调性输入 |
+| `app-debug.apk` | 稳定别名（latest 地址永久不变） |
+| `app-debug-<versionName>+<versionCode>.apk` | 版本化（可追溯） |
+| `version.json` | 壳版本清单（下次单调性检查的输入） |
+
+**内核**（`kernel-<version>` Release）：
+
+| 资产 | 用途 |
+|---|---|
+| `kernel-<version>.zip` | 签名 OTA 包（设备端验签 + sha256 + 原子切换） |
+| `kernel-manifest.json` | 清单（version / sha256 / engines / requires / requiresProtocol） |
+| `kernel-feed-<version>.zip` | 投递包（解开设备直推） |
+
+## 5. 设备端"我是谁"
+
+`files/provisioning.json` 同时给出两个身份：
+
+- `appVersion` / `appVersionCode` / `bridgeProtocol`（壳）
+- `kernelVersion`（内核，来自 `files/kernel/CURRENT`）
 
 ## 6. 自检清单
 
-- [ ] `ci.yml` 的 version-manifest 门禁绿
-- [ ] `fast-apk` 日志出现 `[version] 本次发布 x.y.z (versionCode=N)`
-- [ ] Release 上同时存在三个资产
-- [ ] 设备上 `files/provisioning.json` 的 `appVersion` / `appVersionCode` 与本次发布一致
+- [ ] `ci.yml` 的跨层版本校验绿（日志里有 `[version] ... protocol shell vN / kernel requires vN`）
+- [ ] `fast-apk` 日志出现 `[version] 本次发布 x.y.z (versionCode=N)`，且 Release 三资产齐全
+- [ ] 只更新内核时：`kernel-ota` 成功，且**壳版本未变**
+- [ ] 设备 `provisioning.json` 的 `appVersion` / `kernelVersion` / `bridgeProtocol` 三者自洽
