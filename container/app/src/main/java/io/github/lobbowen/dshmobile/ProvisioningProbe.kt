@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.Settings
 import androidx.core.content.ContextCompat
+import io.github.lobbowen.dshmobile.kernel.ShizukuState
 import io.github.lobbowen.dshmobile.permissions.LifecycleChecks
 import io.github.lobbowen.dshmobile.permissions.PermissionCatalog
 import io.github.lobbowen.dshmobile.permissions.PermissionCenter
@@ -160,28 +161,11 @@ object ProvisioningProbe {
         // ②/③ 走真实 SDK：binder 是否在 + 是否已授权本应用（不再反射 ServiceManager / 猜设置键名）
         val binderAlive = ShizukuShell.binderAlive()
         val granted = ShizukuShell.permissionGranted()
-        val ok = binderAlive && granted
+        // 四态分类与处置文案是**纯逻辑**（见 ShizukuState，有单测）：
+        // 「装了没启动」与「没装」处置完全不同，而 ok 必须**同时**依赖 binder 与授权。
+        val c = ShizukuState.classify(installedVersion, binderAlive, granted)
 
-        val status = when {
-            ok -> "已授权且守护进程在跑"
-            binderAlive -> "守护进程在跑，但本应用尚未授权"
-            installedVersion != null -> "已安装 v$installedVersion 但守护进程未启动"
-            else -> "未安装"
-        }
-
-        val hint = when {
-            ok -> "shell.exec 以 shell uid(2000) 执行（privileged=true）。"
-            binderAlive -> "打开 Shizuku → 已授权应用 → 添加本应用；授权后 shell.exec 立即可用。"
-            installedVersion != null ->
-                "Shizuku 已安装但守护进程没起来：打开 Shizuku 点一次「启动」" +
-                    "（非 root 机型每次重启都需启动；Android 11+ 可用无线调试在本机完成）。"
-            else ->
-                "shell.exec 依赖 Shizuku（必备能力，ADR-0003）。请安装 Shizuku（moe.shizuku.privileged.api）" +
-                    "并以 adb / 无线调试启动，然后授权本应用。\n" +
-                    "未满足前 shell 能力组不可用，调用返回 -32001。"
-        }
-
-        return ProbeResult(SHIZUKU, "Shizuku / 无线调试", ok, status, hint)
+        return ProbeResult(SHIZUKU, "Shizuku / 无线调试", c.ok, c.status, c.hint)
     }
 
     private fun checkMediaProjection(ctx: Context): ProbeResult {
