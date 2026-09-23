@@ -9,6 +9,9 @@ import android.os.Build
 import android.os.Environment
 import android.provider.Settings
 import androidx.core.content.ContextCompat
+import com.example.nodecontainer.permissions.LifecycleChecks
+import com.example.nodecontainer.permissions.PermissionCatalog
+import com.example.nodecontainer.permissions.PermissionCenter
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -33,6 +36,7 @@ object ProvisioningProbe {
     const val SHIZUKU = "shizuku"
     const val MEDIAPROJECTION = "mediaprojection"
     const val SPECIAL_PERMS = "special-perms"
+    const val LIFECYCLE = "lifecycle"
 
     /** 与 [ScreenCaptureService.GRANT_FILE] 保持一致（探针提示文案里引用）。 */
     private const val GRANT_FILE = ScreenCaptureService.GRANT_FILE
@@ -47,7 +51,8 @@ object ProvisioningProbe {
             checkAccessibility(ctx),
             checkShizuku(ctx),
             checkMediaProjection(ctx),
-            checkSpecialPerms(ctx)
+            checkSpecialPerms(ctx),
+            checkLifecycle(ctx)
         )
         for (r in results) {
             RuntimeDiagnostics.append(
@@ -237,52 +242,29 @@ object ProvisioningProbe {
     }
 
     private fun checkSpecialPerms(ctx: Context): ProbeResult {
+        val center = PermissionCenter(ctx)
         val items = mutableListOf<String>()
         var okCount = 0
-
-        // 1) 外部存储管理（bridge:storage 的代表能力）
-        val extStorage = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Environment.isExternalStorageManager()
-        } else false
-        if (extStorage) okCount++
-        items += "MANAGE_EXTERNAL_STORAGE=${if (extStorage) "已授权" else "未授权"}" +
-            (if (extStorage) "" else "（已声明，需跳设置页或由 Device Owner 静默授予）")
-
-        // 2) 通知访问
-        val notifAccess = try {
-            val csv = Settings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners") ?: ""
-            csv.split(":").any { it.contains(ctx.packageName) }
-        } catch (_: Throwable) { false }
-        if (notifAccess) okCount++
-        items += "通知访问=${if (notifAccess) "已授权" else "未授权"}"
-
-        // 3) 通知发送（Android 13+ 运行时权限）
-        val postNotif = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) ==
-                PackageManager.PERMISSION_GRANTED
-        } else true
-        if (postNotif) okCount++
-        items += "POST_NOTIFICATIONS=${if (postNotif) "已授权" else "未授权（notif.post 会被系统静默丢弃）"}"
-
-        // 4) 安装未知应用（Device Owner 静默安装依赖；AppOps 特殊权限）
-        val installPkgs = try {
-            ctx.packageManager.canRequestPackageInstalls()
-        } catch (_: Throwable) { false }
-        if (installPkgs) okCount++
-        items += "REQUEST_INSTALL_PACKAGES=${if (installPkgs) "已授权" else "未授权"}" +
-            "（Device Owner 可经 setPermissionGrantState 直接授予）"
-
-        // 5) 悬浮窗
-        val overlay = try {
-            Settings.canDrawOverlays(ctx)
-        } catch (_: Throwable) { false }
-        if (overlay) okCount++
-        items += "SYSTEM_ALERT_WINDOW=${if (overlay) "已授权" else "未授权"}" +
-            "（Device Owner 可静默授予，无需用户点确认）"
-
+        for (spec in PermissionCatalog.SPECIAL) {
+            val granted = center.isGranted(spec)
+            if (granted) okCount++
+            items += spec.label + "=" + (if (granted) "已授权" else "未授权") +
+                (if (!granted && spec.note.isNotEmpty()) "（" + spec.note + "）" else "")
+        }
         return ProbeResult(
-            SPECIAL_PERMS, "标准特殊权限", okCount == 5, "$okCount/5 已就绪",
+            SPECIAL_PERMS, "标准特殊权限", okCount == PermissionCatalog.SPECIAL.size,
+            "$okCount/${PermissionCatalog.SPECIAL.size} 已就绪",
             items.joinToString("\n")
+        )
+    }
+
+    /** 生命周期风险（电池优化 / phantom process killer / 前台保活前提）。 */
+    private fun checkLifecycle(ctx: Context): ProbeResult {
+        val lines = LifecycleChecks.collect(ctx)
+        val ok = lines.count { it.ok }
+        return ProbeResult(
+            LIFECYCLE, "生命周期风险", ok == lines.size, "$ok/${lines.size} 项就绪",
+            lines.joinToString("\n") { it.title + "=" + it.detail }
         )
     }
 
