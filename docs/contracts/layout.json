@@ -133,6 +133,16 @@
       "from": "CONTAINER-STATUS.md",
       "to": "docs/runbook/container-status.md",
       "kind": "file"
+    },
+    {
+      "from": "docs/ARCHITECTURE.md",
+      "to": "ARCHITECTURE.md",
+      "kind": "file"
+    },
+    {
+      "from": "docs/BASE_SPEC.md",
+      "to": "docs/contracts/base-spec.md",
+      "kind": "file"
     }
   ],
   "legacyForbidden": [
@@ -141,7 +151,9 @@
     "native",
     "dsh-android-kernel",
     "_artifacts",
-    "README-交接包.md"
+    "README-交接包.md",
+    "docs/ARCHITECTURE.md",
+    "docs/BASE_SPEC.md"
   ],
   "generated": [
     "container/app/build/",

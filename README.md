@@ -3,7 +3,7 @@
 > 把手机变成「工作台」的**地基**：一个冻结的安卓 APK，内含原生 Node 运行时 + HostBridge 能力桥 + 签名 OTA 引擎 + 生命周期/诊断。
 > 真正的产品（控制面板内核 L1、Agent L2）由这套底座**热更新**承载——APK 只在 Node/桥能力变更时才重编。
 
-分层架构详见 [`docs/BASE_SPEC.md`](docs/BASE_SPEC.md) 与 [`docs/BRIDGE_PROTOCOL.md`](docs/BRIDGE_PROTOCOL.md)。
+架构与硬约束见 [`ARCHITECTURE.md`](ARCHITECTURE.md)；契约见 [`docs/contracts/`](docs/contracts/)；规范索引见 §2.1。
 
 ---
 
@@ -24,39 +24,40 @@
 ## 2. 仓库结构
 
 ```
-dsh-mobile/                             # 单仓：L0 容器 = 仓根，L1 内核 = dsh-android-kernel/
-├─ app/src/main/
-│  ├─ jniLibs/arm64-v8a/libnode.so        # NDK 编出的 node（构建时注入，首启离线可用）
-│  │                                       #   ⚠ 必须是 lib*.so 且放 jniLibs（见 §2.1，改动前必读）
-│  ├─ assets/
-│  │  ├─ node/server.js                   # 容器探针（无内核包时首启验证 Node 原生链路）
-│  │  ├─ node-versions.json               # Node 运行时版本清单（驱动 Node OTA）
-│  │  ├─ ota-public.pem                   # ★焊接的 OTA 验签公钥（设备端唯一信任源）
-│  ├─ java/com/example/nodecontainer/
-│  │  ├─ NodeContainerApp                 # 通知渠道
-│  │  ├─ NodeRuntimeService(:node)        # 前台服务：预置体检 → 写 runtime.json → 拉起内核 → 退避重启
-│  │  ├─ HostBridgeService                # ★UDS 能力桥（JSON-RPC 2.0，8 组方法 + 审计）
-│  │  ├─ ProvisioningProbe                # ★预置自检探针（PROVISIONING §4，落 provisioning.json）
-│  │  ├─ KernelManager                    # kernel/ CURRENT 指针 + 基线内核落地
-│  │  ├─ NodeProvisioner / NodeVersionManager  # Node 运行时定位 / 版本管理
-│  │  ├─ BootReceiver                     # ★开机自启容器
-│  │  ├─ DeviceAdminReceiver              # ★Device Owner（静默装卸/锁屏/密码/Kiosk）
-│  │  ├─ DshAccessibilityService          # ★无障碍：手势/节点树/文本注入（bridge:ui_automation）
-│  │  ├─ ScreenCaptureService             # ★截屏：MediaProjection 前台服务（bridge:ui.screenshot）
-│  │  ├─ PackageInstallReceiver           # ★PackageInstaller 会话结果回传（app.install/uninstall）
-│  │  └─ MainActivity                     # 诊断面板 + 屏幕捕获授权 + 内核同源宿主帧 /__host
-│  └─ res/xml/{device_admin, accessibility_service_config, network_security_config}.xml
-├─ container-engine/                      # ★可测 OTA 引擎（Node，零依赖）
-│  ├─ src/  zip / keys / sign / verify / kernel-bundle / ota-engine / runtime-json
-│  │        / boot / bridge/{protocol,methods,uds-transport,server}.js
-│  ├─ test/ 12 个测试套件（228 条逻辑断言，另 test:baseline 8 条产物断言）
-│  └─ bin/build-bundle.js                 # 内核包签名构建 CLI
-├─ scripts/  keygen / build-node-android / build-apk-local / make-release / build-kernel-bundle
-├─ keys/                                    # 白名单 gitignore：ota-private.pem / release.keystore / keystore.properties
-├─ dsh-android-kernel/                      # ★ L1 内核源码（单仓子目录；回归门禁 = kernel-ci.yml）
-└─ .github/workflows/  fast-apk(日常出包·分钟级) / kernel-ota / kernel-ci / pin-node
-                         / build-apk(仅 Node 升级·手动触发) / publish / repack / admin
+dsh-mobile/                                  # 单仓双子项目（M）
+├─ container/                                # ── L0 容器（冻结 APK）──
+│  ├─ app/src/main/
+│  │  ├─ jniLibs/arm64-v8a/libnode.so       # NDK 产出的 node（构建时注入）
+│  │  │                                      #   ⚠ 必须 lib*.so 且放 jniLibs（见 §2.1）
+│  │  ├─ assets/{node/, node-versions.json, ota-public.pem}
+│  │  └─ java/com/example/nodecontainer/    # 服务 / HostBridge / OTA / 诊断 / 原生资产
+│  ├─ engine/                               # 可测 OTA 引擎（Node，零依赖）
+│  ├─ native/{posix,flock,ptyprobe}/        # C 源：随包原生桥与探针
+│  └─ _artifacts/                           # 产物样本（可重建）
+├─ kernel/                                  # ── L1 内核（签名 OTA 热更新）──
+├─ system/                                  # ── Tier S（ROM/priv-app 集成）──
+├─ docs/
+│  ├─ adr/                                  # 决策记录 0001…
+│  ├─ contracts/                            # base-spec / bridge-protocol / layout.json / *.schema.json
+│  ├─ runbook/                              # git-repo / testing / handover / provisioning / contributing
+│  └─ STORAGE-STANDARD.md                   # 存储规范（位置 + 对账）
+├─ scripts/                                 # 跨层构建/发布工具
+├─ ARCHITECTURE.md                          # ★ 架构与硬约束（唯一事实来源）
+├─ _archive/                                # 历史归档（只读）
+├─ gradle*/settings.gradle.kts              # 根构建（:app → container/app）
+└─ .github/workflows/                       # CI（唯一合法验证通道，见 §2.1）
 ```
+
+### 2.1 规范索引（改动前先读）
+
+| 主题 | 文件 |
+|---|---|
+| 架构与硬约束（唯一事实来源） | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
+| 存储位置 / 目录契约 / 对账 | [`docs/STORAGE-STANDARD.md`](docs/STORAGE-STANDARD.md)、[`docs/contracts/layout.json`](docs/contracts/layout.json) |
+| Git / 提交 / 令牌使用 | [`docs/runbook/git-repo-standard.md`](docs/runbook/git-repo-standard.md) |
+| **测试（只准走 CI，本地禁止执行）** | [`docs/runbook/testing-standard.md`](docs/runbook/testing-standard.md) |
+| 决策记录（含已否决方案） | [`docs/adr/`](docs/adr/) |
+| 契约（内核包 / 运行时 / 桥协议） | [`docs/contracts/`](docs/contracts/) |
 
 ### 2.1 ⚠️ 为什么 node 必须放在 jniLibs 而不是 assets
 

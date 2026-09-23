@@ -131,6 +131,14 @@ jobs:
           sys.exit(1 if bad else 0)
           PY
 
+      - name: Gate — native asset manifest is generated from the registry
+        # 单一事实源：.github/native-assets.txt 必须等于生成器的输出。
+        # 手改而不同步注册表 → 此步 `git diff --exit-code` 直接红。
+        run: |
+          set -euo pipefail
+          node scripts/gen-native-assets.js
+          git diff --exit-code -- .github/native-assets.txt
+
       - name: Container engine tests (logic)
         # 本工作流改了 container/engine/src/（zip.js 的 Deflate 支持、
         # kernel-bundle 的排除表与体积断言、桥方法表）—— 不跑测试就等于没验证。
