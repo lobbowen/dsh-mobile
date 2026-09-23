@@ -53,7 +53,7 @@
         └─ CURRENT 存在 → 版本比较 → 需要则更新
       ① GET <base>/kernel-<channel>/kernel-manifest.json（受 startupBudgetMs 约束）
       ② isNewer(remote, CURRENT)            ← 只升不降
-      ③ 下载 zip → cacheDir
+      ③ 下载 zip → cacheDir（**断点续传 + 重试**，见下）
       ④ 校验链：sha256 → ed25519 验签 → engines.node → requires → requiresProtocol
                  （manifest 里的 version 还会与**包内已签名的 kernel.json** 交叉校验）
       ⑤ 原子切 files/kernel/CURRENT
@@ -76,6 +76,24 @@
 （已安装的设备**不会**被"回退"，这是 OTA 的固有语义。）
 
 **灰度流程**：`canary` + 小比例 → 真机观察 → 加大比例 → 提升到 `stable`。
+
+### 3.6 下载：断点续传 + 重试（弱网可用性的关键）
+
+内核包 ~1.2MB。弱网下单次 GET 经常中途断——如果失败就丢弃，**每次开机都从 0 开始**，
+网络永远「差一点点」，内核永远装不上，签名/下限/灰度全都没机会生效。因此：
+
+| 机制 | 说明 |
+|---|---|
+| **不删半包** | 下到 `kernel-ota-<ver>.zip.part`；失败或预算耗尽都**保留** |
+| **Range 续传** | 下次带 `Range: bytes=<已下>-` 接着下（服务端支持，实测 `206`） |
+| **预算到点就停** | 单次开机最多花 `startupBudgetMs`，**进度跨启动累积**（把一次大失败拆成多次小成功） |
+| **重试 + 退避** | 3 次，退避 0.5s→1s→2s |
+| **收齐后验 sha256** | 不一致立即丢弃重下（防传输损坏 / 拼接错误）；信任根仍是包内 ed25519 签名 |
+| **安全回退** | 服务端不支持 Range（回 200）→ 从头写；返回 416 → 按「已收齐」交给 sha256 判定 |
+| **identity 编码** | 显式 `Accept-Encoding: identity`——否则中间层压缩会让 Range 偏移指向压缩流，续传必然损坏 |
+
+> 下载超时**不**按启动预算夹逼：预算是「总时长」约束（循环内检查），read timeout 是「单次阻塞」
+> 约束。用预算夹逼它会把「慢但在稳定传输」的连接误杀，恰好破坏续传要解决的问题。
 
 ## 4. 失败语义（不假装成功）
 

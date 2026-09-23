@@ -29,6 +29,11 @@ object KernelOtaUpdater {
     private const val READ_TIMEOUT_MS = 20_000
     private const val MAX_MANIFEST_BYTES = 64 * 1024
     private const val MAX_ZIP_BYTES = 32L * 1024 * 1024
+// 下载专用：单次 read 上限（不是总时长；总时长由启动预算在循环里管）、重试次数、连接超时。
+// 连接超时比 manifest 的 5s 宽：弱网下 TLS+握手经常超过 5s，过紧会把它误判成失败。
+private const val DOWNLOAD_READ_TIMEOUT_MS = 30_000
+private const val DOWNLOAD_CONNECT_TIMEOUT_MS = 15_000
+private const val DOWNLOAD_ATTEMPTS = 3
 
     data class Config(
         val baseUrl: String,
@@ -154,16 +159,18 @@ object KernelOtaUpdater {
         }
         val url = manifest.optString("url", "").trim().ifBlank { cfg.zipUrl(remote) }
         val tmp = File(context.cacheDir, "kernel-ota-$remote.zip")
+        // 半包用**独立文件名**并跨启动保留：下次从 Range 断点接着下（见 downloadResumable）。
+        val part = File(context.cacheDir, "kernel-ota-$remote.zip.part")
         // 把 manifest **原样**落盘：签名是对原始字节的规范化 JSON 做的，
         // 只有原始内容才能通过验签（重新序列化会改变 key 顺序 —— canonical 会排序，
         // 所以严格说也行，但"原样"能顺带发现传输/解析层的意外改动）。
         val manifestFile = File(context.cacheDir, "kernel-manifest-ota.json")
         try { manifestFile.writeText(manifestText) } catch (_: Throwable) { }
-        try {
-            download(url, tmp, left())
-        } catch (e: Throwable) {
-            tmp.delete()
-            return Outcome(true, true, false, current, remote, "下载失败（$url）：${e::class.java.simpleName}: ${e.message}")
+        val dlErr = downloadResumable(url, tmp, part, manifest.optString("sha256", "").ifBlank { null }, deadline)
+        if (dlErr != null) {
+            // ⚠ **绝不删 part**：已下的字节留给下次启动续传。
+            // 这正是"弱网也能装上"的关键 —— 把一次大失败拆成若干次小成功。
+            return Outcome(true, true, false, current, remote, "下载未完成（$url）：$dlErr")
         }
 
         val result = try {
@@ -238,23 +245,145 @@ object KernelOtaUpdater {
         }
     }
 
-    private fun download(url: String, dest: File, budgetMs: Long) {
-        val conn = open(url, budgetMs)
-        val code = conn.responseCode
-        if (code !in 200..299) throw IllegalStateException("HTTP $code")
-        conn.inputStream.use { ins ->
-            dest.outputStream().use { out ->
-                val buf = ByteArray(64 * 1024)
-                var total = 0L
-                while (true) {
-                    val n = ins.read(buf)
-                    if (n <= 0) break
-                    total += n
-                    if (total > MAX_ZIP_BYTES) throw IllegalStateException("包超过上限 ${MAX_ZIP_BYTES} 字节")
-                    out.write(buf, 0, n)
+    // =========================================================================
+    // 下载：**断点续传 + 重试 + 完整性校验**
+    // =========================================================================
+    // 为什么必须做扎实：内核包 ~1.2MB。弱网下单次 GET 经常中途断，而原实现失败即删临时文件，
+    // 于是**每次开机都从 0 开始** —— 网络永远「差一点点」，内核永远装不上，签名 / 版本下限 /
+    // 灰度这一整套机制全都发挥不了作用。
+    //
+    // 四条设计决定：
+    //   ① **不删半包**：下到 <name>.part；失败或预算耗尽都保留，下次用 Range 接着下。
+    //   ② **预算到点就停、进度留下**：单次开机最多花 budget，进度跨启动累积。
+    //   ③ **重试 + 指数退避**：瞬时抖动（连接重置 / 5xx / 提前 EOF）自动重来。
+    //   ④ **收齐后校验 sha256**：不一致立即丢弃重来，绝不把「拼出来的包」交给安装器。
+    //      （信任根仍是包内 ed25519 签名；sha256 防的是传输损坏与拼接错误。）
+    //
+    // 返回 null = 成功；非 null = 失败原因（**半包已保留**）
+
+    private enum class Transfer { DONE, PARTIAL, FAILED }
+
+    private fun downloadResumable(
+        url: String,
+        dest: File,
+        part: File,
+        expectedSha256: String?,
+        deadline: Long,
+    ): String? {
+        var lastErr: String? = null
+        for (attempt in 1..DOWNLOAD_ATTEMPTS) {
+            if (expired(deadline)) return "启动预算耗尽；已下 " + part.length() + " 字节已保留，下次启动继续"
+            val r = try {
+                transferOnce(url, part, expectedSha256, deadline)
+            } catch (e: Throwable) {
+                lastErr = e::class.java.simpleName + ": " + (e.message ?: "")
+                Transfer.FAILED
+            }
+            when (r) {
+                Transfer.DONE -> {
+                    dest.delete()
+                    // 原子就位：rename 优先，跨设备才退化拷贝。
+                    if (!part.renameTo(dest)) {
+                        part.copyTo(dest, overwrite = true)
+                        part.delete()
+                    }
+                    return null
+                }
+                Transfer.PARTIAL -> return "启动预算耗尽；已下 " + part.length() + " 字节已保留，下次启动继续"
+                Transfer.FAILED -> {
+                    if (attempt < DOWNLOAD_ATTEMPTS) {
+                        try { Thread.sleep(minOf(500L shl (attempt - 1), 4_000L)) } catch (_: InterruptedException) { }
+                    }
                 }
             }
         }
-        if (dest.length() <= 0L) throw IllegalStateException("下载到 0 字节")
+        return lastErr ?: ("重试 " + DOWNLOAD_ATTEMPTS + " 次仍未完成")
     }
+
+    private fun transferOnce(url: String, part: File, expectedSha256: String?, deadline: Long): Transfer {
+        val have = if (part.isFile) part.length() else 0L
+        val conn = openDownload(url)
+        if (have > 0L) conn.setRequestProperty("Range", "bytes=" + have + "-")
+        return try {
+            when (val code = conn.responseCode) {
+                // 半包 >= 服务端长度时，越界 Range 会得到 416 —— 视为「已收齐」，交给 sha256 判定。
+                416 -> if (sha256Ok(part, expectedSha256)) Transfer.DONE
+                       else { part.delete(); throw IllegalStateException("416 且 sha256 不符，已丢弃") }
+                206 -> appendTo(conn, part, expectedSha256, deadline)   // 支持续传 → 追加
+                in 200..299 -> {                                        // 不支持 Range（或首次）→ 从头写
+                    part.delete()
+                    appendTo(conn, part, expectedSha256, deadline)
+                }
+                else -> throw IllegalStateException("HTTP " + code)
+            }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun appendTo(conn: HttpURLConnection, part: File, expectedSha256: String?, deadline: Long): Transfer {
+        val total = totalBytes(conn)
+        conn.inputStream.use { ins ->
+            part.parentFile?.mkdirs()
+            java.io.FileOutputStream(part, true).use { out ->
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    // 预算检查放在循环内：到点立刻停，**已写部分保留**（这就是跨启动续传）。
+                    if (expired(deadline)) return Transfer.PARTIAL
+                    val n = ins.read(buf)
+                    if (n <= 0) break
+                    out.write(buf, 0, n)
+                    if (part.length() > MAX_ZIP_BYTES) throw IllegalStateException("包超过上限 ${MAX_ZIP_BYTES} 字节")
+                }
+                out.flush()
+                try { out.fd.sync() } catch (_: Throwable) { }   // 落盘后再信 length
+            }
+        }
+        if (part.length() <= 0L) throw IllegalStateException("下载到 0 字节")
+        // 有总长信息就能判断是否提前断：提前断 → 抛错走重试（而不是把半包当完整包）。
+        if (total > 0L && part.length() < total) {
+            throw java.io.EOFException("提前结束 " + part.length() + "/" + total)
+        }
+        if (!sha256Ok(part, expectedSha256)) {
+            // 最常见原因：服务端忽略了 Range 却仍回 206（或中间缓存层改写了内容）。
+            // 丢弃重来 —— 绝不把可疑字节交给安装器。
+            part.delete()
+            throw IllegalStateException("sha256 校验未通过，已丢弃半包重下")
+        }
+        return Transfer.DONE
+    }
+
+    private fun sha256Ok(file: File, expected: String?): Boolean {
+        val e = expected?.trim()?.lowercase().orEmpty()
+        if (e.isBlank()) return true          // 无锚点时交给包内签名把关（manifest 正常都带 sha256）
+        return try {
+            KernelInstaller.sha256(file).equals(e, ignoreCase = true)
+        } catch (_: Throwable) { false }
+    }
+
+    private fun totalBytes(conn: HttpURLConnection): Long {
+        conn.getHeaderField("Content-Range")?.substringAfterLast("/")?.trim()?.toLongOrNull()?.let { if (it > 0) return it }
+        return conn.getHeaderField("Content-Length")?.trim()?.toLongOrNull() ?: -1L
+    }
+
+    private fun expired(deadline: Long): Boolean = deadline > 0L && System.currentTimeMillis() > deadline
+
+    /**
+     * 下载专用连接。
+     *
+     * 与 [open] 的区别：超时**不再按启动预算夹逼**。预算是「总时长」约束（由 [expired] 在循环里管），
+     * 而 read timeout 是「单次阻塞」约束 —— 拿 12s 的预算去夹逼它，会把「慢但在稳定传输」的连接误杀，
+     * 恰好破坏续传要解决的问题。
+     *
+     * 另外显式声明 Accept-Encoding: identity：若中间层做了压缩，Range 偏移会指向压缩流的位置，
+     * 续传拼出来的包必然损坏。
+     */
+    private fun openDownload(url: String): HttpURLConnection =
+        (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = DOWNLOAD_CONNECT_TIMEOUT_MS
+            readTimeout = DOWNLOAD_READ_TIMEOUT_MS
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "dsh-kernel-ota")
+            setRequestProperty("Accept-Encoding", "identity")
+        }
 }
