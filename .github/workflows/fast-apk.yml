@@ -803,9 +803,12 @@ jobs:
           # ── versionCode 单调门禁 ──────────────────────────────────────────────
           # 为什么必须拦：versionCode 回退 = 已升级的设备**永远收不到**新版本，
           # 且不可逆（只能卸载重装）。宁可发不出去，也不能发一个"更旧"的号。
-          PREV="$(mktemp)"
-          if gh release download "$TAG" -p version.json -O "$PREV" --repo '${{ github.repository }}' 2>/dev/null; then
-            PVC="$(node -p "require('$PREV').shell.versionCode" 2>/dev/null || echo 0)"
+          # 注意：gh 的 -O 若指向**已存在**的文件会直接报错 —— mktemp 已建好文件，
+          # 所以给一个临时**目录**让它自己写（这是本门禁第一次跑时踩到的真实坑）。
+          # 另外：失败不再静默吞掉，而是打 warning + gh 原始错误，避免"门禁没生效"伪装成"首次发布"。
+          PREVDIR="$(mktemp -d)"
+          if gh release download "$TAG" -p version.json -O "$PREVDIR" --repo '${{ github.repository }}' 2>"$PREVDIR/err"; then
+            PVC="$(node -p "require('$PREVDIR/version.json').shell.versionCode" 2>/dev/null || echo 0)"
             echo "[version] 已发布 versionCode=$PVC，本次=$VC"
             if [ "$VC" -lt "$PVC" ]; then
               echo "::error title=versionCode 回退::本次 $VC < 已发布 $PVC —— 已升级的设备将永远收不到新版本。请 bump version.json 的 shell.versionCode（见 docs/runbook/versioning.md）。"
@@ -813,9 +816,12 @@ jobs:
             fi
             if [ "$VC" -eq "$PVC" ]; then
               echo "[version] 同版本重发（versionCode=$VC，latest 滚动通道允许）"
+            else
+              echo "[version] 版本前进（$PVC → $VC）"
             fi
           else
-            echo "[version] 未发现已发布的 version.json（首次带版本发布，跳过单调性检查）"
+            echo "::warning title=versionCode 门禁未生效::未能取到已发布的 version.json，本次跳过单调性检查。gh 错误如下："
+            cat "$PREVDIR/err" || true
           fi
 
           # ── 覆盖上传（含孤立资产回退）────────────────────────────────────────
