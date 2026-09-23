@@ -8,8 +8,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const REPO_ROOT = path.resolve(__dirname, '..', '..');
-const DEFAULT_PUBLIC_KEY_PATH = path.join(REPO_ROOT, 'app', 'src', 'main', 'assets', 'ota-public.pem');
+const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
+const DEFAULT_PUBLIC_KEY_PATH = path.join(REPO_ROOT, 'container', 'app', 'src', 'main', 'assets', 'ota-public.pem');
 const DEFAULT_PRIVATE_KEY_PATH = path.join(REPO_ROOT, 'keys', 'ota-private.pem');
 
 function loadPublicKey(p) {
