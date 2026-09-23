@@ -41,6 +41,12 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Validate workflow files (YAML)
+        # 门禁流程自己也要能拦住"workflow 写坏"：解析失败时 GitHub 的表现是
+        # **0 个 job**（看起来像"没触发"），所以必须在这里显式校验。
+        working-directory: .
+        run: python3 scripts/validate-workflows.py
+
       - name: Gate — native asset manifest is generated from the registry
         # 单一事实源：.github/native-assets.txt 必须等于生成器的输出。
         working-directory: .
