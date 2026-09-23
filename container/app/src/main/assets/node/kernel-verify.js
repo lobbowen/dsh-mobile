@@ -20,7 +20,7 @@
 //
 //  契约（与 Kotlin 侧 NodeKernelVerifier 严格对齐）
 //  -----------------------------------------------
-//  入参：--zip <path> --pubkey <path> [--sha256 <hex>] [--version <v>] [--shell-protocol <n>]
+//  入参：--zip <path> --pubkey <path> [--sha256 <hex>] [--version <v>] [--shell-protocol <n>] [--manifest <path>]
 //  出参：stdout 最后一行 `DSH_VERIFY_RESULT {"ok":bool,"version":..,"reason":..,
 //        "detail":..,"entryOk":bool}`
 //        退出码：0 = 校验通过；非 0 = 未通过（Kotlin 侧主要看结果行，退出码是双保险）
@@ -58,6 +58,7 @@ function parseArgs(argv) {
     else if (a === '--sha256') out.sha256 = argv[++i];
     else if (a === '--version') out.version = argv[++i];
     else if (a === '--shell-protocol') out.shellProtocol = argv[++i];
+    else if (a === '--manifest') out.manifest = argv[++i];
   }
   return out;
 }
@@ -232,6 +233,30 @@ function main() {
     pubKeyPem = fs.readFileSync(args.pubkey, 'utf8');
   } catch (e) {
     fail('pubkey-unreadable', e.message);
+  }
+
+  // ---- 4.5) manifest 签名（ADR-0005 C3）----
+  //
+  // 为什么也要验：manifest 是**先被读**的那一个。不验它，重放/伪造的 manifest 就能
+  // 把设备指向另一个（**合法签名**的）旧包 —— 版本交叉校验与版本下限能兜住大部分，
+  // 但"根"还是签名。这里复用同一把焊死公钥与同一套 canonical（与 sign.js 逐字节一致）。
+  if (args.manifest) {
+    let mObj;
+    try {
+      mObj = JSON.parse(fs.readFileSync(args.manifest, 'utf8'));
+    } catch (e) {
+      fail('manifest-unreadable', '读不到/解析不了 manifest: ' + e.message);
+    }
+    if (!mObj.signature) fail('manifest-signature-missing', 'manifest 无 signature 字段');
+    let mOk = false;
+    try {
+      mOk = crypto.verify(null, Buffer.from(canonical(mObj), 'utf8'), pubKeyPem,
+        Buffer.from(mObj.signature, 'base64'));
+    } catch (e) {
+      fail('manifest-signature-error', e.message);
+    }
+    if (!mOk) fail('manifest-signature-invalid', 'manifest ed25519 验签未通过（签名与内容不匹配）');
+    info('manifest 验签通过（sequence=' + (mObj.sequence || '?') + '，rollout=' + (mObj.rolloutPercent ?? '?') + '%）');
   }
 
   let sigOk = false;

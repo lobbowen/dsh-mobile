@@ -105,7 +105,7 @@ APK（L0 宿主）= Node 运行时 + 原生库 + HostBridge + **OTA 子系统**�
 |---|---|
 | **C1 版本下限** | ✅ `files/kernel/FLOOR`（只增不减）；`KernelInstaller` 拒绝低于下限的包（`version-below-floor`），**即使签名合法** |
 | **C2 commit/rollback** | ✅ 安装只写 `PENDING`；启动链**首次健康检查通过**才提交（提升下限 + 清 pending）；起不来则回滚 `CURRENT`，且**下限不降** |
-| **C3 元数据新鲜度** | ⚠️ **部分**：发布侧签发 manifest（`sequence` 单调 + `expires`/`expiresEpochMs` + ed25519 `signature`）；设备侧**已强制** `expires` 与 `sequence` 水位（防冻结/重放）。**待接线**：设备侧对 manifest `signature` 的密码学校验（需复用 Node 校验器）。影响有限——zip 本身已验签，且 manifest 版本会与包内签名版本交叉校验，"装任意包"不可行 |
+| **C3 元数据新鲜度** | ✅ 发布侧签发 manifest（`sequence` 单调 + `expires`/`expiresEpochMs` + ed25519 `signature`）；设备侧**强制** `expires`（防冻结）、`sequence` 水位（防重放）、**以及 manifest 签名**（由同一个 Node 校验器进程、同一把焊死公钥验；失败即 `manifest-signature-invalid`） |
 | **C4 通道 + 放量** | ✅ 通道 `canary`/`stable`（提升时归档不重建、门禁按通道比较）+ `rolloutPercent` **确定性分桶**放量；`rolloutPercent=0` 即停发 |
 
 > 说明：C1/C2/C3 都属于**设备端**的能力，必须与"路径收敛（删本地 feed / 删内置基线）"一起做 ——

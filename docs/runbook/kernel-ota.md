@@ -62,7 +62,7 @@
 | `sequence` | 单调递增的"第几版 manifest" | 低于本通道**已见水位**即拒（判为疑似重放） |
 | `expires` / `expiresEpochMs` | 有效期（默认 30 天） | 过期即拒（防"永久冻结在旧版本"） |
 | `rolloutPercent` | 灰度放量 0–100 | 按 `安装ID+版本` **确定性分桶**：`bucket >= rolloutPercent` 则本次不装（下次启动再试） |
-| `signature` | manifest 的 ed25519 签名 | ⚠️ **发布侧已签发**；设备侧密码学校验**尚待接线**（zip 已验签，不影响"不可执行任意包"） |
+| `signature` | manifest 的 ed25519 签名 | ✅ 设备端**校验**（与 zip 同一个 Node 校验器进程、同一把焊死公钥；失败即 `manifest-signature-invalid`） |
 
 **停发**：把 `rolloutPercent` 设为 `0` 重新发布该通道 manifest —— 尚未安装的设备不会再装。
 （已安装的设备**不会**被"回退"，这是 OTA 的固有语义。）

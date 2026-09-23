@@ -114,6 +114,8 @@ object KernelInstaller {
         manifest: JSONObject?,
         source: Source,
         nodeBin: File = NativeAssetRegistry.resolve(context, NativeAssetRegistry.NODE),
+        /** 原始 manifest 文件（ADR-0005 C3）：随包一起验 manifest 签名。 */
+        manifestFile: File? = null,
     ): InstallResult {
         if (!zip.isFile) {
             return InstallResult(false, null, source, "zip-missing", "候选包不存在: ${zip.absolutePath}")
@@ -123,7 +125,7 @@ object KernelInstaller {
         }
 
         // ---- 1) 交给 Node 做密码学校验（Kotlin 侧做不到，见类注释）----
-        val verify = NodeKernelVerifier.verify(context, zip, manifest, nodeBin)
+        val verify = NodeKernelVerifier.verify(context, zip, manifest, nodeBin, manifestFile)
         if (!verify.ok) {
             return InstallResult(
                 ok = false, version = verify.version, source = source,
