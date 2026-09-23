@@ -20,7 +20,7 @@
 //
 //  契约（与 Kotlin 侧 NodeKernelVerifier 严格对齐）
 //  -----------------------------------------------
-//  入参：--zip <path> --pubkey <path> [--sha256 <hex>] [--version <v>]
+//  入参：--zip <path> --pubkey <path> [--sha256 <hex>] [--version <v>] [--shell-protocol <n>]
 //  出参：stdout 最后一行 `DSH_VERIFY_RESULT {"ok":bool,"version":..,"reason":..,
 //        "detail":..,"entryOk":bool}`
 //        退出码：0 = 校验通过；非 0 = 未通过（Kotlin 侧主要看结果行，退出码是双保险）
@@ -57,6 +57,7 @@ function parseArgs(argv) {
     else if (a === '--pubkey') out.pubkey = argv[++i];
     else if (a === '--sha256') out.sha256 = argv[++i];
     else if (a === '--version') out.version = argv[++i];
+    else if (a === '--shell-protocol') out.shellProtocol = argv[++i];
   }
   return out;
 }
@@ -251,6 +252,25 @@ function main() {
       'ed25519 验签未通过（公钥 ' + args.pubkey + '）—— 包不是用配对私钥签的，或 kernel.json 被改过');
   }
   info('ed25519 验签通过');
+
+  // ---- 5) 桥协议兼容（ADR-0004 §3）----
+  // 与 engines/requires 并列的门槛：内核要求的最低协议 <= 壳实现的协议。
+  // 回答的是"能不能装在这台壳上"，与"哪个更新"正交。
+  //
+  // 刻意**不**静默放行：内核声明了 requiresProtocol 而调用方没传 --shell-protocol，
+  // 那是调用方 bug（Kotlin 必须传 BuildConfig.BRIDGE_PROTOCOL），必须报出来 ——
+  // "少传一个参数就悄悄跳过校验"正是最危险的那种沉默。
+  const reqProto = Number(kernelJson.requiresProtocol || 0);
+  const shellProto = Number(args.shellProtocol || 0);
+  if (reqProto > 0 && shellProto === 0) {
+    fail('shell-protocol-missing',
+      '内核声明 requiresProtocol=' + reqProto + '，但校验器未收到 --shell-protocol（调用方必须传入壳实现的协议版本）');
+  }
+  if (reqProto > shellProto) {
+    fail('protocol-unsatisfied',
+      '内核要求桥协议 v' + reqProto + '，本壳实现 v' + shellProto + ' —— 该内核包与本壳不兼容');
+  }
+  if (reqProto > 0) info('桥协议兼容：requires v' + reqProto + ' <= shell v' + shellProto);
 
   // ---- 5) 入口存在性（结构完整性）----
   const entryRel = kernelJson.entry || 'bin/dsh-supervisor';

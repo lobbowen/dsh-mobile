@@ -43,7 +43,12 @@ function main() {
   //
   // 正确语义：**没有基址就是没有 url**（用空串表示"本地投递，无远端"）。
   const url = urlBase ? urlBase.replace(/\/$/, '') + `/kernel-${version}.zip` : '';
-  const { zipBuf, manifest } = packBundle({ srcDir, version, abi, privateKeyPem: privateKey, url });
+  // requiresProtocol 由调用方从内核的单一事实源（kernel/package.json 的 dsh.requiresProtocol）
+  // 经环境变量传入 —— 与 DSH_BUNDLE_OUT_DIR 同款做法，避免在这里复制第二个源。
+  const requiresProtocol = process.env.DSH_KERNEL_REQUIRES_PROTOCOL || '0';
+  const { zipBuf, manifest } = packBundle({
+    srcDir, version, abi, privateKeyPem: privateKey, url, requiresProtocol,
+  });
 
   // 重新核算，确保 manifest.sha256 与落盘 zip 字节一致
   const actualSha = sha256(zipBuf);

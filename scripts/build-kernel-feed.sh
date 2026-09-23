@@ -218,9 +218,10 @@ VERIFY="$ROOT/container/app/src/main/assets/node/kernel-verify.js"
 if [ -f "$VERIFY" ]; then
   echo "[feed] 用设备端校验器自检…"
   set +e
-  # 带上 --sha256 与 --version：模拟设备端"有 manifest 锚点"的最严路径
+  # 带上 --sha256 / --version / --shell-protocol：模拟设备端"有 manifest 锚点"的最严路径
   SHA="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$OUT/kernel-manifest.json','utf8')).sha256)")"
-  OUT_TXT="$(node "$VERIFY" --zip "$OUT/kernel-$VER.zip" --pubkey "$ANCHOR" --sha256 "$SHA" --version "$VER" 2>&1)"
+  SHELL_PROTO="$(node -p "require('$ROOT/version.json').shell.bridgeProtocol")"
+  OUT_TXT="$(node "$VERIFY" --zip "$OUT/kernel-$VER.zip" --pubkey "$ANCHOR" --sha256 "$SHA" --version "$VER" --shell-protocol "$SHELL_PROTO" 2>&1)"
   RC=$?
   set -e
   echo "$OUT_TXT" | sed 's/^/[feed]   /'

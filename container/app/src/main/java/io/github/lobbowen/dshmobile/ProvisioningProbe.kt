@@ -257,8 +257,11 @@ object ProvisioningProbe {
         try {
             val obj = org.json.JSONObject().apply {
                 put("schema", 1)
+                // 两条版本流各自的身份 + 协议版本：排查"为什么某功能没生效"先看这三个值（ADR-0004 §5）。
                 put("appVersion", BuildConfig.VERSION_NAME)
                 put("appVersionCode", BuildConfig.VERSION_CODE)
+                put("bridgeProtocol", BuildConfig.BRIDGE_PROTOCOL)
+                put("kernelVersion", KernelManager(ctx).currentVersion() ?: "")
                 put("checkedAt", System.currentTimeMillis())
                 put("androidApi", Build.VERSION.SDK_INT)
                 put("device", "${Build.MANUFACTURER} ${Build.MODEL}")

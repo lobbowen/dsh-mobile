@@ -49,6 +49,11 @@
         "type": "object"
       }
     },
+    "requiresProtocol": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "内核要求的最低 HostBridge 协议版本（ADR-0004 §3）。壳不满足则拒绝安装：protocol-unsatisfied。"
+    },
     "signature": {
       "type": "string"
     }

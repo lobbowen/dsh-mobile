@@ -30,6 +30,8 @@ android {
     val shellVer = verJson["shell"] as Map<*, *>
     val appVersionName = shellVer["versionName"] as String
     val appVersionCode = (shellVer["versionCode"] as Number).toInt()
+    // 壳实现的 HostBridge 协议版本：内核据此判断"能不能装在这台壳上"（ADR-0004 §3）。
+    val appBridgeProtocol = (shellVer["bridgeProtocol"] as Number).toInt()
 
     defaultConfig {
         applicationId = "io.github.lobbowen.dshmobile"
@@ -39,6 +41,7 @@ android {
         targetSdk = 28
         versionCode = appVersionCode
         versionName = appVersionName
+        buildConfigField("int", "BRIDGE_PROTOCOL", appBridgeProtocol.toString())
         // 当前仅支持 arm64-v8a（bionic 链接的 Node 二进制只编这个 ABI）。
         // 需要 32 位设备时，扩展 build-node-android.sh 增加 armeabi-v7a 产物即可。
         ndk {

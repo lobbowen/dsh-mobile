@@ -14,12 +14,16 @@ const { extractZip } = require('./zip');
 const { sha256, verifyManifest } = require('./verify');
 
 class OtaEngine {
-  constructor({ baseDir, httpGet, publicKeyPem, capabilities, runtime, log }) {
+  constructor({ baseDir, httpGet, publicKeyPem, capabilities, runtime, protocol, log }) {
     this.baseDir = baseDir;                 // files/（应用沙箱）
     this.httpGet = httpGet;                 // (url) => Promise<Buffer>
     this.publicKeyPem = publicKeyPem;       // 焊死公钥（设备端唯一信任源）
     this.capabilities = capabilities || [];  // 设备已预置能力 token
     this.runtime = runtime || { node: process.version };
+    // 壳实现的桥协议版本（ADR-0004 §3）。调用方必须显式传入；
+    // 默认 0 = "未声明"，任何声明了 requiresProtocol>=1 的内核都会被拒绝 ——
+    // 刻意**不**静默跳过：漏传就装不上，CI 会立刻暴露。
+    this.shellProtocol = Number(protocol || 0);
     this.log = log || (() => {});
     this.kernelDir = path.join(baseDir, 'kernel');
     this.currentPointer = path.join(this.kernelDir, 'CURRENT');
@@ -67,6 +71,12 @@ class OtaEngine {
         return { ok: false, reason: 'node-engine-unsatisfied' };
       const missing = (kernelJson.requires || []).filter((r) => !this.capabilities.includes(r));
       if (missing.length) return { ok: false, reason: 'capability-missing', missing };
+      // 桥协议兼容（ADR-0004 §3）：内核要求的最低协议 <= 壳实现的协议。
+      // 与 engines/requires 并列，回答"能不能装在这台壳上"。
+      const reqProto = Number(kernelJson.requiresProtocol || 0);
+      if (reqProto > this.shellProtocol) {
+        return { ok: false, reason: 'protocol-unsatisfied', required: reqProto, have: this.shellProtocol };
+      }
       return { ok: true, kernelJson };
     } catch (e) {
       return { ok: false, reason: 'extract-failed', error: String(e && e.message) };
