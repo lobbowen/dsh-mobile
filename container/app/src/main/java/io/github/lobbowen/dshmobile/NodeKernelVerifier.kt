@@ -60,6 +60,8 @@ object NodeKernelVerifier {
         zip: File,
         manifest: JSONObject?,
         nodeBin: File = NativeAssetRegistry.resolve(context, NativeAssetRegistry.NODE),
+        /** 原始 manifest 文件（ADR-0005 C3）：交给校验器**验其签名**。null = 不验（如仅包内自校验）。 */
+        manifestFile: File? = null,
     ): VerifyOutcome {
         val script = try {
             NodeProvisioner.ensureKernelVerifyScript(context)
@@ -90,6 +92,8 @@ object NodeKernelVerifier {
         // 这是**必传**参数 —— 校验器在内核声明了要求却收不到它时会直接失败，
         // 不允许"少传就悄悄跳过"。
         args += listOf("--shell-protocol", BuildConfig.BRIDGE_PROTOCOL.toString())
+        // manifest 的 ed25519 签名由**同一个校验器进程**验证（同一把焊死公钥、同一套 canonical）。
+        manifestFile?.takeIf { it.isFile }?.let { args += listOf("--manifest", it.absolutePath) }
         manifest?.optString("sha256", "")?.ifBlank { null }?.let { args += listOf("--sha256", it) }
         manifest?.optString("version", "")?.ifBlank { null }?.let { args += listOf("--version", it) }
 

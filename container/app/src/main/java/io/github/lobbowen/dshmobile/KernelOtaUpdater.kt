@@ -146,6 +146,11 @@ object KernelOtaUpdater {
         }
         val url = manifest.optString("url", "").trim().ifBlank { cfg.zipUrl(remote) }
         val tmp = File(context.cacheDir, "kernel-ota-$remote.zip")
+        // 把 manifest **原样**落盘：签名是对原始字节的规范化 JSON 做的，
+        // 只有原始内容才能通过验签（重新序列化会改变 key 顺序 —— canonical 会排序，
+        // 所以严格说也行，但"原样"能顺带发现传输/解析层的意外改动）。
+        val manifestFile = File(context.cacheDir, "kernel-manifest-ota.json")
+        try { manifestFile.writeText(manifestText) } catch (_: Throwable) { }
         try {
             download(url, tmp, left())
         } catch (e: Throwable) {
@@ -154,9 +159,12 @@ object KernelOtaUpdater {
         }
 
         val result = try {
-            KernelInstaller.install(context, tmp, manifest, KernelInstaller.Source.OTA)
+            KernelInstaller.install(
+                context, tmp, manifest, KernelInstaller.Source.OTA, manifestFile = manifestFile,
+            )
         } finally {
             tmp.delete()
+            manifestFile.delete()
         }
         // 安装成功才推进 sequence 水位：失败不推进，下次仍可重试同一个 sequence。
         if (result.ok && seq > 0L) {
