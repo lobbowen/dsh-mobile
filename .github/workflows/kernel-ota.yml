@@ -28,9 +28,12 @@ on:
         required: false
         default: 'main'
       version:
-        description: '内核版本号'
-        required: true
-        default: '1.0.0'
+        # ⚠ 默认必须为空：留空才会从单一事实源 kernel/package.json 解析（ADR-0004）。
+        # 原先默认 '1.0.0'，与 package.json 构成两个源 —— 实测它就静默产出了 version=1.0.0
+        # 的 manifest（内核真实为 0.1.0-android.11）。注释写着「已修」，但默认值一直没改。
+        description: '内核版本号（留空 = 从 kernel/package.json 解析）'
+        required: false
+        default: ''
       abi:
         description: 'abi 标签'
         required: false

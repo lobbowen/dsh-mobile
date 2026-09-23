@@ -40,7 +40,15 @@ object KernelOtaUpdater {
         /** 启动链的**总预算**：超时就放弃本次升级（下次启动/手动再试），绝不拖住开机。0=不限。 */
         val startupBudgetMs: Long,
     ) {
-        val manifestUrl: String get() = "$baseUrl/$releaseTag/$manifestName"
+        /**
+     * manifest 的 URL。**刻意带 cache-buster**。
+     *
+     * 实测教训（2026-09-24）：CDN 会把 manifest 缓存在**边缘**。一次探针上传（未带 Cache-Control）
+     * 之后，即使源站已换成真实 manifest，读到的仍是旧的 —— 表现为「发了但设备没更新」。
+     * manifest 只有 ~1KB，每次回源代价可忽略；而"读到陈旧 manifest"的代价是整条更新链静默失效。
+     * 内核包则相反：文件名带版本号、内容不可变，可长缓存、可断点续传。
+     */
+    val manifestUrl: String get() = "$baseUrl/$releaseTag/$manifestName?t=${System.currentTimeMillis()}"
         fun zipUrl(version: String) = "$baseUrl/$releaseTag/kernel-$version.zip"
     }
 
