@@ -57,14 +57,20 @@ object OtaPolicy {
             return Verdict.Reject("manifest-expired",
                 "manifest 已过期（expiresEpochMs=" + i.expiresEpochMs + "）—— 拒绝使用；检查发布流水线是否仍在签发")
         }
-        // ② 防重放：sequence 不得低于本通道已见最大值
+        // ② 是否需要更新（相等 → 已是最新）
+        //
+        // ⚠ 这一步必须**排在防重放之前**（真机实测修正）：
+        //   设备装好之后，它自己的 sequence 水位就等于 manifest 的 sequence，
+        //   于是"同一份 manifest 再来一次"会被重放规则拦下 —— 技术上正确，但**归因误导**：
+        //   稳定态（已是最新）被报成"疑似重放"，看日志的人会以为出了安全问题。
+        //   先判"是否更新"不削弱安全性：只要远端版本确实更新，后面的重放检查照样拦。
+        if (!KernelVersions.isNewer(i.remoteVersion, i.currentVersion)) {
+            return Verdict.UpToDate("已是最新（本地 " + i.currentVersion + "，远端 " + i.remoteVersion + "）")
+        }
+        // ③ 防重放：sequence 不得低于本通道已见最大值
         if (i.sequence in 1..i.lastSequence) {
             return Verdict.Reject("manifest-replay",
                 "manifest sequence=" + i.sequence + " 不高于已见 " + i.lastSequence + " —— 疑似重放，拒绝")
-        }
-        // ③ 是否需要更新（相等 → 已是最新）
-        if (!KernelVersions.isNewer(i.remoteVersion, i.currentVersion)) {
-            return Verdict.UpToDate("已是最新（本地 " + i.currentVersion + "，远端 " + i.remoteVersion + "）")
         }
         // ④ 版本下限：**在下载之前**就拒（省一次白下载，也少一条被绕过的路径）
         if (KernelVersions.isBelowFloor(i.remoteVersion, i.floorVersion)) {
