@@ -410,6 +410,8 @@ jobs:
           check_so "$J/libdshptyprobe.so" 1000 || exit 1
           "$CC" -static -O2 -o "$J/libdshrootprobe.so" native/rootprobe/root-probe.c || exit 1
           check_so "$J/libdshrootprobe.so" 1000 || exit 1
+          "$CC" -shared -fPIC -O2 -I "$INC" -o "$J/libdshrootns.so" native/rootns/path-namespace.c || exit 1
+          check_so "$J/libdshrootns.so" 1000 || exit 1
 
           # ── ② bash 5.2.15 静态交叉编译 ──
           BASH_VER=5.2.15
@@ -491,7 +493,7 @@ jobs:
           # 首轮日志 "Unable to strip ... packaging them as they are" ⇒ rg 33MB、
           # ptyprobe 2MB 带全量符号进包）。手动 strip：NAPI 件不受影响（.dynsym
           # 是动态符号表，strip-unneeded 不动它）。
-          for f in libbash.so libdshrg.so libdshptyprobe.so libdshrootprobe.so libdshflock.so libdshposix.so libdshpty.so; do
+          for f in libbash.so libdshrg.so libdshptyprobe.so libdshrootprobe.so libdshrootns.so libdshflock.so libdshposix.so libdshpty.so; do
             if [ -f "$J/$f" ]; then
               before=$(stat -c%s "$J/$f"); "$TC/llvm-strip" --strip-unneeded "$J/$f" 2>/dev/null || true
               echo "[strip] $f $before -> $(stat -c%s "$J/$f") 字节"
@@ -727,7 +729,7 @@ jobs:
           # 不该让生命周期/PTC 修复陪葬。
           echo
           echo "--- 小体积原生件 ---"
-          for b in libdshflock.so libdshposix.so libdshptyprobe.so libdshrootprobe.so; do
+          for b in libdshflock.so libdshposix.so libdshptyprobe.so libdshrootprobe.so libdshrootns.so; do
             if unzip -l "$APK" | grep -q "lib/${ABI}/$b"; then echo "[ok] lib/${ABI}/$b"; else echo "[error] APK 缺 lib/${ABI}/$b（自有 C，必产）"; exit 1; fi
           done
           for b in libbash.so libdshrg.so; do
