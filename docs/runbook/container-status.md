@@ -22,7 +22,7 @@
 | **M3 Kotlin 安卓应用** | `MainActivity/NodeRuntimeService/HostBridgeService/KernelManager/BootReceiver/DeviceAdminReceiver/DshAccessibilityService/ProvisioningProbe/PackageInstallReceiver/ScreenCaptureService` + Manifest 注册 + 加载内核同源宿主帧 `/__host` + `dsh:kernel-update` 桥 | **CI 真编译通过**（fast-apk `b47df7f`，14/14 步，APK 已发布） |
 | **P1 预置自检探针** | `ProvisioningProbe`：5 项体检（人读 `diagnostics.txt` + 机器读 `provisioning.json`）；Device Owner 13 个 API 修正 | 编译通过 + 逻辑自测 |
 | **P2 无障碍真实实现** | `DshAccessibilityService`：手势 / 节点树（含 IME 悬浮窗）/ 文本注入三级降级 / 条件轮询 | 编译通过；`bridge-e2e` 断言覆盖 |
-| **P4 shell 兜底 + 探测增强** | `shell.exec` 以应用 uid 执行（`privileged:false` 明示）；Shizuku **三态**探测（未装 / 已装未授权 / 已授权） | 编译通过；`bridge-e2e` 覆盖 |
+| **P3 shell（Shizuku 必备）** | `shell.exec` 经 Shizuku UserService 以 **shell uid(2000)** 执行（`privileged:true`）；Shizuku 三态走真实 SDK（未装 / 未启动 / 未授权） | **CI 真编译通过**（fast-apk，含 AIDL + Shizuku 依赖） |
 | **P5 storage + 截屏** | `fs.read/write/list/mkdir` 真实实现（全放开 + 危险路径提示不拦截）；`ScreenCaptureService`（MediaProjection 前台服务，`ui.screenshot` 真实出图） | 编译通过；`bridge-e2e` 覆盖 |
 | **M4 脚本与 CI** | `scripts/build-kernel-bundle.sh` + `container-engine/bin/build-bundle.js` + `kernel-ota.yml` + `build-apk.yml` 公钥锚点校验 | 实测构建+验签闭环通过 |
 | **M5 端到端 + 文档** | `e2e-mock-kernel-test.js`（真实 spawn 内核+健康检查）+ README/CONTAINER-STATUS 重写 | 8 passed |
@@ -46,7 +46,7 @@
 - **ProvisioningProbe（P1 预置自检探针，2026-09）**：开机跑 5 项体检（device-owner / accessibility / shizuku / mediaprojection / special-perms），结果写 `files/diagnostics.txt`（人读）+ `files/provisioning.json`（机器读）。Shizuku 与 MediaProjection 两项在 P4/P5 后升级为**状态感知**（不止判断"有没有"，还判断"能不能用"）。
 - **fs.* 真实实现（P5，2026-09）**：`fs.read`（`auto` 编码无损校验，非 UTF-8 自动退 base64；`maxBytes` 默认 8MB / 硬顶 64MB）、`fs.write`（utf8/base64、`append`、自动建父目录）、`fs.list`（`recursive`、`maxEntries` 上限 10000）、`fs.mkdir`。**范围全放开**（有 `MANAGE_EXTERNAL_STORAGE` 即通行），但保留审计留痕与**危险路径提示**（`/dev/*`、`/proc|/sys/*`、`/system|/vendor|/boot`）——**提示不拦截**，这是用户的显式选择。
 - **ui.screenshot 真实实现（P5，2026-09）**：`ScreenCaptureService` 前台服务（`foregroundServiceType="mediaProjection"`，Android 14+ 硬性要求）→ `ImageReader` + `VirtualDisplay` → `acquireLatestImage()` 取最新帧 → `imageToBitmap` 处理 `rowPadding` 防花屏。默认返回 PNG 落盘路径（避免几 MB base64 撑爆 JSON-RPC 帧），`inline=true` 才内联 base64。授权缓存 `files/screen-capture-grant.json`（Parcel 字节流 + base64），`MainActivity` 提供「授权屏幕捕获」按钮承接系统弹窗。
-- **shell.exec 兜底（P4，2026-09）**：以**应用 uid** 执行（`ProcessBuilder`），返回体显式带 `privileged:false` + `note`，**不冒充 shell uid(2000)**。读线程 pump 与 `waitFor` 并行以防管道死锁；超时 `destroyForcibly()`；输出截断 256KB。
+- **shell.exec（P3，2026-09，ADR-0003）**：**Shizuku 为必备能力**，经自定义 AIDL UserService 在 **shell uid(2000)** 执行（`privileged:true`）。**无应用 uid 兜底**：未装/未启动/未授权 → `-32001`。UserService 侧读线程 pump 与 `waitFor` 并行防管道死锁；超时 `destroyForcibly()`；输出截断 256KB。
 
 ---
 
@@ -58,7 +58,7 @@
    - ✅ `ui_automation`：`ui.tap / ui.swipe / ui.inputText / ui.getUiTree / ui.waitFor / ui.screenshot` —— **P2 + P5 全部真实实现**。前五个需无障碍服务连接；`ui.screenshot` 需用户点一次屏幕捕获授权（**不可预置**，与 Device Owner 的本质区别）。
    - ✅ `device_policy` 全组：`policy.* / sys.setTime / sys.setTimeZone / sys.reboot / app.install / app.uninstall / app.grantPermission`（P1 修正 13 处 API 误用；`app.install/uninstall` 走 `PackageInstaller`）。
    - ✅ `storage`：`fs.read / fs.write / fs.list / fs.mkdir` 真实实现（P5）。需 `MANAGE_EXTERNAL_STORAGE`（Manifest 已声明，属 AppOps 特殊权限，需跳设置页或 Device Owner 静默授予）。
-   - ⚠️ `shell`：`shell.exec` **兜底已实现**（应用 uid，`privileged:false`）。**未内置 Shizuku SDK**（P4 决策：不引入第三方 AAR 以免污染冻结容器的信任边界），故不具备 shell uid(2000) 特权。Shizuku 探测已细分三态，接入 SDK 后可解锁。
+   - ✅ `shell`：`shell.exec` 已按**必备能力**落定（ADR-0003）—— 内置 Shizuku SDK，经 UserService 以 **shell uid(2000)** 执行；未装/未启动/未授权时能力不可用（`-32001`），**不做应用 uid 兜底**。环境前提：非 root 机型需 adb / 无线调试启动一次 Shizuku 并授权本应用。
    - ✅ `build`：**P3 已收口（决策：不做内置编译链）**。设备编译工具链经实测证伪（无 aarch64 版 aapt2，见 `ARCHITECTURE.md` §2.3），「全内置 vs 首启下载 vs 最小子集」三选一并撤销。本组语义修正为「从本地 feed 安装已签名内核」（A''）：`build.kernelInstall`（feed/zipPath 双模式，验签走 Node 一次性进程，失败不破坏现状，`restartRequired` 由调用方处理）、`build.kernelStatus`、`build.status`（旧名兼容）均已真实实现（能力 `kernel_update`，任意设备具备）；`build.apk` 已废弃，返回带迁移指引的 `-32602`。若未来出现「设备侧重打包修改 APK」的真实需求，另立方案（纯 Node 重打包 + 重签名，不引入原生工具链）。
 2. **OTA 下发编排**：`OtaEngine` 已具备验签/解包/原子指针能力；设备上“轮询 manifest→下载→apply→回滚”的调度器由内核侧 bootstrap（Node）承接，本仓未内置一个独立 Kotlin OTA 调度器（按 BASE_SPEC §5，OTA 引擎逻辑归于内核引导）。
 3. **基线内核 `assets/kernel/baseline.zip`**：`KernelManager.ensureBaseline` 已支持首启离线落地，但本仓未内置基线内核包（由 `kernel-ota.yml` 构建产出后纳入）。
@@ -67,7 +67,7 @@
    **剩下的是真机验证**：`adb shell dpm set-device-owner …` → 开无障碍 → 点「授权屏幕捕获」→ 看 `provisioning.json` 五项体检是否全绿。
    > P4/P5 新增代码（`MediaProjection` / `ImageReader` / `Parcel.marshall` / `PackageInstaller`）**尚未经 CI 真编译**，是本轮待验证项。
 5. **`policy.setPassword` 属遗留路径**：`DevicePolicyManager.resetPassword` 自 API 30 废弃且多数设备不生效，实现保留但已返回 `note` 提示；建议改用 user restrictions 或应用内锁。
-6. **`shell.exec` 的 `shizuku` 能力门禁语义**：方法级 caps 声明为 `shizuku`，但实现是应用 uid 兜底 —— 这意味着设备未装 Shizuku 时调用会得到 `-32001`（**组级**门禁），装了 Shizuku 才会走到兜底实现。若希望"无 Shizuku 也能用兜底"，需把 caps 放宽到组代表能力，这是一个待定的产品决策。
+6. ~~`shell.exec` 的 `shizuku` 能力门禁语义待定~~ **已定（ADR-0003）**：Shizuku 为**必备能力**，方法级 caps 即 `shizuku`；未满足前提时返回 `-32001`，**不提供应用 uid 兜底**。
 
 ### 编译修复（2026-09，fast-apk 首次真编译）
 

@@ -58,18 +58,22 @@
 ### 3.3 shell（Shell 级命令）
 | 方法 | 参数 | 依赖 | 落地 |
 |---|---|---|---|
-| `shell.exec` | `cmd`, `args?`, `timeoutMs?` | **Shizuku / 无线调试**（shizuku） | ⚠️ 应用 uid 兜底 |
+| `shell.exec` | `cmd`, `args?`, `timeoutMs?` | **Shizuku / 无线调试**（shizuku） | ✅ Shizuku UserService（shell uid 2000） |
 
-> **兜底实现语义（P4 决策）**：容器**未内置 Shizuku SDK**（不引入第三方 AAR，以免污染
-> 冻结容器的信任边界）。当前 `shell.exec` 以**应用 uid** 通过 `ProcessBuilder` 执行，
-> 返回体显式带 `privileged:false` + `note` —— **不冒充 shell uid(2000)**。
-> 应用 uid 下 `getprop` / `pm list` / `am`（部分）等只读命令可用；`input` / `settings put` 等需特权。
+> **实现语义（ADR-0003：Shizuku 为必备能力）**：容器**内置 Shizuku SDK**
+> （`dev.rikka.shizuku:api/provider:13.1.5`；Shizuku 本体 Apache-2.0、API MIT）。
+> `shell.exec` 经 **Shizuku UserService**（自定义 AIDL `IRemoteShell`）在 **shell uid(2000)** 下执行，
+> 返回体带 `privileged:true` + 真实 `uid`。
 >
-> `shizuku` 仍是**方法级 caps**：设备未装 Shizuku 时调用返回 `-32001`（组级门禁）。
-> 若希望"无 Shizuku 也能用兜底"，需把 caps 放宽到组代表能力 —— 待产品决策。
+> 为什么不是 `Shizuku.newProcess`：自 Shizuku **v13** 起该方法已 **private 且标记废弃**
+> （计划 API 14 移除）。官方受支持路径就是自定义 AIDL + UserService。
 >
-> 实现细节：读线程 pump 与 `waitFor` 并行（防管道写满死锁）；超时 `destroyForcibly()` + 抛 `ERR_TIMEOUT`；
-> 输出截断 256 KB。
+> **没有"应用 uid 兜底"**：设备未安装 / 未启动 / 未授权 Shizuku 时，`shizuku` 能力不可用，
+> 调用按契约返回 `-32001`。环境前提（与 Device Owner、Tier S 同级）：非 root 机型需用
+> adb 或**无线调试**启动一次 Shizuku，并在其中授权本应用。
+>
+> 实现细节：UserService 侧读线程 pump 与 `waitFor` 并行（防管道写满死锁）；超时 `destroyForcibly()`
+> 并返回 `exitCode:-1`；输出截断 256 KB。
 
 ### 3.4 device_policy（系统策略，Device Owner）
 | 方法 | 参数 | 依赖 | 落地 |
