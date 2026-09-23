@@ -3,10 +3,10 @@ name: Build & Sign Kernel OTA Bundle
 # 构建并签名「可热更新的内核（L1）」OTA 包：对齐 docs/BASE_SPEC.md §5 通道一（构建期签名）。
 #
 # 双信任根：本工作流用 CI secret OTA_PRIVATE_KEY_PEM（ed25519 私钥）签名内核包；
-# 设备端用焊死在 APK 的 app/src/main/assets/ota-public.pem 验签 —— 私钥绝不进 APK。
+# 设备端用焊死在 APK 的 container/app/src/main/assets/ota-public.pem 验签 —— 私钥绝不进 APK。
 #
 # 用法（手动 Run workflow）：
-#   - kernel_repo : 内核源码仓（**留空 = 单仓内的 dsh-android-kernel/ 子目录**；
+#   - kernel_repo : 内核源码仓（**留空 = 单仓内的 kernel/ 子目录**；
 #                   仅在需要从 fork/其他仓构建时才填 owner/repo）
 #   - kernel_ref  : 跨仓构建时的内核仓 ref（分支/tag/sha）；留空走单仓，此项无效
 #   - version     : 内核版本号（写进 kernel.json / 包名）
@@ -80,12 +80,12 @@ jobs:
 
       - name: Verify welded public key anchor present
         run: |
-          ANCHOR=app/src/main/assets/ota-public.pem
+          ANCHOR=container/app/src/main/assets/ota-public.pem
           [ -f "$ANCHOR" ] || { echo "::error::缺少 $ANCHOR（设备端验签公钥锚点）"; exit 1; }
           echo "anchor present: $(wc -c < "$ANCHOR") bytes"
 
       - name: Stage kernel source
-        # 单仓默认：内核源码就是同仓 dsh-android-kernel/ 子目录，无需跨仓检出。
+        # 单仓默认：内核源码就是同仓 kernel/ 子目录，无需跨仓检出。
         # 只有显式传了 kernel_repo（fork / 试验分支）才去 clone 外部仓。
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -95,7 +95,7 @@ jobs:
             git clone --depth 1 --branch "$KERNEL_REF" \
               "https://x-access-token:${GH_TOKEN}@github.com/$KERNEL_REPO.git" kernel-src
           else
-            cp -a dsh-android-kernel kernel-src
+            cp -a kernel kernel-src
           fi
 
       - name: Build panel UI (ui/dist)

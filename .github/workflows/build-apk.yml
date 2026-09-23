@@ -179,7 +179,7 @@ jobs:
 
       # ---------------------------------------------------------------------------
       # 校验 OTA 公钥锚点已焊接进 APK（设备端验签唯一信任源，见 BASE_SPEC §8）。
-      # 锚点 app/src/main/assets/ota-public.pem 应随仓库提交；若提供 OTA_PUBLIC_KEY
+      # 锚点 container/app/src/main/assets/ota-public.pem 应随仓库提交；若提供 OTA_PUBLIC_KEY
       # secret（PEM 文本）则以其为准覆盖，便于私钥轮换后重焊。
       # ---------------------------------------------------------------------------
       - name: Ensure welded OTA public key anchor
@@ -188,7 +188,7 @@ jobs:
           OTA_PUBLIC_KEY: ${{ secrets.OTA_PUBLIC_KEY }}
         run: |
           echo "3/9 ensure-ota-anchor" > /tmp/ci-stage
-          ANCHOR="app/src/main/assets/ota-public.pem"
+          ANCHOR="container/app/src/main/assets/ota-public.pem"
           if [ -n "$OTA_PUBLIC_KEY" ]; then
             printf '%s' "$OTA_PUBLIC_KEY" > "$ANCHOR"
             echo "anchor written from OTA_PUBLIC_KEY secret"
@@ -242,7 +242,7 @@ jobs:
         run: |
           echo "2.5/9 container-engine-tests" > /tmp/ci-stage
           set -euo pipefail
-          cd container-engine
+          cd container/engine
           npm run test:logic 2>&1 | tee /tmp/engine-test.log
           echo
           echo "=== 容器引擎逻辑测试汇总 ==="
@@ -347,7 +347,7 @@ jobs:
           echo "6/9 sync-json" > /tmp/ci-stage
           python3 - <<'PY'
           import json, os
-          p = "app/src/main/assets/node-versions.json"
+          p = "container/app/src/main/assets/node-versions.json"
           tag = os.environ["NODE_TAG"]
           d = json.load(open(p))
           d["default"] = tag
@@ -406,8 +406,8 @@ jobs:
           echo "=== 检查缓存的 Node 产物 ==="
           # 目标路径与构建脚本的 OUT_DIR 保持一致：jniLibs/arm64-v8a/libnode.so
           # （不是 assets！原因见 build-node-android.sh 里的 W^X 说明）
-          mkdir -p app/src/main/jniLibs/arm64-v8a
-          DEST="app/src/main/jniLibs/arm64-v8a/libnode.so"
+          mkdir -p container/app/src/main/jniLibs/arm64-v8a
+          DEST="container/app/src/main/jniLibs/arm64-v8a/libnode.so"
           EXACT_KEY="node-android-${{ steps.nodever.outputs.tag }}-${{ hashFiles('scripts/build-node-android.sh') }}"
           if [ -f /tmp/dsh-node-cache/node ]; then
             cp -f /tmp/dsh-node-cache/node "$DEST"
@@ -435,7 +435,7 @@ jobs:
             ASSETS="$(grep -v '^[[:space:]]*#' .github/native-assets.txt | grep -v '^[[:space:]]*$' | tr -d '\r')"
             for a in $ASSETS; do
               [ "$a" = "libnode.so" ] && continue   # 本体已在上方恢复
-              D="app/src/main/jniLibs/arm64-v8a/$a"
+              D="container/app/src/main/jniLibs/arm64-v8a/$a"
               if [ -f "/tmp/dsh-node-cache/$a" ]; then
                 cp -f "/tmp/dsh-node-cache/$a" "$D"
                 chmod +x "$D"
@@ -548,7 +548,7 @@ jobs:
           # 清单来源：.github/native-assets.txt（NativeAssetRegistry 的投影）
           ASSETS="$(grep -v '^[[:space:]]*#' .github/native-assets.txt | grep -v '^[[:space:]]*$' | tr -d '\r')"
           for a in $ASSETS; do
-            SRC="app/src/main/jniLibs/arm64-v8a/$a"
+            SRC="container/app/src/main/jniLibs/arm64-v8a/$a"
             if [ "$a" = "libnode.so" ]; then
               # 本体已在上面以 /tmp/dsh-node-cache/node 的形式存过（保持既有缓存键不变，
               # 避免所有历史缓存失效）
@@ -572,13 +572,13 @@ jobs:
         id: verifybin
         run: |
           echo "=== 打包前门禁：确认 node 二进制以 jniLibs 形态就位 ==="
-          DEST="app/src/main/jniLibs/arm64-v8a/libnode.so"
+          DEST="container/app/src/main/jniLibs/arm64-v8a/libnode.so"
           if [ ! -f "$DEST" ]; then
             echo "[error] 缺少 $DEST"
             echo "        这意味着 node 既没从缓存恢复、也没有新编译出来。"
             echo "        直接失败，避免打出一个没有运行时的 APK。"
             echo "输出："
-            echo "  jniLibs 目录:"; ls -la app/src/main/jniLibs/arm64-v8a/ 2>/dev/null || echo "  (不存在)"
+            echo "  jniLibs 目录:"; ls -la container/app/src/main/jniLibs/arm64-v8a/ 2>/dev/null || echo "  (不存在)"
             echo "  out/Release:"; ls -la out/Release/node 2>/dev/null || echo "  (不存在)"
             exit 1
           fi
@@ -696,7 +696,7 @@ jobs:
           # 于是"编译成功"和"真机可跑"之间有一道没人守的门。
           #
           # 这一步把门补上：直接解开产出的 APK 查验，不在就当场失败。
-          APK="$(find app/build/outputs/apk/debug -name '*.apk' -type f | head -1)"
+          APK="$(find container/app/build/outputs/apk/debug -name '*.apk' -type f | head -1)"
           if [ -z "$APK" ]; then
             echo "[error] 找不到 APK"
             exit 1
@@ -745,7 +745,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: android-node-container-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: container/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
       # ---------------------------------------------------------------------------
@@ -772,8 +772,8 @@ jobs:
         run: |
           set -o pipefail
           TAG="apk-latest"
-          APK="app/build/outputs/apk/debug/app-debug.apk"
-          ls -la app/build/outputs/apk/debug/ || true
+          APK="container/app/build/outputs/apk/debug/app-debug.apk"
+          ls -la container/app/build/outputs/apk/debug/ || true
           if [ ! -f "$APK" ]; then
             echo "[error] 未找到 $APK，跳过发布"
             exit 1
@@ -809,7 +809,7 @@ jobs:
             echo "BUILD_OK"
             echo "time : $(date -u)"
             echo "node : ${{ steps.nodever.outputs.tag }}"
-            echo "apk  : app/build/outputs/apk/debug/app-debug.apk"
+            echo "apk  : container/app/build/outputs/apk/debug/app-debug.apk"
             # 可直接下载的稳定网址（Release 资产，见上方 Publish APK 步骤的说明）。
             echo "url  : https://github.com/${{ github.repository }}/releases/download/apk-latest/app-debug.apk"
           } > ci-ok.txt

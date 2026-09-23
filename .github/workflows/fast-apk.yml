@@ -36,7 +36,7 @@ on:
     # 白名单的默认语义是"不匹配就不跑"，对日常出包这条高频路径，
     # 宁可漏跑（可手动/ tag 触发）也不要因新增目录而莫名跑起来。
     paths:
-      - 'app/**'
+      - 'container/app/**'
       - 'gradle/**'
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
@@ -48,9 +48,9 @@ on:
       - '.github/native-assets.txt'
       # native/ 下的 C 源（flock/publish/ptyprobe 等）现场编译进 jniLibs ——
       # 改源码同样等于改 APK 内容（tag 触发不受 paths 限制，但 push 直出也要能触发）。
-      - 'native/**'
+      - 'container/native/**'
       # 内核垫片（守卫投放进 dsh 安装树的 JS）随基线包上机 —— 改它同样是改 APK。
-      - 'dsh-android-kernel/**'
+      - 'kernel/**'
     # 额外的 tag 触发：推 fast-<任意> 即可手动跑一次，不必改代码。
     # 维护环境（沙箱）无法操作网页、workflow_dispatch 点不了，
     # tag 是最干净的显式触发手段。
@@ -99,14 +99,14 @@ jobs:
           # 与"实际下载哪份运行时"永远一致，不会出现两处硬编码各自漂移。
           V="${{ inputs.node_version }}"
           if [ -z "$V" ]; then
-            V="$(python3 -c "import json; print(json.load(open('app/src/main/assets/node-versions.json'))['default'])")"
+            V="$(python3 -c "import json; print(json.load(open('container/app/src/main/assets/node-versions.json'))['default'])")"
             echo "从 assets/node-versions.json 读到版本: $V"
           else
             echo "使用显式指定的版本: $V"
           fi
           A="${{ inputs.abi }}"
           if [ -z "$A" ]; then
-            A="$(python3 -c "import json; print(json.load(open('app/src/main/assets/node-versions.json'))['abi'])")"
+            A="$(python3 -c "import json; print(json.load(open('container/app/src/main/assets/node-versions.json'))['abi'])")"
             echo "从 assets/node-versions.json 读到 ABI: $A"
           else
             echo "使用显式指定的 ABI: $A"
@@ -132,14 +132,14 @@ jobs:
           PY
 
       - name: Container engine tests (logic)
-        # 本工作流改了 container-engine/src/（zip.js 的 Deflate 支持、
+        # 本工作流改了 container/engine/src/（zip.js 的 Deflate 支持、
         # kernel-bundle 的排除表与体积断言、桥方法表）—— 不跑测试就等于没验证。
         #
         # 为什么放在 gradle 之前：这些测试只需 Node（秒级），而 gradle 要几分钟。
         # 有错就该在 10 秒内知道，而不是等 8 分钟后在编译阶段以奇怪的形式暴露。
         #
         # 为什么是 test:logic 而不是 test —— 这里有一个**曾经踩过的坑**：
-        # 基线包（app/src/main/assets/kernel/baseline.zip）是构建产物
+        # 基线包（container/app/src/main/assets/kernel/baseline.zip）是构建产物
         # （.gitignore 排除），生成它的 "Build kernel baseline bundle"
         # 步骤在**本步骤之后**（它需要先拉内核源码 + 注入私钥，代价高）。
         # 所以本步骤只能跑**不依赖产物**的逻辑测试，否则会因为"产物还没生成"
@@ -147,7 +147,7 @@ jobs:
         # 基线包本身的断言放在它生成之后（见 "Verify kernel baseline bundle"）。
         run: |
           set -euo pipefail
-          cd container-engine
+          cd container/engine
           npm run test:logic 2>&1 | tee /tmp/engine-test.log
           echo
           echo "=== 容器引擎逻辑测试汇总 ==="
@@ -272,19 +272,19 @@ jobs:
           # ---- 放进 jniLibs ----
           # 文件名必须是 lib*.so：否则 AGP 不会把它当 native lib 处理，
           # 也就不会在安装时解压到可执行的 nativeLibraryDir（W^X 约束）。
-          mkdir -p "app/src/main/jniLibs/${ABI}"
+          mkdir -p "container/app/src/main/jniLibs/${ABI}"
           for a in $ASSETS; do
             if [ ! -f "/tmp/rt/$a" ]; then
               echo "[error] Release 里没有 $a（清单要求它随包）"
               exit 1
             fi
-            cp -f "/tmp/rt/$a" "app/src/main/jniLibs/${ABI}/$a"
-            chmod +x "app/src/main/jniLibs/${ABI}/$a"
+            cp -f "/tmp/rt/$a" "container/app/src/main/jniLibs/${ABI}/$a"
+            chmod +x "container/app/src/main/jniLibs/${ABI}/$a"
           done
 
           echo
           echo "== jniLibs 就位 =="
-          ls -la "app/src/main/jniLibs/${ABI}/"
+          ls -la "container/app/src/main/jniLibs/${ABI}/"
 
           # 记录用了哪份运行时 —— 出问题时能一眼看出 APK 里装的是哪次固化的产物。
           echo "runtime-tag=$TAG" >> "$GITHUB_ENV"
@@ -292,7 +292,7 @@ jobs:
       - name: Gate — verify runtime is in place before gradle
         run: |
           set -euo pipefail
-          D="app/src/main/jniLibs/${ABI}"
+          D="container/app/src/main/jniLibs/${ABI}"
           # 清单驱动，与上面同一份文件；加资产不用改这里。
           ASSETS="$(grep -v '^[[:space:]]*#' .github/native-assets.txt | grep -v '^[[:space:]]*$' | tr -d '\r')"
           for f in $ASSETS; do
@@ -312,14 +312,14 @@ jobs:
         # 真机实证（2026-09-23）：dsh 两条设备死路都没有 JS 等价物——
         # ① flock（下列）；② link：Android 7+ SELinux 禁 untrusted_app 硬链接，
         #    dsh 会话/附件的 link 式独占发布报 EACCES ⇒ renameat2(RENAME_NOREPLACE)
-        #    link 用户态替代（native/posix/，自有代码）→ libdshposix.so，经 LD_PRELOAD 注入。
+        #    link 用户态替代（container/native/posix/，自有代码）→ libdshposix.so，经 LD_PRELOAD 注入。
         #    两库不能合并成单一 .so：NAPI_MODULE_INIT 入口每模块唯一。
         # 真机实证：dsh 会话持久化硬依赖
         # @deepseek-ai/node-addon-system 的 flock 绑定，上游只发 linux(glibc/musl)/
         # darwin 预编译件，无 android-arm64 ⇒ 设备发消息报
         # "flock is not supported on android-arm64"。flock(2) 无 JS 等价物
         #（O_EXCL 锁崩溃后残留=砍能力），唯一正解=NDK 现编 vendor 的 src/flock.c
-        #（源码见 native/flock/PROVENANCE.md）放进 jniLibs —— nativeLibraryDir 是
+        #（源码见 container/native/flock/PROVENANCE.md）放进 jniLibs —— nativeLibraryDir 是
         # W^X 下唯一可 dlopen/exec 的通道（libnode.so 同款先例）。
         # 刻意**不**登记进 native-assets.txt：那份清单的 ≥1MB 门槛会误杀小体积绑定。
         run: |
@@ -346,10 +346,10 @@ jobs:
 
           # NAPI_VERSION=9：flock.c 用到 napi_add_async_cleanup_hook（v9 起声明）；
           # vendor 注释写 v8 但其源码超出 v8 面，9 是其真实下限。
-          mkdir -p "app/src/main/jniLibs/${ABI}"
+          mkdir -p "container/app/src/main/jniLibs/${ABI}"
           "$CC" -shared -fPIC -O2 -DNAPI_VERSION=9 -I "$INC" \
-            -o "app/src/main/jniLibs/${ABI}/libdshflock.so" native/flock/flock.c
-          SO="app/src/main/jniLibs/${ABI}/libdshflock.so"
+            -o "container/app/src/main/jniLibs/${ABI}/libdshflock.so" container/native/flock/flock.c
+          SO="container/app/src/main/jniLibs/${ABI}/libdshflock.so"
           SIZE=$(stat -c%s "$SO")
           [ "$SIZE" -gt 1000 ] || { echo "[error] $SO 仅 $SIZE 字节，编译产物可疑"; exit 1; }
           file "$SO" | grep -q "ELF 64-bit.*ARM aarch64" || { echo "[error] 产物不是 aarch64 ELF"; exit 1; }
@@ -357,9 +357,9 @@ jobs:
 
           # ② link/linkat 用户态替代（纯 libc 符号，无 NDK 头文件依赖）
           "$CC" -shared -fPIC -O2 -I "$INC" \
-            -o "app/src/main/jniLibs/${ABI}/libdshposix.so" \
-            native/posix/link-interpose.c native/posix/open-fallback.c
-          SO2="app/src/main/jniLibs/${ABI}/libdshposix.so"
+            -o "container/app/src/main/jniLibs/${ABI}/libdshposix.so" \
+            container/native/posix/link-interpose.c container/native/posix/open-fallback.c
+          SO2="container/app/src/main/jniLibs/${ABI}/libdshposix.so"
           SIZE2=$(stat -c%s "$SO2")
           [ "$SIZE2" -gt 500 ] || { echo "[error] $SO2 仅 $SIZE2 字节，编译产物可疑"; exit 1; }
           file "$SO2" | grep -q "ELF 64-bit.*ARM aarch64" || { echo "[error] posix 产物不是 aarch64 ELF"; exit 1; }
@@ -371,7 +371,7 @@ jobs:
         #                      Android 无 /bin/bash，可 exec 目录只有 nativeLibraryDir
         #                      由 PrefixProvisioner 复制为 $PREFIX/bin 下的真名可执行文件。
         #   · libdshrg.so  —— glob/grep 硬依赖 ripgrep（无 JS 等价物），由 $PREFIX 提供。
-        #   · libdshptyprobe.so —— 真机 PTY 能力探针（native/ptyprobe/，决策 node-pty 路线）。
+        #   · libdshptyprobe.so —— 真机 PTY 能力探针（container/native/ptyprobe/，决策 node-pty 路线）。
         # 失败语义：bash/rg/探针均为硬性必需（$PREFIX 依赖它们，无回退）；node-pty 走上游
         # 配方，软失败（终端降级，不陪葬其它能力）。Audit 步骤如实报告 APK 内有无。
         # bash 配方要点：bionic 无 termcap/readline ⇒ 预编一个 tputs 族 no-op 桩归档
@@ -392,7 +392,7 @@ jobs:
           CC="$TC/aarch64-linux-android21-clang"
           LLVM_AR="$TC/llvm-ar"
           [ -x "$CC" ] || { echo "[error] 找不到 clang: $CC"; exit 1; }
-          J="app/src/main/jniLibs/${ABI}"
+          J="container/app/src/main/jniLibs/${ABI}"
           mkdir -p "$J"
 
           check_so() { # $1=路径 $2=最小字节
@@ -404,8 +404,8 @@ jobs:
             file "$f" | sed 's/^/      /'
           }
 
-          # ── ① PTY 探针（必须成功；见 native/ptyprobe/PROVENANCE.md）──
-          "$CC" -static -O2 -o "$J/libdshptyprobe.so" native/ptyprobe/pty-probe.c \
+          # ── ① PTY 探针（必须成功；见 container/native/ptyprobe/PROVENANCE.md）──
+          "$CC" -static -O2 -o "$J/libdshptyprobe.so" container/native/ptyprobe/pty-probe.c \
             || { echo "[error] ptyprobe 编译失败（纯 C 静态，失败即环境问题）"; exit 1; }
           check_so "$J/libdshptyprobe.so" 1000 || exit 1
 
@@ -535,8 +535,8 @@ jobs:
             echo '::warning title=能力件缺失::node-pty 构建失败 —— 终端 PTY 本包不可用'; exit 0; }
           SO="build/Release/pty.node"
           file "$SO" | grep -q 'ELF 64-bit.*ARM aarch64' || { echo '::warning title=能力件缺失::pty.node 非 aarch64'; tail -20 /tmp/pty-gyp.log; exit 0; }
-          cp -f "$SO" "${GITHUB_WORKSPACE}/app/src/main/jniLibs/${ABI}/libdshpty.so"
-          echo "[ok] libdshpty.so $(stat -c%s "${GITHUB_WORKSPACE}/app/src/main/jniLibs/${ABI}/libdshpty.so") 字节"
+          cp -f "$SO" "${GITHUB_WORKSPACE}/container/app/src/main/jniLibs/${ABI}/libdshpty.so"
+          echo "[ok] libdshpty.so $(stat -c%s "${GITHUB_WORKSPACE}/container/app/src/main/jniLibs/${ABI}/libdshpty.so") 字节"
 
       - name: Stage pinned npm into APK assets
         # npm 是**基础环境**的一部分（与 Node 版本锁死、几乎不变）⇒ 进 APK 而非内核包。
@@ -546,7 +546,7 @@ jobs:
           ./scripts/stage-npm-assets.sh
 
       - name: Build kernel baseline bundle
-        # 生成 APK 内置的基线内核包 → app/src/main/assets/kernel/baseline.zip
+        # 生成 APK 内置的基线内核包 → container/app/src/main/assets/kernel/baseline.zip
         #
         # 为什么必须有这一步：KernelManager.ensureBaseline() 一直想读这个文件，
         # 但它**从来不存在**（assets/ 下只有 node/ + ota-public.pem）。后果是
@@ -562,7 +562,7 @@ jobs:
         run: |
           set -uo pipefail
           echo "== 内核源码（单仓子目录） =="
-          KDIR="dsh-android-kernel"
+          KDIR="kernel"
           rm -rf /tmp/kernel-src
           if [ -d "$KDIR" ]; then
             cp -a "$KDIR" /tmp/kernel-src
@@ -595,7 +595,7 @@ jobs:
           chmod +x scripts/build-kernel-baseline.sh
           if ./scripts/build-kernel-baseline.sh /tmp/kernel-src; then
             echo "[ok] 基线包已生成"
-            ls -la app/src/main/assets/kernel/baseline.zip
+            ls -la container/app/src/main/assets/kernel/baseline.zip
           else
             echo "::error title=基线包生成失败::build-kernel-baseline.sh 非零退出 —— 详见上一步输出"
             exit 1
@@ -618,7 +618,7 @@ jobs:
           DSH_REQUIRE_BASELINE: '1'
         run: |
           set -uo pipefail
-          cd container-engine
+          cd container/engine
           npm run test:baseline 2>&1 | tee /tmp/baseline-test.log
           RC=${PIPESTATUS[0]}
           echo
@@ -693,7 +693,7 @@ jobs:
       - name: Audit APK contents
         run: |
           set -euo pipefail
-          APK="$(find app/build/outputs/apk/debug -name '*.apk' -type f | head -1)"
+          APK="$(find container/app/build/outputs/apk/debug -name '*.apk' -type f | head -1)"
           echo "APK: $APK  ($(stat -c%s "$APK") 字节)"
 
           echo "--- lib/ 下的条目 ---"
@@ -758,7 +758,7 @@ jobs:
           echo "--- npm 基础环境 ---"
           if unzip -l "$APK" | grep -q 'assets/npm/npm.zip'; then
             SIZE=$(unzip -l "$APK" | awk '/assets\/npm\/npm\.zip/{print $1}')
-            echo "[ok] 含 assets/npm/npm.zip（$SIZE 字节，版本 $(cat app/src/main/assets/npm/version.txt)）"
+            echo "[ok] 含 assets/npm/npm.zip（$SIZE 字节，版本 $(cat container/app/src/main/assets/npm/version.txt)）"
             unzip -l "$APK" | grep -q 'assets/npm/version.txt' \
               || { echo "[error] npm.zip 在但 version.txt 缺失（解包版本戳无从确定）"; exit 1; }
           else
@@ -770,7 +770,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: android-node-container-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: container/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
       - name: Publish APK to Release
@@ -778,7 +778,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          APK="$(find app/build/outputs/apk/debug -name '*.apk' -type f | head -1)"
+          APK="$(find container/app/build/outputs/apk/debug -name '*.apk' -type f | head -1)"
           TAG="apk-latest"
 
           # 固定 tag、每轮覆盖：下载网址稳定，不必每轮去查新地址。
@@ -814,7 +814,7 @@ jobs:
             "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" . || {
               echo "[warn] clone 失败，跳过上报"; exit 0; }
 
-          APK_SHA="$(sha256sum "$GITHUB_WORKSPACE"/app/build/outputs/apk/debug/*.apk | awk '{print $1}')"
+          APK_SHA="$(sha256sum "$GITHUB_WORKSPACE"/container/app/build/outputs/apk/debug/*.apk | awk '{print $1}')"
           {
             echo "BUILD_OK"
             echo "time    : $(date -u)"

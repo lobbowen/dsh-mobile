@@ -19,7 +19,7 @@ VER="${1:?用法: ./scripts/make-release.sh <node-version>}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # 产物源：与 build-node-android.sh 的 OUT_DIR 保持一致（jniLibs 下的 libnode.so）。
 # 注意 zip 内部条目名仍叫 node —— 这是 OTA 包内的约定文件名，与本地打包形式无关。
-SRC="$ROOT/app/src/main/jniLibs/arm64-v8a/libnode.so"
+SRC="$ROOT/container/app/src/main/jniLibs/arm64-v8a/libnode.so"
 OUT_DIR="$ROOT/release"
 mkdir -p "$OUT_DIR"
 OUT="$OUT_DIR/node-${VER}-android-arm64-v8a.zip"

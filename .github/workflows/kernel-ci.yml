@@ -10,7 +10,7 @@ name: android-kernel-ci
 #   · 签名内核包**不在这里产**（归容器侧 kernel-ota.yml，它能拿到 OTA 私钥）；
 #     本 workflow 只做回归与面板门禁。
 #   · 测试自包含：不读取容器引擎源码；跨仓桥互通由容器侧 bridge-interop 承担
-#     （单仓下内核源码就在 dsh-android-kernel/，那边无需再配 DSH_KERNEL_REPO）。
+#     （单仓下内核源码就在 kernel/，那边无需再配 DSH_KERNEL_REPO）。
 on:
   push:
     branches: [main, master]
@@ -18,11 +18,11 @@ on:
     # 注：GitHub 一个 workflow 的 on.push 只能有一个块（重复 key 后者覆盖前者），
     # branches/tags/paths 必须合并在这同一个 push 下。
     paths:
-      - 'dsh-android-kernel/**'
+      - 'kernel/**'
       - '.github/workflows/kernel-ci.yml'
   pull_request:
     paths:
-      - 'dsh-android-kernel/**'
+      - 'kernel/**'
   workflow_dispatch: {}
 
 jobs:
@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: dsh-android-kernel
+        working-directory: kernel
     steps:
       - uses: actions/checkout@v4
 
@@ -50,7 +50,7 @@ jobs:
 
       # UI 门禁：typecheck + lint + unit test + build（见 ui/package.json#verify）。
       - name: 前端门禁（typecheck + lint + test + build）
-        working-directory: dsh-android-kernel/ui
+        working-directory: kernel/ui
         run: |
           npm install --no-audit --no-fund
           npm run verify
@@ -61,7 +61,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ui-dist
-          path: dsh-android-kernel/ui/dist
+          path: kernel/ui/dist
           if-no-files-found: error
 
   # ══════════════════════════════════════════════════════════════════════════
@@ -87,7 +87,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VER="$(node -p "require('./dsh-android-kernel/package.json').version")"
+          VER="$(node -p "require('./kernel/package.json').version")"
           echo "  版本: $VER"
           # 断言：必须有产物，否则「静默挂空 Release」比失败更糟。
           if [ -z "$(ls -A ui-dist 2>/dev/null)" ]; then

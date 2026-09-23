@@ -28,7 +28,7 @@ const { execFileSync } = require('child_process');
 const makeRunner = require('./harness');
 const { check, finish } = makeRunner('kernel-feed');
 
-const ROOT = path.resolve(__dirname, '..', '..');
+const ROOT = path.resolve(__dirname, '..', '..', '..');
 const SCRIPT = path.join(ROOT, 'scripts', 'build-kernel-feed.sh');
 
 console.log('--- 内核 feed 构建 ---');
@@ -43,7 +43,7 @@ check('build-kernel-feed.sh 存在', true);
 const sh = fs.readFileSync(SCRIPT, 'utf8');
 
 // 1) 设备端 LocalKernelFeed 的目录/命名约定必须在这里被复现
-const FEED_KT = path.join(ROOT, 'app', 'src', 'main', 'java', 'com', 'example', 'nodecontainer', 'LocalKernelFeed.kt');
+const FEED_KT = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'com', 'example', 'nodecontainer', 'LocalKernelFeed.kt');
 if (fs.existsSync(FEED_KT)) {
   const kt = fs.readFileSync(FEED_KT, 'utf8');
   check('两端都约定 feed 目录名为 kernel-feed（Kotlin 侧）', kt.includes('"kernel-feed"'));
@@ -78,21 +78,21 @@ const kp = crypto.generateKeyPairSync('ed25519', {
 });
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-test-'));
-// 布局：sandbox/{scripts, container-engine/bin, container-engine/src, app/src/main/assets/{node,kernel}, keys}
+// 布局：sandbox/{scripts, container/engine/bin, container/engine/src, container/app/src/main/assets/{node,kernel}, keys}
 fs.mkdirSync(path.join(sandbox, 'scripts'), { recursive: true });
 fs.mkdirSync(path.join(sandbox, 'keys'), { recursive: true });
-fs.mkdirSync(path.join(sandbox, 'app', 'src', 'main', 'assets', 'node'), { recursive: true });
+fs.mkdirSync(path.join(sandbox, 'container', 'app', 'src', 'main', 'assets', 'node'), { recursive: true });
 fs.copyFileSync(SCRIPT, path.join(sandbox, 'scripts', 'build-kernel-feed.sh'));
 
 // 复用真实仓库的 container-engine（脚本会调 bin/build-bundle.js）
-fs.symlinkSync(path.join(ROOT, 'container-engine'), path.join(sandbox, 'container-engine'), 'dir');
+fs.symlinkSync(path.join(ROOT, 'container', 'engine'), path.join(sandbox, 'container', 'engine'), 'dir');
 
 fs.writeFileSync(path.join(sandbox, 'keys', 'ota-private.pem'), kp.privateKey);
-fs.writeFileSync(path.join(sandbox, 'app', 'src', 'main', 'assets', 'ota-public.pem'), kp.publicKey);
+fs.writeFileSync(path.join(sandbox, 'container', 'app', 'src', 'main', 'assets', 'ota-public.pem'), kp.publicKey);
 // 设备端校验器必须真实存在 —— 脚本会用它自检
 fs.copyFileSync(
-  path.join(ROOT, 'app', 'src', 'main', 'assets', 'node', 'kernel-verify.js'),
-  path.join(sandbox, 'app', 'src', 'main', 'assets', 'node', 'kernel-verify.js')
+  path.join(ROOT, 'container', 'app', 'src', 'main', 'assets', 'node', 'kernel-verify.js'),
+  path.join(sandbox, 'container', 'app', 'src', 'main', 'assets', 'node', 'kernel-verify.js')
 );
 
 // 造一个最小内核源码树
@@ -111,7 +111,7 @@ let rc = 0; let out = '';
 // "依赖一个不该存在于仓库的文件"（CI 上必崩，且失败原因极具误导性）。
 const sandboxEnv = Object.assign({}, process.env, {
   DSH_OTA_PRIVATE_KEY_PATH: path.join(sandbox, 'keys', 'ota-private.pem'),
-  DSH_OTA_PUBLIC_KEY_PATH: path.join(sandbox, 'app', 'src', 'main', 'assets', 'ota-public.pem'),
+  DSH_OTA_PUBLIC_KEY_PATH: path.join(sandbox, 'container', 'app', 'src', 'main', 'assets', 'ota-public.pem'),
 });
 try {
   out = execFileSync('bash',
@@ -149,8 +149,8 @@ if (rc === 0) {
   check('manifest 含 ed25519 签名', typeof m.signature === 'string' && m.signature.length > 0);
 
   // ---- 产出的包必须能被设备端校验器接受 ----
-  const VERIFIER = path.join(ROOT, 'app', 'src', 'main', 'assets', 'node', 'kernel-verify.js');
-  const ANCHOR = path.join(sandbox, 'app', 'src', 'main', 'assets', 'ota-public.pem');
+  const VERIFIER = path.join(ROOT, 'container', 'app', 'src', 'main', 'assets', 'node', 'kernel-verify.js');
+  const ANCHOR = path.join(sandbox, 'container', 'app', 'src', 'main', 'assets', 'ota-public.pem');
   let vrc = 0; let vout = '';
   try {
     vout = execFileSync('node', [VERIFIER,
@@ -180,7 +180,7 @@ if (rc === 0) {
   const sandbox2 = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-err-'));
   fs.mkdirSync(path.join(sandbox2, 'scripts'), { recursive: true });
   fs.copyFileSync(SCRIPT, path.join(sandbox2, 'scripts', 'build-kernel-feed.sh'));
-  fs.symlinkSync(path.join(ROOT, 'container-engine'), path.join(sandbox2, 'container-engine'), 'dir');
+  fs.symlinkSync(path.join(ROOT, 'container', 'engine'), path.join(sandbox2, 'container-engine'), 'dir');
   fs.mkdirSync(path.join(sandbox2, 'app', 'src', 'main', 'assets'), { recursive: true });
   fs.writeFileSync(path.join(sandbox2, 'app', 'src', 'main', 'assets', 'ota-public.pem'), kp.publicKey);
   // **不建 keys/** —— 模拟私钥缺失。
@@ -213,7 +213,7 @@ if (rc === 0) {
   fs.mkdirSync(path.join(sandbox3, 'keys'), { recursive: true });
   fs.mkdirSync(path.join(sandbox3, 'app', 'src', 'main', 'assets'), { recursive: true });
   fs.copyFileSync(SCRIPT, path.join(sandbox3, 'scripts', 'build-kernel-feed.sh'));
-  fs.symlinkSync(path.join(ROOT, 'container-engine'), path.join(sandbox3, 'container-engine'), 'dir');
+  fs.symlinkSync(path.join(ROOT, 'container', 'engine'), path.join(sandbox3, 'container-engine'), 'dir');
   fs.writeFileSync(path.join(sandbox3, 'keys', 'ota-private.pem'), kp.privateKey);       // 甲钥
   fs.writeFileSync(path.join(sandbox3, 'app', 'src', 'main', 'assets', 'ota-public.pem'), kp2.publicKey); // 乙钥
   const mismatchEnv = Object.assign({}, process.env, {

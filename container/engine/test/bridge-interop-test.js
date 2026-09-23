@@ -36,7 +36,7 @@ const { check, finish } = makeRunner('bridge-interop');
 // ============================================================================
 // 单仓布局：内核就是仓内 dsh-android-kernel/ 子目录，默认路径直接按本文件位置算。
 // DSH_KERNEL_REPO 仍可覆盖（跨仓试验 / fork）。
-const KERNEL_REPO = process.env.DSH_KERNEL_REPO || path.join(__dirname, '..', '..', 'dsh-android-kernel');
+const KERNEL_REPO = process.env.DSH_KERNEL_REPO || path.join(__dirname, '..', '..', '..', 'kernel');
 const CLIENT_REL = path.join('src', 'platform', 'host-bridge', 'client.js');
 // 必须 path.resolve 而不是 path.join：env 给相对路径时（README 教的
 // `DSH_KERNEL_REPO=../../dsh-android-kernel`），path.join 产出的仍是相对路径，

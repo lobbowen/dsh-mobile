@@ -35,7 +35,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="${1:-$ROOT/../dsh-android-kernel}"
+SRC="${1:-$ROOT/kernel}"
 VER="${2:-}"
 ABI="${3:-node24-arm64-android35}"
 
@@ -87,7 +87,7 @@ fi
 # 这一步是"构建期就把问题挡住"。若不查，产出的 APK 会带着一个
 # 永远验不过的基线包，真机上表现为「基线内核校验失败」——
 # 而排查它需要走完整条 exec/验签链，代价极高。
-ANCHOR="$ROOT/app/src/main/assets/ota-public.pem"
+ANCHOR="$ROOT/container/app/src/main/assets/ota-public.pem"
 if [ ! -f "$ANCHOR" ]; then
   echo "[baseline] [error] 公钥锚点缺失: $ANCHOR" >&2
   exit 1
@@ -131,7 +131,7 @@ console.log('[baseline] 公私钥配对校验通过 ✓');
 NODE
 
 # ---- 打包（复用 build-bundle，产物在 release/）----
-node "$ROOT/container-engine/bin/build-bundle.js" "$SRC" "$VER" "$ABI" "" >/dev/null
+node "$ROOT/container/engine/bin/build-bundle.js" "$SRC" "$VER" "$ABI" "" >/dev/null
 
 SRC_ZIP="$ROOT/release/kernel-$VER.zip"
 [ -f "$SRC_ZIP" ] || { echo "[baseline] [error] 打包未产出 $SRC_ZIP" >&2; exit 1; }
@@ -140,7 +140,7 @@ SRC_ZIP="$ROOT/release/kernel-$VER.zip"
 # 带版名 baseline-<ver>.zip 是**升级通道**：设备端 KernelManager 不解包即可拿版本
 # 与 CURRENT 比较，高于现状才落地；历史名 baseline.zip 同内容一并保留（旧审计
 # 步骤与无版本名时的首启兜底仍按它走）。
-OUT_DIR="$ROOT/app/src/main/assets/kernel"
+OUT_DIR="$ROOT/container/app/src/main/assets/kernel"
 mkdir -p "$OUT_DIR"
 rm -f "$OUT_DIR"/baseline-*.zip
 cp "$SRC_ZIP" "$OUT_DIR/baseline.zip"
@@ -151,7 +151,7 @@ cp "$SRC_ZIP" "$OUT_DIR/baseline-$VER.zip"
 # 这是本脚本最有价值的一步：设备端的 kernel-verify.js 就在这里，为什么不在
 # 构建期用它？若这里过了而设备上不过，那差异只可能来自数据（而不是逻辑）。
 # 反过来，若这里就不过，就没必要浪费一轮 CI + 一次真机安装。
-VERIFY="$ROOT/app/src/main/assets/node/kernel-verify.js"
+VERIFY="$ROOT/container/app/src/main/assets/node/kernel-verify.js"
 if [ -f "$VERIFY" ]; then
   echo "[baseline] 用设备端校验器自检…"
   set +e

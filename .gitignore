@@ -1,13 +1,13 @@
 # 构建产物
 .gradle/
-app/build/
+container/app/build/
 build/
 local.properties
 *.iml
 .idea/
 
 # 编译出的 Node 二进制（体积大，按需本地生成，不入库）
-app/src/main/assets/node-bin/
+container/app/src/main/assets/node-bin/
 
 # 基线内核包（构建产物，由 scripts/build-kernel-baseline.sh 从内核仓实时生成）
 #
@@ -18,11 +18,11 @@ app/src/main/assets/node-bin/
 # CI 侧：fast-apk.yml 的 "Build kernel baseline bundle" 步骤实时生成。
 # 本地：跑 ./scripts/build-kernel-baseline.sh ../dsh-android-kernel
 #       （缺它不影响编译 —— ensureBaseline 会给出明确诊断而非静默失败）
-app/src/main/assets/kernel/baseline.zip
+container/app/src/main/assets/kernel/baseline.zip
 
 # 内嵌 npm 资产（scripts/stage-npm-assets.sh 从 registry 拉取官方 tarball 生成；
 # 版本+sha512 双钉在脚本里，可重建、不必入库）
-app/src/main/assets/npm/
+container/app/src/main/assets/npm/
 
 # OTA 发布包
 release/

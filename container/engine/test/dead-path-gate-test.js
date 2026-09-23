@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = path.resolve(__dirname, '..', '..');
+const ROOT = path.resolve(__dirname, '..', '..', '..');
 const FORBIDDEN = ['libdshrootns', 'libdshrootprobe', 'libdshptraceprobe', 'ContainerRoot', 'DSH_REAL_ROOT'];
 const EXT = new Set(['.kt', '.kts', '.c', '.h', '.js', '.mjs', '.cjs', '.yml', '.yaml', '.json',
   '.sh', '.gradle', '.te', '.xml', '.bp', '.rc', '.txt']);

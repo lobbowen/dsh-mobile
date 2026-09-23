@@ -38,7 +38,7 @@ fi
 ./gradlew assembleDebug
 
 echo "==> [3/3] 完成"
-APK="$ROOT/app/build/outputs/apk/debug/app-debug.apk"
+APK="$ROOT/container/app/build/outputs/apk/debug/app-debug.apk"
 ls -lh "$APK"
 echo "    安装: adb install -r \"$APK\""
 echo "    打开 App 即可在屏幕上看到逐阶段启动诊断；端口就绪后自动切到 Node 探针 UI。"

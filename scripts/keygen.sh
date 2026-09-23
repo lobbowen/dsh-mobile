@@ -15,7 +15,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$ROOT/keys"
 PRIV="$ROOT/keys/ota-private.pem"
 PUB="$ROOT/keys/ota-public.pem"
-ANCHOR="$ROOT/app/src/main/assets/ota-public.pem"
+ANCHOR="$ROOT/container/app/src/main/assets/ota-public.pem"
 
 if [ -f "$PRIV" ]; then
   echo "[keygen] 私钥已存在: $PRIV （跳过生成，保留现有密钥）"

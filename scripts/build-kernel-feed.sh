@@ -57,7 +57,7 @@ VER="${2:?缺少 version 参数}"
 ABI="${3:-node24-arm64-android35}"
 OUT="${4:-$ROOT/feed}"
 
-ANCHOR="$ROOT/app/src/main/assets/ota-public.pem"
+ANCHOR="$ROOT/container/app/src/main/assets/ota-public.pem"
 
 # ---- 密钥位置可覆盖 ----
 # 默认是仓库内的标准位置（keys/ota-private.pem + assets/ota-public.pem），
@@ -140,7 +140,7 @@ trap 'rm -rf "$STAGE"' EXIT
 # 「校验过了配对、签名却换了一把」这种荒诞但极难查的情况。
 DSH_OTA_PRIVATE_KEY_PATH="$PRIV" \
 DSH_BUNDLE_OUT_DIR="$STAGE" \
-  node "$ROOT/container-engine/bin/build-bundle.js" "$SRC" "$VER" "$ABI" "" >/dev/null
+  node "$ROOT/container/engine/bin/build-bundle.js" "$SRC" "$VER" "$ABI" "" >/dev/null
 SRC_ZIP="$STAGE/kernel-$VER.zip"
 [ -f "$SRC_ZIP" ] || { echo "[feed] [error] 打包未产出 $SRC_ZIP" >&2; exit 1; }
 
@@ -214,7 +214,7 @@ EOF
 
 # ---- 自检：用**与设备端同一个校验器**验一遍 ----
 # 若这里过了而设备上不过，差异只可能来自数据（而非逻辑）。
-VERIFY="$ROOT/app/src/main/assets/node/kernel-verify.js"
+VERIFY="$ROOT/container/app/src/main/assets/node/kernel-verify.js"
 if [ -f "$VERIFY" ]; then
   echo "[feed] 用设备端校验器自检…"
   set +e
