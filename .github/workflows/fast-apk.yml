@@ -839,8 +839,19 @@ jobs:
           cp "$APK" "$VDIR/$VAPK"
 
           upload "$APK"            # 稳定别名 → app-debug.apk（latest 地址永久不变）
-          upload "$VDIR/$VAPK"     # 版本化   → app-debug-<versionName>+<versionCode>.apk
           upload "version.json"    # 版本清单 → version.json（下次发布的单调性输入）
+
+          # 版本化资产进**独立 tag**（v<versionName>），**不放**滚动 latest：
+          # 否则 latest 会随每次发布无限堆积历史 APK（滚动通道只该有"当前"）。
+          VTAG="v$VN"
+          if gh release view "$VTAG" --repo '${{ github.repository }}' >/dev/null 2>&1; then
+            gh release upload "$VTAG" "$VDIR/$VAPK" --repo '${{ github.repository }}' --clobber
+          else
+            gh release create "$VTAG" "$VDIR/$VAPK" \
+              --repo '${{ github.repository }}' \
+              --title "DSH Mobile $VN" \
+              --notes "版本化归档：versionName=$VN，versionCode=$VC。滚动别名见 apk-latest。"
+          fi
 
           rm -rf "$VDIR"
 
@@ -851,7 +862,7 @@ jobs:
           echo
           echo "下载地址:"
           echo "  https://github.com/${{ github.repository }}/releases/download/${TAG}/app-debug.apk   （latest 别名）"
-          echo "  https://github.com/${{ github.repository }}/releases/download/${TAG}/${VAPK}   （版本化）"
+          echo "  https://github.com/${{ github.repository }}/releases/download/$VTAG/${VAPK}   （版本化归档）"
 
       - name: Report to ci-ok
         if: success()
