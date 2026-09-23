@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "kernel.json（内核包清单，随包签名）",
+  "type": "object",
+  "required": [
+    "name",
+    "version",
+    "abi",
+    "engines",
+    "entry",
+    "requires",
+    "signature"
+  ],
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+"
+    },
+    "abi": {
+      "type": "string"
+    },
+    "engines": {
+      "type": "object",
+      "properties": {
+        "node": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "node"
+      ]
+    },
+    "entry": {
+      "type": "string",
+      "description": "如 bin/dsh-supervisor"
+    },
+    "requires": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "managedAgents": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "signature": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "runtime.json（容器写、内核读，schema 2）",
+  "type": "object",
+  "required": [
+    "schema",
+    "nodePath",
+    "nodeBinDir",
+    "npmPath",
+    "minNode",
+    "writtenBy"
+  ],
+  "properties": {
+    "schema": {
+      "const": 2
+    },
+    "nodePath": {
+      "type": "string",
+      "description": "libnode.so 绝对路径（nativeLibraryDir）"
+    },
+    "nodeBinDir": {
+      "type": "string",
+      "description": "nativeLibraryDir"
+    },
+    "npmPath": {
+      "type": "string"
+    },
+    "npmEntry": {
+      "type": "string",
+      "description": "npm-cli.js 绝对路径（可选）"
+    },
+    "minNode": {
+      "type": "string"
+    },
+    "writtenBy": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}
