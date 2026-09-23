@@ -14,14 +14,14 @@ on:
       - 'docs/contracts/**'
       - 'scripts/**'
       - '.github/native-assets.txt'
-      - '.github/workflows/ci.yml'
+      - '.github/workflows/**'
   pull_request:
     paths:
       - 'container/**'
       - 'kernel/**'
       - 'docs/contracts/**'
       - 'scripts/**'
-      - '.github/workflows/ci.yml'
+      - '.github/workflows/**'
   workflow_dispatch: {}
 
 jobs:

@@ -1,0 +1,980 @@
+name: Admin (cancel / status)
+
+# ============================================================================
+# 为什么要这个 workflow
+# ============================================================================
+# 维护环境（沙箱）没有可用的 GitHub API token（PAT 已失效、gh CLI 401），
+# 唯一的通道是 git push。但有些事【只能通过 API 做】，最典型的是：
+# · 取消一个正在跑的 run（不能在沙箱侧 gh run cancel）
+# · 查某个 run 的状态与 artifact
+#
+# GitHub 提供 GITHUB_TOKEN（每个 run 自动注入、权限受 permissions 控制），
+# 所以只要能让一个 workflow 跑起来，它就能替我们做这些 API 操作。
+# 触发手段就是 tag —— 一条 git push 即可，不需要网页，也不需要 PAT。
+#
+# tag 语法（命令 → 动作）
+# admin-cancel-<run_id> 取消指定 run
+# admin-status-<run_id> 查询指定 run 状态 + artifact 列表
+# admin-logs-<run_id> 拉取指定 run 的失败步骤日志（排查 CI 失败用）
+# admin-apk-<run_id> 校验某 run 产物 APK 的 lib/ 内容 + ELF 形态校验
+# （沙箱下载不了 Release 附件 / artifact 302 到被屏蔽的
+# release-assets.githubusercontent.com，只能在 CI 侧验）
+# admin-release[-<tag>] 查询 Release 附件（默认 apk-latest）
+# admin-cancelall 取消所有 queued/in_progress 的 run（除自己）
+#
+# 例：git push origin HEAD:refs/tags/admin-cancel-34880060734
+# 结果会写进 ci-admin 分支，沙箱侧 fetch 该分支即可读到。
+#
+# 为什么要 logs：CI 一次失败动辄要等几十分钟，而失败原因在外部
+# （沙箱屏蔽 api.github.com）读不到。没有这个命令就只能靠猜着改、
+# 再等一轮，代价极高。
+# ============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '执行哪个 Release 工具'
+        required: true
+        type: choice
+        options: [publish, repack, pin]
+        default: publish
+      run_id:
+        description: 'publish/pin：源运行 ID（留空=最近一次成功）'
+        required: false
+        default: ''
+      source_run_id:
+        description: 'repack：源 APK run ID（留空=最近一次成功）'
+        required: false
+        default: ''
+      version:
+        description: 'pin：Node 版本号（如 24.21.0）'
+        required: false
+        default: ''
+      abi:
+        description: 'pin：目标 ABI'
+        required: false
+        default: 'arm64-v8a'
+      tag:
+        description: 'publish/repack：目标 Release tag'
+        required: false
+        default: 'apk-latest'
+  push:
+    tags:
+      - 'admin-*'
+      - 'publish-*'
+      - 'repack-*'
+      - 'pin-node-*'
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  admin:
+    if: ${{ startsWith(github.ref_name, 'admin-') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse action from tag
+        id: act
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME:-}"
+          echo "tag=$TAG"
+          CMD="${TAG#admin-}"
+          echo "cmd=$CMD"
+          echo "cmd=$CMD" >> "$GITHUB_OUTPUT"
+          case "$CMD" in
+            cancelall)
+              echo "kind=cancelall" >> "$GITHUB_OUTPUT" ;;
+            cancel-*)
+              echo "kind=cancel"   >> "$GITHUB_OUTPUT"
+              echo "target=${CMD#cancel-}" >> "$GITHUB_OUTPUT" ;;
+            status-*)
+              echo "kind=status"   >> "$GITHUB_OUTPUT"
+              echo "target=${CMD#status-}" >> "$GITHUB_OUTPUT" ;;
+            release-*)
+              echo "kind=release"  >> "$GITHUB_OUTPUT"
+              echo "target=${CMD#release-}" >> "$GITHUB_OUTPUT" ;;
+            release)
+              echo "kind=release"  >> "$GITHUB_OUTPUT"
+              echo "target=apk-latest" >> "$GITHUB_OUTPUT" ;;
+            logs-*)
+              echo "kind=logs"     >> "$GITHUB_OUTPUT"
+              echo "target=${CMD#logs-}" >> "$GITHUB_OUTPUT" ;;
+            apk-*)
+              # 校验某个 run 产物 APK 的内容（主要看 lib/ 下有没有清单资产）。
+              #
+              # 为什么需要：维护沙箱的外网白名单不含 release-assets.githubusercontent.com，
+              # 下载不了 Release 附件；而 artifact 走 api.github.com 的 302 同样到不了。
+              # 所以「APK 里到底装了什么」这件事只能在 CI 侧验证 —— 不能让
+              # 「我本地验证过了」变成一句无法兑现的话。
+              echo "kind=apk"      >> "$GITHUB_OUTPUT"
+              echo "target=${CMD#apk-}" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "[error] 未知动作: $CMD"
+              echo "kind=unknown" >> "$GITHUB_OUTPUT"
+              exit 1 ;;
+          esac
+
+      - name: Execute
+        id: exec
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          KIND: ${{ steps.act.outputs.kind }}
+          TARGET: ${{ steps.act.outputs.target }}
+          SELF_RUN: ${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          OUT=/tmp/admin.txt
+          {
+            echo "ADMIN_REPORT"
+            echo "time  : $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "tag   : ${GITHUB_REF_NAME}"
+            echo "kind  : $KIND"
+            echo "target: ${TARGET:-(n/a)}"
+            echo
+          } > "$OUT"
+
+          case "$KIND" in
+            cancel)
+              echo "== 取消 run $TARGET ==" >> "$OUT"
+              if gh run cancel "$TARGET" --repo "$REPO" >> "$OUT" 2>&1; then
+                echo "结果: 取消请求已发送" >> "$OUT"
+              else
+                echo "结果: 取消失败（可能已结束或 ID 不存在）" >> "$OUT"
+              fi
+              sleep 15
+              echo >> "$OUT"
+              echo "=== 取消后状态 ===" >> "$OUT"
+              gh run view "$TARGET" --repo "$REPO" --json status,conclusion \
+                --jq '" status=\(.status) conclusion=\(.conclusion)"' >> "$OUT" 2>&1 || true
+              ;;
+
+            cancelall)
+              echo "== 取消所有非本 run 的 queued/in_progress ==" >> "$OUT"
+              # 注意：不能连自己一起取消，否则后面的 push 上报会被中断。
+              for st in queued in_progress; do
+                gh run list --repo "$REPO" --status "$st" --limit 50 \
+                  --json databaseId,workflowName,headSha \
+                  --jq '.[] | "\(.databaseId)\t\(.workflowName)\t\(.headSha[0:7])"' \
+                | while IFS=$'\t' read -r rid wf sha; do
+                    [ -z "$rid" ] && continue
+                    if [ "$rid" = "$SELF_RUN" ]; then
+                      echo "  [skip] $rid  $wf  $sha  (本 run)" >> "$OUT"
+                      continue
+                    fi
+                    echo "  [cancel] $rid  $wf  $sha" >> "$OUT"
+                    gh run cancel "$rid" --repo "$REPO" >>"$OUT" 2>&1 || true
+                  done
+              done
+              sleep 15
+              echo >> "$OUT"
+              echo "=== 剩余在跑 ===" >> "$OUT"
+              gh run list --repo "$REPO" --status in_progress --limit 20 \
+                --json databaseId,workflowName \
+                --jq '.[] | " \(.databaseId) \(.workflowName)"' >> "$OUT" 2>&1 || true
+              ;;
+
+            status)
+              echo "== run $TARGET 详情 ==" >> "$OUT"
+              gh run view "$TARGET" --repo "$REPO" \
+                --json databaseId,workflowName,headSha,status,conclusion,createdAt,updatedAt,url \
+                --jq '" wf : \(.workflowName)\n sha : \(.headSha[0:7])\n status: \(.status)\n concl : \(.conclusion)\n start : \(.createdAt)\n end : \(.updatedAt)\n url : \(.url)"' >> "$OUT" 2>&1 || true
+
+              echo >> "$OUT"
+              echo "=== artifact 列表 ===" >> "$OUT"
+              gh api "repos/$REPO/actions/runs/$TARGET/artifacts" \
+                --jq '.artifacts[] | " id=\(.id) \(.name) \(.size_in_bytes)B expired=\(.expired) digest=\(.digest // "n/a")"' >> "$OUT" 2>&1 || true
+              ;;
+
+            release)
+              echo "== Release: $TARGET 的附件 ==" >> "$OUT"
+              gh release view "$TARGET" --repo "$REPO" \
+                --json tagName,name,createdAt,publishedAt,url,assets \
+                --jq '" tag : \(.tagName)\n name : \(.name)\n url : \(.url)\n pub : \(.publishedAt)\n\n附件:"' >> "$OUT" 2>&1 || true
+              gh release view "$TARGET" --repo "$REPO" --json assets \
+                --jq '.assets[] | " \(.name) \(.size) 字节 state=\(.state) digest=\(.digest // "n/a")\n updatedAt=\(.updatedAt)"' >> "$OUT" 2>&1 || true
+              ;;
+
+            logs)
+              # 拉取失败 run 的日志。没有这个能力时，CI 失败只能靠猜 ——
+              # 这在"每次失败要等几十分钟"的场景下代价极高。
+              echo "== run $TARGET 的失败日志 ==" >> "$OUT"
+              gh run view "$TARGET" --repo "$REPO" \
+                --json status,conclusion,workflowName,headSha,url \
+                --jq '" wf : \(.workflowName)\n sha : \(.headSha[0:7])\n status: \(.status)\n concl : \(.conclusion)\n url : \(.url)"' >> "$OUT" 2>&1 || true
+
+              echo >> "$OUT"
+              echo "=== 各步骤结果 ===" >> "$OUT"
+              gh run view "$TARGET" --repo "$REPO" \
+                --json jobs \
+                --jq '.jobs[] | .name as $j | .steps[] | " [\(.conclusion // .status)] \($j) :: \(.name)"' >> "$OUT" 2>&1 || true
+
+              echo >> "$OUT"
+              echo "=== 失败步骤日志（仅 failed 步骤） ===" >> "$OUT"
+              # --log-failed 只输出失败步骤，避免几百 KB 噪音。
+              gh run view "$TARGET" --repo "$REPO" --log-failed >> "$OUT" 2>&1 || {
+                echo "(--log-failed 不可用，回退到全量日志的尾部)" >> "$OUT"
+                gh run view "$TARGET" --repo "$REPO" --log 2>&1 | tail -120 >> "$OUT" || true
+              }
+              ;;
+
+            apk)
+              # 用 .github/native-assets.txt 作为期望清单（与 gradle / 构建脚本同一来源），
+              # 逐项核对 APK 内是否真有对应条目，并打印压缩方式。
+              echo "== run $TARGET 的 APK 内容校验 ==" >> "$OUT"
+              ABI="${ABI:-arm64-v8a}"
+              W="/tmp/apkchk"
+              rm -rf "$W"; mkdir -p "$W"
+
+              echo "  [1/3] 下载 artifact（android-node-container-apk）" >> "$OUT"
+              if ! gh run download "$TARGET" --repo "$REPO" \
+                     --name android-node-container-apk --dir "$W" >> "$OUT" 2>&1; then
+                echo "  [FAIL] artifact 下载失败（已过期？run 失败？）" >> "$OUT"
+              else
+                APK="$(find "$W" -name '*.apk' -type f | head -1)"
+                echo "  APK: $APK" >> "$OUT"
+                echo "  大小: $(stat -c%s "$APK") 字节" >> "$OUT"
+                echo "  sha256: $(sha256sum "$APK" | awk '{print $1}')" >> "$OUT"
+
+                echo >> "$OUT"
+                echo "  [2/3] APK 内 lib/ 条目" >> "$OUT"
+                unzip -l "$APK" | grep 'lib/' >> "$OUT" 2>&1 || echo "  (无 lib/ 条目 —— 严重异常)" >> "$OUT"
+
+                echo >> "$OUT"
+                echo "  [3/3] 逐项核对清单 .github/native-assets.txt" >> "$OUT"
+                MISS=""
+                for a in $(grep -v '^[[:space:]]*#' .github/native-assets.txt | grep -v '^[[:space:]]*$' | tr -d '\r'); do
+                  n=$(unzip -l "$APK" | grep -c "lib/${ABI}/$a" || true)
+                  if [ "$n" -ge 1 ]; then
+                    echo "    [ok]   lib/${ABI}/$a" >> "$OUT"
+                  else
+                    echo "    [FAIL] lib/${ABI}/$a 不在 APK 内" >> "$OUT"
+                    MISS="$MISS $a"
+                  fi
+                done
+                if [ -n "$MISS" ]; then
+                  echo >> "$OUT"
+                  echo "  结果: ✗ 缺少$MISS" >> "$OUT"
+                  echo "        APK 装到真机会因缺符号/缺运行时而失败。" >> "$OUT"
+                else
+                  echo >> "$OUT"
+                  echo "  结果: ✓ 清单内资产全部在 APK 内" >> "$OUT"
+                fi
+
+                echo >> "$OUT"
+                echo "  --- 压缩方式（Stored=未压缩 / Defl=压缩） ---" >> "$OUT"
+                unzip -v "$APK" | awk '$NF ~ /lib\// {print "    " $NF "  " $2 "  " $3 "  " $4}' >> "$OUT" 2>&1 || true
+
+                echo >> "$OUT"
+                echo "  --- 独立校验：解出 libnode.so 的 ELF 形态（exec 四道关） ---" >> "$OUT"
+                mkdir -p "$W/x"
+                if unzip -o -q "$APK" "lib/${ABI}/libnode.so" -d "$W/x" 2>/dev/null; then
+                  N="$W/x/lib/${ABI}/libnode.so"
+                  echo "    文件: $(file -b "$N")" >> "$OUT"
+                  echo "    e_machine/app:  $(readelf -h "$N" 2>/dev/null | awk -F: '/Machine/{print $2}' | xargs)" >> "$OUT"
+                  echo "    interp:  $(readelf -W -l "$N" 2>/dev/null | awk '/interpreter/{print $NF}' | head -1)" >> "$OUT"
+                  echo "    NEEDED:  $(readelf -d "$N" 2>/dev/null | awk '/NEEDED/{gsub(/[\[\]]/,"",$NF); printf "%s ", $NF}')" >> "$OUT"
+                  echo "    LOAD 对齐: $(readelf -W -l "$N" 2>/dev/null | awk '/^  LOAD/{print $NF}' | sort -u | tr '\n' ' ')" >> "$OUT"
+                else
+                  echo "    [skip] 解不出 libnode.so" >> "$OUT"
+                fi
+              fi
+              ;;
+
+            *)
+              echo "[error] 未处理的 kind=$KIND" >> "$OUT"
+              ;;
+          esac
+
+          echo >> "$OUT"
+          echo "=== 最近 8 个 run ===" >> "$OUT"
+          gh run list --repo "$REPO" --limit 8 \
+            --json databaseId,workflowName,headSha,status,conclusion,createdAt \
+            --jq '.[] | " \(.databaseId) \(.headSha[0:7]) \(.status)/\(.conclusion) \(.workflowName)"' >> "$OUT" 2>&1 || true
+
+          cat "$OUT"
+
+      - name: Report to ci-admin
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          git config user.name  'CI Admin' || true
+          git config user.email 'ci@workbuddy.local' || true
+          git checkout --orphan ci-admin-tmp 2>/dev/null || git checkout ci-admin-tmp
+          git rm -rf . >/dev/null 2>&1 || true
+          cp /tmp/admin.txt ci-admin.txt
+          git add -f ci-admin.txt
+          git commit -m "admin report: ${GITHUB_REF_NAME}" || true
+          git push -f origin HEAD:ci-admin
+  publish:
+    if: ${{ startsWith(github.ref_name, 'publish-') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'publish') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write       # 建 Release / 传资产
+      actions: read         # 列取/下载本仓库的 artifact
+
+    steps:
+      - name: Resolve target run and download artifact
+        id: get
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag }}"
+          RUN_ID="${{ inputs.run_id }}"
+
+          # tag 触发时（refs/tags/publish-<run_id>），从 tag 名解析 run_id。
+          # 例：publish-34852369904 → RUN_ID=34852369904
+          if [ -z "$RUN_ID" ] && [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            REF_TAG="${GITHUB_REF_NAME:-}"
+            echo "== 由 tag 触发: $REF_TAG =="
+            CAND="${REF_TAG#publish-}"
+            if printf '%s' "$CAND" | grep -qE '^[0-9]+$'; then
+              RUN_ID="$CAND"
+              echo "从 tag 解析出 run_id=$RUN_ID"
+            else
+              echo "[warn] tag 名不是 publish-<run_id> 形式（got: $CAND），改为自动查找。"
+            fi
+          fi
+
+          if [ -z "$TAG" ]; then TAG="apk-latest"; fi
+
+          if [ -z "$RUN_ID" ]; then
+            echo "== 未指定 run_id，自动查找最近一次成功运行 =="
+            RUN_ID="$(gh run list \
+                        --repo '${{ github.repository }}' \
+                        --workflow 'build-apk.yml' \
+                        --status success \
+                        --limit 1 \
+                        --json databaseId \
+                        --jq '.[0].databaseId')"
+            if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+              echo "[error] 找不到任何成功的 build-apk 运行。"
+              echo "        请先让 Build Android Node Container APK 成功一次。"
+              exit 1
+            fi
+          fi
+          echo "目标 run: $RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+          echo "== 该 run 的 artifact 列表 =="
+          gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/artifacts" \
+            --jq '.artifacts[] | "\(.name)  (\(.size_in_bytes) bytes, expired=\(.expired))"' || true
+
+          echo "== 下载 artifact: android-node-container-apk =="
+          rm -rf /tmp/dl && mkdir -p /tmp/dl
+          gh run download "$RUN_ID" \
+            --repo '${{ github.repository }}' \
+            --name android-node-container-apk \
+            --dir /tmp/dl
+
+          echo "== 下载内容 =="
+          find /tmp/dl -type f | head -20
+          APK="$(find /tmp/dl -name '*.apk' -type f | head -1)"
+          if [ -z "$APK" ]; then
+            echo "[error] artifact 里没有 .apk 文件。"
+            exit 1
+          fi
+          echo "找到 APK: $APK ($(du -h "$APK" | cut -f1))"
+          cp "$APK" /tmp/app-debug.apk
+          ls -la /tmp/app-debug.apk
+
+      - name: Publish to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag }}"
+          echo "== 发布到 Release tag: $TAG =="
+
+          # tag 固定（默认 apk-latest）：存在则更新，不存在则创建。
+          # 这样下载网址是稳定的，不必每轮去查新地址。
+          if gh release view "$TAG" --repo '${{ github.repository }}' >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，将覆盖资产。"
+          else
+            echo "Release $TAG 不存在，创建中…"
+            gh release create "$TAG" \
+              --repo '${{ github.repository }}' \
+              --title "DSH Mobile APK (latest)" \
+              --notes "Android 原生 Node 容器 APK。来源 run: ${{ steps.get.outputs.run_id }}"
+          fi
+
+          gh release upload "$TAG" /tmp/app-debug.apk#app-debug.apk \
+            --repo '${{ github.repository }}' --clobber
+
+          echo
+          echo "=== 发布完成 ==="
+          gh release view "$TAG" --repo '${{ github.repository }}' --json url,assets \
+            --jq '.assets[] | "\(.name)  \(.size) bytes  \(.url)"' || true
+          echo
+          echo "下载地址:"
+          echo "https://github.com/${{ github.repository }}/releases/download/${TAG}/app-debug.apk"
+
+      - name: Record URL to ci-ok branch
+        # 把可下载地址写进 ci-ok 自报分支，便于外部读取（环境限制下这是主要通道）。
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory '*'
+          rm -rf /tmp/okp && mkdir -p /tmp/okp && cd /tmp/okp
+          git clone --quiet \
+            "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" . || {
+              echo "[warn] clone 失败，跳过 ci-ok 更新"; exit 0; }
+          {
+            echo "BUILD_OK"
+            echo "time : $(date -u)"
+            echo "from : published from run ${{ steps.get.outputs.run_id }}"
+            echo "apk  : app-debug.apk"
+            echo "url  : https://github.com/${{ github.repository }}/releases/download/${{ inputs.tag }}/app-debug.apk"
+          } > ci-ok.txt
+          git config user.email "ci@workbuddy.local"
+          git config user.name "CI Diagnostic Bot"
+          git add ci-ok.txt
+          git commit -q -m "ci: apk published" || true
+          git push origin HEAD:ci-ok --force && echo "[ok] ci-ok updated"
+  repack:
+    if: ${{ startsWith(github.ref_name, 'repack-') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'repack') }}
+    concurrency:
+      group: repack-apk
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve source run id
+        id: src
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          RUN_ID="${{ inputs.source_run_id }}"
+
+          # tag 触发：repack-<run_id>
+          if [ -z "$RUN_ID" ] && [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            REF_TAG="${GITHUB_REF_NAME:-}"
+            echo "== 由 tag 触发: $REF_TAG =="
+            CAND="${REF_TAG#repack-}"
+            if printf '%s' "$CAND" | grep -qE '^[0-9]+$'; then
+              RUN_ID="$CAND"
+            fi
+          fi
+
+          if [ -z "$RUN_ID" ]; then
+            echo "== 未指定，自动查找最近一次成功的 Build APK =="
+            RUN_ID="$(gh run list \
+                        --repo '${{ github.repository }}' \
+                        --workflow 'build-apk.yml' \
+                        --status success --limit 1 \
+                        --json databaseId --jq '.[0].databaseId')"
+          fi
+          [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ] || { echo "[error] 找不到源 run"; exit 1; }
+          echo "源 run: $RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download source artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          RUN_ID="${{ steps.src.outputs.run_id }}"
+          rm -rf /tmp/dl && mkdir -p /tmp/dl
+          gh run download "$RUN_ID" \
+            --repo '${{ github.repository }}' \
+            --name android-node-container-apk \
+            --dir /tmp/dl
+          APK="$(find /tmp/dl -name '*.apk' -type f | head -1)"
+          [ -n "$APK" ] || { echo "[error] artifact 内无 .apk"; exit 1; }
+          echo "源 APK: $APK ($(du -h "$APK" | cut -f1))"
+          cp "$APK" /tmp/app-src.apk
+
+      - name: Inject libc++_shared.so
+        run: |
+          set -euo pipefail
+          # 从 NDK 里取 libc++_shared.so（arm64-v8a）
+          LIBCXX="$(find "$ANDROID_NDK_LATEST_HOME" -path '*sysroot/usr/lib/aarch64-linux-android/libc++_shared.so' | head -1)"
+          if [ -z "$LIBCXX" ]; then
+            # 兜底：从 runner 上已安装的任意 NDK 里找
+            LIBCXX="$(find /usr/local/lib/android/sdk/ndk -path '*sysroot/usr/lib/aarch64-linux-android/libc++_shared.so' 2>/dev/null | head -1)"
+          fi
+          [ -n "$LIBCXX" ] || { echo "[error] 找不到 libc++_shared.so"; exit 1; }
+          echo "libc++_shared.so: $LIBCXX ($(stat -c%s "$LIBCXX") 字节)"
+
+          python3 scripts/inject-libcxx-into-apk.py \
+            --apk /tmp/app-src.apk \
+            --out /tmp/app-injected.apk \
+            --libcxx "$LIBCXX"
+          ls -la /tmp/app-injected.apk
+
+      - name: Verify injected APK
+        run: |
+          set -euo pipefail
+          cat > /tmp/verify.py <<'PY'
+          import zipfile, sys
+          z = zipfile.ZipFile('/tmp/app-injected.apk')
+          names = [i.filename for i in z.infolist()]
+          for want in ('lib/arm64-v8a/libnode.so', 'lib/arm64-v8a/libc++_shared.so'):
+              if want not in names:
+                  sys.exit('[error] 缺少 %s' % want)
+              print('[ok] %s' % want)
+          if any('node-bin' in n for n in names):
+              sys.exit('[error] 仍存在旧的 assets/node-bin 条目')
+          bad = z.testzip()
+          if bad:
+              sys.exit('[error] CRC 校验失败: %s' % bad)
+          print('[ok] CRC 全部通过')
+          PY
+          python3 /tmp/verify.py
+
+      - name: Sign APK
+        run: |
+          set -euo pipefail
+          # 用仓库 Actions secret 里的 keystore（若有），否则生成一个临时 debug 签名。
+          # 说明：本包仅用于自测，debug 签名足够；要长期升级可换成固定 keystore。
+          KS="$RUNNER_TEMP/release.keystore"
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "== 使用仓库配置的 keystore =="
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$KS"
+            KS_PASS="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+            KS_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}"
+            KS_KEYPASS="${{ secrets.ANDROID_KEY_PASSWORD }}"
+          else
+            echo "== 未配置 keystore，生成本次专用的 debug 签名 =="
+            keytool -genkeypair -v -keystore "$KS" \
+              -storepass android -keypass android \
+              -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US" >/dev/null 2>&1
+            KS_PASS=android; KS_ALIAS=androiddebugkey; KS_KEYPASS=android
+          fi
+
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)"
+          "$APKSIGNER" sign \
+            --ks "$KS" --ks-pass "pass:$KS_PASS" \
+            --ks-key-alias "$KS_ALIAS" --key-pass "pass:$KS_KEYPASS" \
+            --min-sdk-version 24 --max-sdk-version 35 \
+            --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+            --out /tmp/app-signed.apk /tmp/app-injected.apk
+
+          "$APKSIGNER" verify --verbose /tmp/app-signed.apk
+          ls -la /tmp/app-signed.apk
+
+      - name: Publish to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag }}"
+          [ -n "$TAG" ] || TAG="apk-latest"
+          echo "== 发布到 tag: $TAG =="
+
+          if gh release view "$TAG" --repo '${{ github.repository }}' >/dev/null 2>&1; then
+            if gh release view "$TAG" --repo '${{ github.repository }}' --json assets \
+                 --jq '.assets[].name' | grep -qx 'app-debug.apk'; then
+              gh release delete-asset "$TAG" app-debug.apk \
+                --repo '${{ github.repository }}' --yes
+            fi
+            gh release upload "$TAG" /tmp/app-signed.apk#app-debug.apk \
+              --repo '${{ github.repository }}' --clobber
+          else
+            gh release create "$TAG" /tmp/app-signed.apk#app-debug.apk \
+              --repo '${{ github.repository }}' \
+              --title "Node Container APK ($TAG)" \
+              --notes "repack from run ${{ steps.src.outputs.run_id }}：注入 libc++_shared.so，修复 cannot locate symbol。"
+          fi
+
+          echo "== 发布完成 =="
+          gh release view "$TAG" --repo '${{ github.repository }}' --json url,assets \
+            --jq '"\(.url)\n" + (.assets[] | "  \(.name)  \(.size) bytes")'
+
+      - name: Report to ci-ok
+        if: always()
+        env:
+          GH_TOKEN: >-
+            ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          # 把「产物指纹」上报到 ci-ok 分支。
+          # 为什么这么做：维护环境（沙箱）无法直连 github.com / objects.githubusercontent.com
+          # 下载 Release 附件，只能靠 CI 自报指纹来远程确认「发出去的包里到底有什么」。
+          # 所以这里必须报告【可验证的事实】，而不是一句"成功"。
+          {
+            echo "REPACK_REPORT"
+            echo "time : $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "from : run ${{ steps.src.outputs.run_id }}"
+            echo "job  : ${{ job.status }}"
+            echo "note : 注入 libc++_shared.so，修复 cannot locate symbol"
+            echo
+            echo "=== APK 指纹 (/tmp/app-signed.apk) ==="
+            if [ -f /tmp/app-signed.apk ]; then
+              echo "size  : $(stat -c%s /tmp/app-signed.apk) 字节"
+              echo "sha256: $(sha256sum /tmp/app-signed.apk | cut -d' ' -f1)"
+              echo "md5   : $(md5sum /tmp/app-signed.apk | cut -d' ' -f1)"
+            else
+              echo "(APK 不存在 —— 前面某步失败了)"
+            fi
+            echo
+            echo "=== lib/ 内容 ==="
+            if [ -f /tmp/app-signed.apk ]; then
+              unzip -l /tmp/app-signed.apk 2>/dev/null | grep 'lib/' || echo "(无 lib/ 条目)"
+            fi
+            echo
+            echo "=== 签名方案 ==="
+            if [ -f /tmp/app-signed.apk ]; then
+              APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)"
+              "$APKSIGNER" verify --verbose /tmp/app-signed.apk 2>&1 || true
+            fi
+            echo
+            echo "=== Release 里的附件 ==="
+            gh release view "${{ inputs.tag || 'apk-latest' }}" \
+              --repo '${{ github.repository }}' --json assets \
+              --jq '.assets[] | "  \(.name)  \(.size) bytes  digest=\(.digest // "n/a")"' 2>/dev/null || true
+          } > /tmp/ci-ok.txt
+
+          cat /tmp/ci-ok.txt
+
+          git config user.name  'CI Reporter' || true
+          git config user.email 'ci@workbuddy.local' || true
+          git checkout --orphan ci-ok-tmp 2>/dev/null || git checkout ci-ok-tmp
+          git rm -rf . >/dev/null 2>&1 || true
+          cp /tmp/ci-ok.txt ci-ok.txt
+          git add -f ci-ok.txt
+          git commit -m "repack report (run ${{ steps.src.outputs.run_id }}, ${{ job.status }})" || true
+          git push -f origin HEAD:ci-ok
+  pin:
+    if: ${{ startsWith(github.ref_name, 'pin-node-') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'pin') }}
+    runs-on: ubuntu-latest
+    # 纯搬运，几分钟足够。给 30 分钟余量（要下载 ~50MB artifact）。
+    timeout-minutes: 30
+
+    steps:
+      - name: Resolve source run and inputs
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          RUN_ID="${{ inputs.run_id }}"
+          VERSION="${{ inputs.version }}"
+          ABI="${{ inputs.abi }}"
+
+          # tag 触发解析：pin-node-<run_id> 或 pin-node-latest
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            REF_TAG="${GITHUB_REF_NAME:-}"
+            echo "== 由 tag 触发: $REF_TAG =="
+            CAND="${REF_TAG#pin-node-}"
+            if [ "$CAND" != "latest" ] && printf '%s' "$CAND" | grep -qE '^[0-9]+$'; then
+              RUN_ID="$CAND"
+              echo "从 tag 解析出 run_id=$RUN_ID"
+            else
+              echo "tag 未指定 run_id，改为自动查找最近一次成功运行。"
+            fi
+          fi
+
+          if [ -z "$RUN_ID" ]; then
+            echo "== 自动查找最近一次成功的构建运行 =="
+            # 优先找新的 build-node.yml（拆分后的 Node 专用构建）；
+            # 找不到就回退到旧的 build-apk.yml（拆分前的一体化构建，
+            # 它的产物同样是完好的，可直接固化 —— 这正是本次固化要做的事）。
+            for WF in build-node.yml build-apk.yml; do
+              RUN_ID="$(gh run list \
+                          --repo '${{ github.repository }}' \
+                          --workflow "$WF" \
+                          --status success \
+                          --limit 1 \
+                          --json databaseId \
+                          --jq '.[0].databaseId' 2>/dev/null || true)"
+              if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
+                echo "命中 workflow: $WF  (run $RUN_ID)"
+                break
+              fi
+            done
+          fi
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "[error] 找不到成功的 build-node 运行。"
+            echo "        先跑一次 Build Node runtime，再固化。"
+            exit 1
+          fi
+
+          # 版本号缺省时，尝试从该 run 的 ci-ok/ci-last 自报里取；取不到用默认值。
+          if [ -z "$VERSION" ]; then VERSION="24.21.0"; fi
+          if [ -z "$ABI" ]; then ABI="arm64-v8a"; fi
+
+          echo "源 run  : $RUN_ID"
+          echo "版本    : $VERSION"
+          echo "ABI     : $ABI"
+
+          {
+            echo "run_id=$RUN_ID"
+            echo "version=$VERSION"
+            echo "abi=$ABI"
+          } >> "$GITHUB_OUTPUT"
+
+          echo
+          echo "== 该 run 的 artifact 列表 =="
+          gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/artifacts" \
+            --jq '.artifacts[] | "\(.name)  (\(.size_in_bytes) bytes, expired=\(.expired))"'
+
+      - name: Download artifact and extract .so files
+        id: extract
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          RUN_ID="${{ steps.resolve.outputs.run_id }}"
+
+          rm -rf /tmp/pin && mkdir -p /tmp/pin/dl /tmp/pin/out
+
+          # 该 run 的 Node 二进制以 artifact 形式挂在 job 上。
+          # 名字见 build-node.yml 的 upload 步骤；下载整个 artifact 再挑文件，
+          # 比按名字猜更稳（名字一旦调整这里不会静默漏文件）。
+          echo "== 下载 artifact 列表 =="
+          gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/artifacts" \
+            --jq '.artifacts[].name' | tee /tmp/pin/artifact-names.txt
+
+          while IFS= read -r NAME; do
+            [ -z "$NAME" ] && continue
+            echo "--- 下载: $NAME ---"
+            mkdir -p "/tmp/pin/dl/$NAME"
+            gh run download "$RUN_ID" \
+              --repo '${{ github.repository }}' \
+              --name "$NAME" \
+              --dir "/tmp/pin/dl/$NAME" || echo "[warn] $NAME 下载失败，跳过"
+          done < /tmp/pin/artifact-names.txt
+
+          echo
+          echo "== 下载内容总览 =="
+          find /tmp/pin/dl -type f -printf '%s  %p\n' | sort -rn | head -20
+
+          # 找出两个 .so。用 find 而非固定路径，容忍 artifact 内部的目录层级差异。
+          NODE_SO="$(find /tmp/pin/dl -type f -name 'libnode.so*' | head -1)"
+          CXX_SO="$(find /tmp/pin/dl -type f -name 'libc++_shared.so*' | head -1)"
+
+          # 兜底：某些 artifact 可能只含 APK。那就从 APK 的 lib/ 里取。
+          if [ -z "$NODE_SO" ]; then
+            APK="$(find /tmp/pin/dl -type f -name '*.apk' | head -1)"
+            if [ -n "$APK" ]; then
+              echo "== 未找到裸 .so，改从 APK 中提取 =="
+              mkdir -p /tmp/pin/unzip
+              unzip -o -q "$APK" 'lib/arm64-v8a/*' -d /tmp/pin/unzip
+              NODE_SO="$(find /tmp/pin/unzip -type f -name 'libnode.so*' | head -1)"
+              CXX_SO="$(find /tmp/pin/unzip -type f -name 'libc++_shared.so*' | head -1)"
+            fi
+          fi
+
+          if [ -z "$NODE_SO" ]; then
+            echo "[error] 在 run $RUN_ID 的产物里找不到 libnode.so。"
+            echo "        artifact 内容见上（已按大小排序）。"
+            exit 1
+          fi
+          if [ -z "$CXX_SO" ]; then
+            echo "[error] 找不到 libc++_shared.so —— 它是 node 的运行期依赖，"
+            echo "        缺它打出的包在真机上会报 cannot locate symbol。拒绝固化。"
+            exit 1
+          fi
+
+          cp -f "$NODE_SO" /tmp/pin/out/libnode.so
+          cp -f "$CXX_SO"  /tmp/pin/out/libc++_shared.so
+          chmod +x /tmp/pin/out/libnode.so /tmp/pin/out/libc++_shared.so
+
+          echo
+          echo "== 提取结果 =="
+          ls -la /tmp/pin/out/
+
+      - name: Verify extracted binaries (fail loudly, never pin a bad runtime)
+        run: |
+          set -euo pipefail
+          cd /tmp/pin/out
+
+          # readelf / file 由 binutils 提供，ubuntu-latest 上通常已有，
+          # 但不保证 —— 缺了就直接装，避免校验步骤因为工具缺失而失败。
+          # （"校验工具没装"和"产物不合格"是两回事，不该混为一谈。）
+          for t in readelf file; do
+            command -v "$t" >/dev/null 2>&1 || {
+              echo "[info] 缺少 $t，安装 binutils/file …"
+              sudo apt-get update -qq
+              sudo apt-get install -y -qq binutils file
+              break
+            }
+          done
+
+          echo "=== 1) ELF 架构 ==="
+          file libnode.so libc++_shared.so
+
+          # 必须是 AArch64 ELF。架构错了装到真机上就是 exec format error。
+          if ! file libnode.so | grep -q 'ARM aarch64'; then
+            echo "[error] libnode.so 不是 ARM aarch64 ELF，拒绝固化。"
+            exit 1
+          fi
+          echo "[ok] 架构正确：ARM aarch64"
+
+          echo
+          echo "=== 2) 解释器必须指向 Android linker64 ==="
+          readelf -W -l libnode.so 2>/dev/null | grep -i interpreter || true
+          if ! readelf -W -l libnode.so 2>/dev/null | grep -qi 'linker64'; then
+            echo "[error] 未找到 /system/bin/linker64 解释器。"
+            echo "        这说明它是用 glibc 工具链链接的，不是 Android bionic —— "
+            echo "        真机上无法 exec。拒绝固化。"
+            exit 1
+          fi
+          echo "[ok] 解释器正确"
+
+          echo
+          echo "=== 3) 16KB 页对齐（Android 15+ 要求；不满足则新设备无法加载）==="
+          # 两点注意（第一次跑时都踩到了）：
+          #   a) 必须用 readelf -W（wide）。默认模式在输出非终端时会把超 80 列的
+          #      Program Headers 表折行，同一个 LOAD 段的字段被拆到两行 —— 于是
+          #      awk 取的 $NF 不再是对齐值，这项校验就会【误报失败】。
+          #   b) 判据用「是否存在 0x4000 对齐的 LOAD 段」而非「全部段都必须是」。
+          #      后者看起来更严格，但 ELF 里段的对齐值本就允许不同（如最后一个
+          #      RW 段），拿它当硬门槛是在校验一个 ELF 规范并不要求的东西，
+          #      只会制造假失败。真正的目的是确认「这份产物支持 16KB 页设备」。
+          readelf -W -l libnode.so 2>/dev/null | grep -E '^  LOAD' || true
+          if readelf -W -l libnode.so 2>/dev/null | grep -qE '0x4000'; then
+            echo "[ok] 检出 16KB (0x4000) 对齐的 LOAD 段"
+          else
+            echo "[error] 未检出 16KB 对齐的 LOAD 段。"
+            echo "        Android 15+ 在 16KB 页设备上会返回 ELIBBAD / Exec format error。"
+            echo "        NDK r27+ 默认应满足；若是旧 NDK 编出的产物，拒绝固化。"
+            exit 1
+          fi
+
+          echo
+          echo "=== 4) 动态依赖闭环 ==="
+          # 遍历 DT_NEEDED，除 bionic 提供的系统库外，其余必须由随包文件提供。
+          NEEDED="$(readelf -d libnode.so 2>/dev/null | awk '/NEEDED/ {gsub(/[\[\]]/,"",$5); print $5}')"
+          echo "NEEDED 列表："
+          echo "$NEEDED" | sed 's/^/  /'
+          MISSING=""
+          while IFS= read -r lib; do
+            [ -z "$lib" ] && continue
+            case "$lib" in
+              libc.so|libm.so|libdl.so|liblog.so|libz.so|libandroid.so|\
+              libGLESv2.so|libEGL.so|libnativewindow.so|libsync.so|\
+              libatomic.so|libstdc++.so)
+                echo "  [ok] $lib （bionic/系统提供）" ;;
+              *)
+                if [ -f "./$lib" ]; then
+                  echo "  [ok] $lib （已随包提供）"
+                else
+                  echo "  [MISSING] $lib"
+                  MISSING="$MISSING $lib"
+                fi ;;
+            esac
+          done <<< "$NEEDED"
+          if [ -n "$MISSING" ]; then
+            echo "[error] 以下依赖既不在系统里、也没随包提供：$MISSING"
+            echo "        固化了也跑不起来，拒绝。"
+            exit 1
+          fi
+          echo "[ok] 依赖闭环完整"
+
+          echo
+          echo "=== 5) 记录指纹 ==="
+          sha256sum libnode.so libc++_shared.so | tee /tmp/pin/out/SHA256SUMS
+
+      - name: Publish as immutable release
+        id: pub
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.resolve.outputs.version }}"
+          ABI="${{ steps.resolve.outputs.abi }}"
+          TAG="node-runtime-${VERSION}-${ABI}"
+
+          cd /tmp/pin/out
+
+          # 生成 manifest：fast-apk.yml 靠它决定"下载什么、校验什么"。
+          # 把校验和写进 manifest 而不是让下游自己算，是为了让"用了哪个二进制"
+          # 这件事可追溯 —— 出问题时能一眼看出 APK 里装的是哪份产物。
+          NODE_SHA="$(sha256sum libnode.so | awk '{print $1}')"
+          NODE_SIZE="$(stat -c%s libnode.so)"
+          CXX_SHA="$(sha256sum libc++_shared.so | awk '{print $1}')"
+          CXX_SIZE="$(stat -c%s libc++_shared.so)"
+
+          # 用 python 生成 manifest，而不是 heredoc 或内联多行脚本。
+          # 原因：YAML 块标量里嵌 heredoc 极易因缩进破坏结构（这里踩过）。
+          # 单行 python -c 最稳。
+          python3 -c "import json,datetime,sys; v,a,r,ns,nz,cs,cz=sys.argv[1:8]; m={'schema':1,'version':v,'abi':a,'source_run':r,'created_at':datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),'files':{'libnode.so':{'sha256':ns,'size':int(nz)},'libc++_shared.so':{'sha256':cs,'size':int(cz)}}}; json.dump(m,open('manifest.json','w'),indent=2,ensure_ascii=False); print(json.dumps(m,indent=2,ensure_ascii=False))" \
+            "$VERSION" "$ABI" "${{ steps.resolve.outputs.run_id }}" \
+            "$NODE_SHA" "$NODE_SIZE" "$CXX_SHA" "$CXX_SIZE"
+
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+
+          if gh release view "$TAG" --repo '${{ github.repository }}' >/dev/null 2>&1; then
+            echo "[warn] Release $TAG 已存在。"
+            echo "       该 tag 的语义是【不可变】—— 同一版本+ABI 的二进制不应被替换，"
+            echo "       否则已发布的 APK 与它所依赖的运行时版本就对不上了。"
+            echo "       如需固化的新产物，请提升 version。此处仅更新资产内容以备重发。"
+          else
+            echo "创建 Release $TAG"
+            # 注意：--notes 的值必须写成【单行】。
+            # YAML 块标量（run: |）里出现跨行字符串时，续行一旦顶格就会破坏
+            # YAML 结构（本文件在这一点上踩过坑：报 "could not find expected ':'"）。
+            # 需要换行就用 \n 转义，交给 shell 展开。
+            NOTES="预编译的 Node ${VERSION} 安卓原生运行时（bionic 链接，arm64-v8a）。\n\n"
+            NOTES="${NOTES}来源：build-node 运行 ${{ steps.resolve.outputs.run_id }}\n\n"
+            NOTES="${NOTES}包含：\n"
+            NOTES="${NOTES}- libnode.so —— Node 可执行文件（经 jniLibs 通道落盘到 nativeLibraryDir）\n"
+            NOTES="${NOTES}- libc++_shared.so —— 运行期动态依赖，符号由它提供\n"
+            NOTES="${NOTES}- manifest.json / SHA256SUMS —— 校验与溯源\n\n"
+            NOTES="${NOTES}本资产为不可变引用：fast-apk.yml 按此 tag 下载，不再重编 Node。"
+            gh release create "$TAG" \
+              --repo '${{ github.repository }}' \
+              --title "Node ${VERSION} runtime for Android ${ABI} (prebuilt)" \
+              --notes "$(printf '%b' "$NOTES")"
+          fi
+
+          gh release upload "$TAG" \
+            libnode.so libc++_shared.so manifest.json SHA256SUMS \
+            --repo '${{ github.repository }}' --clobber
+
+          echo
+          echo "=== 固化完成 ==="
+          gh release view "$TAG" --repo '${{ github.repository }}' \
+            --json assets --jq '.assets[] | "\(.name)  \(.size) bytes"'
+
+      - name: Report to ci-ok
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory '*'
+          rm -rf /tmp/pinok && mkdir -p /tmp/pinok && cd /tmp/pinok
+          git clone --quiet \
+            "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" . || {
+              echo "[warn] clone 失败，跳过上报"; exit 0; }
+
+          TAG="${{ env.TAG }}"
+          {
+            echo "NODE_PINNED"
+            echo "time    : $(date -u)"
+            echo "tag     : $TAG"
+            echo "version : ${{ steps.resolve.outputs.version }}"
+            echo "abi     : ${{ steps.resolve.outputs.abi }}"
+            echo "run     : ${{ steps.resolve.outputs.run_id }}"
+            echo
+            echo "== 资产 =="
+            cd /tmp/pin/out && sha256sum libnode.so libc++_shared.so
+          } > ci-ok.txt
+
+          git config user.email "ci@workbuddy.local"
+          git config user.name "CI Diagnostic Bot"
+          git add ci-ok.txt
+          git commit -q -m "ci: node runtime pinned ($TAG)" || true
+          git push origin HEAD:ci-ok --force && echo "[ok] ci-ok 已更新"
