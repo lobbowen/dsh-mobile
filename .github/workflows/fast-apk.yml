@@ -131,36 +131,8 @@ jobs:
           sys.exit(1 if bad else 0)
           PY
 
-      - name: Gate — native asset manifest is generated from the registry
-        # 单一事实源：.github/native-assets.txt 必须等于生成器的输出。
-        # 手改而不同步注册表 → 此步 `git diff --exit-code` 直接红。
-        run: |
-          set -euo pipefail
-          node scripts/gen-native-assets.js
-          git diff --exit-code -- .github/native-assets.txt
-
-      - name: Container engine tests (logic)
-        # 本工作流改了 container/engine/src/（zip.js 的 Deflate 支持、
-        # kernel-bundle 的排除表与体积断言、桥方法表）—— 不跑测试就等于没验证。
-        #
-        # 为什么放在 gradle 之前：这些测试只需 Node（秒级），而 gradle 要几分钟。
-        # 有错就该在 10 秒内知道，而不是等 8 分钟后在编译阶段以奇怪的形式暴露。
-        #
-        # 为什么是 test:logic 而不是 test —— 这里有一个**曾经踩过的坑**：
-        # 基线包（container/app/src/main/assets/kernel/baseline.zip）是构建产物
-        # （.gitignore 排除），生成它的 "Build kernel baseline bundle"
-        # 步骤在**本步骤之后**（它需要先拉内核源码 + 注入私钥，代价高）。
-        # 所以本步骤只能跑**不依赖产物**的逻辑测试，否则会因为"产物还没生成"
-        # 而在 13 秒内必然红 —— 一个纯粹由步骤顺序造成的假红。
-        # 基线包本身的断言放在它生成之后（见 "Verify kernel baseline bundle"）。
-        run: |
-          set -euo pipefail
-          cd container/engine
-          npm run test:logic 2>&1 | tee /tmp/engine-test.log
-          echo
-          echo "=== 容器引擎逻辑测试汇总 ==="
-          echo "$(grep -c '^PASS' /tmp/engine-test.log || true) 个 PASS，$(grep -c '^FAIL' /tmp/engine-test.log || true) 个 FAIL"
-
+      # 注意：引擎门禁与「原生资产清单生成」门禁已迁到 ci.yml（统一门禁）。
+      # 本 workflow 只负责出包，不再重复跑测试。
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
