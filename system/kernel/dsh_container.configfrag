@@ -1,0 +1,10 @@
+# 自有内核需要打开的内核配置：真命名空间容器（路线 A）的前提。
+# 现役设备 /proc/sys/user/max_user_namespaces 存在但 app 被沙箱挡在 EINVAL；
+# 系统服务域不受该过滤器约束，此处只是把能力补齐。
+CONFIG_NAMESPACES=y
+CONFIG_USER_NS=y
+CONFIG_PID_NS=y
+CONFIG_NET_NS=y
+CONFIG_UTS_NS=y
+CONFIG_IPC_NS=y
+CONFIG_OVERLAY_FS=y

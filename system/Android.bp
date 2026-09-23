@@ -1,0 +1,12 @@
+// 容器作为特权系统应用进镜像：priv-app + 平台证书。
+// APK 由本仓 Gradle 产出；此处只做导入，避免两套构建逻辑分叉。
+android_app_import {
+    name: "DshContainer",
+    apk: "DshContainer.apk",
+    presigned: true,          // 已由自有/平台密钥签名时不重签
+    privileged: true,         // 进 /system/priv-app
+    certificate: "platform",  // presigned=false 时改用平台证书
+    dex_preopt: {
+        enabled: false,
+    },
+}

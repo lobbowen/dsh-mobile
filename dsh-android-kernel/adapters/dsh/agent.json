@@ -1,0 +1,20 @@
+{
+  "id": "dsh",
+  "name": "DeepSeek Harness",
+  "npmPackage": "@deepseek-ai/dsh",
+  "entry": "lib/bin.js",
+  "profileName": "web",
+  "homeDirName": ".dsh",
+  "dataPaths": [
+    "sessions",
+    "storages",
+    "profiles",
+    "settings.yaml",
+    ".credentials.yaml",
+    ".anonymous-user-id"
+  ],
+  "protectedPackages": [
+    "@deepseek-ai/dsh-base",
+    "@deepseek-ai/dsh-web-app"
+  ]
+}

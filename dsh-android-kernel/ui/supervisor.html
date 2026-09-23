@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/dsh-logo.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>dsh-supervisor · 控制面板</title>
+    <style>
+      /* 内核面板页：纯网页（2026-09-07 定稿，无独立加载页/无窗口逻辑）。
+         基础样式仅保证铺满与无色块，具体 UI 由 React 应用渲染。 */
+      :root {
+        font-family: Inter, "Noto Sans SC", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #171717;
+      }
+      * { box-sizing: border-box; }
+      html, body, #root { width: 100%; height: 100%; height: 100dvh; }
+      body { margin: 0; min-width: 320px; min-height: 100vh; min-height: 100dvh; overflow: hidden; background: transparent; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" crossorigin src="/src/main-supervisor.tsx"></script>
+  </body>
+</html>
