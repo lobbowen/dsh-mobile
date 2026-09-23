@@ -257,6 +257,8 @@ object ProvisioningProbe {
         try {
             val obj = org.json.JSONObject().apply {
                 put("schema", 1)
+                put("appVersion", BuildConfig.VERSION_NAME)
+                put("appVersionCode", BuildConfig.VERSION_CODE)
                 put("checkedAt", System.currentTimeMillis())
                 put("androidApi", Build.VERSION.SDK_INT)
                 put("device", "${Build.MANUFACTURER} ${Build.MODEL}")

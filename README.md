@@ -39,7 +39,7 @@ dsh-mobile/                                  # 单仓双子项目（M）
 ├─ docs/
 │  ├─ adr/                                  # 决策记录 0001…
 │  ├─ contracts/                            # base-spec / bridge-protocol / layout.json / *.schema.json
-│  ├─ runbook/                              # git-repo / testing / release-identity / handover / provisioning / contributing
+│  ├─ runbook/                              # git-repo / testing / versioning / release-identity / handover / provisioning / contributing
 │  └─ STORAGE-STANDARD.md                   # 存储规范（位置 + 对账）
 ├─ scripts/                                 # 跨层构建/发布工具
 ├─ ARCHITECTURE.md                          # ★ 架构与硬约束（唯一事实来源）
@@ -57,6 +57,7 @@ dsh-mobile/                                  # 单仓双子项目（M）
 | Git / 提交 / 令牌使用 | [`docs/runbook/git-repo-standard.md`](docs/runbook/git-repo-standard.md) |
 | **测试（只准走 CI，本地禁止执行）** | [`docs/runbook/testing-standard.md`](docs/runbook/testing-standard.md) |
 | **发布身份 / 密钥 / PAT** | [`docs/runbook/release-identity.md`](docs/runbook/release-identity.md) |
+| **版本管理（各层版本 / bump 规则）** | [`docs/runbook/versioning.md`](docs/runbook/versioning.md) |
 | 决策记录（含已否决方案） | [`docs/adr/`](docs/adr/) |
 | 契约（内核包 / 运行时 / 桥协议） | [`docs/contracts/`](docs/contracts/) |
 

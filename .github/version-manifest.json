@@ -1,0 +1,24 @@
+{
+  "$comment": "由 scripts/gen-version.js 生成，请勿手改；改版本请改 version.json / 各 package.json。",
+  "shell": {
+    "versionName": "0.2.0",
+    "versionCode": 2
+  },
+  "engine": {
+    "name": "container-engine",
+    "version": "0.1.0"
+  },
+  "kernel": {
+    "name": "dsh-android-kernel",
+    "version": "0.1.0-android.11"
+  },
+  "ui": {
+    "name": "dsh-supervisor-ui",
+    "version": "0.10.0"
+  },
+  "runtime": {
+    "node": "24.21.0",
+    "abi": "arm64-v8a",
+    "tag": "node-runtime-24.21.0-arm64-v8a"
+  }
+}
