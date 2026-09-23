@@ -357,7 +357,8 @@ jobs:
 
           # ② link/linkat 用户态替代（纯 libc 符号，无 NDK 头文件依赖）
           "$CC" -shared -fPIC -O2 -I "$INC" \
-            -o "app/src/main/jniLibs/${ABI}/libdshposix.so" native/posix/link-interpose.c
+            -o "app/src/main/jniLibs/${ABI}/libdshposix.so" \
+            native/posix/link-interpose.c native/posix/open-fallback.c
           SO2="app/src/main/jniLibs/${ABI}/libdshposix.so"
           SIZE2=$(stat -c%s "$SO2")
           [ "$SIZE2" -gt 500 ] || { echo "[error] $SO2 仅 $SIZE2 字节，编译产物可疑"; exit 1; }

@@ -141,3 +141,13 @@ renameat2 NOREPLACE: available
 
 - 用自研 `sharp` 兼容包替换依赖（属替换实现，破坏依赖契约）→ 否决。
 - 把图像处理搬到 HostBridge/Bitmap 再做替换包 → 同上，且引入跨进程旁路 → 否决。
+
+### P4 补充：read_image 的 EACCES（2026-09-23 定位并修复）
+
+根因：`dsh-attachment-local` 的 `ensureDurableHome` 以 `parse(home).root` 为边界，
+会把 `<DSH_HOME>` 的**每一个祖先 fsync 到文件系统根**；Android 上 `/data/user/0`、`/data`、`/`
+对 app 均不可读，`open` 目录即 EACCES，附件保存整条失败（`read` 不走此路径，故正常）。
+
+修法（环境层，不改 DSH）：`native/posix/open-fallback.c` —— 在 `open/openat` 因 EACCES 失败、
+且目标确为 `$HOME` 的祖先目录时，返回 `$HOME` 的只读目录句柄，让调用方的 fsync 完成。
+上游正确修法应是把 durable 边界设到 `$DSH_HOME` 或容忍 EACCES，已记录。
