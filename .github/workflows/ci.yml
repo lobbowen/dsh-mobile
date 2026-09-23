@@ -138,3 +138,49 @@ jobs:
         with:
           files: dsh-android-kernel-panel-*.tar.gz
           generate_release_notes: true
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # app-tests：Android 侧 JVM 单元测试（纯逻辑，不需要模拟器）
+  # ══════════════════════════════════════════════════════════════════════════
+  # 为什么单独一个 job：它需要 JDK + Android SDK，比上面两个 Node job 重得多；
+  # 但两者互不依赖 —— 并行跑，Node 侧仍能秒级给出快速反馈。
+  #
+  # 为什么必须有：内核下载器（ResumableDownloader）这类**纯 JVM 逻辑**此前完全没有夹具，
+  # 「断点续传 / 416 / 提前断 / sha256 不符」这些分支只能靠真机碰运气。
+  # 现在用 JUnit + JDK 自带的 com.sun.net.httpserver 起本地 HTTP 服务逐分支验证。
+  #
+  # 刻意**不**用第三方 setup-android action（实测它会装已不存在的 tools 包而失败，
+  # 见 fast-apk.yml 的注释）；runner 自带的 Android SDK 够用。
+  app-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Install SDK packages
+        run: |
+          set -o pipefail
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          "$SDKMANAGER" --version 2>&1 | tail -1
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0" 2>&1 | tail -3
+
+      - name: 单元测试（:app:testDebugUnitTest）
+        run: |
+          set -o pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:testDebugUnitTest
+
+      - name: 上传测试报告（仅失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-unit-test-report
+          path: container/app/build/reports/tests/
+          if-no-files-found: ignore
