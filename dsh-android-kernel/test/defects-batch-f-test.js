@@ -5,12 +5,12 @@
 // 批 F 缺陷回归（K6 / K7 / K9 / K10，2026-09-11）
 //
 // 四个缺陷各自独立，但**共享同一根因族**：
-//   「注释声称的行为」与「代码实际行为」不一致，且不一致处**静默**。
+// 「注释声称的行为」与「代码实际行为」不一致，且不一致处**静默**。
 //
-//   K6  identity.js 声称有 Host 校验，实现里从未读取 req.headers.host
-//   K7  ports.js 用 process.env.HOME || '/tmp'，Windows 无 HOME → 状态文件分裂
-//   K9  正则 [^s] 写成字符类（意图 [^\s]），静默截断/跨行
-//   K10 卸载失败仍无条件删 manifest → 残留不可追
+// K6 identity.js 声称有 Host 校验，实现里从未读取 req.headers.host
+// K7 ports.js 用 process.env.HOME || '/tmp'，Windows 无 HOME → 状态文件分裂
+// K9 正则 [^s] 写成字符类（意图 [^\s]），静默截断/跨行
+// K10 卸载失败仍无条件删 manifest → 残留不可追
 //
 // 本测试逐条把「声称」变成「断言」。
 // ═══════════════════════════════════════════════════════════════════════════
@@ -81,7 +81,7 @@ console.log('== K7 端口注册表路径（三平台一致）==');
   check('K7 不再把 /tmp 作为兜底（状态文件会与 state.json 分裂）',
     !code.includes("'/tmp'"), '/tmp');
   // 2026-09-15：路径改由**产品状态根**（src/platform/state-root.js）给出 ——
-  //   仍是三平台正确来源，且与 state.json 同域（不分裂）；不再各自 os.homedir()。
+  // 仍是三平台正确来源，且与 state.json 同域（不分裂）；不再各自 os.homedir()。
   check('K7 经产品状态根解析端口文件（platform/state-root）',
     /platform\/state-root/.test(code) && /supervisorDir\(\)/.test(code), 'state-root');
 }
@@ -91,8 +91,8 @@ console.log('== K9 版本解析正则 ==');
 {
   const p = path.join(ROOT, 'src', 'guard', 'supervisor', 'settings-view.js');
   const srcAll = fs.readFileSync(p, 'utf8');
-  // ⚠ 必须**先剥离注释**再断言：修复说明里会引用错误形态 [^s] 作对照，
-  //   若不剥注释，正确的修复反而会被自己的说明文字判为「仍有误用」。
+  // 必须**先剥离注释**再断言：修复说明里会引用错误形态 [^s] 作对照，
+  // 若不剥注释，正确的修复反而会被自己的说明文字判为「仍有误用」。
   const src = srcAll.split(String.fromCharCode(10))
     .filter((l) => !/^\s*\/\//.test(l)).join(String.fromCharCode(10));
   check('K9 不再有 [^s] 字符类误用（已剥注释）', !/\[\^s\]/.test(src), '[^s]');

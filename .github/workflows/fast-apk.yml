@@ -308,11 +308,11 @@ jobs:
             echo "[ok] $f  $SIZE 字节"
           done
 
-      - name: Build libdshflock.so + libdshpublish.so (NDK 原生桥)
+      - name: Build libdshflock.so + libdshposix.so (NDK 原生桥)
         # 真机实证（2026-09-23）：dsh 两条设备死路都没有 JS 等价物——
         # ① flock（下列）；② link：Android 7+ SELinux 禁 untrusted_app 硬链接，
         #    dsh 会话/附件的 link 式独占发布报 EACCES ⇒ renameat2(RENAME_NOREPLACE)
-        #    语义等价桥（native/publish/，自有代码）→ libdshpublish.so。
+        #    link 用户态替代（native/posix/，自有代码）→ libdshposix.so，经 LD_PRELOAD 注入。
         #    两库不能合并成单一 .so：NAPI_MODULE_INIT 入口每模块唯一。
         # 真机实证：dsh 会话持久化硬依赖
         # @deepseek-ai/node-addon-system 的 flock 绑定，上游只发 linux(glibc/musl)/
@@ -355,25 +355,24 @@ jobs:
           file "$SO" | grep -q "ELF 64-bit.*ARM aarch64" || { echo "[error] 产物不是 aarch64 ELF"; exit 1; }
           echo "[ok] libdshflock.so $SIZE 字节 ($(file -b --mime-type "$SO" 2>/dev/null || echo ELF))"
 
-          # ② link 桥：renameat2 经 syscall() 包装，无 API level 头文件依赖
-          "$CC" -shared -fPIC -O2 -DNAPI_VERSION=9 -I "$INC" \
-            -o "app/src/main/jniLibs/${ABI}/libdshpublish.so" native/publish/rename-no-replace.c
-          SO2="app/src/main/jniLibs/${ABI}/libdshpublish.so"
+          # ② link/linkat 用户态替代（纯 libc 符号，无 NDK 头文件依赖）
+          "$CC" -shared -fPIC -O2 -I "$INC" \
+            -o "app/src/main/jniLibs/${ABI}/libdshposix.so" native/posix/link-interpose.c
+          SO2="app/src/main/jniLibs/${ABI}/libdshposix.so"
           SIZE2=$(stat -c%s "$SO2")
-          [ "$SIZE2" -gt 1000 ] || { echo "[error] $SO2 仅 $SIZE2 字节，编译产物可疑"; exit 1; }
-          file "$SO2" | grep -q "ELF 64-bit.*ARM aarch64" || { echo "[error] publish 产物不是 aarch64 ELF"; exit 1; }
-          echo "[ok] libdshpublish.so $SIZE2 字节"
+          [ "$SIZE2" -gt 500 ] || { echo "[error] $SO2 仅 $SIZE2 字节，编译产物可疑"; exit 1; }
+          file "$SO2" | grep -q "ELF 64-bit.*ARM aarch64" || { echo "[error] posix 产物不是 aarch64 ELF"; exit 1; }
+          echo "[ok] libdshposix.so $SIZE2 字节"
 
       - name: Build capability binaries (bash / ripgrep / PTY probe)
         # android.9：终端三件套 + PTY 探针，全部 NDK 交叉编译**静态**产物：
         #   · libbash.so   —— dsh-bash-local / dsh-terminal-bash 需要真 bash 二进制；
         #                      Android 无 /bin/bash，可 exec 目录只有 nativeLibraryDir
-        #                      （W^X），文件名必须 lib*.so 形态（能力垫片经 DSH_BASH_BIN 指过来）。
-        #   · libdshrg.so  —— glob/grep 工具硬依赖 ripgrep（无 JS 等价物），经 DSH_RIPGREP_BIN。
+        #                      由 PrefixProvisioner 复制为 $PREFIX/bin 下的真名可执行文件。
+        #   · libdshrg.so  —— glob/grep 硬依赖 ripgrep（无 JS 等价物），由 $PREFIX 提供。
         #   · libdshptyprobe.so —— 真机 PTY 能力探针（native/ptyprobe/，决策 node-pty 路线）。
-        # 失败语义（刻意的不对称）：探针编译失败 = 环境问题，硬红；bash/rg 失败 = 上游
-        # 构建配方问题，记 ::warning:: 后继续 —— 生命周期/PTC 修复不该被配方陪葬，
-        # 缺件时垫片旋钮诚实回退原语义，Audit 步骤如实报告 APK 内有无，绝不静默。
+        # 失败语义：bash/rg/探针均为硬性必需（$PREFIX 依赖它们，无回退）；node-pty 走上游
+        # 配方，软失败（终端降级，不陪葬其它能力）。Audit 步骤如实报告 APK 内有无。
         # bash 配方要点：bionic 无 termcap/readline ⇒ 预编一个 tputs 族 no-op 桩归档
         # 塞进 LIBS（configure 的功能探测即真实链接通过；dsh 只跑 `bash -c` 非交互
         # 管线，readline 的美化路径不参与）；--enable-static-link 产出免动态链接器
@@ -457,11 +456,12 @@ jobs:
                 exit 1; }
             ) && cp -f /tmp/bash-${BASH_VER}/bash "$J/libbash.so"
             if ! check_so "$J/libbash.so" 300000; then
-              echo "::warning title=能力件缺失::libbash.so 未产出 —— bash 工具本包不可用（终端/命令执行报 ENOENT，诚实可见）"
-              rm -f "$J/libbash.so"
+              echo "::error title=必需件缺失::libbash.so 未产出 —— bash 工具依赖 $PREFIX/bin/bash，无回退路径"
+              exit 1
             fi
           else
-            echo "::warning title=能力件缺失::bash 源码下载/解包失败 —— bash 工具本包不可用"
+            echo "::error title=必需件缺失::bash 源码下载/解包失败 —— bash 工具无回退路径"
+            exit 1
           fi
 
           # ── ③ ripgrep 14.1.1（cargo 交叉到 aarch64-linux-android，静态 CRT）──
@@ -480,15 +480,15 @@ jobs:
             tail -30 /tmp/rg-build.log
           fi
           if ! check_so "$J/libdshrg.so" 300000; then
-            echo "::warning title=能力件缺失::libdshrg.so 未产出 —— glob/grep 工具本包不可用（SEARCH_FAILED，诚实可见）"
-            rm -f "$J/libdshrg.so"
+            echo "::error title=必需件缺失::libdshrg.so 未产出 —— glob/grep 依赖 $PREFIX/bin/rg，无回退路径"
+            exit 1
           fi
 
           # AGP 只 strip「共享库」语义的 ELF，对这批静态可执行文件是 no-op（实证：
           # 首轮日志 "Unable to strip ... packaging them as they are" ⇒ rg 33MB、
           # ptyprobe 2MB 带全量符号进包）。手动 strip：NAPI 件不受影响（.dynsym
           # 是动态符号表，strip-unneeded 不动它）。
-          for f in libbash.so libdshrg.so libdshptyprobe.so libdshflock.so libdshpublish.so; do
+          for f in libbash.so libdshrg.so libdshptyprobe.so libdshflock.so libdshposix.so libdshpty.so; do
             if [ -f "$J/$f" ]; then
               before=$(stat -c%s "$J/$f"); "$TC/llvm-strip" --strip-unneeded "$J/$f" 2>/dev/null || true
               echo "[strip] $f $before -> $(stat -c%s "$J/$f") 字节"
@@ -497,6 +497,45 @@ jobs:
 
           echo "== 能力二进制就位情况 =="
           ls -la "$J"
+
+      - name: Build node-pty for android-arm64 (NDK + node-gyp)
+        # node-pty 只发 linux/darwin/win32 预编译件且无 wasm 兜底，PTY 只能自己编。
+        # 产物投 jniLibs/libdshpty.so；运行时由容器复制到 node-pty 的 loader 查找位
+        # （node_modules/node-pty/prebuilds/android-arm64/pty.node）。
+        # 失败语义：上游配方问题 => ::warning 后继续（终端能力降级，不陪葬其它能力）。
+        run: |
+          set -uo pipefail
+          PTY_VER="1.2.0-beta.15"
+          NDK=""
+          for v in "${ANDROID_NDK_LATEST_HOME:-}" "${ANDROID_NDK_HOME:-}" "${ANDROID_NDK_ROOT:-}"; do
+            [ -n "$v" ] && [ -d "$v" ] && NDK="$v" && break
+          done
+          if [ -z "$NDK" ]; then NDK=$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | sort -V | tail -1 || true); fi
+          [ -n "$NDK" ] && [ -d "$NDK" ] || { echo "::warning title=能力件缺失::找不到 NDK，跳过 node-pty"; exit 0; }
+          TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          # API 24：bionic 的 pty.h/forkpty 自 API 23 起才有；minSdk=24 与之相符。
+          export CC="$TC/aarch64-linux-android24-clang"
+          export CXX="$TC/aarch64-linux-android24-clang++"
+          export AR="$TC/llvm-ar" LINK="$CXX"
+          [ -x "$CC" ] || { echo "::warning title=能力件缺失::找不到 clang: $CC"; exit 0; }
+          rm -rf /tmp/ptybuild && mkdir -p /tmp/ptybuild && cd /tmp/ptybuild
+          npm pack "node-pty@${PTY_VER}" >/dev/null 2>&1 || { echo "::warning title=能力件缺失::node-pty 源码拉取失败"; exit 0; }
+          tar -xzf node-pty-*.tgz && cd package
+          # bionic 无 libutil：binding.gyp 里的 -lutil 必须去掉（含 mac 分支的 libraries!）。
+          python3 - <<'PY'
+          import re, pathlib
+          p = pathlib.Path('binding.gyp')
+          p.write_text(re.sub(r"\s*'-lutil'\s*,?", "", p.read_text()))
+          PY
+          # binding.gyp 用 require('node-addon-api') 取 targets，须装进包内。
+          npm install --ignore-scripts --no-audit --no-fund >/dev/null 2>&1 || true
+          npx --yes node-gyp@10 rebuild --arch=arm64 --nodedir=/tmp/node-headers > /tmp/pty-gyp.log 2>&1 || {
+            echo '=== node-gyp 失败取证（末 60 行）==='; tail -60 /tmp/pty-gyp.log
+            echo '::warning title=能力件缺失::node-pty 构建失败 —— 终端 PTY 本包不可用'; exit 0; }
+          SO="build/Release/pty.node"
+          file "$SO" | grep -q 'ELF 64-bit.*ARM aarch64' || { echo '::warning title=能力件缺失::pty.node 非 aarch64'; tail -20 /tmp/pty-gyp.log; exit 0; }
+          cp -f "$SO" "${GITHUB_WORKSPACE}/app/src/main/jniLibs/${ABI}/libdshpty.so"
+          echo "[ok] libdshpty.so $(stat -c%s "${GITHUB_WORKSPACE}/app/src/main/jniLibs/${ABI}/libdshpty.so") 字节"
 
       - name: Stage pinned npm into APK assets
         # npm 是**基础环境**的一部分（与 Node 版本锁死、几乎不变）⇒ 进 APK 而非内核包。
@@ -685,12 +724,14 @@ jobs:
           # 不该让生命周期/PTC 修复陪葬。
           echo
           echo "--- 小体积原生件 ---"
-          for b in libdshflock.so libdshpublish.so libdshptyprobe.so; do
+          for b in libdshflock.so libdshposix.so libdshptyprobe.so; do
             if unzip -l "$APK" | grep -q "lib/${ABI}/$b"; then echo "[ok] lib/${ABI}/$b"; else echo "[error] APK 缺 lib/${ABI}/$b（自有 C，必产）"; exit 1; fi
           done
           for b in libbash.so libdshrg.so; do
-            if unzip -l "$APK" | grep -q "lib/${ABI}/$b"; then echo "[ok] lib/${ABI}/$b"; else echo "::warning title=能力降级::lib/${ABI}/$b 不在 APK —— 对应 dsh 能力本包不可用（诚实回退，非静默）"; fi
+            if unzip -l "$APK" | grep -q "lib/${ABI}/$b"; then echo "[ok] lib/${ABI}/$b"; else echo "::error title=必需件缺失::lib/${ABI}/$b 不在 APK（$PREFIX 依赖它，无回退）"; exit 1; fi
           done
+          # libdshpty.so：上游 node-pty 配方，软失败（终端降级，不影响其它能力）
+          if unzip -l "$APK" | grep -q "lib/${ABI}/libdshpty.so"; then echo "[ok] lib/${ABI}/libdshpty.so"; else echo "::warning title=能力降级::lib/${ABI}/libdshpty.so 不在 APK —— 终端 PTY 不可用"; fi
 
           # --- 基线内核包审计 ---
           #

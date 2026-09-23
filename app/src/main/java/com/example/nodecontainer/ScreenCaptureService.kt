@@ -42,10 +42,10 @@ import java.util.concurrent.atomic.AtomicReference
  * 拿回一个 resultCode + Intent，用它 createScreenCaptureIntent 才能建出 VirtualDisplay。
  *
  * 这意味着：
- *   · **无法预置**（不像 Device Owner 可以 adb 一次性设置）；
- *   · 无法在后台静默发起（必须有 Activity 承载 startActivityForResult）；
- *   · 授权结果可复用（我们把它缓存在 files/screen-capture-grant.json，
- *     下次同一 resultCode/Intent 仍可用，直到用户撤销或进程重启）。
+ * · **无法预置**（不像 Device Owner 可以 adb 一次性设置）；
+ * · 无法在后台静默发起（必须有 Activity 承载 startActivityForResult）；
+ * · 授权结果可复用（我们把它缓存在 files/screen-capture-grant.json，
+ * 下次同一 resultCode/Intent 仍可用，直到用户撤销或进程重启）。
  *
  * 所以本服务的契约是：**「授权一次，长期复用」**。首次 ui.screenshot 若未授权，
  * 返回 -32001 并附带 "需要用户授权" 的明确指引；用户在 App 里点一次授权后，
@@ -89,8 +89,8 @@ class ScreenCaptureService : Service() {
                 RuntimeDiagnostics.append(this, "screenshot", false, "getMediaProjection 返回 null", "授权数据可能已失效")
                 return
             }
-            // ⚠ 必须注册 callback：否则部分 ROM 上 projection 会在短暂空闲后被系统回收，
-            //   表现为「第一次能截、第二次 startVirtualDisplay 抛 IllegalStateException」。
+            // 必须注册 callback：否则部分 ROM 上 projection 会在短暂空闲后被系统回收，
+            // 表现为「第一次能截、第二次 startVirtualDisplay 抛 IllegalStateException」。
             p.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() {
                     Log.i(TAG, "MediaProjection 被系统停止")
@@ -234,7 +234,7 @@ class ScreenCaptureService : Service() {
         fun isReady(): Boolean = instance?.projection != null
 
         /**
-         * 保存授权结果。⚠ Intent 无法直接序列化为 JSON，故用 Intent 的
+         * 保存授权结果。 Intent 无法直接序列化为 JSON，故用 Intent 的
          * toUri(FLAG_GRANT_READ_URI_PERMISSION) 仅能拿到数据 URI —— 对 MediaProjection
          * 的授权 Intent 不适用。稳妥做法是把整个 Intent 以 Parcel 字节流存盘。
          */

@@ -2,11 +2,11 @@
 
 // 统一安装/更新任务注册表（Task Registry）。
 // 收敛系统内全部「安装 / 升级 / 卸载 / 更新」操作到同一个任务模型：
-//  - 统一状态机：pending → running → succeeded|failed|skipped|canceled
-//  - 明确状态：任何时刻任务都有可观测状态 + step 级进度 + 有界日志
-//  - 持久化历史：~/.dsh/supervisor/tasks.json，守卫重启后仍可查看
-//  - 各业务模块（native/instance/plugin/router）只保留执行逻辑，
-//    任务生命周期统一交给本注册表。
+// - 统一状态机：pending → running → succeeded|failed|skipped|canceled
+// - 明确状态：任何时刻任务都有可观测状态 + step 级进度 + 有界日志
+// - 持久化历史：~/.dsh/supervisor/tasks.json，守卫重启后仍可查看
+// - 各业务模块（native/instance/plugin/router）只保留执行逻辑，
+// 任务生命周期统一交给本注册表。
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -23,9 +23,9 @@ function taskId() {
 class TaskRegistry {
   /**
    * @param {object} opts
-   *   - stateDir: 状态目录（~/.dsh/supervisor），tasks.json 落于此
-   *   - logger: 可选日志器
-   *   - events: 可选事件总线（append('task_created'|'task_state'|...)）
+   * - stateDir: 状态目录（~/.dsh/supervisor），tasks.json 落于此
+   * - logger: 可选日志器
+   * - events: 可选事件总线（append('task_created'|'task_state'|...)）
    */
   constructor(opts) {
     this.stateDir = opts && opts.stateDir;
@@ -70,17 +70,17 @@ class TaskRegistry {
     if (!this.file) return;
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
-      // ⚠ P2 修复（2026-09-13，失效模式 i+b）：**跨进程写者必须合并，不能整份覆盖**。
+      // P2 修复（2026-09-13，失效模式 i+b）：**跨进程写者必须合并，不能整份覆盖**。
       //
-      //   缺陷：本文件有**两个进程**各持一个 TaskRegistry 实例写同一个 tasks.json ——
-      //     守卫（supervisor.js:203）与 router-daemon（daemon.js:55），同一 stateDir。
-      //     而 _load() 只在构造器跑一次，_save() 是「整份覆盖」→ **丢失更新**：
-      //     实测：守卫 begin native/install → daemon begin proxy-app/update →
-      //       磁盘上只剩 proxy-app/update，守卫那条任务**从磁盘消失**
-      //       （反向亦然；两个进程同时跑时 /tasks 每 2s 轮询结果随机翻转）。
-      //   修法：落盘前**重读磁盘并按 id 合并**（同 id 以本方为准，其余磁盘条目保留），
-      //     再按创建时间倒序 + MAX_TASKS 截断。这样两个进程的条目都能留存。
-      //     注：这是「多写者下不丢数据」的最小改动；长期应把 TaskRegistry 收敛为单进程持有。
+      // 缺陷：本文件有**两个进程**各持一个 TaskRegistry 实例写同一个 tasks.json ——
+      // 守卫（supervisor.js:203）与 router-daemon（daemon.js:55），同一 stateDir。
+      // 而 _load() 只在构造器跑一次，_save() 是「整份覆盖」→ **丢失更新**：
+      // 实测：守卫 begin native/install → daemon begin proxy-app/update →
+      // 磁盘上只剩 proxy-app/update，守卫那条任务**从磁盘消失**
+      // （反向亦然；两个进程同时跑时 /tasks 每 2s 轮询结果随机翻转）。
+      // 修法：落盘前**重读磁盘并按 id 合并**（同 id 以本方为准，其余磁盘条目保留），
+      // 再按创建时间倒序 + MAX_TASKS 截断。这样两个进程的条目都能留存。
+      // 注：这是「多写者下不丢数据」的最小改动；长期应把 TaskRegistry 收敛为单进程持有。
       let merged = this.tasks;
       try {
         if (fs.existsSync(this.file)) {
@@ -98,13 +98,13 @@ class TaskRegistry {
           }
         }
       } catch { /* 磁盘不可读/损坏：退化为只写本方（不因合并失败而丢本次写入）*/ }
-      // ⚠ **只把合并结果写盘，不写回 this.tasks** ——
-      //   否则本方内存会混入另一进程的任务，而 _current 索引并未同步建立，
-      //   会出现「list() 里有、isBusy() 却 false」的不一致视图。
-      //   本实例的语义（list/isBusy/current）严格只覆盖**自己创建**的任务；
-      //   跨进程的完整视图由读盘方（面板/API 每次读盘）获得。
-      // ⚠ tmp 名必须**唯一**：固定 '.tmp' 会让两个进程并发写同一临时文件 →
-      //   rename 出混合内容（与 store.js 同类隐患）。
+      // **只把合并结果写盘，不写回 this.tasks** ——
+      // 否则本方内存会混入另一进程的任务，而 _current 索引并未同步建立，
+      // 会出现「list() 里有、isBusy() 却 false」的不一致视图。
+      // 本实例的语义（list/isBusy/current）严格只覆盖**自己创建**的任务；
+      // 跨进程的完整视图由读盘方（面板/API 每次读盘）获得。
+      // tmp 名必须**唯一**：固定 '.tmp' 会让两个进程并发写同一临时文件 →
+      // rename 出混合内容（与 store.js 同类隐患）。
       const tmp = this.file + '.tmp.' + process.pid + '.' + Date.now();
       fs.writeFileSync(tmp, JSON.stringify({ tasks: merged }, null, 2), { mode: 0o600 });
       fs.renameSync(tmp, this.file);
@@ -123,10 +123,10 @@ class TaskRegistry {
   /* ═══════ 任务创建与查询 ═══════ */
   /**
    * 创建任务。
-   * @param {string} kind    'native' | 'instance' | 'plugin' | 'proxy-app'
-   * @param {string} action  'install' | 'upgrade' | 'uninstall' | 'update'
-   * @param {object} target  { id, name }
-   * @param {object} opts    { from, to, createdBy, meta }
+   * @param {string} kind 'native' | 'instance' | 'plugin' | 'proxy-app'
+   * @param {string} action 'install' | 'upgrade' | 'uninstall' | 'update'
+   * @param {object} target { id, name }
+   * @param {object} opts { from, to, createdBy, meta }
    * @returns 任务对象
    */
   begin(kind, action, target, opts) {

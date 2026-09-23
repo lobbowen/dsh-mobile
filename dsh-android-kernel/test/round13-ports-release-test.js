@@ -7,27 +7,27 @@
 // ## 缺陷（失效模式 a + g）
 //
 // ① PortRegistry.release(port, ownerId) 的**空值检查在 owner 比较之后**：
-//      const rec = this._records.get(p);
-//      if (ownerId != null && rec.owner !== ownerId) return false;   // ← rec 可能 undefined
-//      if (!rec) return false;                                       // ← 永远到不了
-//    实测：release(未登记端口, 任意 ownerId) → **TypeError: Cannot read properties of
-//    undefined (reading 'owner')**。
-//    而其文档明确写「传了 ownerId → 仅当登记 owner 匹配才释放（不匹配即 no-op，并返回 false）」——
-//    「端口尚未登记/已被别处释放」恰恰是良构调用方**最常见的场景**（ownerId 参数的存在意义
-//    就是让「如果归我再释放」安全）。包裹 try/catch 的调用方把它静默吞掉 → 契约无声失效；
-//    未包裹的直接崩。
+// const rec = this._records.get(p);
+// if (ownerId != null && rec.owner !== ownerId) return false; // ← rec 可能 undefined
+// if (!rec) return false; // ← 永远到不了
+// 实测：release(未登记端口, 任意 ownerId) → **TypeError: Cannot read properties of
+// undefined (reading 'owner')**。
+// 而其文档明确写「传了 ownerId → 仅当登记 owner 匹配才释放（不匹配即 no-op，并返回 false）」——
+// 「端口尚未登记/已被别处释放」恰恰是良构调用方**最常见的场景**（ownerId 参数的存在意义
+// 就是让「如果归我再释放」安全）。包裹 try/catch 的调用方把它静默吞掉 → 契约无声失效；
+// 未包裹的直接崩。
 //
 // ② 三处调用方仍**不带 ownerId** 释放（与实例域 P1-3 同一类）：
-//      main-process.js  ports.release(oldPort)
-//      proxy.js         ports.release(rec.port)      （list→release 之间存在 TOCTOU）
-//      manager.js       ports.release(rec.port)      （同）
-//    按端口号无条件释放可能删掉**他人**在期间重新登记的记录 → 新 owner 失去登记（泄漏/被重复分配）。
+// main-process.js ports.release(oldPort)
+// proxy.js ports.release(rec.port) （list→release 之间存在 TOCTOU）
+// manager.js ports.release(rec.port) （同）
+// 按端口号无条件释放可能删掉**他人**在期间重新登记的记录 → 新 owner 失去登记（泄漏/被重复分配）。
 //
 // ## 门禁
-//   R-a  release 对**未登记端口 + ownerId** 必须返回 false（不抛）
-//   R-b  release 的 owner 不匹配/no-op/匹配 三种语义都正确
-//   R-c  全仓 release 调用方**都带 ownerId**（owner 归属纪律）
-//   R-d  反向：判据能识别「先比 owner 后判空」的旧顺序（门禁非空转）
+// R-a release 对**未登记端口 + ownerId** 必须返回 false（不抛）
+// R-b release 的 owner 不匹配/no-op/匹配 三种语义都正确
+// R-c 全仓 release 调用方**都带 ownerId**（owner 归属纪律）
+// R-d 反向：判据能识别「先比 owner 后判空」的旧顺序（门禁非空转）
 // ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
@@ -86,9 +86,9 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13prt-'));
   for (const f of files) {
     if (f.endsWith(path.join('lifecycle', 'ports.js'))) continue; // 定义处
     const src = fs.readFileSync(f, 'utf8');
-    // ⚠ 必须同时剥离 `*` 开头的**块注释续行** —— 本仓注释里会写
-    //   「PortRegistry.release() 现已支持 ownerId」这类**说明文字**，
-    //   只剥 `//` 会把它当成一次无参调用（假红，我第一版即如此）。
+    // 必须同时剥离 `*` 开头的**块注释续行** —— 本仓注释里会写
+    // 「PortRegistry.release() 现已支持 ownerId」这类**说明文字**，
+    // 只剥 `//` 会把它当成一次无参调用（假红，我第一版即如此）。
     const code = src.split('\n').filter((l) => {
       const t = l.trim();
       return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*');

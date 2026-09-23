@@ -5,9 +5,9 @@
 //
 // 定位：守卫是唯一对外汇聚面。各进程事件文件单写者（guard / router-daemon），
 // EventHub 只读聚合三源 → 转写入守卫唯一的聚合事件流文件（单写者=守卫），对外 /events 读它。
-//  - 聚合流 seq 即 gseq：全局单调、meta 续号、跨守卫重启连续（UI after 游标稳定）。
-//  - 不落 daemon 事件副本到 daemon 文件（daemon 文件仍为原始单写者真相）。
-//  - daemon 增量经 ctl eventsTail(afterSeq) 拉取（复用既有 ctl 通道），失败降级跳过。
+// - 聚合流 seq 即 gseq：全局单调、meta 续号、跨守卫重启连续（UI after 游标稳定）。
+// - 不落 daemon 事件副本到 daemon 文件（daemon 文件仍为原始单写者真相）。
+// - daemon 增量经 ctl eventsTail(afterSeq) 拉取（复用既有 ctl 通道），失败降级跳过。
 //
 // 不变量：聚合流文件只由 EventHub 写；水位(watermark)只由 EventHub 写；对外 /events 只读聚合流。
 // ═══════════════════════════════════════════════════════════════════════
@@ -55,19 +55,19 @@ function humaneMsg(type, data) {
 
 /** 调 daemon 的 ctl 通道（`POST /ctl {method,args}`），返回 `value`；失败抛错。
  *
- *  ⚠ 2026-09-12（P2 去重）：本函数是 ctl 客户端的**唯一实现**。
- *    此前 `guard/supervisor/control-view.js:_ctlCall` 有一份**逐行近似**的副本，
- *    两处已分叉：默认超时不同（此处 3s / 彼处 120s）、错误对象形状不同
- *    （彼处额外挂 `err.ok=false` / `err.error`）—— 同一协议两种行为。
- *    现由 `platform/` 统一提供（本层是跨域共享能力的正确归属），
- *    `control-view` 改为薄包装并显式传自己的默认超时。
+ * 2026-09-12（P2 去重）：本函数是 ctl 客户端的**唯一实现**。
+ * 此前 `guard/supervisor/control-view.js:_ctlCall` 有一份**逐行近似**的副本，
+ * 两处已分叉：默认超时不同（此处 3s / 彼处 120s）、错误对象形状不同
+ * （彼处额外挂 `err.ok=false` / `err.error`）—— 同一协议两种行为。
+ * 现由 `platform/` 统一提供（本层是跨域共享能力的正确归属），
+ * `control-view` 改为薄包装并显式传自己的默认超时。
  *
- *  @param {number} port ctl 端口（router 43107 / lan 43108）
- *  @param {string} method daemon 侧 RouterService/LanManager 的方法名
- *  @param {Array} args 方法参数
- *  @param {number} [timeoutMs=3000] 超时（超时即 destroy，不悬挂调用方）
- *  @param {object} [opts] { withErrorFields?: boolean } —— true 时在 Error 上挂 `ok/error`
- *    （control-view 的既有契约需要，便于上游判定 `r.ok === false`）
+ * @param {number} port ctl 端口（router 43107 / lan 43108）
+ * @param {string} method daemon 侧 RouterService/LanManager 的方法名
+ * @param {Array} args 方法参数
+ * @param {number} [timeoutMs=3000] 超时（超时即 destroy，不悬挂调用方）
+ * @param {object} [opts] { withErrorFields?: boolean } —— true 时在 Error 上挂 `ok/error`
+ * （control-view 的既有契约需要，便于上游判定 `r.ok === false`）
  */
 function ctlCall(port, method, args, timeoutMs, opts) {
   const o = opts || {};
@@ -109,12 +109,12 @@ function tailFile(file, n) {
 class EventHub {
   /**
    * @param {object} opts
-   *  - stateDir: 守卫状态目录（聚合流/水位落此）
-   *  - guardEvents: 守卫 Events 实例（源之一）
-   *  - guardLogFile / dshLogFile / upgradeLogFile: 守卫侧运行日志（/logs/tail 用）
-   *  - daemonLogs: { router: '.../log/router-daemon.log' }
-   *  - ctlPorts: { router: 43107 }
-   *  - logger: 可选
+   * - stateDir: 守卫状态目录（聚合流/水位落此）
+   * - guardEvents: 守卫 Events 实例（源之一）
+   * - guardLogFile / dshLogFile / upgradeLogFile: 守卫侧运行日志（/logs/tail 用）
+   * - daemonLogs: { router: '.../log/router-daemon.log' }
+   * - ctlPorts: { router: 43107 }
+   * - logger: 可选
    */
   constructor(opts) {
     this.stateDir = opts.stateDir;
@@ -133,10 +133,10 @@ class EventHub {
     this._warnedKey = {};
     this._shortKey = (which) => (which === 'router-daemon' ? 'router' : which);
     this._portFor = (which) => this.ctlPorts[this._shortKey(which)];
-    // ⚠ 2026-09-12：删除 `_logFileFor` —— 全仓**零调用点**（`tailLog` 走直读路径）。
-    //   它的存在还有副作用：`_log`（本类真正的告警出口）此前**未被定义**，
-    //   而 `_logFileFor` 是唯一带 `_log` 前缀的成员 —— 极易让读者（和当初的调用者）
-    //   误以为告警出口已存在（P1-1 的成因之一）。
+    // 2026-09-12：删除 `_logFileFor` —— 全仓**零调用点**（`tailLog` 走直读路径）。
+    // 它的存在还有副作用：`_log`（本类真正的告警出口）此前**未被定义**，
+    // 而 `_logFileFor` 是唯一带 `_log` 前缀的成员 —— 极易让读者（和当初的调用者）
+    // 误以为告警出口已存在（P1-1 的成因之一）。
     this.logger = opts.logger || null;
     this.aggDir = path.join(this.stateDir, 'events');
     this.aggFile = path.join(this.aggDir, this.aggBase + '.aggregated.events.log');
@@ -153,20 +153,20 @@ class EventHub {
 
   /** 内部告警出口（P1-1 修复，2026-09-12）。
    *
-   *  ⚠ 此前本类有 **4 处 `this._log('warn', …)` 调用，却从未定义 `_log`**
-   *    （`_logFileFor` 是唯一带 `_log` 前缀的成员，且它是赋值而非同名方法）——
-   *    与内核 `markNetFail` 同型：「声明了调用但方法不存在」。
+   * 此前本类有 **4 处 `this._log('warn', …)` 调用，却从未定义 `_log`**
+   * （`_logFileFor` 是唯一带 `_log` 前缀的成员，且它是赋值而非同名方法）——
+   * 与内核 `markNetFail` 同型：「声明了调用但方法不存在」。
    *
-   *    后果（比一般 no-op 更严重：它是**抛异常**）：
-   *      · `_ingest` 在「写盘失败」这一唯一应触发分支先调 `_log` → TypeError →
-   *        被**同一条 try 的 catch** 捕获 → catch 里再调 `_log` → 再抛 → 逃出整个 for 循环；
-   *        结果不是注释承诺的「水位不推进、下轮补齐」，而是**该批剩余事件直接丢弃**，
-   *        且**告警本身也丢失**；
-   *      · daemon 路径上该异常被 `_syncDaemon` 的 catch 记为「eventsTail 不可用」，
-   *        把「本地写盘失败」误报成「daemon 不可达」→ 排障方向被带偏。
+   * 后果（比一般 no-op 更严重：它是**抛异常**）：
+   * · `_ingest` 在「写盘失败」这一唯一应触发分支先调 `_log` → TypeError →
+   * 被**同一条 try 的 catch** 捕获 → catch 里再调 `_log` → 再抛 → 逃出整个 for 循环；
+   * 结果不是注释承诺的「水位不推进、下轮补齐」，而是**该批剩余事件直接丢弃**，
+   * 且**告警本身也丢失**；
+   * · daemon 路径上该异常被 `_syncDaemon` 的 catch 记为「eventsTail 不可用」，
+   * 把「本地写盘失败」误报成「daemon 不可达」→ 排障方向被带偏。
    *
-   *    修法：定义本方法（与文件内既有用法一致：可选 logger + 不抛）。
-   *    这是把「契约」补全，而非改语义 —— 调用点的意图从注释即可读出。
+   * 修法：定义本方法（与文件内既有用法一致：可选 logger + 不抛）。
+   * 这是把「契约」补全，而非改语义 —— 调用点的意图从注释即可读出。
    */
   _log(level, msg) {
     try {
@@ -177,7 +177,7 @@ class EventHub {
   }
 
   /** 事件人性化 data：浅拷贝源 data 并注入可读中文 message（前端优先显示 data.message）。
-   *  不改源事件对象（审计源行仍为原始 data）。 */
+   * 不改源事件对象（审计源行仍为原始 data）。 */
   _humaData(type, data) {
     if (data !== null && typeof data === 'object' && typeof data.message === 'string') return data; // 源已自带 message
     const msg = humaneMsg(type, data);
@@ -341,18 +341,18 @@ class EventHub {
   }
 
   /** 用户时间线读（穿透审计修正）：seq > after 且非 internal 的最近 limit 条业务事件。
-   *  先全窗过滤再取尾——避免『先 limit 后过滤 → 被内部事件挤空/看不到存量业务』。 */
+   * 先全窗过滤再取尾——避免『先 limit 后过滤 → 被内部事件挤空/看不到存量业务』。 */
   readVisible(after, limit) { return visibleFrom(this.window(), after, limit); }
 
   /** 事件检索（P2）：filter { type?: 前缀, source?: guard|router-daemon } → 匹配事件。
-   *  从聚合流过滤（事件已经全局有序）。limit 上限 2000。 */
+   * 从聚合流过滤（事件已经全局有序）。limit 上限 2000。 */
   readFiltered(filter, after, limit) { return filteredFrom(this.window(), filter, after, limit); }
 
   /** 审计导出（P2）：把聚合流原文行导出为文本（JSONL），供离线备份/审计。limit 行数上限。 */
   exportLines(after, limit) { return exportFrom(this.window(), after, limit); }
 
   /** 遥测派生（P2 /metrics）：事件流上的只读投影——按 source 计数事件、top type、窗口事件率。
-   *  不引入新采集通道（日志/事件即唯一采集面）。 */
+   * 不引入新采集通道（日志/事件即唯一采集面）。 */
   metrics() { return metricsFrom(this.window(), this.seq); }
 }
 
@@ -412,8 +412,8 @@ function metricsFrom(win, seq) {
 }
 
 /** 降级读路径（空对象模式 null-object，契约 §3.6）：hub 不可用时（非守卫进程/初始化降级/测试）
- *  把守卫本地事件流适配成与 EventHub **完全相同**的读接口——使 /events、/logs/*、/metrics 全程
- *  只有一条读路径，彻底消除 `if (hub) … else …` 双语义漂移。 */
+ * 把守卫本地事件流适配成与 EventHub **完全相同**的读接口——使 /events、/logs/*、/metrics 全程
+ * 只有一条读路径，彻底消除 `if (hub) … else …` 双语义漂移。 */
 class EventReader {
   constructor(events) { this.events = events; }
   get seq() { return this.events.seq; }

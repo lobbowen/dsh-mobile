@@ -7,44 +7,9 @@ import java.io.File
 /**
  * 让 Node 可执行文件就位的入口。
  *
- * ============================================================================
- *  核心约束：Android 上的应用私有可执行文件只有一个合法去处
- * ============================================================================
- * SELinux 强制 W^X 策略（Android 10+）：
- *   /data/data/<pkg>/files/     label = app_data_file  →  **禁止 execve**
- *   /data/app/<pkg>/lib/<abi>/  label = exec_type      →  允许 exec
- *
- * 所以 node 不能解压到 filesDir 再执行（那会在真机上以
- * `error=13, Permission denied` 失败），唯一可行路径是：
- *   以 jniLibs/arm64-v8a/libnode.so 打包 → 安装时系统解压到
- *   nativeLibraryDir → 直接从那里 exec。
- *
- * 两个必须同时满足的打包开关（本仓库两处都写了，见 docs/ARCHITECTURE.md）：
- *   AndroidManifest 的 android:extractNativeLibs="true"
- *   gradle 的 packaging.jniLibs.useLegacyPackaging = true
- *
- * ⚠️ File.canExecute() 在上述约束下【完全不可信】：它只查 stat 的 x 权限位，
- *    对 noexec 挂载和 SELinux 策略无感，会在 filesDir 那份文件上返回 true。
- *    判断"能否执行"的唯一可靠办法是真去执行一次 —— 见
- *    `native/NativePreparer.kt` 的 `probe()`。
- *
- * 完整的踩坑记录（linker 搜索路径、LD_LIBRARY_PATH、缓存漏存 libc++ 等）
- * 见 docs/ARCHITECTURE.md。这里只保留改动代码时必须知道的约束。
- * ============================================================================
- *
- * ## 本文件在「原生资产抽象层」里的位置
- *
- * 「哪些二进制要能 exec、各自依赖什么、怎么验证」已收敛到 `native/` 包
- * （[com.example.nodecontainer.native.NativeAssetRegistry] 是唯一事实来源，
- * [com.example.nodecontainer.native.NativePreparer] 是统一引擎）。
- *
- * 本对象因此**只剩两件事**：
- *   1. [bundledExecutable] —— 一个薄转发，保留给存量调用方与诊断展示；
- *   2. [ensureServerScript] —— 纯数据文件的复制，与 exec 无关，**不受 W^X 影响**。
- *
- * 历史上的 [ensureBundledNode] 已废弃：它只检查 `libnode.so` 存在与否，
- * 完全不知道依赖库的存在，是「依赖缺失被误判为 SELinux 拒 exec」这一
- * 误导性故障的成因之一。需要校验请改用 `NativePreparer.prepare()`。
+ * 约定见 docs/ADR-001：libnode.so 经 jniLibs 解压到 nativeLibraryDir 执行。
+ * 原生资产的登记与验证见 NativeAssetRegistry / NativePreparer。
+ * 本对象只剩两件事：[bundledExecutable] 薄转发；[ensureServerScript] 复制数据文件。
  */
 object NodeProvisioner {
 
@@ -177,8 +142,8 @@ object NodeProvisioner {
      * 原因：校验器会在每次内核安装时被调用，而"每次都写盘"会让它自己成为
      * 一个潜在的失败点（磁盘满/IO 抖动）。内容一致就跳过，减少无谓写。
      *
-     * ⚠️ 它是**校验器**，与被校验的内核包解耦。绝不能改从内核目录加载 ——
-     *    那会让"签名无效的内核"有机会提供自己的校验器（自证循环）。
+     * 它是**校验器**，与被校验的内核包解耦。绝不能改从内核目录加载 ——
+     * 那会让"签名无效的内核"有机会提供自己的校验器（自证循环）。
      */
     fun ensureKernelVerifyScript(context: Context): File {
         return ensureAssetCopied(context, "node/kernel-verify.js", File(context.filesDir, "kernel-verify.js"))

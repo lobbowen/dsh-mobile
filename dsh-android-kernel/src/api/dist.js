@@ -23,17 +23,17 @@ function handle(ctx) {
       sup.dist.selectRegistry(true).then(() => sup.dist.registryInfo()).then((r) => send(200, { ok: true, ...r })).catch((e) => send(500, { ok: false, error: e.message }));
       return;
     }
-    // ⚠ 2026-09-13（P2 修复）：**同源镜像探活端点**。
+    // 2026-09-13（P2 修复）：**同源镜像探活端点**。
     //
-    //   缺陷：设置页的「测试」按钮由**浏览器**直连用户填写的任意镜像源
-    //     （RegistryCard.tsx::testLatency 的跨源 fetch），而本页由内核伺服并带
-    //     `connect-src 'self'`（见 index.js 的 CSP）→ 浏览器**在发起前即按 CSP 拦截**，
-    //     fetch 立刻 reject，catch 统一 toast「探测失败」。
-    //   后果：该按钮对**任何**地址恒报「探测失败」，且换网络也无法解决 ——
-    //     用户据此以为镜像坏了；UI 无法区分「真的不可达」与「被策略阻断」。
-    //   修法：走**同源**后端探活（服务端 fetch 不受页面 CSP 约束），
-    //     并由 DistributionManager 用**与契约一致的探测规格**探测
-    //     （探针路径取自 distribution 的 _probeRegistry，确保与内核选源判据同源）。
+    // 缺陷：设置页的「测试」按钮由**浏览器**直连用户填写的任意镜像源
+    // （RegistryCard.tsx::testLatency 的跨源 fetch），而本页由内核伺服并带
+    // `connect-src 'self'`（见 index.js 的 CSP）→ 浏览器**在发起前即按 CSP 拦截**，
+    // fetch 立刻 reject，catch 统一 toast「探测失败」。
+    // 后果：该按钮对**任何**地址恒报「探测失败」，且换网络也无法解决 ——
+    // 用户据此以为镜像坏了；UI 无法区分「真的不可达」与「被策略阻断」。
+    // 修法：走**同源**后端探活（服务端 fetch 不受页面 CSP 约束），
+    // 并由 DistributionManager 用**与契约一致的探测规格**探测
+    // （探针路径取自 distribution 的 _probeRegistry，确保与内核选源判据同源）。
     if (req.method === 'POST' && pathname === '/dist/registry/probe') {
       if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
       return collectBody(req, res, 4096, (body) => {

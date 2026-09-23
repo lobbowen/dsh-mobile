@@ -4,13 +4,13 @@
 // 受管进程生命周期核心（2026-09-04 架构定稿）
 //
 // 统一不变量（router-daemon 与未来一切受管常驻进程共用）：
-//   1) 一个逻辑服务 = 一个受管进程（单实例）；
-//   2) 服务与绑定端口持久（注册表 truth；本层不碰端口分配，只保证换代期间「端口先释放后复用」）；
-//   3) 换代（replace）必须：TERM 旧代 → 验证旧进程已死 → 验证端口已释放 → 才 spawn 新代；
-//      旧没死透/端口没放 → 绝不起新（此前双代并存→端口漂移的根因在此被硬性杜绝）；
-//   4) spawn 一次性：spawn 后 latch 窗口内任何入口（启动/监督/手动）不得再 spawn；
-//   5) 守卫重启 ≠ 服务重启：身份文件（{guardPid, daemonPid, startedAt}）让新守卫「接管」既有进程，
-//      owner 连续，绝不另起一个；身份丢失/异主不接管（由上层门禁把关）。
+// 1) 一个逻辑服务 = 一个受管进程（单实例）；
+// 2) 服务与绑定端口持久（注册表 truth；本层不碰端口分配，只保证换代期间「端口先释放后复用」）；
+// 3) 换代（replace）必须：TERM 旧代 → 验证旧进程已死 → 验证端口已释放 → 才 spawn 新代；
+// 旧没死透/端口没放 → 绝不起新（此前双代并存→端口漂移的根因在此被硬性杜绝）；
+// 4) spawn 一次性：spawn 后 latch 窗口内任何入口（启动/监督/手动）不得再 spawn；
+// 5) 守卫重启 ≠ 服务重启：身份文件（{guardPid, daemonPid, startedAt}）让新守卫「接管」既有进程，
+// owner 连续，绝不另起一个；身份丢失/异主不接管（由上层门禁把关）。
 //
 // 与端口注册表的分工：注册表记录 owner→固定端口（由被管进程维护）；本层只对进程负责，
 // 两者拼成完整链条 =「端口持久化成立的前提：进程换代先无后有」。
@@ -57,13 +57,13 @@ async function waitPortFree(port, timeoutMs) {
 class DaemonLifecycle {
   /**
    * @param {object} o
-   *  - name: 标识（'router' | 'lan'）
-   *  - script / args: spawn 命令
-   *  - ctlPort: 就绪/换代仲裁端口
-   *  - cmdMark: cmdline 识别子串（防误接管异主）
-   *  - identityFile: JSON {guardPid, daemonPid, startedAt}
-   *  - spawnEnv(extra) / logger / events
-   *  - readyTimeoutMs / stopGraceMs / portReleaseTimeoutMs / spawnWindowMs
+   * - name: 标识（'router' | 'lan'）
+   * - script / args: spawn 命令
+   * - ctlPort: 就绪/换代仲裁端口
+   * - cmdMark: cmdline 识别子串（防误接管异主）
+   * - identityFile: JSON {guardPid, daemonPid, startedAt}
+   * - spawnEnv(extra) / logger / events
+   * - readyTimeoutMs / stopGraceMs / portReleaseTimeoutMs / spawnWindowMs
    */
   constructor(o) {
     this.name = o.name;
@@ -71,23 +71,23 @@ class DaemonLifecycle {
     this.args = o.args || [];
     this.ctlPort = o.ctlPort;
     this.cmdMark = o.cmdMark;
-    // ⚠ P0-2 修复（2026-09-12）：`cmdMark` 与实际命令行**永不匹配**。
+    // P0-2 修复（2026-09-12）：`cmdMark` 与实际命令行**永不匹配**。
     //
-    //   缺陷：daemon 由 `spawn(process.execPath, [this.script, ...this.args])` 拉起，
-    //     故真实 cmdline 形如 `node <pkg>/src/domains/router/daemon.js -c <cfg>`；
-    //     而调用方传的 `cmdMark` 是 `'router-daemon'` —— 该子串**不在** cmdline 里
-    //     （实测 indexOf = -1）。于是 `_ctlOwnerPid()` 恒 null：
-    //       · 换代分支（旧代占 ctl 时 TERM + 等端口释放）**永不执行**；
-    //       · `classify()` 的 external / reclaiming 状态**永不可达**
-    //         →「ctl 被外部进程占用，不接管不拉起」这条红线形同不存在。
+    // 缺陷：daemon 由 `spawn(process.execPath, [this.script, ...this.args])` 拉起，
+    // 故真实 cmdline 形如 `node <pkg>/src/domains/router/daemon.js -c <cfg>`；
+    // 而调用方传的 `cmdMark` 是 `'router-daemon'` —— 该子串**不在** cmdline 里
+    // （实测 indexOf = -1）。于是 `_ctlOwnerPid()` 恒 null：
+    // · 换代分支（旧代占 ctl 时 TERM + 等端口释放）**永不执行**；
+    // · `classify()` 的 external / reclaiming 状态**永不可达**
+    // →「ctl 被外部进程占用，不接管不拉起」这条红线形同不存在。
     //
-    //   对照：同仓另两处反查监听者（supervise-view.js、control-view.js）**都**额外
-    //     匹配 `/domains/router/daemon.js` 路径形态 —— 只有本核心这一条路径失明，
-    //     属「同一纪律在多条路径中只在一处执行」的反面（此处是唯一漏的那处）。
+    // 对照：同仓另两处反查监听者（supervise-view.js、control-view.js）**都**额外
+    // 匹配 `/domains/router/daemon.js` 路径形态 —— 只有本核心这一条路径失明，
+    // 属「同一纪律在多条路径中只在一处执行」的反面（此处是唯一漏的那处）。
     //
-    //   修法：**从 `script` 派生权威标记**（它就是 spawn 时真正写进 cmdline 的那个路径），
-    //     与调用方给的语义标记**并列**匹配。这样不依赖调用方记住传路径，
-    //     且脚本位置演进（src/ 移动）时自动跟随。
+    // 修法：**从 `script` 派生权威标记**（它就是 spawn 时真正写进 cmdline 的那个路径），
+    // 与调用方给的语义标记**并列**匹配。这样不依赖调用方记住传路径，
+    // 且脚本位置演进（src/ 移动）时自动跟随。
     const path = require('node:path');
     const norm = (s) => String(s || '').replace(/\\/g, '/');
     this._cmdMarks = [];
@@ -137,8 +137,8 @@ class DaemonLifecycle {
       const pid = pidlook.findListeningPid(this.ctlPort);
       if (!pid) return null;
       // 2026-09-13 修复（P1）：**两侧都要归一化**。
-      //   _cmdMarks 已被构造器 norm() 成 "/"，而 readCmdline 返回**原生**分隔符 ——
-      //   路径分隔符不一致时直接 indexOf 永远 -1 → 认不出自己的 daemon。
+      // _cmdMarks 已被构造器 norm() 成 "/"，而 readCmdline 返回**原生**分隔符 ——
+      // 路径分隔符不一致时直接 indexOf 永远 -1 → 认不出自己的 daemon。
       const cmd = pidlook.normCmdline(pidlook.readCmdline(pid) || '');
       // P0-2：按**全部**标记匹配（含从 script 派生的路径形态）——见构造器说明。
       return this._cmdMarks.some((mk) => mk && cmd.indexOf(mk) >= 0) ? pid : null;
@@ -149,10 +149,10 @@ class DaemonLifecycle {
   expectedPid() { const id = this._readIdentity(); return id && id.daemonPid ? id.daemonPid : null; }
 
   /** 回收非当前受管代际的旧代进程（2026-09 架构补齐：YAMA 下 /proc fd 对非祖先不可读，
-   *  socket→pid 无法映射；改用 pgrep -af 读 cmdline（同 frpmgr 范式，跨平台/YAMA 免疫）——
-   *  凡 cmdline 命中本 daemon（script+configPath 特征）且 pid ≠ 当前身份 pid/≠自己/≠ctl 属主，
-   *  一律视为旧代残留，TERM 回收。任何上下文（含不可见命名空间）拉起的同 cmdline 旧代都会被清掉，
-   *  「固定端口被看不见的旧代占用」从此不可能存活。@returns 回收数 */
+   * socket→pid 无法映射；改用 pgrep -af 读 cmdline（同 frpmgr 范式，跨平台/YAMA 免疫）——
+   * 凡 cmdline 命中本 daemon（script+configPath 特征）且 pid ≠ 当前身份 pid/≠自己/≠ctl 属主，
+   * 一律视为旧代残留，TERM 回收。任何上下文（含不可见命名空间）拉起的同 cmdline 旧代都会被清掉，
+   * 「固定端口被看不见的旧代占用」从此不可能存活。@returns 回收数 */
   reclaimOrphans() {
     // cfg = args 中 -c/--config 的值（生产 daemon 为 configPath，用于精确匹配防误杀其它实例/用户）；
     // 无 -c（如测试夹具/简化调用）→ cfg 为空 → 仅按 cmdMark 匹配（仍排除自己/受管代/ctl 属主）
@@ -162,7 +162,7 @@ class DaemonLifecycle {
       if (args[i] === '-c' || args[i] === '--config') { cfg = String(args[i + 1] || ''); break; }
     }
     // P0-2：pgrepList 每次只接受一个 pattern，故对**每个**标记各查一遍并按 pid 去重。
-    //   此前只用语义标记（'router-daemon'）→ 匹配 0 个 → 孤儿回收恒空跑。
+    // 此前只用语义标记（'router-daemon'）→ 匹配 0 个 → 孤儿回收恒空跑。
     const marks = this._cmdMarks.length ? this._cmdMarks : [this.cmdMark];
     const seen = new Set();
     const candidates = [];
@@ -190,10 +190,10 @@ class DaemonLifecycle {
   }
 
   /** 换代/启动仲裁总入口：
-   *  - 期望 pid 活且 ctl 就绪 → {mode:'adopted', pid}
-   *  - 无进程 → spawn（latch）→ {mode:'started', pid}
-   *  - 期望 pid 死或失联 → replace（停残留→等死→等端口→spawn）→ {mode:'replaced', pid}
-   *  - spawn latch 窗口内 → {mode:'barrier'} */
+   * - 期望 pid 活且 ctl 就绪 → {mode:'adopted', pid}
+   * - 无进程 → spawn（latch）→ {mode:'started', pid}
+   * - 期望 pid 死或失联 → replace（停残留→等死→等端口→spawn）→ {mode:'replaced', pid}
+   * - spawn latch 窗口内 → {mode:'barrier'} */
   ensureRunning() {
     if (this._stopping) return { mode: 'stopping' };
     try { this.reclaimOrphans(); } catch {}
@@ -224,19 +224,19 @@ class DaemonLifecycle {
     const child = spawn(process.execPath, [this.script, ...this.args], {
       stdio: 'ignore', detached: true, env: { ...process.env, ...(this.spawnEnv() || {}) },
     });
-    // ⚠ P1-3 修复（2026-09-12）：**必须接住异步 'error'，且不得在未确认时写入身份**。
+    // P1-3 修复（2026-09-12）：**必须接住异步 'error'，且不得在未确认时写入身份**。
     //
-    //   缺陷：原实现 spawn 后直接 `_writeIdentity(child.pid)` 并返回 `{mode:'started'}`。
-    //     而 spawn 对 ENOENT/EPERM **不抛同步错**，只发异步 'error'（同 shell/index.js 的 P0-1，
-    //     实测 pid=undefined + uncaught ENOENT）。于是：
-    //       · 无 'error' 监听 → 异常逃逸为守卫 uncaughtException（60s 内 3 次即自杀）；
-    //       · 身份文件被写成 `daemonPid: undefined` → `expectedPid()` 恒 null、
-    //         `_pidAlive(undefined)` 恒 false → **每轮监督都 spawn**（仅 25s latch 压制），
-    //         表现为「每 25~30s 拉起一次、面板永远不 ready」。
+    // 缺陷：原实现 spawn 后直接 `_writeIdentity(child.pid)` 并返回 `{mode:'started'}`。
+    // 而 spawn 对 ENOENT/EPERM **不抛同步错**，只发异步 'error'（同 shell/index.js 的 P0-1，
+    // 实测 pid=undefined + uncaught ENOENT）。于是：
+    // · 无 'error' 监听 → 异常逃逸为守卫 uncaughtException（60s 内 3 次即自杀）；
+    // · 身份文件被写成 `daemonPid: undefined` → `expectedPid()` 恒 null、
+    // `_pidAlive(undefined)` 恒 false → **每轮监督都 spawn**（仅 25s latch 压制），
+    // 表现为「每 25~30s 拉起一次、面板永远不 ready」。
     //
-    //   修法：① 接住 'error'（记事件，不再逃逸）；
-    //         ② 用同步可判的 `child.pid` 决定是否写身份 —— 未定义即失败，**不写**，
-    //            并如实返回 `{mode:'failed'}` 让调用方（superviseOnce/control-view）可见。
+    // 修法：① 接住 'error'（记事件，不再逃逸）；
+    // ② 用同步可判的 `child.pid` 决定是否写身份 —— 未定义即失败，**不写**，
+    // 并如实返回 `{mode:'failed'}` 让调用方（superviseOnce/control-view）可见。
     child.on('error', (e) => {
       if (this.logger && this.logger.warn) this.logger.warn('[' + this.name + '] daemon spawn error: ' + ((e && e.message) || e));
       try { if (this.events && this.events.append) this.events.append('daemon_spawn_error', { name: this.name, error: (e && e.message) || String(e), script: this.script }); } catch {}
@@ -254,15 +254,15 @@ class DaemonLifecycle {
   }
 
   /** 无副作用分类（供监督/审计共用）：当前受管代际与 ctl 属主的真实状态。**绝不 spawn/stop**。
-   *  @returns {{mode:'running'|'external'|'reclaiming'|'barrier'|'absent'|'stopping', pid?, owner?, stale?}}
-   *   - running    : 期望代际存活（ctl 属主=期望 pid，或 ctl 尚未起）
-   *   - external   : ctl 被「异 cmdMark/异代际」进程占用（外部抢占，绝不接管）
-   *   - reclaiming : 期望代际已死但同 cmdMark 残留仍占 ctl（需换代）
-   *   - barrier    : spawn latch 窗口内（等旧代退出）
-   *   - absent     : 无进程、无残留（可 spawn）
-   *   - stopping   : 已进入停止流程
-   *  这是生产监督路径（_orphanAudit / _daemonSuperviseOnce）识别「异主 daemon」的唯一判据——
-   *  ensureRunning 只按 cmdline 判 active，无法区分「本守卫的 daemon」与「外部同名 daemon」。 */
+   * @returns {{mode:'running'|'external'|'reclaiming'|'barrier'|'absent'|'stopping', pid?, owner?, stale?}}
+   * - running : 期望代际存活（ctl 属主=期望 pid，或 ctl 尚未起）
+   * - external : ctl 被「异 cmdMark/异代际」进程占用（外部抢占，绝不接管）
+   * - reclaiming : 期望代际已死但同 cmdMark 残留仍占 ctl（需换代）
+   * - barrier : spawn latch 窗口内（等旧代退出）
+   * - absent : 无进程、无残留（可 spawn）
+   * - stopping : 已进入停止流程
+   * 这是生产监督路径（_orphanAudit / _daemonSuperviseOnce）识别「异主 daemon」的唯一判据——
+   * ensureRunning 只按 cmdline 判 active，无法区分「本守卫的 daemon」与「外部同名 daemon」。 */
   classify() {
     if (this._stopping) return { mode: 'stopping' };
     const exp = this.expectedPid();
@@ -278,7 +278,7 @@ class DaemonLifecycle {
   }
 
   /** 周期监督：期望进程失联 → 先验证死透再 replace（死透由 ensureRunning 的 stale/死pid 分支处理）。
-   *  基于 classify() 分类后施加副作用（reclaim/spawn）；分类能力本身无副作用、供审计复用。 */
+   * 基于 classify() 分类后施加副作用（reclaim/spawn）；分类能力本身无副作用、供审计复用。 */
   async superviseOnce() {
     if (!this.expectedPid()) { try { this.reclaimOrphans(); } catch {} }
     const c = this.classify();
@@ -303,16 +303,16 @@ class DaemonLifecycle {
       const owner = this._ctlOwnerPid();
       if (owner) { this._stopPid(owner); stopped = owner; }
     }
-    // ⚠ P2-2 修复（2026-09-12）：**停止失败必须如实回报**，且不得清身份。
+    // P2-2 修复（2026-09-12）：**停止失败必须如实回报**，且不得清身份。
     //
-    //   缺陷：原实现超时只 `warn`，随后**无条件** `_clearIdentity()` 并 `return {ok:true}` ——
-    //     对 SIGTERM 无响应（D 状态/被停住/忽略信号）的 daemon，守卫宣告「已停」并抹掉身份，
-    //     此后**没有任何人再知道这个 pid**：孤儿继续占 ctl 端口与 relay 端口，
-    //     而「按身份找 pid」的路径已因身份丢失而失效（只剩 cmdMark 扫描兜底）。
-    //     「门禁恒真」的又一例：超时是**唯一**的失败信号，却被丢弃。
+    // 缺陷：原实现超时只 `warn`，随后**无条件** `_clearIdentity()` 并 `return {ok:true}` ——
+    // 对 SIGTERM 无响应（D 状态/被停住/忽略信号）的 daemon，守卫宣告「已停」并抹掉身份，
+    // 此后**没有任何人再知道这个 pid**：孤儿继续占 ctl 端口与 relay 端口，
+    // 而「按身份找 pid」的路径已因身份丢失而失效（只剩 cmdMark 扫描兜底）。
+    // 「门禁恒真」的又一例：超时是**唯一**的失败信号，却被丢弃。
     //
-    //   修法：超时 → `ok:false` 且**保留身份**（让下一轮 hasPendingStop/监督仍能找到它重试），
-    //     并记事件供面板可见；端口未释放同理降级为部分成功。
+    // 修法：超时 → `ok:false` 且**保留身份**（让下一轮 hasPendingStop/监督仍能找到它重试），
+    // 并记事件供面板可见；端口未释放同理降级为部分成功。
     let dead = true;
     if (stopped) {
       dead = await waitProcessExit(stopped, this.stopGraceMs + 1500);

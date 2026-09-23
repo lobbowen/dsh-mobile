@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// ⛔ 卸载类测试（项目政策，2026-08-31）：本脚本执行「控制面板对 DSH 原生的卸载」（NativeManager.uninstall 全量清理），
+// 卸载类测试（项目政策，2026-08-31）：本脚本执行「控制面板对 DSH 原生的卸载」（NativeManager.uninstall 全量清理），
 // 已从 npm test 自动测试链排除，仅允许作为独立脚本显式单独调用（node test/native-test.js 或 npm run test:native-uninstall）；
 // 除非用户明确指令，禁止擅自运行。
 

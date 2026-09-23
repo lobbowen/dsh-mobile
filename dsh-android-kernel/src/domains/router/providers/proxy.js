@@ -2,7 +2,7 @@
 
 // 反代供应商：重——账号=代理实例（进程），每账号一个实例（硬规则）。
 // 生命周期：注册时启动实例 → 检测配额 → ready/frozen/discarded（受限即冻结带恢复点，到点由
-//          调度器自动探测释放回池；与运行中同一 applyDetection 状态机）；进程态不落盘。
+// 调度器自动探测释放回池；与运行中同一 applyDetection 状态机）；进程态不落盘。
 
 const { spawn } = require('node:child_process');
 const os = require('node:os');
@@ -19,8 +19,8 @@ const { npxBin } = require('../../../platform/os/exec-path');
 // Command billing/订阅解析与策略注册见 ./quota-strategies.js（模式类不携带供应商解析词）。
 
 /** 实例回收闲置宽限期（ms）：非期望集实例若在宽限期内被使用过（lastUsedAt 新鲜），
- *  本轮 reconcile 不回收——吸收交替/突发请求（刚用完的账号不被立刻杀，避免启停追逐），
- *  宽限期后仍未再用 → 下轮回收（资源收敛仍成立：常驻 1 + 至多 1 备胎的稳态不受影响）。 */
+ * 本轮 reconcile 不回收——吸收交替/突发请求（刚用完的账号不被立刻杀，避免启停追逐），
+ * 宽限期后仍未再用 → 下轮回收（资源收敛仍成立：常驻 1 + 至多 1 备胎的稳态不受影响）。 */
 const IDLE_RECLAIM_GRACE_MS = 90 * 1000;
 
 class ProxyProvider extends ProviderBase {
@@ -56,9 +56,9 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 启动实例（底层治理）：
-   *   - 并发去重：inst.startingPromise —— 并发调用（请求按需激活 + 调度器保障）只 spawn 一次；
-   *   - 全局串行：this._startLock —— 同一供应商一次只启动一个 npx（防 npm 缓存锁/资源风暴）；
-   *   - spawn 后立即设 pid，close/error 清理。 */
+   * - 并发去重：inst.startingPromise —— 并发调用（请求按需激活 + 调度器保障）只 spawn 一次；
+   * - 全局串行：this._startLock —— 同一供应商一次只启动一个 npx（防 npm 缓存锁/资源风暴）；
+   * - spawn 后立即设 pid，close/error 清理。 */
   async startInstance(inst) {
     if (inst.pid) return { ok: true, already: true };
     if (inst.startingPromise) return inst.startingPromise; // 启动中：复用同一 Promise
@@ -83,9 +83,9 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 解析启动命令（缓存优先 + fallback npx）：
-   *   - 定位 ~/.npm/_npx/<hash>/node_modules/<pkg> 已缓存包 → 直接 node <bin>（零解析/零下载/秒起）；
-   *   - 缓存未命中 → npx --yes（首次下载安装）。
-   *  返回 { ok, cmd, registry }。 */
+   * - 定位 ~/.npm/_npx/<hash>/node_modules/<pkg> 已缓存包 → 直接 node <bin>（零解析/零下载/秒起）；
+   * - 缓存未命中 → npx --yes（首次下载安装）。
+   * 返回 { ok, cmd, registry }。 */
   async _resolveLaunchCommand(app, port, key) {
     const regOrigin = this.dist ? await this.dist.selectRegistry(false).catch(() => null) : null;
     const binEntry = this._cachedPkgBin(app.pkg);
@@ -124,8 +124,8 @@ class ProxyProvider extends ProviderBase {
       if (ri >= 0) { args[ri + 1] = regOrigin; } else { args.unshift(regOrigin); args.unshift('--registry'); }
     }
     // P1-4 修复（2026-09-12）：`cmd[0]` 来自 app.command（'npx'）——
-    //   必须经统一解析入口，否则绕过解析（npm 的同一问题已有 npmBin）。
-    //   仅当它确实是逻辑名 'npx' 时才替换（保持模板可注入绝对路径的能力）。
+    // 必须经统一解析入口，否则绕过解析（npm 的同一问题已有 npmBin）。
+    // 仅当它确实是逻辑名 'npx' 时才替换（保持模板可注入绝对路径的能力）。
     const bin = (cmd[0] === 'npx') ? npxBin() : cmd[0];
     return { ok: true, cmd: [bin, ...args], registry: regOrigin };
   }
@@ -156,7 +156,7 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 确保包已缓存（下载预取）：缓存未命中 → npx --yes 预下载（首次安装），
-   *  避免首次请求时冷启动下载导致启动/探活超时。返回 { ok }。 */
+   * 避免首次请求时冷启动下载导致启动/探活超时。返回 { ok }。 */
   async _ensurePkgCached(app) {
     if (!app || !app.pkg) return { ok: true };
     if (this._cachedPkgBin(app.pkg)) return { ok: true, cached: true };
@@ -180,9 +180,9 @@ class ProxyProvider extends ProviderBase {
     // 防残留：同账号只保留一条 proxyInstance 端口记录（旧实例残留清理）
     if (inst.keyId) {
       const owner = 'proxy:' + inst.keyId;
-      // ⚠ 2026-09-13（失效模式 g）：释放时**带上该记录的 owner** ——
-      //   list() 快照与 release 之间存在 TOCTOU：期间若该端口被他人重新登记，
-      //   不带 ownerId 的 release 会误删**他人**记录（与实例域 P1-3 同一类缺陷）。
+      // 2026-09-13（失效模式 g）：释放时**带上该记录的 owner** ——
+      // list() 快照与 release 之间存在 TOCTOU：期间若该端口被他人重新登记，
+      // 不带 ownerId 的 release 会误删**他人**记录（与实例域 P1-3 同一类缺陷）。
       for (const rec of ports.list()) if (rec.owner === owner && rec.port !== inst.port) { try { ports.release(rec.port, rec.owner); } catch {} }
     }
     // ── 认领前置：绑定端口上的本账号幸存进程（2026-09 复检根治：一律弃用重拉，禁 adopt）──
@@ -229,7 +229,7 @@ class ProxyProvider extends ProviderBase {
     // 新分配/换绑 → 持久化绑定（toJSON 落盘）
     if (inst.port !== port) { inst.port = port; this._persist(); }
     // （2026-09 复检：原「新分端口幸存者 adopt」块已删除——绑定端口幸存者由上方认领前置一律
-    //  弃用重拉；claimSlot 分配的是空闲端口，spawn 前由下方端口释放等待兜底残留。）
+    // 弃用重拉；claimSlot 分配的是空闲端口，spawn 前由下方端口释放等待兜底残留。）
     // 端口释放等待（2026-09 审计修复：EADDRINUSE 启停风暴根因）：
     // stopInstance 对旧进程 SIGTERM 后立即置 pid=null，SIGKILL 兜底在 1.5s 后——
     // 若新 startInstance 在旧进程真正退出前复用同端口 spawn，上游 listen 即 EADDRINUSE
@@ -250,10 +250,10 @@ class ProxyProvider extends ProviderBase {
     const launch = await this._resolveLaunchCommand(app, port, inst.key);
     if (!launch.ok) return launch;
     // 实例环境 = app 契约（见 proxy-apps.js），模式类不内联供应商 env（2026-09 用户定稿）：
-    //  - 账号密钥只经 env 传递、绝不进 cmdline——env 名由 app.keyEnv 声明
-    //    （默认 CC_API_KEY：commandcode 生态历史名，测试 mock 应用沿用）；
-    //  - app.env 提供应用级 env（含 {{key}}/{{port}} 占位）。commandcode 不注入任何超时/日志 env——
-    //    跑代理完全默认（见下方注释）。
+    // - 账号密钥只经 env 传递、绝不进 cmdline——env 名由 app.keyEnv 声明
+    // （默认 CC_API_KEY：commandcode 生态历史名，测试 mock 应用沿用）；
+    // - app.env 提供应用级 env（含 {{key}}/{{port}} 占位）。commandcode 不注入任何超时/日志 env——
+    // 跑代理完全默认（见下方注释）。
     const keyEnv = (app && app.keyEnv) || 'CC_API_KEY';
     const envVars = Object.assign({}, process.env);
     // 2026-09 回归最早纯净态：只注账号密钥，【不】注入任何 CC_IDLE/CC_UPSTREAM/LOG_LEVEL——
@@ -272,10 +272,10 @@ class ProxyProvider extends ProviderBase {
     try { child = spawn(launch.cmd[0], launch.cmd.slice(1), { stdio: ['ignore', 'pipe', 'pipe'], env: envVars, detached: true }); }
     catch (e) { return { ok: false, error: 'spawn 失败: ' + e.message }; }
     // 捕获反代实例 stdout/stderr（2026-09 诊断增强）：
-    //  - 全量落盘：stdout/stderr 写独立文件 ~/.dsh/supervisor/logs/proxy-instance-<app>-<port>.log——
-    //    反代内部完整处理（收到请求→转上游→上游 chunk→错误）可见，卡死/400 时定位根因（曾因只滤
-    //    关键词落事件丢失 info/debug → 每次异常只能外部猜 CPU/连接/时间线）；
-    //  - 关键词行仍落事件（保留既有诊断摘要）。
+    // - 全量落盘：stdout/stderr 写独立文件 ~/.dsh/supervisor/logs/proxy-instance-<app>-<port>.log——
+    // 反代内部完整处理（收到请求→转上游→上游 chunk→错误）可见，卡死/400 时定位根因（曾因只滤
+    // 关键词落事件丢失 info/debug → 每次异常只能外部猜 CPU/连接/时间线）；
+    // - 关键词行仍落事件（保留既有诊断摘要）。
     const logFilter = /error|streaming|idle|timeout|ECONN|abort|socket|finish|truncat/i;
     let logStream = null;
     try {
@@ -321,20 +321,20 @@ class ProxyProvider extends ProviderBase {
 
   /** 标记实例被请求使用（forward-core pick 后调用）：仅记录使用时间。
    *
-   *  ⚠ P1-1 修复（2026-09-12）：本函数**不再清零** `_unhealthyCount`。
+   * P1-1 修复（2026-09-12）：本函数**不再清零** `_unhealthyCount`。
    *
-   *  缺陷：它原先在**每次 pick 之后、请求发出之前**被调用（forward-core 的循环里），
-   *    并**无条件**清零失败计数；而重启阈值在 `markInstanceProblem` 里是「≥2」。
-   *    而失败发生在请求**结束**时才 +1 —— 于是「清零 → 失败+1 → 清零 → 失败+1 …」，
-   *    计数**数学上永远到不了 2**，请求级熔断（连续 ≥2 次失败即重启实例）是死代码。
+   * 缺陷：它原先在**每次 pick 之后、请求发出之前**被调用（forward-core 的循环里），
+   * 并**无条件**清零失败计数；而重启阈值在 `markInstanceProblem` 里是「≥2」。
+   * 而失败发生在请求**结束**时才 +1 —— 于是「清零 → 失败+1 → 清零 → 失败+1 …」，
+   * 计数**数学上永远到不了 2**，请求级熔断（连续 ≥2 次失败即重启实例）是死代码。
    *
-   *  注释原本写「请求成功 = 实例可用」，但实现执行在成功**之前** ——
-   *    这是「注释声称的语义」与「代码实际时机」分叉的典型。
+   * 注释原本写「请求成功 = 实例可用」，但实现执行在成功**之前** ——
+   * 这是「注释声称的语义」与「代码实际时机」分叉的典型。
    *
-   *  现：清零改由 `markRequestOk`（**请求成功后**调用）负责；
-   *    `markUsed` 只管 lastUsedAt（诊断/闲置宽限判断）。
+   * 现：清零改由 `markRequestOk`（**请求成功后**调用）负责；
+   * `markUsed` 只管 lastUsedAt（诊断/闲置宽限判断）。
    *
-   *  注：prewarmed 标志已随「预热池目标态」废除——实例存留完全由 reconcile 期望集 + 闲置宽限期决定。 */
+   * 注：prewarmed 标志已随「预热池目标态」废除——实例存留完全由 reconcile 期望集 + 闲置宽限期决定。 */
   markUsed(inst) {
     if (!inst) return;
     inst.lastUsedAt = Date.now();
@@ -342,12 +342,12 @@ class ProxyProvider extends ProviderBase {
 
   /** **请求成功**后清零失败计数（P1-1 修复的配套）。
    *
-   *  为什么必须独立成一个方法：清零的**时机**是这条缺陷的全部要害 ——
-   *    「请求发出前清零」使熔断不可达；只有「请求确认成功后清零」才既保留
-   *    「成功即健康」的语义，又让连续失败能真正累计。
+   * 为什么必须独立成一个方法：清零的**时机**是这条缺陷的全部要害 ——
+   * 「请求发出前清零」使熔断不可达；只有「请求确认成功后清零」才既保留
+   * 「成功即健康」的语义，又让连续失败能真正累计。
    *
-   *  ⚠ 健康监测的 `_monitorFails` 是**独立**计数器（见 healthInstance 的注释），
-   *    本方法不得触碰它（跨界耦合曾被显式修过）。
+   * 健康监测的 `_monitorFails` 是**独立**计数器（见 healthInstance 的注释），
+   * 本方法不得触碰它（跨界耦合曾被显式修过）。
    */
   markRequestOk(inst) {
     if (!inst) return;
@@ -355,8 +355,8 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 实例停止仲裁：仅当账号不再需要实例时才允许停止。
-   *  ① inflight>0（请求在途）→ 不停止（防杀在途流）；
-   *  ② 付费侧在用（selected/粘滞 activeAccount）→ 保留。 */
+   * ① inflight>0（请求在途）→ 不停止（防杀在途流）；
+   * ② 付费侧在用（selected/粘滞 activeAccount）→ 保留。 */
   _canStopInstance(acc) {
     if (!acc) return true;
     if ((acc.inflight || 0) > 0) return false;
@@ -367,14 +367,14 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 实例停止（幂等）：
-   *  在途/在用仲裁 → 仅标记 _stopPendingUntilIdle（不设一次性补刀 timer——旧 timer 在命中
-   *  在途时直接 return 永不重排 → 实例泄漏；现由「请求结束补刀（_retryPendingStop）＋ reconcile
-   *  周期停循环」两条路径收敛）。
-   *  force=true（服务停服/守卫优雅退出专用）：跳过在用/在途仲裁强制 TERM——否则在用账号实例被 defer
-   *  逃脱关停 → daemon 退出即成孤儿（426880/677630/795363 三次实锤，停服孤儿化根因①）；停服即服务下线，
-   *  在途流本就随 daemon 退出而断，不存在「不可中断」。
-   *  孤儿（无对应账号）直接停（acc=null 空安全，供 reconcile 对 orphan 实例收敛）。
-   *  不释放端口（端口与实例绑死，复用绑定防漂移）；仅删除账号时释放。 */
+   * 在途/在用仲裁 → 仅标记 _stopPendingUntilIdle（不设一次性补刀 timer——旧 timer 在命中
+   * 在途时直接 return 永不重排 → 实例泄漏；现由「请求结束补刀（_retryPendingStop）＋ reconcile
+   * 周期停循环」两条路径收敛）。
+   * force=true（服务停服/守卫优雅退出专用）：跳过在用/在途仲裁强制 TERM——否则在用账号实例被 defer
+   * 逃脱关停 → daemon 退出即成孤儿（426880/677630/795363 三次实锤，停服孤儿化根因①）；停服即服务下线，
+   * 在途流本就随 daemon 退出而断，不存在「不可中断」。
+   * 孤儿（无对应账号）直接停（acc=null 空安全，供 reconcile 对 orphan 实例收敛）。
+   * 不释放端口（端口与实例绑死，复用绑定防漂移）；仅删除账号时释放。 */
   stopInstance(inst, force) {
     if (!inst) return;
     const acc = this.accounts.find((a) => a.keyId === inst.keyId) || null;
@@ -405,7 +405,7 @@ class ProxyProvider extends ProviderBase {
     }
     try { this._terminatingPids.add(pid); } catch {}
     try { process.kill(-pid, 'SIGTERM'); } catch { try { process.kill(pid, 'SIGTERM'); } catch {} }
-    // SIGKILL 兜底 1.5s（unref：运行期不阻塞退出）。⚠ daemon 优雅退出绝不能只靠它——unref 定时器随
+    // SIGKILL 兜底 1.5s（unref：运行期不阻塞退出）。 daemon 优雅退出绝不能只靠它——unref 定时器随
     // process.exit 消亡 → 子进程孤儿化（stdio 死 → adopt 复用即楔死）；退出路径必须经 waitAllStopped
     // 确认子进程已死再 exit（RouterService.stopAndWait，见 index.js / router-daemon.js）。
     setTimeout(() => {
@@ -418,7 +418,7 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 请求结束补刀（forward-core 在途计数归零时调用）：该账号若标记待停且已无在途 → 立即停。
-   *  取代旧一次性 2.5s timer（命中在途即空放、永不重排的泄漏根因）。 */
+   * 取代旧一次性 2.5s timer（命中在途即空放、永不重排的泄漏根因）。 */
   _retryPendingStop(acc) {
     if (!acc || !acc._stopPendingUntilIdle) return;
     if ((acc.inflight || 0) > 0) return; // 仍有在途：等最后一次请求结束再补
@@ -428,9 +428,9 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 等待全部 SIGTERM 在途子进程真正退出（优雅退出专用，2026-09 根治停服孤儿化）：
-   *   stopInstance 只发 SIGTERM + unref SIGKILL(1.5s)——若 daemon 随即 process.exit，定时器随进程
-   *   消亡永不触发 → 子进程孤儿化、stdio 管道死（426880/677630 两次实锤，adopt 复用即 EPIPE 楔死）。
-   *   本方法轮询 _terminatingPids：超时兜底 SIGKILL 进程组，返回时无残留（或确认已清）。 */
+   * stopInstance 只发 SIGTERM + unref SIGKILL(1.5s)——若 daemon 随即 process.exit，定时器随进程
+   * 消亡永不触发 → 子进程孤儿化、stdio 管道死（426880/677630 两次实锤，adopt 复用即 EPIPE 楔死）。
+   * 本方法轮询 _terminatingPids：超时兜底 SIGKILL 进程组，返回时无残留（或确认已清）。 */
   async waitAllStopped(timeoutMs) {
     const dl = Date.now() + (timeoutMs || 3000);
     // zombie 判定：SIGKILL 已投递但父进程尚未回收的进程 kill(0) 仍为 true——其端口/stdio 已释放，
@@ -472,9 +472,9 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 实例探活（2026-09 分层隔离）：纯 HTTP 探测并回报 inst.healthy——【不持有任何计数】。
-   *  分层：请求级连续失败计数 _unhealthyCount（net-fail≥2 重启）由 markInstanceProblem 自管；
-   *        健康监测连续失败计数 _monitorFails（≥3 kill 重拉）由 monitorLifecycle 自管。
-   *  曾在此混写 _unhealthyCount（健康清零/失败累加）→ 探活结果污染请求熔断计数（跨界耦合）。 */
+   * 分层：请求级连续失败计数 _unhealthyCount（net-fail≥2 重启）由 markInstanceProblem 自管；
+   * 健康监测连续失败计数 _monitorFails（≥3 kill 重拉）由 monitorLifecycle 自管。
+   * 曾在此混写 _unhealthyCount（健康清零/失败累加）→ 探活结果污染请求熔断计数（跨界耦合）。 */
   async healthInstance(inst) {
     if (!inst || !inst.port) return;
     const app = this.app;
@@ -495,12 +495,12 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 实例生命周期监控（2026-09 分层原则 + 卡死检测补齐）：
-   *  分层：业务健康（400/5xx/额度）由智能路由判账号状态，不在此判定；此处管「实例自身是否可用」：
-   *  ① 进程存活 + 端口监听（adopt 实例无 exit 事件 → pid 残留阻断按需激活，周期清 pid）
-   *  ② 【2026-09 卡死检测】HTTP 探活（healthPath，3s 超时）——进程活着但事件循环被占满/假死
-   *     （如 41012 卡死：CPU 90% 请求全挂）时，进程/端口检查都通过但 health 不响应。
-   *     连续 _monitorFails >= 3（约 90s）→ 判定卡死 → kill + 清 pid → 按需激活全新拉起（自愈）。
-   *     不误杀：healthPath 是独立轻量端点；实例正常服务长流时也应能即时响应（fetch 3s 超时即弃）。 */
+   * 分层：业务健康（400/5xx/额度）由智能路由判账号状态，不在此判定；此处管「实例自身是否可用」：
+   * ① 进程存活 + 端口监听（adopt 实例无 exit 事件 → pid 残留阻断按需激活，周期清 pid）
+   * ② 【2026-09 卡死检测】HTTP 探活（healthPath，3s 超时）——进程活着但事件循环被占满/假死
+   * （如 41012 卡死：CPU 90% 请求全挂）时，进程/端口检查都通过但 health 不响应。
+   * 连续 _monitorFails >= 3（约 90s）→ 判定卡死 → kill + 清 pid → 按需激活全新拉起（自愈）。
+   * 不误杀：healthPath 是独立轻量端点；实例正常服务长流时也应能即时响应（fetch 3s 超时即弃）。 */
   async monitorLifecycle() {
     if (this._stopping || this.activated !== true) return;
     for (const inst of (this.instances || [])) {
@@ -555,26 +555,26 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 实例重启执行（事件驱动，2026-09 用户定稿）：报错触发时 kill 当前实例进程并重新拉起。
-   *  不做全量周期探活——实例是按需调用机制，只在「具体报错」时介入重启（400/连接失败/5xx）。
-   *  带单实例退避 _restartAt 防风暴（重启后 2min 内不重复重启同一实例）。 */
+   * 不做全量周期探活——实例是按需调用机制，只在「具体报错」时介入重启（400/连接失败/5xx）。
+   * 带单实例退避 _restartAt 防风暴（重启后 2min 内不重复重启同一实例）。 */
   restartInstance(inst, reason) {
     if (!inst || this._stopping) return;
     if (!inst.pid && !inst.port) return;
     if (Date.now() < (inst._restartAt || 0)) return; // 退避中
     const acc = this.accountOf(inst);
     if (acc && (acc.inflight || 0) > 0) {
-      // ⚠ P1-3 修复（2026-09-12）：两处缺陷合并修。
+      // P1-3 修复（2026-09-12）：两处缺陷合并修。
       //
-      //  缺陷一（时序）：旧实现把 `_restartAt = now + 120s` 写在**本分支之前** ——
-      //    即在途请求触发的重启，**退避已置位**却什么都没做：随后 2 分钟内所有重启
-      //    尝试都被 `Date.now() < _restartAt` 拦下 → 坏实例至少卡死 2 分钟。
-      //    现改为：**只有真正执行重启时才置退避**。
+      // 缺陷一（时序）：旧实现把 `_restartAt = now + 120s` 写在**本分支之前** ——
+      // 即在途请求触发的重启，**退避已置位**却什么都没做：随后 2 分钟内所有重启
+      // 尝试都被 `Date.now() < _restartAt` 拦下 → 坏实例至少卡死 2 分钟。
+      // 现改为：**只有真正执行重启时才置退避**。
       //
-      //  缺陷二（死字段）：`_restartPending` 只写不读（全仓无消费点），
-      //    注释称「空闲后由下次报错/调用触发」并不成立 —— 下次报错要重新累积失败，
-      //    且会被已置位的退避拦下。
-      //    现改为**真正的延迟执行**：记下待重启原因，并在实例空闲（inflight 归 0）时
-      //    由 `_flushRestartPending` 补做。
+      // 缺陷二（死字段）：`_restartPending` 只写不读（全仓无消费点），
+      // 注释称「空闲后由下次报错/调用触发」并不成立 —— 下次报错要重新累积失败，
+      // 且会被已置位的退避拦下。
+      // 现改为**真正的延迟执行**：记下待重启原因，并在实例空闲（inflight 归 0）时
+      // 由 `_flushRestartPending` 补做。
       inst._restartPending = reason || 'deferred';
       if (this.logger && this.logger.info) {
         this.logger.info('[proxy-instance] 在途请求中，重启延后 key=' + inst.maskedKey + ' reason=' + inst._restartPending);
@@ -585,24 +585,24 @@ class ProxyProvider extends ProviderBase {
     inst._restartPending = null;
     if (this.logger && this.logger.warn) this.logger.warn('[proxy-instance] 实例重启 key=' + inst.maskedKey + ' port=' + inst.port + ' reason=' + reason);
     const hadPid = !!inst.pid;
-    // ⚠ P2 修复（2026-09-13，失效模式 e/g）：**重启必须真正停掉进程**，且失败不得静默。
+    // P2 修复（2026-09-13，失效模式 e/g）：**重启必须真正停掉进程**，且失败不得静默。
     //
-    //   缺陷：原为 `this.stopInstance(inst)`（不带 force）。而 stopInstance 的仲裁
-    //     `_canStopInstance`(:353-360) 在「账号 ready + 可用 + 被 selected/activeAccount 指向」时
-    //     为 false —— 这正是**正在服务的实例**（也恰恰是最需要重启的那类）。
-    //     于是：stopInstance 只置 _stopPendingUntilIdle 就 return，**不 kill**；
-    //     而上一行已把 `inst._restartPending = null` → flushRestartPending 无内容可补做；
-    //     调用它的 _endInflight 也不会再来（此处 inflight 本就为 0）。
-    //     同时 `_restartAt = now + 120s` 已置位 → 之后 2 分钟内所有重启尝试都被退避拦下。
+    // 缺陷：原为 `this.stopInstance(inst)`（不带 force）。而 stopInstance 的仲裁
+    // `_canStopInstance`(:353-360) 在「账号 ready + 可用 + 被 selected/activeAccount 指向」时
+    // 为 false —— 这正是**正在服务的实例**（也恰恰是最需要重启的那类）。
+    // 于是：stopInstance 只置 _stopPendingUntilIdle 就 return，**不 kill**；
+    // 而上一行已把 `inst._restartPending = null` → flushRestartPending 无内容可补做；
+    // 调用它的 _endInflight 也不会再来（此处 inflight 本就为 0）。
+    // 同时 `_restartAt = now + 120s` 已置位 → 之后 2 分钟内所有重启尝试都被退避拦下。
     //
-    //   后果：upstream-timeout → 实例级重启这条自愈链对该账号**彻底失效至少 2 分钟**，
-    //     且没有任何事件/日志表明「重启被丢弃」。触发它的正是「health 秒回但 completion 挂死」
-    //     这类生命周期探活看不出的病态 → 坏实例持续吃流量。
+    // 后果：upstream-timeout → 实例级重启这条自愈链对该账号**彻底失效至少 2 分钟**，
+    // 且没有任何事件/日志表明「重启被丢弃」。触发它的正是「health 秒回但 completion 挂死」
+    // 这类生命周期探活看不出的病态 → 坏实例持续吃流量。
     //
-    //   修法：本函数**已自行处理**在途情形（上方 inflight>0 分支延后并记 _restartPending），
-    //     故此处到达即代表「可以停」→ 用 force 语义跳过在用仲裁（重启的语义就是要杀掉它）。
-    //     并做**失败可观测**：若 stop 后进程仍活，重新武装 _restartPending 并清退避，
-    //     让 reconcile/flush 能再试，而不是静默黑洞 2 分钟。
+    // 修法：本函数**已自行处理**在途情形（上方 inflight>0 分支延后并记 _restartPending），
+    // 故此处到达即代表「可以停」→ 用 force 语义跳过在用仲裁（重启的语义就是要杀掉它）。
+    // 并做**失败可观测**：若 stop 后进程仍活，重新武装 _restartPending 并清退避，
+    // 让 reconcile/flush 能再试，而不是静默黑洞 2 分钟。
     try { this.stopInstance(inst, true); } catch (e) { this.logger.warn && this.logger.warn('[proxy-instance] 重启 stop 异常: ' + (e && e.message)); }
     if (inst.pid) {
       let stillAlive = true;
@@ -644,8 +644,8 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 请求级熔断（事件驱动）：请求报错（连接失败/400/5xx）时标记实例。
-   *  实例是「按需调用」——只在具体报错时介入：连续 ≥2 次报错 → 重启实例恢复。
-   *  实例为 null 或已无 pid 时忽略（无进程对象可标；由账号切换/按需拉起兜底）。 */
+   * 实例是「按需调用」——只在具体报错时介入：连续 ≥2 次报错 → 重启实例恢复。
+   * 实例为 null 或已无 pid 时忽略（无进程对象可标；由账号切换/按需拉起兜底）。 */
   markInstanceProblem(instOrAcc, reason) {
     try {
       const inst = instOrAcc && instOrAcc.pid ? instOrAcc : null;
@@ -666,13 +666,13 @@ class ProxyProvider extends ProviderBase {
 
   /** 实例空闲后补做「被延后的重启」（P1-3 修复的配套消费点）。
    *
-   *  为什么需要它：`restartInstance` 在**在途请求**期间不能 kill（会切断流），
-   *  故只能记 `_restartPending` 并返回。旧实现到此为止 —— 该字段**没有任何读取点**，
-   *  于是「延后」变成了「丢弃」，且当时退避已置位 → 坏实例至少卡死 2 分钟。
+   * 为什么需要它：`restartInstance` 在**在途请求**期间不能 kill（会切断流），
+   * 故只能记 `_restartPending` 并返回。旧实现到此为止 —— 该字段**没有任何读取点**，
+   * 于是「延后」变成了「丢弃」，且当时退避已置位 → 坏实例至少卡死 2 分钟。
    *
-   *  现由 `_endInflight` 在 inflight 归零时调用本方法：真正的延迟执行。
-   *  - 仍有在途（并发请求）→ 继续等，不清标记；
-   *  - 已空闲 → 清标记并执行重启（`restartInstance` 会重新判退避）。
+   * 现由 `_endInflight` 在 inflight 归零时调用本方法：真正的延迟执行。
+   * - 仍有在途（并发请求）→ 继续等，不清标记；
+   * - 已空闲 → 清标记并执行重启（`restartInstance` 会重新判退避）。
    */
   flushRestartPending(inst) {
     if (!inst || !inst._restartPending) return;
@@ -689,10 +689,10 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 模式级配额检测（模式类零供应商词，2026-09 用户定稿）：
-   *  按 app.quota.type 查配额策略注册表（quota-strategies.js）执行取数与解析：
-   *   - official-billing（commandcode-billing）：直连官方 API（credits+subscriptions），无需实例运行；
-   *   - window-usage（含历史 alias opencode-usage/proxy-usage）：读本地实例 usagePath 的 usage 面。
-   *  无 type 但有 usagePath → 按 window-usage（旧通用分支语义）。overallStatus 措辞由本模式统一填充。 */
+   * 按 app.quota.type 查配额策略注册表（quota-strategies.js）执行取数与解析：
+   * - official-billing（commandcode-billing）：直连官方 API（credits+subscriptions），无需实例运行；
+   * - window-usage（含历史 alias opencode-usage/proxy-usage）：读本地实例 usagePath 的 usage 面。
+   * 无 type 但有 usagePath → 按 window-usage（旧通用分支语义）。overallStatus 措辞由本模式统一填充。 */
   async detectInstanceQuota(inst) {
     const app = this.app;
     if (!app || !app.quota) { inst.quota = null; return { ok: true, quota: null }; }
@@ -755,8 +755,8 @@ class ProxyProvider extends ProviderBase {
     inst.quota = det.quota || null;
     const summary = this.accountQuotaSummary(acc);
     // 统一入库（2026-09 用户定稿）：与 base 同一 applyDetection 状态机、与运行中同一条处置路径——
-    //   受限（月额度用尽 / 时间窗满）→ frozen + limit + recovery（到点自动探测解冻），正常 → ready。
-    //   无 review 闸门（时间窗满同样是自动检测、自动解；不存在两套待遇）。
+    // 受限（月额度用尽 / 时间窗满）→ frozen + limit + recovery（到点自动探测解冻），正常 → ready。
+    // 无 review 闸门（时间窗满同样是自动检测、自动解；不存在两套待遇）。
     this.applyDetection(acc, { ok: true, quota: det.quota || null });
     // 受限入库即停掉刚用于检测的实例（不再空转；ready 常驻由保障/请求按需激活决定，与旧行为一致）
     if (acc.status === 'frozen' && acc.instance && acc.instance.pid) { try { this.stopInstance(acc.instance); } catch {} }
@@ -788,8 +788,8 @@ class ProxyProvider extends ProviderBase {
 
 
   /** 429/403 配额触发冻结：第一时间停掉实例（资源最低），再更新状态机。
-   *  无感切换：冻结后异步预热下一个可用账号的实例（后台启动），
-   *  使下一个请求到达时实例已就绪（秒响应，不阻塞在激活等待）。 */
+   * 无感切换：冻结后异步预热下一个可用账号的实例（后台启动），
+   * 使下一个请求到达时实例已就绪（秒响应，不阻塞在激活等待）。 */
   /** 停掉账号实例（统一经 instanceOf 按 keyId 映射——账号与实例经 keyId 关联，acc.instance 字段已废弃）。 */
   _stopInstanceIfAny(acc) {
     if (!acc) return;
@@ -805,7 +805,7 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** credits 余额不足（上游 400/402/429/403 insufficient credits 驱动）：与窗口额度同一处置——
-   *  停实例 + 冻结（按周期回探）+ 对账补备胎。 */
+   * 停实例 + 冻结（按周期回探）+ 对账补备胎。 */
   markCreditsExhausted(acc) {
     this._stopInstanceIfAny(acc);
     super.markCreditsExhausted(acc);
@@ -814,8 +814,8 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 响应驱动冻结后的异步补探测（2026-09-05 修复 B）：429/400 冻结原本不触发探测 → quota 停留冻结前快照。
-   *  冻结后立即异步重探并走 applyDetection：真实超限 → quota 刷新为真实态；误判 → 自动解冻。
-   *  仅 official-billing 策略（直连官方 API，实例已停不影响探测）。 */
+   * 冻结后立即异步重探并走 applyDetection：真实超限 → quota 刷新为真实态；误判 → 自动解冻。
+   * 仅 official-billing 策略（直连官方 API，实例已停不影响探测）。 */
   _probeAfterResponseFreeze(acc) {
     if (!acc || acc.status === 'banned' || acc.status === 'discarded') return;
     const app = this.app;
@@ -843,14 +843,14 @@ class ProxyProvider extends ProviderBase {
 
   /* ═══════ 实例对账（2026-09 架构收敛：启停唯一决策者）═══════
    * 目标：把「启/停」从 7 条各自写 if 的路径收敛为一条幂等 reconciliation 回路——
-   *   期望运行集 = 常驻 1（resident）+ 至多 1 备胎（spare，仅当有可用账号「将耗尽」才产生）。
+   * 期望运行集 = 常驻 1（resident）+ 至多 1 备胎（spare，仅当有可用账号「将耗尽」才产生）。
    * 常驻（resident）：路由当前应服务的账号（selected/锁定 → activeAccount → 首个可用），
-   *   必须 ready+usable（与 switch.pickFor 同一事实源 isAccountUsable）——若旧 primary 已冻结
-   *   /限额，resident 自动落到实际可用账号（不再为不可用账号保活实例）。
+   * 必须 ready+usable（与 switch.pickFor 同一事实源 isAccountUsable）——若旧 primary 已冻结
+   * /限额，resident 自动落到实际可用账号（不再为不可用账号保活实例）。
    * 备胎（spare）：当「主力将耗尽」（任一可用账号 _quotaPercent≥80，即额度接近上限很快会冻结）
-   *   或「刚冻结需无感切换」时，额外保活一个 ready+usable 的非 resident 账号做 failover；
-   *   否则不产生备胎（省资源）。备胎也必须是 usable —— 绝不为不可用账号预热
-   *   （旧 _prewarmByQuota 只看 percent≥80 不看可用性 → 预热即回收死循环的根因）。
+   * 或「刚冻结需无感切换」时，额外保活一个 ready+usable 的非 resident 账号做 failover；
+   * 否则不产生备胎（省资源）。备胎也必须是 usable —— 绝不为不可用账号预热
+   * （旧 _prewarmByQuota 只看 percent≥80 不看可用性 → 预热即回收死循环的根因）。
    * 对账动作：ensure desired 集实例 running（幂等 start）；停掉其余无在途请求实例（幂等 stop）。
    * 触发：周期 tick（index 5min/启动）+ 事件（冻结 mark* 后即时补备胎）。 */
 
@@ -865,14 +865,14 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 常驻账号（应保活实例）——服务跟随 + sticky 兜底（2026-09 架构修正）：
-   *  优先级 = ① selected/锁定（若可用）→ ② activeAccount（实际在用/服务中，若可用）→
-   *  ③ 既有稳定常驻 _residentKeyId（若仍可用）→ ④ 首个可用账号。
-   *  关键：② 必须优先于 ③ —— activeAccount 是 switch 粘滞指向、请求实际流经的账号；
-   *  若 resident 不跟随它，reconcile 会停掉正在服务的实例（服务中断）。
-   *  ③ 仅在无在用（空闲/activeAccount 被冻结清空）时兜底，避免每次空闲后重新轮换到不同账号。
-   *  真实 switch 粘滞下 activeAccount 稳定（pickFor 只在其不可用/冻结时才换），故不产生启停追逐；
-   *  追逐只源于外部强制交替切换（用户显式切号），此时跟随 activeAccount 才是正确语义。
-   *  迁移后更新 _residentKeyId（内存态，不落盘）。 */
+   * 优先级 = ① selected/锁定（若可用）→ ② activeAccount（实际在用/服务中，若可用）→
+   * ③ 既有稳定常驻 _residentKeyId（若仍可用）→ ④ 首个可用账号。
+   * 关键：② 必须优先于 ③ —— activeAccount 是 switch 粘滞指向、请求实际流经的账号；
+   * 若 resident 不跟随它，reconcile 会停掉正在服务的实例（服务中断）。
+   * ③ 仅在无在用（空闲/activeAccount 被冻结清空）时兜底，避免每次空闲后重新轮换到不同账号。
+   * 真实 switch 粘滞下 activeAccount 稳定（pickFor 只在其不可用/冻结时才换），故不产生启停追逐；
+   * 追逐只源于外部强制交替切换（用户显式切号），此时跟随 activeAccount 才是正确语义。
+   * 迁移后更新 _residentKeyId（内存态，不落盘）。 */
   residentAccount() {
     const usable = (this.accounts || []).filter((a) => this.isAccountUsable(a));
     let res = null;
@@ -894,8 +894,8 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 是否需要备胎：常驻（在用）账号额度将耗尽（≥80%——很快会被冻结，需无感切换备胎）。
-   *  不用「任一可用账号」判定——非在用的高占用账号不影响当前服务（也绝不适合当备胎，
-   *  备胎选号只看最低占用可用账号）；旧实现「任一 ready≥80 即预热」正是预热-回收死循环的触发。 */
+   * 不用「任一可用账号」判定——非在用的高占用账号不影响当前服务（也绝不适合当备胎，
+   * 备胎选号只看最低占用可用账号）；旧实现「任一 ready≥80 即预热」正是预热-回收死循环的触发。 */
   _needSpare() {
     const res = this.residentAccount();
     return !!(res && this._quotaPercent(res) >= 80);
@@ -916,7 +916,7 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 实例对账核心（幂等单轮）：拉起 desired 缺口 + （可选）回收非期望集实例。
-   *  由 reconcileInstances 在单飞锁内调用（幂等：start/stop 均具去重）。 */
+   * 由 reconcileInstances 在单飞锁内调用（幂等：start/stop 均具去重）。 */
   async _runReconcile(allowStop) {
     const out = { started: [], stopped: [], desired: [] };
     const desired = this.desiredRunningAccounts();
@@ -937,10 +937,10 @@ class ProxyProvider extends ProviderBase {
     }
     if (!allowStop) return out;
     // 周期对账：停止不在期望集且有实例在跑的。
-    //  - 在途/在用 → stopInstance 内部仲裁（待停标记，请求结束补刀 / 下轮续停）；
-    //  - 闲置宽限（lastUsedAt 在 IDLE_RECLAIM_GRACE_MS 内）→ 本轮不回收（吸收交替/突发请求，
-    //    防启停追逐）；宽限过期仍未再用 → 下轮回收；
-    //  - 孤儿（无账号实例）→ stopInstance 空安全直接停（不泄漏）。
+    // - 在途/在用 → stopInstance 内部仲裁（待停标记，请求结束补刀 / 下轮续停）；
+    // - 闲置宽限（lastUsedAt 在 IDLE_RECLAIM_GRACE_MS 内）→ 本轮不回收（吸收交替/突发请求，
+    // 防启停追逐）；宽限过期仍未再用 → 下轮回收；
+    // - 孤儿（无账号实例）→ stopInstance 空安全直接停（不泄漏）。
     const graceCut = Date.now() - IDLE_RECLAIM_GRACE_MS;
     for (const inst of (this.instances || [])) {
       if (!inst.pid) continue;
@@ -957,14 +957,14 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 实例对账（幂等收敛，启停唯一决策者）——单飞互斥：
-   *  同 provider 同时只跑一轮（_reconcileBusy）——30s 生命周期 tick / 5min 维护 tick /
-   *  冻结事件多源并发触发，无互斥会让多轮 reconcile 交错（start 与 stop 相杀）。
-   *  busy 时的语义：
-   *  - 周期对账（allowStop=true）：等当前轮结束后【自己再跑一轮完整（start+stop）】——
-   *    绝不并入在跑轮：若在跑的是 stop:false 事件轮（只补起不停），并入会漏掉回收（实例泄漏）；
-   *  - 事件补起（allowStop=false）：撞 busy 直接跳过（补起尽力而为，周期轮会覆盖补起+回收）。
-   *  @param opts { stop?:boolean } 周期对账默认 stop=true（补停闲置）；事件对账传 false
-   *    （仅补起 desired 缺口——不在请求处理中途杀可能刚被 pick 的实例，停交由下个周期 tick）。 */
+   * 同 provider 同时只跑一轮（_reconcileBusy）——30s 生命周期 tick / 5min 维护 tick /
+   * 冻结事件多源并发触发，无互斥会让多轮 reconcile 交错（start 与 stop 相杀）。
+   * busy 时的语义：
+   * - 周期对账（allowStop=true）：等当前轮结束后【自己再跑一轮完整（start+stop）】——
+   * 绝不并入在跑轮：若在跑的是 stop:false 事件轮（只补起不停），并入会漏掉回收（实例泄漏）；
+   * - 事件补起（allowStop=false）：撞 busy 直接跳过（补起尽力而为，周期轮会覆盖补起+回收）。
+   * @param opts { stop?:boolean } 周期对账默认 stop=true（补停闲置）；事件对账传 false
+   * （仅补起 desired 缺口——不在请求处理中途杀可能刚被 pick 的实例，停交由下个周期 tick）。 */
   async reconcileInstances(opts) {
     if (!this.activated || this._stopping) return { started: [], stopped: [], desired: [] };
     const allowStop = !(opts && opts.stop === false);
@@ -980,7 +980,7 @@ class ProxyProvider extends ProviderBase {
   }
 
   /** 事件驱动的即时对账（冻结 mark* 后调用——保「无感切换」语义）：仅补起 desired 缺口，
-   *  不在请求处理中途杀实例（停由周期对账收敛）。async 不阻塞请求。 */
+   * 不在请求处理中途杀实例（停由周期对账收敛）。async 不阻塞请求。 */
   reconcileNow() {
     if (this._stopping) return;
     this.reconcileInstances({ stop: false }).catch(() => {});

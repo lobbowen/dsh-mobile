@@ -5,7 +5,7 @@ name: Build Android Node Container APK
 # 因此“出包”交给 GitHub Actions：一键编译出可安装的 debug APK 作为构件(artifact)下载。
 #
 # 用法：Actions → 手动 Run workflow（仅改 Node 运行时/编译脚本时才需要；
-#      日常出包走 fast-apk，不碰这条路）。
+# 日常出包走 fast-apk，不碰这条路）。
 #
 # 注：诊断日志经 PAT（仓库 Secret）推到 ci-diag 分支，维护者在沙箱侧经 raw 通道读取。
 
@@ -27,10 +27,10 @@ on:
 # 更糟的是它们还会争抢同一台机器的资源，把彼此拖慢。
 #
 # cancel-in-progress: true 的取舍：
-#   推新提交时直接取消旧的（旧的那个已经没有意义了，代码都变了），
-#   保证「最新代码 = 唯一在跑的构建」，监控永远指向正确目标。
-#   代价是旧构建的 Node 编译成果丢失 —— 但它本来也对应旧脚本，
-#   缓存 key 不同，留着也用不上。
+# 推新提交时直接取消旧的（旧的那个已经没有意义了，代码都变了），
+# 保证「最新代码 = 唯一在跑的构建」，监控永远指向正确目标。
+# 代价是旧构建的 Node 编译成果丢失 —— 但它本来也对应旧脚本，
+# 缓存 key 不同，留着也用不上。
 # ---------------------------------------------------------------------------
 concurrency:
   group: build-apk-${{ github.ref }}
@@ -202,11 +202,11 @@ jobs:
 
       # ---------------------------------------------------------------------------
       # 校验本 workflow 自身：重复键之类的结构错误会被 GitHub 直接拒绝加载，
-      # 表现为 Actions 页面「红色 ✗ + 0s/几秒」且不产生任何步骤日志（极难排查）。
+      # 表现为 Actions 页面「红色 + 0s/几秒」且不产生任何步骤日志（极难排查）。
       #
       # 必须放在 Checkout 之后 —— 校验脚本本身来自仓库，checkout 之前它不存在。
       # （踩过的坑：原先放在最前面，结果 python3 找不到 scripts/validate-workflow.py，
-      #   该步骤失败导致后面所有步骤 skipped，又是一轮静默失败。）
+      # 该步骤失败导致后面所有步骤 skipped，又是一轮静默失败。）
       # ---------------------------------------------------------------------------
       - name: Validate workflow file
         id: wfvalidate
@@ -226,15 +226,15 @@ jobs:
         # 都是"能装但跑不起来"，而排查代价是一轮 3 小时的构建。
         #
         # 放在这里（gradle 之前、setup-java 之前）的理由：
-        #   · 只需 Node，秒级完成，有错立刻知道；
-        #   · 不依赖任何构建产物（基线包是产物，生成它需要私钥 secret
-        #     且本 workflow 并不生成它）—— 所以只能跑 test:logic。
+        # · 只需 Node，秒级完成，有错立刻知道；
+        # · 不依赖任何构建产物（基线包是产物，生成它需要私钥 secret
+        # 且本 workflow 并不生成它）—— 所以只能跑 test:logic。
         #
         # 为什么不跑 test:baseline：本 workflow 不产出基线包，
         # 强求它存在会在每次发布构建上都红一次，属于假红。
         # 基线包由 fast-apk.yml 的 "Build kernel baseline bundle" 生成并验证。
         #
-        # ⚠ 必须更新 /tmp/ci-stage。这是一个真实踩过的坑：
+        # 必须更新 /tmp/ci-stage。这是一个真实踩过的坑：
         # 失败诊断（第 25 步）读的是 /tmp/ci-stage 这个**由各步骤自行写入**的
         # 进度文件。若新加的步骤不写它，诊断里就会显示**上一步**的名字 ——
         # 于是"容器引擎测试失败"会被报成"validate-workflow 失败"，指向完全错误的方向。
@@ -369,27 +369,27 @@ jobs:
       # gradle 阶段，每轮都白等近 4 小时编译。）
       #
       # 缓存 key 的设计（决定"什么时候该重编"）：
-      #   node-android-<node tag>-<build 脚本哈希>
-      #   - Node 版本变了      -> tag 变 -> 自动重编（符合预期）
-      #   - 编译脚本/补丁改了  -> 哈希变 -> 自动重编（**这点很重要**：
-      #     我们改过 aligned_alloc 补丁、宿主编译器逻辑等，那些改动必须
-      #     触发重编，否则会拿到旧产物，产生"改了却没生效"的诡异现象）
-      #   - 只改 Kotlin/gradle -> key 不变 -> 命中缓存，跳过编译
+      # node-android-<node tag>-<build 脚本哈希>
+      # - Node 版本变了 -> tag 变 -> 自动重编（符合预期）
+      # - 编译脚本/补丁改了 -> 哈希变 -> 自动重编（**这点很重要**：
+      # 我们改过 aligned_alloc 补丁、宿主编译器逻辑等，那些改动必须
+      # 触发重编，否则会拿到旧产物，产生"改了却没生效"的诡异现象）
+      # - 只改 Kotlin/gradle -> key 不变 -> 命中缓存，跳过编译
       #
       # 【只缓存最终二进制，刻意不缓存 out/ 目录】
-      #   一开始想把整个 out/ 也缓存起来，好让 make 做增量编译。权衡后放弃：
-      #   1) out/ 含 6808 个 .o，体积 3~6 GB。GitHub 单仓库缓存总额上限就是
-      #      10 GB，一个条目吃掉大半，且 7 天不用就被清理。
-      #   2) 压缩+上传+下载这么大的目录本身要十几分钟，省下的时间被吃掉一大半。
-      #   3) 我们的真实需求不是"增量编译"，而是"下游改动时压根别编" ——
-      #      只缓存 node 二进制（约 100~120 MB）完全够用，传输只要几十秒。
-      #   GitHub Actions 的 cache 本质上也不是增量缓存，它只做整份条目的
-      #   精确匹配 / 前缀回退，缓存中间态并不能带来真正的增量编译。
+      # 一开始想把整个 out/ 也缓存起来，好让 make 做增量编译。权衡后放弃：
+      # 1) out/ 含 6808 个 .o，体积 3~6 GB。GitHub 单仓库缓存总额上限就是
+      # 10 GB，一个条目吃掉大半，且 7 天不用就被清理。
+      # 2) 压缩+上传+下载这么大的目录本身要十几分钟，省下的时间被吃掉一大半。
+      # 3) 我们的真实需求不是"增量编译"，而是"下游改动时压根别编" ——
+      # 只缓存 node 二进制（约 100~120 MB）完全够用，传输只要几十秒。
+      # GitHub Actions 的 cache 本质上也不是增量缓存，它只做整份条目的
+      # 精确匹配 / 前缀回退，缓存中间态并不能带来真正的增量编译。
       #
       # restore-keys：本轮 key 未命中时按前缀回退到最近一次缓存。这里刻意
-      #   用同前缀，好处是换了编译脚本时仍能拿到旧二进制作为"应急兜底"；
-      #   但因为 key 变了就说明编译脚本动过，脚本改动很可能影响产物正确性，
-      #   所以【命中回退缓存时额外打一条醒目警告】，不静默使用。
+      # 用同前缀，好处是换了编译脚本时仍能拿到旧二进制作为"应急兜底"；
+      # 但因为 key 变了就说明编译脚本动过，脚本改动很可能影响产物正确性，
+      # 所以【命中回退缓存时额外打一条醒目警告】，不静默使用。
       # ---------------------------------------------------------------------------
       - name: Cache compiled Node binary
         id: nodecache
@@ -425,7 +425,7 @@ jobs:
             # 若缓存里只存了 node 本体、这里只恢复 node 本体，那么【一旦命中缓存】，
             # jniLibs 目录里就只有 libnode.so 而没有 libc++_shared.so，
             # 打出来的 APK 到真机上必然报：
-            #     cannot locate symbol "_ZTVNSt6__ndk119basic_ostringstream..."
+            # cannot locate symbol "_ZTVNSt6__ndk119basic_ostringstream..."
             # 而未命中缓存（完整编译）时却又是好的 —— 于是表现为
             # 「第一次能跑、命中缓存后反而不行」这种极难排查的间歇性故障。
             #
@@ -516,19 +516,19 @@ jobs:
 
       - name: Save Node binary to cache
         # 条件说明（这里的判断很关键，别改错）：
-        #   cache-hit != 'yes'  —— 未命中缓存才保存，避免每次重写同一份。
-        #   steps.nodebuild.outcome == 'success' —— **只要求 Node 编译本身成功**，
-        #      而不是整个 job 成功。
+        # cache-hit != 'yes' —— 未命中缓存才保存，避免每次重写同一份。
+        # steps.nodebuild.outcome == 'success' —— **只要求 Node 编译本身成功**，
+        # 而不是整个 job 成功。
         # 为什么不用 success()：success() 要求【此前所有步骤】都成功，且一旦后续
-        #   gradle 失败，这个步骤就已经被跳过了。但事实上 Node 二进制在下游
-        #   （Kotlin 编译、APK 打包）失败时【依然是完好的】—— 它本身已经编完，
-        #   跟下游是两回事。
-        #   真实教训：连续三轮失败都出在 gradle，而每一轮里 node 其实都编译成功了。
-        #   若用 success()，这些可复用的编译成果会被全部丢弃，下次还得再编 4 小时。
-        #   用 nodebuild 自身的 outcome 判断，就能把这些成果保下来 —— 这恰好是
-        #   本缓存最重要的价值场景。
+        # gradle 失败，这个步骤就已经被跳过了。但事实上 Node 二进制在下游
+        # （Kotlin 编译、APK 打包）失败时【依然是完好的】—— 它本身已经编完，
+        # 跟下游是两回事。
+        # 真实教训：连续三轮失败都出在 gradle，而每一轮里 node 其实都编译成功了。
+        # 若用 success()，这些可复用的编译成果会被全部丢弃，下次还得再编 4 小时。
+        # 用 nodebuild 自身的 outcome 判断，就能把这些成果保下来 —— 这恰好是
+        # 本缓存最重要的价值场景。
         # 注意：cache-hit == 'yes' 时 nodebuild 是 skipped，outcome 为 'skipped'，
-        #      不等于 'success'，故不会重复保存，符合预期。
+        # 不等于 'success'，故不会重复保存，符合预期。
         if: steps.restorenode.outputs.cache-hit != 'yes' && steps.nodebuild.outcome == 'success'
         run: |
           echo "=== 保存 Node 产物到缓存目录 ==="
@@ -593,7 +593,7 @@ jobs:
           file -b "$DEST" | sed 's/^/file: /'
           # 关键前提：必须是 aarch64 的 ELF，否则装到 arm64 设备上无法执行。
           # （不强制 linker64 解释器：该文件是普通 ELF 可执行文件，系统只是把它
-          #   当 native lib 解压落盘，并非作为共享库加载。）
+          # 当 native lib 解压落盘，并非作为共享库加载。）
           if ! file -b "$DEST" | grep -qiE "aarch64"; then
             echo "[error] 该产物不是 aarch64 ELF，与 APK 的 arm64-v8a 不匹配。"
             exit 1
@@ -607,16 +607,16 @@ jobs:
       - name: Inject release keystore (optional, for stable signing)
         id: signing
         # =====================================================================
-        #  「设备能否自我升级 APK」的唯一开关。
+        # 「设备能否自我升级 APK」的唯一开关。
         # =====================================================================
-        #  本 workflow 产出的是**发布版 APK**，所以这一步比 fast-apk.yml 里
-        #  更重要：没有稳定签名，发布出来的包在已装设备上根本装不上去。
+        # 本 workflow 产出的是**发布版 APK**，所以这一步比 fast-apk.yml 里
+        # 更重要：没有稳定签名，发布出来的包在已装设备上根本装不上去。
         #
-        #  仍然**不 fail**（secret 未配置时构建照常，便于 fork/PR 场景），
-        #  但 ::warning:: 会显式说明"本包不具备升级能力"。
+        # 仍然**不 fail**（secret 未配置时构建照常，便于 fork/PR 场景），
+        # 但 ::warning:: 会显式说明"本包不具备升级能力"。
         #
-        #  与 repack-apk.yml 复用同一组 secret 名（ANDROID_KEYSTORE_BASE64 等），
-        #  见 scripts/keygen-android-keystore.sh 头注释里的两把钥匙辨析。
+        # 与 repack-apk.yml 复用同一组 secret 名（ANDROID_KEYSTORE_BASE64 等），
+        # 见 scripts/keygen-android-keystore.sh 头注释里的两把钥匙辨析。
         # =====================================================================
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -652,12 +652,12 @@ jobs:
           # 立刻核验：能读出指纹才说明密码对、文件完整。
           # 不核验的话，密码错要等整个 APK 构建完才在 apksigner 那步炸。
           #
-          # ⚠ 正则必须匹配 "fingerprint"，不能写 "SHA256:" ——
-          #   keytool 实际输出的是：
-          #     Certificate fingerprint (SHA-256): DA:35:...
-          #   而不是 "SHA256:"。实测写 grep -E "SHA256:" 会**永不匹配**，
-          #   于是连健康路径也走 || 分支报错（本地实测踩到）。
-          #   注意 "SHA-256" 中间有连字符，故用 sha-?256 兼容两种写法。
+          # 正则必须匹配 "fingerprint"，不能写 "SHA256:" ——
+          # keytool 实际输出的是：
+          # Certificate fingerprint (SHA-256): DA:35:...
+          # 而不是 "SHA256:"。实测写 grep -E "SHA256:" 会**永不匹配**，
+          # 于是连健康路径也走 || 分支报错（本地实测踩到）。
+          # 注意 "SHA-256" 中间有连字符，故用 sha-?256 兼容两种写法。
           keytool -list -keystore keys/release.keystore \
             -storepass "${KS_PASS:-}" 2>/dev/null \
             | grep -Ei 'fingerprint.*(sha-?256|sha1)' \
@@ -678,8 +678,8 @@ jobs:
           # 注意：这里【不要】写 env: ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}。
           # workflow 级从未定义过 ANDROID_SDK_ROOT，该表达式展开为空字符串，
           # 于是把 runner 自带的正确值覆盖成空 —— gradle 随即告警
-          #   "WARNING: The following problems were found when resolving the SDK
-          #    location: Set with empty value"（上一轮日志里真实出现过）。
+          # "WARNING: The following problems were found when resolving the SDK
+          # location: Set with empty value"（上一轮日志里真实出现过）。
           # 本步骤没显式传 env，runner 自带的 ANDROID_SDK_ROOT/ANDROID_HOME 自然生效。
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
           echo "ANDROID_HOME=${ANDROID_HOME:-<unset>}"
@@ -689,13 +689,13 @@ jobs:
         run: |
           echo "=== 打包后审计：APK 里到底有没有运行期依赖 ==="
           # 为什么要这一步（真实教训）：
-          #   真机报 cannot locate symbol "_ZTVNSt6__ndk119basic_ostringstream..."，
-          #   这是【运行期动态链接】找不到 libc++_shared.so 的表现。
-          #   而此前的门禁只检查了 jniLibs 目录里有没有 libnode.so，
-          #   完全没有校验 libc++_shared.so 是否真的被 AGP 收进了 APK ——
-          #   于是"编译成功"和"真机可跑"之间有一道没人守的门。
+          # 真机报 cannot locate symbol "_ZTVNSt6__ndk119basic_ostringstream..."，
+          # 这是【运行期动态链接】找不到 libc++_shared.so 的表现。
+          # 而此前的门禁只检查了 jniLibs 目录里有没有 libnode.so，
+          # 完全没有校验 libc++_shared.so 是否真的被 AGP 收进了 APK ——
+          # 于是"编译成功"和"真机可跑"之间有一道没人守的门。
           #
-          #   这一步把门补上：直接解开产出的 APK 查验，不在就当场失败。
+          # 这一步把门补上：直接解开产出的 APK 查验，不在就当场失败。
           APK="$(find app/build/outputs/apk/debug -name '*.apk' -type f | head -1)"
           if [ -z "$APK" ]; then
             echo "[error] 找不到 APK"

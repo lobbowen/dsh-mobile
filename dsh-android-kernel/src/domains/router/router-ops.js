@@ -12,11 +12,11 @@ const { maskKey } = require('./providers/base');
 /**
  * 拉起浏览器完成 OAuth 一键登录（安卓：能力在 HostBridge 侧）。
  *
- * ⚠ 已删除的 PC 遗留（勿回潮）：
- *   · 「隔离 profile + 无痕 + 反指纹参数」（--incognito / --window-size / --lang / TZ·LANG 随机池）
- *     —— 安卓容器内没有桌面浏览器二进制，这些参数无处可施；
- *   · X11 / Wayland / D-Bus 图形环境变量注入（systemd --user 无桌面会话拉起浏览器）
- *     —— 安卓内核没有 systemd、没有显示服务。
+ * 已删除的 PC 遗留（勿回潮）：
+ * · 「隔离 profile + 无痕 + 反指纹参数」（--incognito / --window-size / --lang / TZ·LANG 随机池）
+ * —— 安卓容器内没有桌面浏览器二进制，这些参数无处可施；
+ * · X11 / Wayland / D-Bus 图形环境变量注入（systemd --user 无桌面会话拉起浏览器）
+ * —— 安卓内核没有 systemd、没有显示服务。
  * 浏览器调起由 HostBridge 的 Intent(ACTION_VIEW) 承担；打通前恒定失败，
  * 调用方走「无可用浏览器」分支**明确报错**，绝不静默假装成功。
  *
@@ -151,19 +151,19 @@ const auxMethods = {
     } catch (e) {
       if (this._ccLogin && this._ccLogin.server) { const s = this._ccLogin.state; try { this._ccLogin.server.close(); } catch {} if (s) { try { ports.unregister('oauth:' + s); } catch {} } this._ccLogin = null; }
       this._ccLoginPromise = null;
-      // ⚠ P2-6 修复（2026-09-12）：超时/异常分支也必须清理 resolve/reject ——
-      //   成功分支清了两者，本分支此前**只清 promise**，`_ccLoginReject` 残留。
-      //   而浏览器退出回调读的是**当前** `this._ccLoginReject`（不绑定是哪一轮）：
-      //     上一轮超时 → 残留旧 reject → 用户再次发起登录（装入新 reject）→
-      //     上一轮的浏览器进程此时退出 → 旧回调取到**新** login 的 reject
-      //     → 「浏览器已关闭，登录已取消」**误杀新登录**。
-      //   清掉后，旧轮次的退出回调找不到 reject，自然 no-op。
+      // P2-6 修复（2026-09-12）：超时/异常分支也必须清理 resolve/reject ——
+      // 成功分支清了两者，本分支此前**只清 promise**，`_ccLoginReject` 残留。
+      // 而浏览器退出回调读的是**当前** `this._ccLoginReject`（不绑定是哪一轮）：
+      // 上一轮超时 → 残留旧 reject → 用户再次发起登录（装入新 reject）→
+      // 上一轮的浏览器进程此时退出 → 旧回调取到**新** login 的 reject
+      // → 「浏览器已关闭，登录已取消」**误杀新登录**。
+      // 清掉后，旧轮次的退出回调找不到 reject，自然 no-op。
       this._ccLoginResolve = this._ccLoginReject = null;
       return { ok: false, error: e.message };
     } finally {
       // 登录结束（成功/失败/超时）：60s 后清理本次登录的临时 profile（浏览器可能仍开着，延迟清理）
       if (tmpProfile) {
-        // ⚠ 2026-09-12：同样加 unref（60s 清理不应拖住进程退出）。
+        // 2026-09-12：同样加 unref（60s 清理不应拖住进程退出）。
         const t60 = setTimeout(() => { try { require('node:fs').rmSync(tmpProfile, { recursive: true, force: true }); } catch {} }, 60 * 1000);
         if (t60.unref) t60.unref();
       }
@@ -209,8 +209,8 @@ const auxMethods = {
   },
 
   /** 反代更新（job 模型，有状态跟踪）：立即返回 jobId，异步执行 stop→start 各实例，
-   *  前端经 proxyUpdateStatus(appId) 轮询进度——消除「黑盒等待」。
-   *  job = { state: running|done|failed, steps: [{name, state, ts}], restarted, errors, startedAt, finishedAt } */
+   * 前端经 proxyUpdateStatus(appId) 轮询进度——消除「黑盒等待」。
+   * job = { state: running|done|failed, steps: [{name, state, ts}], restarted, errors, startedAt, finishedAt } */
   async applyProxyUpdate(appId) {
     const a = PROXY_APPS[appId];
     if (!a) return { ok: false, error: 'unknown app ' + appId };
@@ -233,16 +233,16 @@ const auxMethods = {
       task = this.tasks.begin('proxy-app', 'update', { id: appId, name: a.name }, { to: a.registry, createdBy: 'user' });
       this.tasks.start(task.id);
       this.tasks.log(task.id, '更新 ' + a.name + '（' + a.registry + '）');
-      // ⚠ P2-1 修复（2026-09-12）：**把逐实例步骤登记进 task**。
+      // P2-1 修复（2026-09-12）：**把逐实例步骤登记进 task**。
       //
-      //   缺陷：此前只维护 `job.steps`，**从未调用 `tasks.step()`** ——
-      //     而 `proxyUpdateStatus` 优先读 task 分支（只要 tasks 已注入就必然命中），
-      //     于是返回的 steps 恒为空数组、restarted（= task.steps 中 done 的个数）恒 0。
-      //     前端「逐实例进度」名为实现、实为死数据；只有 `this.tasks` 未注入时才走 job 分支 ——
-      //     同一事实两处实现且已分叉。
+      // 缺陷：此前只维护 `job.steps`，**从未调用 `tasks.step()`** ——
+      // 而 `proxyUpdateStatus` 优先读 task 分支（只要 tasks 已注入就必然命中），
+      // 于是返回的 steps 恒为空数组、restarted（= task.steps 中 done 的个数）恒 0。
+      // 前端「逐实例进度」名为实现、实为死数据；只有 `this.tasks` 未注入时才走 job 分支 ——
+      // 同一事实两处实现且已分叉。
       //
-      //   现：每个实例在 task 里登记一个 step，进度按 index 同步推进；
-      //     仍保留 `job.steps`（job 分支与既有测试依赖），但两者由同一处更新，不再分叉。
+      // 现：每个实例在 task 里登记一个 step，进度按 index 同步推进；
+      // 仍保留 `job.steps`（job 分支与既有测试依赖），但两者由同一处更新，不再分叉。
       for (const { inst } of insts) this.tasks.step(task.id, inst.maskedKey);
       job.taskId = task.id;
     }
@@ -310,8 +310,8 @@ const auxMethods = {
   },
 
   /** 反代更新进度查询（前端轮询；兼容视图，优先读统一任务）。
-   *  优先返回该 appId 最近一次任务（含已完成），保证前端完成态可见；
-   *  无历史任务时回退 _proxyUpdateJobs。 */
+   * 优先返回该 appId 最近一次任务（含已完成），保证前端完成态可见；
+   * 无历史任务时回退 _proxyUpdateJobs。 */
   proxyUpdateStatus(appId) {
     const t = this.tasks ? this.tasks.list('proxy-app').find((x) => x.target.id === appId) : null;
     if (t) {
@@ -361,8 +361,8 @@ const auxMethods = {
   },
 
   /* ---- 官方单价同步（models.dev）：直连供应商按 adapter.pricing 源抓权威单价 + 全局模型定价索引（反代模型计费）----
-   *  反代供应商（如 Command Code 反代）暴露的模型均为官方模型（Claude/GPT 系）——
-   *  按模型名从 models.dev 的 anthropic/openai 等索引精确取价，供费用估算。 */
+   * 反代供应商（如 Command Code 反代）暴露的模型均为官方模型（Claude/GPT 系）——
+   * 按模型名从 models.dev 的 anthropic/openai 等索引精确取价，供费用估算。 */
   async refreshOfficialPricingAll() {
     const sources = new Map(); // 直连供应商的 models.dev provider
     for (const pr of this.providers) {
@@ -419,24 +419,24 @@ const auxMethods = {
     if (!p) return { ok: false, error: '供应商不存在' };
     const rm = new Set((opts && opts.removeMasked) || []);
     const before = (p.accounts || []).length;
-    // ⚠ P2-4 修复（2026-09-12）：删除反代账号时**必须做与 removeProxyKey 同等的收尾**。
+    // P2-4 修复（2026-09-12）：删除反代账号时**必须做与 removeProxyKey 同等的收尾**。
     //
-    //   缺陷：本函数此前只 `filter(accounts)` —— 对 **proxy 类**供应商而言，
-    //     `stopInstance` / `ports.unregister('proxy:'+keyId)` / `p.instances` 同步**全都没做**，
-    //     而 `removeProxyKey`（下方）三者齐备。同一事实两处实现且已分叉。
+    // 缺陷：本函数此前只 `filter(accounts)` —— 对 **proxy 类**供应商而言，
+    // `stopInstance` / `ports.unregister('proxy:'+keyId)` / `p.instances` 同步**全都没做**，
+    // 而 `removeProxyKey`（下方）三者齐备。同一事实两处实现且已分叉。
     //
-    //   后果：经公开 API `POST /router/providers/keys/set {removeMasked:[...]}`
-    //     （api/router.js 只校验 id、**不校验 kind**）删掉反代账号 → 实例进程继续跑、
-    //     `proxy:<keyId>` 端口记录永久残留；而该 keyId 已不在 accounts，
-    //     `accountOf` 恒 null → orphan 实例/端口**再无释放路径**，最终耗尽代理池。
+    // 后果：经公开 API `POST /router/providers/keys/set {removeMasked:[...]}`
+    // （api/router.js 只校验 id、**不校验 kind**）删掉反代账号 → 实例进程继续跑、
+    // `proxy:<keyId>` 端口记录永久残留；而该 keyId 已不在 accounts，
+    // `accountOf` 恒 null → orphan 实例/端口**再无释放路径**，最终耗尽代理池。
     //
-    //   修法：对将被移除的 proxy 账号逐个执行与 removeProxyKey 相同的收尾。
+    // 修法：对将被移除的 proxy 账号逐个执行与 removeProxyKey 相同的收尾。
     const doomed = (p.accounts || []).filter((a) => rm.has(a.maskedKey));
     if (p.kind === 'proxy') {
       for (const a of doomed) {
         if (a.instance) {
-          // ⚠ P1 修复（2026-09-13）：删除路径必须 force（见 index.js removeProvider 说明）——
-          //   下面紧接就已把账号从 accounts 摘除，延迟停标记将变为不可达 → 进程永久泄漏。
+          // P1 修复（2026-09-13）：删除路径必须 force（见 index.js removeProvider 说明）——
+          // 下面紧接就已把账号从 accounts 摘除，延迟停标记将变为不可达 → 进程永久泄漏。
           try { p.stopInstance(a.instance, true); } catch {}
           try { ports.unregister('proxy:' + a.keyId); } catch {}
           a.instance.port = null;
@@ -449,22 +449,22 @@ const auxMethods = {
       p.instances = (p.instances || []).filter((i) => !gone.has(i.keyId));
     }
     const removed = before - p.accounts.length;
-    // ⚠ P2-5 修复（2026-09-12）：`added` 必须反映**真实结果**，不是「发起了几次尝试」。
+    // P2-5 修复（2026-09-12）：`added` 必须反映**真实结果**，不是「发起了几次尝试」。
     //
-    //   缺陷：此前的 `p.addAccount(t).catch(() => {}); added++;` **不 await** ——
-    //     `addAccount` 内部要 await `detectAccount`，失败时会把账号置 `discarded`
-    //     （base.js:245-249）。于是返回的 `added: N` 可能对应「N 个全被 discarded」，
-    //     而 UI 直接把它读成「已添加 N 个 Key」（client.ts 的 `added?: number`）——
-    //     提示与视图不一致，用户以为加成功了。
+    // 缺陷：此前的 `p.addAccount(t).catch(() => {}); added++;` **不 await** ——
+    // `addAccount` 内部要 await `detectAccount`，失败时会把账号置 `discarded`
+    // （base.js:245-249）。于是返回的 `added: N` 可能对应「N 个全被 discarded」，
+    // 而 UI 直接把它读成「已添加 N 个 Key」（client.ts 的 `added?: number`）——
+    // 提示与视图不一致，用户以为加成功了。
     //
-    //   修法：逐个 await，按真实结果分类返回：
-    //     · added      —— 注册成功（含 ready / frozen-limited 等合规状态）；
-    //     · discarded  —— 检测失败被丢弃（带原因，供 UI 如实提示）。
-    //   本函数因此变为 async；调用方（api/router.js）已用 Promise.resolve(...).then() 包装，
-    //   故无需改动路由。
-    //   ⚠ 并发**保持**原语义：每个 addAccount 都要起实例 + 探活 + 取配额（秒级），
-    //     逐个 await 会让 N 个 Key 串行等 N 倍时间。故用 Promise.all 并发，
-    //     只是**等齐结果**再统计（这正是原实现缺的那一步）。
+    // 修法：逐个 await，按真实结果分类返回：
+    // · added —— 注册成功（含 ready / frozen-limited 等合规状态）；
+    // · discarded —— 检测失败被丢弃（带原因，供 UI 如实提示）。
+    // 本函数因此变为 async；调用方（api/router.js）已用 Promise.resolve(...).then() 包装，
+    // 故无需改动路由。
+    // 并发**保持**原语义：每个 addAccount 都要起实例 + 探活 + 取配额（秒级），
+    // 逐个 await 会让 N 个 Key 串行等 N 倍时间。故用 Promise.all 并发，
+    // 只是**等齐结果**再统计（这正是原实现缺的那一步）。
     const candidates = ((opts && opts.add) || [])
       .map((k) => String(k).trim())
       .filter((t) => t && !p.accounts.some((a) => a.key === t));
@@ -536,7 +536,7 @@ const auxMethods = {
     const idx = (p.accounts || []).findIndex((a) => a.keyId === keyId);
     if (idx < 0) return { ok: false, error: '账号不存在' };
     if (p.kind === 'proxy' && p.accounts[idx].instance) {
-      // ⚠ P1 修复（2026-09-13）：删除路径必须 force（见 index.js removeProvider 说明）。
+      // P1 修复（2026-09-13）：删除路径必须 force（见 index.js removeProvider 说明）。
       try { p.stopInstance(p.accounts[idx].instance, true); } catch {}
       // 删除账号：释放持久化端口绑定（registry 登记 + inst.port）
       try { ports.unregister('proxy:' + keyId); } catch {}

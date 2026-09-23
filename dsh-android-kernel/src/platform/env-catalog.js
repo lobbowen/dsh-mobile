@@ -40,8 +40,8 @@ function cachedWhichVersion(bin, args) {
 /**
  * Node 最低版本门槛的**默认值**（契约不可用时使用）。
  *
- * ⚠ 必须与壳的 `node.rs MIN_NODE` 一致 —— 否则会出现最糟的用户体验：
- *   **面板说「环境就绪 ✅」，而壳因门槛不满足拒绝启动内核。**
+ * 必须与壳的 `node.rs MIN_NODE` 一致 —— 否则会出现最糟的用户体验：
+ * **面板说「环境就绪 」，而壳因门槛不满足拒绝启动内核。**
  * 真实取值由壳经 `~/.dsh/supervisor/runtime.json` 的 `minNode` 字段投放（见 runtimeMeta）。
  */
 const MIN_NODE_DEFAULT = 'v22.12.0';
@@ -111,12 +111,12 @@ class EnvCatalog {
    * 系统二进制条目探测：`{id:{label,required,state,detail}}`。
    *
    * `state` 三态：
-   *   · `ok`       —— 存在且**满足门槛**（Node 需 >= 壳投放的 minNode）；
-   *   · `outdated` —— 存在但低于门槛（**旧实现会误报 ok → 面板谎报「环境就绪」**）；
-   *   · `missing`  —— 不存在。
+   * · `ok` —— 存在且**满足门槛**（Node 需 >= 壳投放的 minNode）；
+   * · `outdated` —— 存在但低于门槛（**旧实现会误报 ok → 面板谎报「环境就绪」**）；
+   * · `missing` —— 不存在。
    *
-   * ⚠ 兼容：`detail` 保持字符串（既有消费方按字符串用），
-   *   新增字段放 `detail` 之外（`version` / `min` / `meets`），不破坏既有契约。
+   * 兼容：`detail` 保持字符串（既有消费方按字符串用），
+   * 新增字段放 `detail` 之外（`version` / `min` / `meets`），不破坏既有契约。
    */
   probe() {
     const out = {};
@@ -137,8 +137,8 @@ class EnvCatalog {
     return out;
   }
 
-  // ⚠ selfUpdateEntry()（内核 npm 子包 corePackageName 条目）已删：
-  //   安卓内核不经 npm 分发，更新 = 容器 OTA；内核侧不报告"内核包是否配置"。
+  // selfUpdateEntry()（内核 npm 子包 corePackageName 条目）已删：
+  // 安卓内核不经 npm 分发，更新 = 容器 OTA；内核侧不报告"内核包是否配置"。
 
   /** DSH 本体条目（外传判定：bin 可执行 + 已装版本）。 */
   dshEntry(binOk, installed, bin) {
@@ -151,9 +151,9 @@ class EnvCatalog {
   }
 
   /** 汇总：全部必填项状态（供面板/守卫快速判定「环境就绪」）。
-   *  @param extra 附加条目（dsh）
-   *  @param sys 可选：已探测的系统条目（避免调用方已 probe 后又重 probe——2026-09 审计修复）
-   *  无 sys 时探测一次（探测结果有 10s TTL 缓存）。 */
+   * @param extra 附加条目（dsh）
+   * @param sys 可选：已探测的系统条目（避免调用方已 probe 后又重 probe——2026-09 审计修复）
+   * 无 sys 时探测一次（探测结果有 10s TTL 缓存）。 */
   summary(extra, sys) {
     const s = sys || this.probe();
     const items = { ...s, ...(extra || {}) };

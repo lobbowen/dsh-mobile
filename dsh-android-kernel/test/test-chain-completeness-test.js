@@ -11,15 +11,15 @@
 // 各有独立 npm script 但没人跑 → 永不执行。这是"门禁静默不跑"。
 //
 // ## Android 内核版政策（见 package.json._uninstallTests）
-//   主链 = 全部测试，**仅排除**真实卸载类两个（native / plugin-change-restart）；
-//   排除表只此两项，任何新增排除都必须在此写明理由。
+// 主链 = 全部测试，**仅排除**真实卸载类两个（native / plugin-change-restart）；
+// 排除表只此两项，任何新增排除都必须在此写明理由。
 //
 // ## 锁定不变量
-//   N-a  `test/` 下每个测试文件要么在 `scripts.test` 链中，要么在**排除表**中并写明理由
-//   N-b  排除表里的文件必须真实存在且理由充分（防排除表腐化为死引用 / 万能借口）
-//   N-c  助手/fixture（`_` 前缀或非测试命名的 .js）不被误报、也不在链中
-//   N-d  链中每一项都真实存在（防链引用已删文件 → npm test 直接崩）
-//   N-e  反向：判据能识别"未入链的测试"与"链中的死引用"（门禁非空转）
+// N-a `test/` 下每个测试文件要么在 `scripts.test` 链中，要么在**排除表**中并写明理由
+// N-b 排除表里的文件必须真实存在且理由充分（防排除表腐化为死引用 / 万能借口）
+// N-c 助手/fixture（`_` 前缀或非测试命名的 .js）不被误报、也不在链中
+// N-d 链中每一项都真实存在（防链引用已删文件 → npm test 直接崩）
+// N-e 反向：判据能识别"未入链的测试"与"链中的死引用"（门禁非空转）
 // ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
@@ -33,8 +33,8 @@ const check = (n, c, x) => {
 };
 
 /** 显式排除表：刻意不进主链的测试，必须写明理由。
- *  ⚠ 本表只允许「真实卸载」这一类 —— 加入任何其它项都必须在此给出充分理由，
- *    否则就是"门禁静默不跑"，正是本文件要消灭的缺陷。 */
+ * 本表只允许「真实卸载」这一类 —— 加入任何其它项都必须在此给出充分理由，
+ * 否则就是"门禁静默不跑"，正是本文件要消灭的缺陷。 */
 const EXCLUDED = {
   'test/native-test.js': '真实原生卸载（npm uninstall 全量清理），按需经 npm run test:native-uninstall 单独执行',
   'test/plugin-change-restart-test.js': '含插件真实卸载场景，按需经 npm run test:plugin-change-restart 单独执行',
@@ -47,10 +47,10 @@ function chainFiles() {
 }
 
 /** 命名约定：`*-test.js` 为标准测试名。
- *  ⚠ 历史遗留两个**不带 -test 后缀**但在链中当测试跑的**门禁**（不改名，避免大范围改动）：
- *    · test/smoke.js        —— 启动冒烟
- *    · test/ports-verify.js —— 端口纪律校验
- *    它们由 `IN_CHAIN_LEGACY` 显式承认，从而与"助手"区分开。 */
+ * 历史遗留两个**不带 -test 后缀**但在链中当测试跑的**门禁**（不改名，避免大范围改动）：
+ * · test/smoke.js —— 启动冒烟
+ * · test/ports-verify.js —— 端口纪律校验
+ * 它们由 `IN_CHAIN_LEGACY` 显式承认，从而与"助手"区分开。 */
 const IN_CHAIN_LEGACY = ['smoke.js', 'ports-verify.js'];
 function isTestFile(name) {
   return name.endsWith('-test.js') || IN_CHAIN_LEGACY.includes(name);

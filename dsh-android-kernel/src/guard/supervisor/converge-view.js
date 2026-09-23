@@ -30,8 +30,8 @@ class ConvergeView {
       restartDue: this._mRestartAt() === null || now >= this._mRestartAt(),
       backoffDue: this._mBackoffUntil() === null || now >= this._mBackoffUntil(),
       // K5 修复（2026-09-11）：`_shouldRun()` 有两个否决位，快照此前**都没建模** ——
-      //   于是影子每拍算出的「应然」与真实 tick 不一致，`[shadow] 不一致` 长期刷屏，
-      //   G3 切换门槛（连续零 diff）**永久不可达**。
+      // 于是影子每拍算出的「应然」与真实 tick 不一致，`[shadow] 不一致` 长期刷屏，
+      // G3 切换门槛（连续零 diff）**永久不可达**。
       crashHalted: this._crashHalted === true, // guardian=false 崩溃后停靠：等显式启动
       sessionHalting: this._sessionHalting() === true, // 退出流程中：抑制一切自动拉起
       crashWindowStart: this._mCrashWindowStart(),
@@ -41,8 +41,8 @@ class ConvergeView {
   }
 
   /** 纯决策：按现有 tick 语义计算「应然下一步」。action 词表：
-   *  none/start/stop/adopt/adoptObserved/enterRunning/restart/backoff。
-   *  只读快照，零副作用（G1 影子 → G3 收敛复用同一决策源）。 */
+   * none/start/stop/adopt/adoptObserved/enterRunning/restart/backoff。
+   * 只读快照，零副作用（G1 影子 → G3 收敛复用同一决策源）。 */
   _decideMainAction(s) {
     if (!s) return { action: 'none', reason: 'no-snapshot' };
     const targetAlive = s.childAlive || s.adoptedAlive;
@@ -71,8 +71,8 @@ class ConvergeView {
     }
     switch (s.phase) {
       case 'STOPPED': {
-        // ⚠ 顺序与 `_shouldRun()` 一致（K5 修复）：两个否决位必须**先于**拉起判断，
-        //   否则影子会算出 start 而真实 tick 拒绝 → 永久 diff。
+        // 顺序与 `_shouldRun()` 一致（K5 修复）：两个否决位必须**先于**拉起判断，
+        // 否则影子会算出 start 而真实 tick 拒绝 → 永久 diff。
         if (s.sessionHalting) return { action: 'none', reason: 'session_halting' };
         if (s.crashHalted) return { action: 'none', reason: 'crash_halted_await_explicit_start' };
         if (s.probeOk) return { action: 'adopt', reason: 'adopt' };
@@ -106,13 +106,13 @@ class ConvergeView {
   }
 
   /** 崩溃类 restart 决策：与 _beginRestart(countCrash=true) 语义一致——动作统一 restart
-   *  （_beginRestart 内部 _bumpCrashWindow 的退避记账/crash_loop_entered 属守卫业务，不改变动作词）。 */
+   * （_beginRestart 内部 _bumpCrashWindow 的退避记账/crash_loop_entered 属守卫业务，不改变动作词）。 */
   _decideCrashRestart(reason) {
     return { action: 'restart', reason, countCrash: true };
   }
 
   /** 实际执行动作记账（拍窗口内）。仅在 tick 收敛窗口内生效（_actWindow）；
-   *  窗口外的外部动作（child exit / 升级钩子）不记账——其迁移由后续拍相位对分类覆盖。 */
+   * 窗口外的外部动作（child exit / 升级钩子）不记账——其迁移由后续拍相位对分类覆盖。 */
   _actNote(action, reason) {
     if (!this._actWindow) return;
     if (!this._mainTickActs) this._mainTickActs = [];
@@ -149,7 +149,7 @@ class ConvergeView {
   }
 
   /** 影子 diff 排除集：异步事件/守卫业务钩子触发（非主循环收敛决策可比范畴），
-   *  不计入 diff 与零 diff 门槛。升级钩子 / child exit / spawn error / 假死 / adopt 令牌重建。 */
+   * 不计入 diff 与零 diff 门槛。升级钩子 / child exit / spawn error / 假死 / adopt 令牌重建。 */
   _shadowExcluded(reason) {
     if (!reason) return false;
     const r = String(reason);
@@ -183,7 +183,7 @@ class ConvergeView {
   }
 
   /** 心跳拍聚合（dsh adapter supervise 调用）：有新 tick 记录才记账/发事件；无则不刷。
-   *  连续 5 拍零 diff 记 info（G3 切换门槛观测）。 */
+   * 连续 5 拍零 diff 记 info（G3 切换门槛观测）。 */
   _shadowHeartbeatBeat() {
     try {
       const rec = this._shadowLast;
@@ -346,7 +346,7 @@ class ConvergeView {
             this._warnOccupied();
           } else if (this._shouldRun()) {
             // 拉起条件（阶段 2 意图单源，契约 §6 判定规则）：
-            //   是否应运行 = (desired == running) && sessionState 允许
+            // 是否应运行 = (desired == running) && sessionState 允许
             // desired 是**持久用户意图**（重启后据此恢复）——只要 desired=running 就无条件拉起，
             // 不再要求 guardian 或内存意图解锁（旧门 `guardian || intents.any()` 导致「退出后
             // 重开壳 desired=running 却不拉起」）。guardian 只约束「崩溃后是否自动重启」（见 RUNNING/exit 分支）。
@@ -434,8 +434,8 @@ class ConvergeView {
   }
 
   /** tick 保留为 _dshConverge 别名（C3-3b G3）：外部收敛触发点（start 首拍 / setDesired /
-   *  requestRestart / _exitUpgradeHold）调用；shadow 模式下定时器也驱动此别名。
-   *  on 模式下 main 每拍收敛由 heartbeat 的 dsh supervise 调用 _dshConverge（无独立 tick 定时器）。 */
+   * requestRestart / _exitUpgradeHold）调用；shadow 模式下定时器也驱动此别名。
+   * on 模式下 main 每拍收敛由 heartbeat 的 dsh supervise 调用 _dshConverge（无独立 tick 定时器）。 */
   async tick() {
     return this._dshConverge();
   }

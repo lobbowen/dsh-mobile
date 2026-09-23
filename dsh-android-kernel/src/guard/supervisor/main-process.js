@@ -23,7 +23,7 @@ class MainProcess {
   }
 
   /** 回收 dsh 状态目录里持锁进程已死的孤儿锁文件（详见 _startProcess 调用点注释）。
-   *  安全边界：锁内容非纯数字 pid、或 pid 仍存活（含 EPERM）一律不动；单文件异常只跳过。 */
+   * 安全边界：锁内容非纯数字 pid、或 pid 仍存活（含 EPERM）一律不动；单文件异常只跳过。 */
   _reapOrphanDshLocks() {
     const envHome = process.env.DSH_HOME && process.env.DSH_HOME.trim();
     const root = envHome ? envHome.trim() : path.join(process.env.HOME || os.homedir(), '.dsh');
@@ -55,10 +55,10 @@ class MainProcess {
   // ---- 生命周期动作 ----
 
   /** 子进程 stderr 取证捕获：文件 fd 而非管道。node 对文件的写是同步的，
-   *  子进程哪怕 process.exit() 急死，最后一行错误也已落盘；对管道的写是异步的，
-   *  急死会丢掉未 flush 的待发数据（真机 2026-09-22：dsh 秒退 exit:1 且屏幕零输出，
-   *  死因就丢在子进程自己的管道缓冲里）。每次 spawn 以 'w' 重开：本轮 stderr
-   *  从零计，上一轮的死因不得顶给本轮。返回 {fd, path, readNew()}，readNew 取增量。 */
+   * 子进程哪怕 process.exit() 急死，最后一行错误也已落盘；对管道的写是异步的，
+   * 急死会丢掉未 flush 的待发数据（真机 2026-09-22：dsh 秒退 exit:1 且屏幕零输出，
+   * 死因就丢在子进程自己的管道缓冲里）。每次 spawn 以 'w' 重开：本轮 stderr
+   * 从零计，上一轮的死因不得顶给本轮。返回 {fd, path, readNew()}，readNew 取增量。 */
   _openStderrCapture() {
     const p = path.join(path.dirname(this.config.dshLogFile), 'dsh-stderr.log');
     const fd = fs.openSync(p, 'w');
@@ -83,16 +83,10 @@ class MainProcess {
   }
 
   /** 安卓容器启动形态整备（仅契约在场时生效，PC 逐字不变）：
-   *  ① 经 nativeManager 幂等投放 NARB JS 垫片（dsh ≥rc.2 硬 require
-   *    node-addon-require-builtin，该包无 android-arm64 预编译件 → boot 必死 exit:1）、
-   *    flock 原生垫片（node-addon-system 同病，发消息即
-   *    "flock is not supported on android-arm64"）、link 发布垫片（SELinux 禁 app
-   *    硬链接 → 会话落盘 EACCES；DSH_*_NATIVE 缺席时两者均 no-op）、PTC 环境垫片
-   *    （workflow 子进程 env 清洗剥掉 LD_LIBRARY_PATH → libnode.so 子进程必崩）与
-   *    能力垫片（bash/rg 二进制路径 + 终端检视 android 门 → 容器 env 旋钮）；
-   *  ② 在 node 与脚本入口之间注入 --expose-internals（shim/cordis loader 的
-   *    no-native 路径依赖它；不是 dsh 子命令参数，位置必须在脚本前）。
-   *  恒幂等：命令已含该 flag 不再重复插入；非 node 代跑形态（args[0] 非 .js）不动。 */
+   * ① 投放两个第三方依赖垫片：node-addon-require-builtin、node-addon-system/flock
+   * （两者都无 android-arm64 预编译件，属依赖供给，不改 DSH）；
+   * ② 在 node 与脚本入口之间注入 --expose-internals，位置必须在脚本前。
+   * 恒幂等：命令已含该 flag 不再重复插入；非 node 代跑形态（args[0] 非 .js）不动。 */
   _androidLaunchReady(command) {
     try {
       const c = runtimeContract.read();
@@ -103,14 +97,14 @@ class MainProcess {
       if (this.nativeManager && typeof this.nativeManager.ensureFlockShim === 'function') {
         this.nativeManager.ensureFlockShim();
       }
-      if (this.nativeManager && typeof this.nativeManager.ensureLinkPublishShim === 'function') {
-        this.nativeManager.ensureLinkPublishShim();
+      if (this.nativeManager && typeof this.nativeManager.ensureRipgrepPackage === 'function') {
+        this.nativeManager.ensureRipgrepPackage();
       }
-      if (this.nativeManager && typeof this.nativeManager.ensurePtcEnvShim === 'function') {
-        this.nativeManager.ensurePtcEnvShim();
+      if (this.nativeManager && typeof this.nativeManager.ensureSharpWasm === 'function') {
+        this.nativeManager.ensureSharpWasm();
       }
-      if (this.nativeManager && typeof this.nativeManager.ensureCapabilityEnvShim === 'function') {
-        this.nativeManager.ensureCapabilityEnvShim();
+      if (this.nativeManager && typeof this.nativeManager.ensureNodePtyPrebuild === 'function') {
+        this.nativeManager.ensureNodePtyPrebuild();
       }
       if (command.includes('--expose-internals') || !String(command[1] || '').endsWith('.js')) return command;
       const out = command.slice();
@@ -120,8 +114,8 @@ class MainProcess {
   }
 
   /** 非零退出取证：dsh reportStartupFailure 把完整崩溃报告写到
-   *  <$DSH_HOME|~/.dsh>/logs/startup-<ts>-<uuid>.log。收集 mtime 晚于本轮
-   *  spawn 时刻的报告尾部（含 2s 时钟粒度余量），供 dsh_exited 事件上屏。 */
+   * <$DSH_HOME|~/.dsh>/logs/startup-<ts>-<uuid>.log。收集 mtime 晚于本轮
+   * spawn 时刻的报告尾部（含 2s 时钟粒度余量），供 dsh_exited 事件上屏。 */
   _collectStartupReports(sinceMs) {
     const envHome = process.env.DSH_HOME && process.env.DSH_HOME.trim();
     const root = envHome ? envHome.trim() : path.join(process.env.HOME || os.homedir(), '.dsh');
@@ -295,9 +289,9 @@ class MainProcess {
   }
 
   /** 原生 DSH 端口运行时再推导（2026-09 架构补齐）：
-   *  DSH 端口由用户可改（config 默认 3080 只是默认）——进程真实端口以 cmdline --port 为准。
-   *  在配置端口无监听但 DSH 进程在跑时，找出受管 DSH 进程的真实端口并更正注册（dsh-main /
-   *  main 实例 / relay 目标 / healthUrl / 状态），让系统跟随用户改动而非卡死在旧配置。 */
+   * DSH 端口由用户可改（config 默认 3080 只是默认）——进程真实端口以 cmdline --port 为准。
+   * 在配置端口无监听但 DSH 进程在跑时，找出受管 DSH 进程的真实端口并更正注册（dsh-main /
+   * main 实例 / relay 目标 / healthUrl / 状态），让系统跟随用户改动而非卡死在旧配置。 */
   _findManagedDshPort() {
     // 候选：配置 bin 精确匹配（config.command[1]）优先；兼容手动标准 DSH（isDshCmdline）
     const bins = [];
@@ -338,11 +332,11 @@ class MainProcess {
       this.logger.warn && this.logger.warn('register dsh-main ' + newPort + ' 失败，保留旧端口 ' + oldPort + ': ' + ((e && e.message) || e));
       return false;
     }
-    // ⚠ 2026-09-13（失效模式 g）：**带 ownerId** —— 与实例域 P1-3 的修法同规。
-    //   按端口号无条件释放可能删掉**他人**的记录（若 oldPort 期间被别的 owner 重新登记）。
-    //   ⚠ owner 必须与 ports.register('dsh-main', p) 写入的**完全一致**：那是 'system:' + role
-    //     （ports.js:156），不是 'dsh-main'。写错会让释放变 no-op → 旧端口残留
-    //     （由 test/main-port-rederive-test.js 捕获）。
+    // 2026-09-13（失效模式 g）：**带 ownerId** —— 与实例域 P1-3 的修法同规。
+    // 按端口号无条件释放可能删掉**他人**的记录（若 oldPort 期间被别的 owner 重新登记）。
+    // owner 必须与 ports.register('dsh-main', p) 写入的**完全一致**：那是 'system:' + role
+    // （ports.js:156），不是 'dsh-main'。写错会让释放变 no-op → 旧端口残留
+    // （由 test/main-port-rederive-test.js 捕获）。
     try { if (oldPort !== newPort) ports.release(oldPort, 'system:dsh-main'); } catch {}
     this.config.targetPort = newPort;
     try { this.config.healthUrl = 'http://' + this.config.targetHost + ':' + newPort + '/'; } catch {}
@@ -412,7 +406,7 @@ class MainProcess {
   }
 
   /** 校验 pid 进程是否属于本守卫管理：cmdline 含配置的启动 bin，或符合 DSH 特征（兼容外部手动起的标准 DSH）。
-   *  精确匹配避免"路径碰巧含 dsh 就误接管"与"安装路径不含 dsh 就漏接管"。 */
+   * 精确匹配避免"路径碰巧含 dsh 就误接管"与"安装路径不含 dsh 就漏接管"。 */
   _isManagedProcess(pid) {
     const cmd = pidlook.readCmdline(pid);
     if (!cmd) return false;
@@ -440,8 +434,8 @@ class MainProcess {
     const child = this._mChild();
     if (child && child.exitCode === null) this._killSequence(child);
     // 重启前停掉仍运行中的目标，保证 RESTARTING → 重拉路径畅通：
-    //  - spawn 托管下被接管的存活实例（如假死触发 http_unhealthy 时进程还活着）→ 杀其 pid；
-    //  （adopted_exit 场景 adopted 已死，此处 isAlive 为 false 自然跳过，不误杀。）
+    // - spawn 托管下被接管的存活实例（如假死触发 http_unhealthy 时进程还活着）→ 杀其 pid；
+    // （adopted_exit 场景 adopted 已死，此处 isAlive 为 false 自然跳过，不误杀。）
     if (this._mAdoptPid() && pidlook.isAlive(this._mAdoptPid())) {
       try { this._killAdopted(this._mAdoptPid()); } catch (e) { this.logger.warn('adopt kill during restart: ' + e.message); }
     }
@@ -473,22 +467,22 @@ class MainProcess {
   }
 
   /** 向进程组发信号（detached spawn 的子进程是组长）；组信号失败退回单进程
-   *  （安卓 = POSIX 组信号，树语义由平台层 `killTree` 提供）。 */
+   * （安卓 = POSIX 组信号，树语义由平台层 `killTree` 提供）。 */
   _signalChild(child, sig) {
     platform.processControl.signalProcess(child.pid, sig);
   }
 
   /** **整树**终止（P1-G 修复）。
    *
-   *  ⚠ 为什么必须单独有这个方法：
-   *   平台层早已提供 `killTree`（安卓/POSIX = 进程组信号）**且已导出**，
-   *   但历史代码里**零调用点** —— 实际停止路径只用 `signalProcess`（单进程语义），
-   *   于是停止 DSH 只杀父进程：其派生的子进程（node / 子命令）成为**孤儿**，
-   *   继续占端口、持文件锁；守卫重启后 adopt 复用即被楔死。
+   * 为什么必须单独有这个方法：
+   * 平台层早已提供 `killTree`（安卓/POSIX = 进程组信号）**且已导出**，
+   * 但历史代码里**零调用点** —— 实际停止路径只用 `signalProcess`（单进程语义），
+   * 于是停止 DSH 只杀父进程：其派生的子进程（node / 子命令）成为**孤儿**，
+   * 继续占端口、持文件锁；守卫重启后 adopt 复用即被楔死。
    *
-   *   这与 `capabilityProfile().processTreeKill` 的**声明相反** ——
-   *   该字段曾只由 `hasTool('taskkill')` 覆写，只证明「命令存在」，不证明「被使用」。
-   *   正是本仓不变量「声明必须由实现产物支撑」被违反的一例（PC 遗留，安卓已恒 false）。
+   * 这与 `capabilityProfile().processTreeKill` 的**声明相反** ——
+   * 该字段曾只由 `hasTool('taskkill')` 覆写，只证明「命令存在」，不证明「被使用」。
+   * 正是本仓不变量「声明必须由实现产物支撑」被违反的一例（PC 遗留，安卓已恒 false）。
    */
   _killTree(child, sig) {
     const pc = platform.processControl;
@@ -524,7 +518,7 @@ class MainProcess {
       this._adoptKillTimer = null;
       if (pidlook.isAlive(pid)) {
         // P1-G：接管实例同样可能有子进程 —— 升级为整树（进程组信号）。
-        //   旧实现只 process.kill(pid)，会留下孤儿子进程占端口。
+        // 旧实现只 process.kill(pid)，会留下孤儿子进程占端口。
         const pc = platform.processControl;
         if (pc && typeof pc.killTree === 'function') {
           pc.killTree(pid, 'SIGKILL', () => {});

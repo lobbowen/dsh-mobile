@@ -5,6 +5,7 @@
 
 const os = require('node:os');
 const path = require('node:path');
+const AGENT = require('./agent').load();
 
 function expandHome(p) {
   if (typeof p !== 'string') return p;
@@ -54,24 +55,24 @@ const DEFAULTS = {
   logMaxBytes: 5 * 1024 * 1024,
   notifyEnabled: true,
   routerAutostart: false, // 智能路由启动开关（旧键 switcherAutoStart 已迁移）
-  // ⚠ 内核更新键 `corePackageName` 已删除：安卓内核不经 npm 分发，
-  //   更新由容器 OTA 完成（单写入者 = 容器）；内核不查询也不安装自己。
-  // ⚠ 旧 manifest 模式的残留键 `selfUpdateManifestUrl` / `selfUpdateDir` 同样已删除
-  //   （全仓无赋值点）。既有用户 config.json 若仍含这些键，加载时忽略即可（未知键不报错）。
-  pluginsProfileName: 'web',
-  packageName: '@deepseek-ai/dsh',
+  // 内核更新键 `corePackageName` 已删除：安卓内核不经 npm 分发，
+  // 更新由容器 OTA 完成（单写入者 = 容器）；内核不查询也不安装自己。
+  // 旧 manifest 模式的残留键 `selfUpdateManifestUrl` / `selfUpdateDir` 同样已删除
+  // （全仓无赋值点）。既有用户 config.json 若仍含这些键，加载时忽略即可（未知键不报错）。
+  pluginsProfileName: AGENT.profileName,
+  packageName: AGENT.npmPackage,
   // **最小兜底**镜像源（2026-09-11 契约化）。
   //
-  // ⚠ 完整目录与探测规格**不在这里** —— 它们是**壳**的产物：
-  //   用户在装壳那刻机器上没有内核，壳必须先完成镜像选择才能装内核，
-  //   故「镜像源管理」的所有权在壳，经 ~/.dsh/supervisor/registry.json 投放，
-  //   内核由 domains/dist 的 DistributionManager 读取（见 platform/registry-contract.js）。
+  // 完整目录与探测规格**不在这里** —— 它们是**壳**的产物：
+  // 用户在装壳那刻机器上没有内核，壳必须先完成镜像选择才能装内核，
+  // 故「镜像源管理」的所有权在壳，经 ~/.dsh/supervisor/registry.json 投放，
+  // 内核由 domains/dist 的 DistributionManager 读取（见 platform/registry-contract.js）。
   //
   // 此处仅保留 2 条，覆盖「契约不可用时也能跑」这一底线（不变量 C2）：
-  //   官方源（能上网）+ npmmirror（中国网络）。
+  // 官方源（能上网）+ npmmirror（中国网络）。
   //
   // 历史：曾在此硬编码与 dist/index.js、壳 mirror.rs **逐字节相同的 6 条**，
-  //   任何一处增删都会漂移；且因两侧探测方法不同，实测会**选到不同的源**。
+  // 任何一处增删都会漂移；且因两侧探测方法不同，实测会**选到不同的源**。
   registries: [
     'https://registry.npmjs.org',
     'https://registry.npmmirror.com',

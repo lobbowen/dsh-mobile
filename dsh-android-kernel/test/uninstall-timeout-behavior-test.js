@@ -5,17 +5,17 @@
 // P1-F **行为级**回归：卸载挂起时必须超时收尾并释放锁
 //
 // 与 `uninstall-timeout-test.js`（静态断言）的分工：
-//   · 静态断言证明「结构与接线存在」；
-//   · 本测试证明「**行为真的发生**」—— 用一个会挂起的假 npm 触发真实的看门狗路径。
+// · 静态断言证明「结构与接线存在」；
+// · 本测试证明「**行为真的发生**」—— 用一个会挂起的假 npm 触发真实的看门狗路径。
 //
-// ⚠ 为什么必须两者都有：静态断言无法证明超时会被触发
-//   （我第一版只写静态断言，注入「看门狗永不触发」后它照样全绿 —— 那是假门禁）。
+// 为什么必须两者都有：静态断言无法证明超时会被触发
+// （我第一版只写静态断言，注入「看门狗永不触发」后它照样全绿 —— 那是假门禁）。
 //
 // 做法：
-//   1. 造一个**永不退出**的假 npm（`#!/bin/sh` + `sleep 1000`）；
-//   2. 把 config.uninstallTimeoutMs 设为 800ms（这就是可注入的用途）；
-//   3. 调 uninstall()，断言：在远小于 sleep 时长内返回、ok=false、timedOut=true；
-//   4. 断言 `manager.uninstalling === null`（锁已释放 —— 这是缺陷的核心症状）。
+// 1. 造一个**永不退出**的假 npm（`#!/bin/sh` + `sleep 1000`）；
+// 2. 把 config.uninstallTimeoutMs 设为 800ms（这就是可注入的用途）；
+// 3. 调 uninstall()，断言：在远小于 sleep 时长内返回、ok=false、timedOut=true；
+// 4. 断言 `manager.uninstalling === null`（锁已释放 —— 这是缺陷的核心症状）。
 // ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
@@ -35,24 +35,24 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 
   // 假 npm：**永不退出**（模拟 registry 挂死 / 凭证助手等待）。
   //
-  // ⚠ 2026-09-13 修复（P1）：**必须跨平台构造**。
-  //   原实现写的是 '#!/bin/sh' + sleep 1000 的 **POSIX 脚本** ——
-  //   Windows **无法执行**它（无 sh 解释器）→ spawn 立刻失败，
-  //   「挂起」退化成「立即失败」→ timedOut=false → 本测试两条断言在 Windows 上必红
-  //   （实测 v0.1.5-BETA.2 的 windows-latest leg：4ms 返回、timedOut=null→false）。
-  //   修法：用 **Node 自身**当解释器（四平台都是同一个可执行），
-  //   并把「挂起/正常退出」写成两份 .js —— 由 process.execPath 执行，Windows 同样可用。
+  // 2026-09-13 修复（P1）：**必须跨平台构造**。
+  // 原实现写的是 '#!/bin/sh' + sleep 1000 的 **POSIX 脚本** ——
+  // Windows **无法执行**它（无 sh 解释器）→ spawn 立刻失败，
+  // 「挂起」退化成「立即失败」→ timedOut=false → 本测试两条断言在 Windows 上必红
+  // （实测 v0.1.5-BETA.2 的 windows-latest leg：4ms 返回、timedOut=null→false）。
+  // 修法：用 **Node 自身**当解释器（四平台都是同一个可执行），
+  // 并把「挂起/正常退出」写成两份 .js —— 由 process.execPath 执行，Windows 同样可用。
   const HANG_JS = 'setTimeout(function () {}, 60000);';   // 60s 不退出（远大于 800ms 超时）
   const fakeNpmHang = path.join(tmp, 'npm-hangs.js');
   fs.writeFileSync(fakeNpmHang, HANG_JS);
   const fakeNpm = process.execPath;                        // 用真实 node 可执行当「解释器」
   const fakeNpmArg = [fakeNpmHang];                        // 由 manager 的 npmBin 支持数组
 
-  // ⚠ 绝不用「patch 模块导出」的方式替换 npm —— 真实事故（2026-09-12）：
-  //   `const { npmBin } = require(...)` 是**值绑定**，patch 无效，
-  //   于是这次「伪造的挂起」实际执行了**真实 npm uninstall -g**。
-  //   那次恰好 no-op（目标 prefix 无此包），但这是侥幸：若真有包就会被删。
-  //   现改为**构造期依赖注入**（opts.npmBin），测试在结构上不可能触碰真实 npm。
+  // 绝不用「patch 模块导出」的方式替换 npm —— 真实事故（2026-09-12）：
+  // `const { npmBin } = require(...)` 是**值绑定**，patch 无效，
+  // 于是这次「伪造的挂起」实际执行了**真实 npm uninstall -g**。
+  // 那次恰好 no-op（目标 prefix 无此包），但这是侥幸：若真有包就会被删。
+  // 现改为**构造期依赖注入**（opts.npmBin），测试在结构上不可能触碰真实 npm。
   const mgr = new NativeManager({
     config: {
       packageName: '@deepseek-ai/dsh',

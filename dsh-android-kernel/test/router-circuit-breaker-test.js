@@ -8,21 +8,21 @@
 //
 // 它们都作用在「坏实例能否被自动重启」这一条链上，任一失效即整链失效：
 //
-//   P1-1  `markUsed` 在**请求发出前**无条件清零 `_unhealthyCount`，
-//         而重启阈值是「连续 ≥2 次失败」→ 计数**数学上到不了 2**。
-//   P1-2  断流自愈调用的是 `prov.markNetFail(acc)` —— **该方法全仓不存在**，
-//         `typeof === 'function'` 恒 false → 调用是死代码。
-//   P1-3  在途请求期间的重启被记为 `_restartPending` 但**无任何读取点**，
-//         且 2 分钟退避**在延迟之前**就已置位 → 坏实例至少卡死 2 分钟。
+// P1-1 `markUsed` 在**请求发出前**无条件清零 `_unhealthyCount`，
+// 而重启阈值是「连续 ≥2 次失败」→ 计数**数学上到不了 2**。
+// P1-2 断流自愈调用的是 `prov.markNetFail(acc)` —— **该方法全仓不存在**，
+// `typeof === 'function'` 恒 false → 调用是死代码。
+// P1-3 在途请求期间的重启被记为 `_restartPending` 但**无任何读取点**，
+// 且 2 分钟退避**在延迟之前**就已置位 → 坏实例至少卡死 2 分钟。
 //
 // 后果：稳定 5xx/400（不触发 180s 超时）的坏实例会被持续选中吃流量，
-//   只能靠另一套独立的 _monitorFails（探活）兜底。
+// 只能靠另一套独立的 _monitorFails（探活）兜底。
 //
 // ## 锁定不变量
-//   R-a  清零只发生在**请求成功后**（markUsed 不得再碰 _unhealthyCount）
-//   R-b  `markNetFail` 不得再出现在调用位置（改用真实存在的 markInstanceNetFail）
-//   R-c  `_restartPending` 必须有**读取点**（出现在某方法的实参位置）
-//   R-d  退避 `_restartAt` 只在**真正执行**重启时置位（不得在延迟分支前）
+// R-a 清零只发生在**请求成功后**（markUsed 不得再碰 _unhealthyCount）
+// R-b `markNetFail` 不得再出现在调用位置（改用真实存在的 markInstanceNetFail）
+// R-c `_restartPending` 必须有**读取点**（出现在某方法的实参位置）
+// R-d 退避 `_restartAt` 只在**真正执行**重启时置位（不得在延迟分支前）
 // ═══════════════════════════════════════════════════════════════════════════
 
 const path = require('node:path');
@@ -42,9 +42,9 @@ const fwd = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'forward
   check('R-a markUsed **不再**清零 _unhealthyCount',
     !!m && !/_unhealthyCount\s*=/.test(m[0]), m ? '已移除' : '');
   check('R-a 存在 markRequestOk（成功后才清零）', /markRequestOk\(inst\)/.test(proxy), '有');
-  // ⚠ 断言「调用了 markRequestOk」而不绑定具体实参名 ——
-  //   P2 双事实源修复后实参已改为 instOf(...) 的结果（okInst），
-  //   写死 `acc.instance` 会让「纯重构」误报（我第一版就踩了这个）。
+  // 断言「调用了 markRequestOk」而不绑定具体实参名 ——
+  // P2 双事实源修复后实参已改为 instOf(...) 的结果（okInst），
+  // 写死 `acc.instance` 会让「纯重构」误报（我第一版就踩了这个）。
   check('R-a forward-core 在 2xx 成功路径调用 markRequestOk',
     /markRequestOk\(\w+\)/.test(fwd), '已接入');
 }

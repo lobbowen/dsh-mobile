@@ -2,17 +2,17 @@
 set -euo pipefail
 
 # ============================================================================
-#  把 build-node-android.sh 产出的 node 二进制打成 OTA 发布包，并计算 sha256。
+# 把 build-node-android.sh 产出的 node 二进制打成 OTA 发布包，并计算 sha256。
 #
-#  ⚠️ 重要现状说明（别被这条命令误导）：
-#  打包好的 OTA 包解压后落在 filesDir（应用可写目录），而 Android 10+ 的
-#  SELinux 禁止 exec 该目录中的文件（W^X）。也就是说，当前 OTA 通道能完成
-#  「下载 / sha256 校验 / 解压」这些数据层面的动作，但解压出来的 node
-#  【无法被 ProcessBuilder 直接启动】。
-#  真正可执行的 node 只有一份：随 APK 打进 jniLibs、由系统解压到
-#  /data/app/.../lib/<abi>/libnode.so 的那份（见 NodeProvisioner 的说明）。
-#  所以现阶段"升级 Node"的实际手段是重新构建 APK；本脚本保留作为将来接入
-#  可执行型 OTA（例如经 app_process 拉起）的生产端工具。
+# 重要现状说明（别被这条命令误导）：
+# 打包好的 OTA 包解压后落在 filesDir（应用可写目录），而 Android 10+ 的
+# SELinux 禁止 exec 该目录中的文件（W^X）。也就是说，当前 OTA 通道能完成
+# 「下载 / sha256 校验 / 解压」这些数据层面的动作，但解压出来的 node
+# 【无法被 ProcessBuilder 直接启动】。
+# 真正可执行的 node 只有一份：随 APK 打进 jniLibs、由系统解压到
+# /data/app/.../lib/<abi>/libnode.so 的那份（见 NodeProvisioner 的说明）。
+# 所以现阶段"升级 Node"的实际手段是重新构建 APK；本脚本保留作为将来接入
+# 可执行型 OTA（例如经 app_process 拉起）的生产端工具。
 # ============================================================================
 
 VER="${1:?用法: ./scripts/make-release.sh <node-version>}"

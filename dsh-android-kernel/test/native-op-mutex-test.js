@@ -9,20 +9,20 @@
 // `install()` / `upgrade()` / `uninstall()` 是三个会写 npm 全局目录的重操作，
 // 必须互斥。但它们的检查**不对称**：
 //
-//   · `upgrade()` **从不设置** `this.installing`，也**不检查**它；
-//   · `install()` **不检查** `busy()`（即 upgradeState 非 idle/done/failed）；
-//   · 两者共享 task key `('native','main')`，故互斥**完全依赖** `tasks.isBusy()` 这一**可选**依赖。
+// · `upgrade()` **从不设置** `this.installing`，也**不检查**它；
+// · `install()` **不检查** `busy()`（即 upgradeState 非 idle/done/failed）；
+// · 两者共享 task key `('native','main')`，故互斥**完全依赖** `tasks.isBusy()` 这一**可选**依赖。
 //
 // 生产中 `tasks` 总被注入（supervisor.js:328-334）故当前成立；但：
-//   · API 层 `/native/upgrade` 只查 `busy()`，**不查 `installing`**（api/native.js:41）；
-//   · 未注入 tasks 时（嵌入/测试/将来重构）install 与 upgrade 会**并发跑两个
-//     `npm install -g`** —— 同前缀并发写 npm 全局目录，结果不可预期。
+// · API 层 `/native/upgrade` 只查 `busy()`，**不查 `installing`**（api/native.js:41）；
+// · 未注入 tasks 时（嵌入/测试/将来重构）install 与 upgrade 会**并发跑两个
+// `npm install -g`** —— 同前缀并发写 npm 全局目录，结果不可预期。
 //
 // ## 锁定不变量
-//   K-a  install() 必须检查 busy()（升级中拒绝安装）
-//   K-b  upgrade() 必须检查 installing / uninstalling（安装/卸载中拒绝升级）
-//   K-c  uninstall() 必须同时检查两者（既有行为，防回归）
-//   K-d  行为级：置位锁后，三个入口都必须**拒绝**且不触碰 npm
+// K-a install() 必须检查 busy()（升级中拒绝安装）
+// K-b upgrade() 必须检查 installing / uninstalling（安装/卸载中拒绝升级）
+// K-c uninstall() 必须同时检查两者（既有行为，防回归）
+// K-d 行为级：置位锁后，三个入口都必须**拒绝**且不触碰 npm
 // ═══════════════════════════════════════════════════════════════════════════
 
 const path = require('node:path');
@@ -51,14 +51,14 @@ check('K-b upgrade 检查 installing', /if \(this\.installing\)/.test(bUpgrade),
 check('K-b upgrade 检查 uninstalling', /if \(this\.uninstalling\)/.test(bUpgrade), '有');
 check('K-c uninstall 检查 installing', /if \(this\.installing\)/.test(bUninstall), '有');
 check('K-c uninstall 检查 uninstalling', /if \(this\.uninstalling\)/.test(bUninstall), '有');
-// ⚠ 本条是行为测试 K-d 抓出来的**真实缺口**：uninstall 原本不查 busy()，
-//   故「升级进行中」时能通过全部检查 → 会在 npm 正装新版时卸载它。
+// 本条是行为测试 K-d 抓出来的**真实缺口**：uninstall 原本不查 busy()，
+// 故「升级进行中」时能通过全部检查 → 会在 npm 正装新版时卸载它。
 check('K-c uninstall 检查 busy()（升级中拒绝）', /if \(this\.busy\(\)\)/.test(bUninstall), '有');
 
 // ── K-d：行为级（包进 async IIFE：顶层 await 会被 Node 判为 ESM）──
 (async () => {
 // ── K-d：行为级 —— 三个入口在锁置位时必须拒绝（且不 spawn npm）──
-//   构造最小 harness：不解真实配置，只验前置拒绝路径。
+// 构造最小 harness：不解真实配置，只验前置拒绝路径。
 {
   const mk = () => {
     const m = Object.create(NativeManager.prototype);
@@ -87,9 +87,9 @@ check('K-c uninstall 检查 busy()（升级中拒绝）', /if \(this\.busy\(\)\)
   check('K-d installing 置位时 uninstall 拒绝', un1 && un1.ok === false && !un1.threw, JSON.stringify(un1));
 
   // ② upgradeState 非终态 → install 与 uninstall 都必须拒绝
-  //   ⚠ **各自用独立的 mgr**：`install()` 在通过前置检查后会置 `this.installing = true`，
-  //     若共用同一个实例，`uninstall()` 会因为**那个**锁被拒 —— 测试便成了假通过
-  //     （我第一版就如此：注掉 uninstall 的 busy 检查仍然 PASS）。
+  // **各自用独立的 mgr**：`install()` 在通过前置检查后会置 `this.installing = true`，
+  // 若共用同一个实例，`uninstall()` 会因为**那个**锁被拒 —— 测试便成了假通过
+  // （我第一版就如此：注掉 uninstall 的 busy 检查仍然 PASS）。
   const m2a = mk(); m2a.upgradeState = 'restarting';
   const in2 = await Promise.resolve(m2a.install('1.0.0')).catch((e) => ({ threw: e.message }));
   check('K-d 升级中 install 拒绝', in2 && in2.ok === false && !in2.threw, JSON.stringify(in2));

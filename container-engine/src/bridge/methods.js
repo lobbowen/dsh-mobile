@@ -3,9 +3,9 @@
 // HostBridge 8 组方法表与能力声明（对齐 BRIDGE_PROTOCOL.md §3 + PROVISIONING.md）。
 //
 // 两层能力：
-//  1) bridgeGroup：内核 kernel.json 的 requires 使用的「组令牌」bridge:<group>。
-//  2) deviceCaps：方法实际依赖的「设备预置能力」（device_owner / accessibility / shizuku / …），
-//     由 PROVISIONING.md 决定设备是否具备。缺失 → 桥返回 ERR_CAPABILITY_MISSING。
+// 1) bridgeGroup：内核 kernel.json 的 requires 使用的「组令牌」bridge:<group>。
+// 2) deviceCaps：方法实际依赖的「设备预置能力」（device_owner / accessibility / shizuku / …），
+// 由 PROVISIONING.md 决定设备是否具备。缺失 → 桥返回 ERR_CAPABILITY_MISSING。
 // audit=true 的方法属 BRIDGE_PROTOCOL §5 强制审计的特权操作。
 
 const GROUPS = ['app_control', 'ui_automation', 'shell', 'device_policy', 'storage', 'build', 'notification', 'system'];
@@ -24,23 +24,23 @@ const DEVICE_CAPS = [
   'kernel_update',            // 从本地 feed 安装已签名内核（A'' 自举，任意设备具备）
 ];
 
-// ⚠️ build_chain 与 kernel_update 的区别（务必别混用）
+// build_chain 与 kernel_update 的区别（务必别混用）
 //
-//   build_chain   —— 「设备上有编译工具链」。**已被实测证伪**：
-//                    Google Maven 上 aapt2 只有 linux/osx/windows 三个 classifier，
-//                    全是 x86_64；linux-aarch64 / linux-arm64 均 HTTP 404。
-//                    解包实况：e_machine=0x3e、PT_INTERP=/lib64/ld-linux-x86-64.so.2、
-//                    NEEDED 含 6 个 glibc 库。exec 四道关的 interp/架构/libc
-//                    三关在装机后无法补救。
-//                    ⇒ 保留此 token 只为表达"这个概念"，**任何设备都不会置位它**。
+// build_chain —— 「设备上有编译工具链」。**已被实测证伪**：
+// Google Maven 上 aapt2 只有 linux/osx/windows 三个 classifier，
+// 全是 x86_64；linux-aarch64 / linux-arm64 均 HTTP 404。
+// 解包实况：e_machine=0x3e、PT_INTERP=/lib64/ld-linux-x86-64.so.2、
+// NEEDED 含 6 个 glibc 库。exec 四道关的 interp/架构/libc
+// 三关在装机后无法补救。
+// ⇒ 保留此 token 只为表达"这个概念"，**任何设备都不会置位它**。
 //
-//   kernel_update —— 「设备能安装已签名内核」。不依赖任何原生工具链，
-//                    只用到：读本地文件 + Node 自带 OpenSSL 验签 + 写 filesDir。
-//                    ⇒ **任意设备都具备**（HostBridgeService.deviceCapabilities 无条件置位）。
+// kernel_update —— 「设备能安装已签名内核」。不依赖任何原生工具链，
+// 只用到：读本地文件 + Node 自带 OpenSSL 验签 + 写 filesDir。
+// ⇒ **任意设备都具备**（HostBridgeService.deviceCapabilities 无条件置位）。
 //
-//  这个区分本身就是一条架构教训：原先 build 组绑在 build_chain 上，
-//  于是整组因为一个永不具备的能力而**永远返回 -32001** —— 一个"沉默的、
-//  代价极高的失败"。把"安装内核"从"编译"里拆出来，那半条链立刻可用。
+// 这个区分本身就是一条架构教训：原先 build 组绑在 build_chain 上，
+// 于是整组因为一个永不具备的能力而**永远返回 -32001** —— 一个"沉默的、
+// 代价极高的失败"。把"安装内核"从"编译"里拆出来，那半条链立刻可用。
 
 // method → { group, caps:[deviceCap...], audit?:bool }
 const METHODS = {
@@ -91,13 +91,13 @@ const METHODS = {
   // 为什么不能」，并拿到**结构化归因**（缺依赖 / 未解压 / SELinux 拒 exec / 探针失败）。
   //
   // 返回形状（与 Kotlin NativePreparer.PrepareReport.toJson 对齐）：
-  //   { allRequiredReady: Boolean, nativeLibraryDir: String, libSearchPath: String,
-  //     assets: [{ id, libName, humanName, required, note, requiredDeps,
-  //                status, path?, inApk?, missingDep?, errno?, exit?, output?, hint? }] }
-  //   status ∈ ready | missing_from_lib | missing_dependency | not_executable | probe_failed
+  // { allRequiredReady: Boolean, nativeLibraryDir: String, libSearchPath: String,
+  // assets: [{ id, libName, humanName, required, note, requiredDeps,
+  // status, path?, inApk?, missingDep?, errno?, exit?, output?, hint? }] }
+  // status ∈ ready | missing_from_lib | missing_dependency | not_executable | probe_failed
   //
   // 参数：{ walkProbes?: Boolean }，默认 true（真跑 exec-probe）。传 false 只做
-  //       存在性+依赖检查，避免频繁 spawn 进程。
+  // 存在性+依赖检查，避免频繁 spawn 进程。
   'sys.nativeAssets':     { group: 'system', caps: ['base'] },
   'sys.setTime':          { group: 'system', caps: ['device_owner'], audit: true },
   'sys.setTimeZone':      { group: 'system', caps: ['device_owner'], audit: true },
@@ -123,11 +123,11 @@ function missingCaps(method, availableCaps) {
 
 // 每组的**代表能力**：握手时判定「该组是否可用」。
 //
-// ⚠ 语义（与 Kotlin HostBridgeService.GROUP_REQUIRED 逐条对齐，2026-09 收敛）：
-//   组可用 = 该组的**代表性基础能力**具备，而非「组内每个方法的能力都具备」。
-//   例：bridge:app_control 的代表能力是 base —— 否则「启动已装应用」会被 Device Owner 门槛误挡，
-//   而 app.install/uninstall 这类特权方法本就由**方法级 caps**单独门禁（调用时再报 -32001）。
-//   两层门禁：组级（握手协商，粗粒度可用性）+ 方法级（每次调用，精确拦截）。
+// 语义（与 Kotlin HostBridgeService.GROUP_REQUIRED 逐条对齐，2026-09 收敛）：
+// 组可用 = 该组的**代表性基础能力**具备，而非「组内每个方法的能力都具备」。
+// 例：bridge:app_control 的代表能力是 base —— 否则「启动已装应用」会被 Device Owner 门槛误挡，
+// 而 app.install/uninstall 这类特权方法本就由**方法级 caps**单独门禁（调用时再报 -32001）。
+// 两层门禁：组级（握手协商，粗粒度可用性）+ 方法级（每次调用，精确拦截）。
 const GROUP_REQUIRED = {
   'app_control': 'base',
   'notification': 'base',

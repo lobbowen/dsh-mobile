@@ -1,10 +1,10 @@
 'use strict';
 
 // 域：守卫/设置 API（changelog·guard 版本·settings·env·ports）。
-// ⚠ 已删除的端点（勿回潮）：
-//   · /autostart            —— 开机自启（systemd + linger + GUI）：安卓常驻由 APK 容器 / Android Service 决定；
-//   · /settings/close-action —— 关窗隐藏到托盘：PC 桌面壳能力；
-//   · /self-update/*        —— 内核自更新：单写入者 = 安卓容器 OTA，内核不持有任何自更新端点。
+// 已删除的端点（勿回潮）：
+// · /autostart —— 开机自启（systemd + linger + GUI）：安卓常驻由 APK 容器 / Android Service 决定；
+// · /settings/close-action —— 关窗隐藏到托盘：PC 桌面壳能力；
+// · /self-update/* —— 内核自更新：单写入者 = 安卓容器 OTA，内核不持有任何自更新端点。
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -16,8 +16,8 @@ function owns(pathname) {
 }
 
 /** 更新日志（DSH）：只展示 DeepSeek Harness 相关内容（来自 NativeManager 版本信息），与管家无关。
- *  命名统一（A4）：UI 中该能力位于「概览」页的「版本与升级」区块（非独立页面）——
- *  历史注释曾按独立页面描述，易误导；此处按真实位置表述。 */
+ * 命名统一（A4）：UI 中该能力位于「概览」页的「版本与升级」区块（非独立页面）——
+ * 历史注释曾按独立页面描述，易误导；此处按真实位置表述。 */
 function fetchDshChangelog(res, sup) {
   const v = (sup && sup.nativeManager) ? sup.nativeManager.versionInfo() : {};
   const inst = v.installed || '未安装';

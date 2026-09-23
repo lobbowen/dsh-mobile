@@ -8,8 +8,8 @@
 // §7.6 把 `src/supervisor.js` 拆成 `src/guard/supervisor/*.js` 后，
 // **两处路径推导没有跟着更新**：
 //
-//   control-view.js   path.join(__dirname, '..') + 'src/domains/router/daemon.js'
-//   registry-view.js  path.join(__dirname, 'domains', 'router', 'daemon.js')
+// control-view.js path.join(__dirname, '..') + 'src/domains/router/daemon.js'
+// registry-view.js path.join(__dirname, 'domains', 'router', 'daemon.js')
 //
 // 而 `__dirname` 已从 `src/` 变成 `src/guard/supervisor/`，于是解析结果是
 // `src/guard/src/domains/router/daemon.js` —— **不存在**。
@@ -43,9 +43,9 @@ let _root = null; // 解析结果缓存（进程内不变）
  * 定位包内 `src/` 目录。
  *
  * 候选（按可信度排序，逐个**用存在性验证**）：
- *   ① `__dirname` 上溯（本模块位于 `src/platform/` → 上溯 1 层即 `src/`）；
- *   ② 显式从 process.argv[1] / 包根推（发行态 bundle 与源码态布局不同）；
- *   ③ 从 cwd 的 src/ 兜底（开发态直接 node src/... 运行时）。
+ * ① `__dirname` 上溯（本模块位于 `src/platform/` → 上溯 1 层即 `src/`）；
+ * ② 显式从 process.argv[1] / 包根推（发行态 bundle 与源码态布局不同）；
+ * ③ 从 cwd 的 src/ 兜底（开发态直接 node src/... 运行时）。
  *
  * @returns {string|null} `src/` 的绝对路径；全部候选不成立时 null
  */
@@ -108,10 +108,10 @@ function describe() {
  * 与 [`resolveSrcRoot`] 同一目的（对抗目录层级变化），但判据不同：
  * 包根用 `package.json` 验证。
  *
- * ⚠ 同类缺陷：`settings-view.js` 的 `_vcsRoot()` 曾用 `path.resolve(__dirname, '..')`
- *   并注释「= dsh-supervisor/」；但 §7.6 拆分后 `__dirname` 变为 `src/guard/supervisor/`，
- *   该表达式实际得到 `src/guard/` —— 注释与行为已经不符，
- *   导致「排除嵌套 .git」的判据作用在错误的目录上。
+ * 同类缺陷：`settings-view.js` 的 `_vcsRoot()` 曾用 `path.resolve(__dirname, '..')`
+ * 并注释「= dsh-supervisor/」；但 §7.6 拆分后 `__dirname` 变为 `src/guard/supervisor/`，
+ * 该表达式实际得到 `src/guard/` —— 注释与行为已经不符，
+ * 导致「排除嵌套 .git」的判据作用在错误的目录上。
  *
  * @returns {string|null}
  */

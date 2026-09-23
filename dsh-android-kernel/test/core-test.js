@@ -153,11 +153,11 @@ async function testApiSecurity() {
 
   // CSP 与静态资源
   r = await req(port, 'GET', '/', {});
-  // ⚠ UI 是**构建产物**（ui/ 经 `npm run build` 落入 ui/dist，或由容器经 OTA 注入 $DSH_UI_DIR）。
-  //   本测试不强制依赖它存在：安卓内核的面板属后续阶段（docs/ANDROID-PLAN.md §10），
-  //   CSP/nosniff 仅在「服务已构建 UI 的静态分支」时下发；UI 缺失属环境缺失而非内核逻辑回归 —— 跳过。
-  //   若直接跑 `npm test` 而未先构建 UI，会得到 503「UI not built」，
-  //   而旧断言只打印 `undefined`，让人误以为是 CSP 逻辑坏了。此处给出**可操作**的失败信息。
+  // UI 是**构建产物**（ui/ 经 `npm run build` 落入 ui/dist，或由容器经 OTA 注入 $DSH_UI_DIR）。
+  // 本测试不强制依赖它存在：安卓内核的面板属后续阶段（docs/ANDROID-PLAN.md §10），
+  // CSP/nosniff 仅在「服务已构建 UI 的静态分支」时下发；UI 缺失属环境缺失而非内核逻辑回归 —— 跳过。
+  // 若直接跑 `npm test` 而未先构建 UI，会得到 503「UI not built」，
+  // 而旧断言只打印 `undefined`，让人误以为是 CSP 逻辑坏了。此处给出**可操作**的失败信息。
   const uiMissing = r.code === 503 || /UI not built/.test(String(r.body));
   // Android 内核：UI（移动端容器 webview）属后续阶段（plan §10），本环境未构建 UI 产物；
   // CSP/nosniff 仅在「服务已构建 UI 的静态分支」时下发，UI 缺失属环境缺失而非内核逻辑回归 —— 跳过。

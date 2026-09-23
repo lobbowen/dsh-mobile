@@ -49,11 +49,11 @@ function getJson(url, timeoutMs = 10000, redirectsLeft = 5) {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
         res.resume();
         if (redirectsLeft <= 0) return reject(new Error('too many redirects from ' + url));
-        // ⚠ P1-3 修复（2026-09-12）：重定向目标**必须校验协议**。
-        //   缺陷：直接把 `res.headers.location` 递归传回；若它是 `file://…`，
-        //     `mod.get()`（http/https 模块）会**同步抛 ERR_INVALID_PROTOCOL**，
-        //     而此处位于响应回调内 → 逃逸为进程级 uncaughtException。
-        //   触发面：registry 可配任意 https（仅校验 ^https?://），或其 302 可达第三方镜像。
+        // P1-3 修复（2026-09-12）：重定向目标**必须校验协议**。
+        // 缺陷：直接把 `res.headers.location` 递归传回；若它是 `file://…`，
+        // `mod.get()`（http/https 模块）会**同步抛 ERR_INVALID_PROTOCOL**，
+        // 而此处位于响应回调内 → 逃逸为进程级 uncaughtException。
+        // 触发面：registry 可配任意 https（仅校验 ^https?://），或其 302 可达第三方镜像。
         const next = String(res.headers.location);
         if (!/^https?:\/\//i.test(next)) return reject(new Error('重定向到不支持的协议: ' + next.slice(0, 64)));
 
@@ -94,10 +94,10 @@ class PluginMarket {
     this._ts = 0;
     this._inFlight = null;
     // P2-8 修复（2026-09-12）：**整体构建预算**（防一次刷新挂住请求数十分钟）。
-    //   背景：社区源候选约 2468 个，按 8 并发分批、每批各带超时 —— 最坏情况可达数十分钟，
-    //     而 `GET /plugins/market` 会**阻塞到构建完成**（前端 15s 就放弃了，服务端却还在跑）。
-    //   现给整次构建一个上限：到点则**停止发起新批次**，用已采集的部分构建索引；
-    //     与既有的「坏构建保护」天然配合（部分结果不会冲掉旧缓存）。
+    // 背景：社区源候选约 2468 个，按 8 并发分批、每批各带超时 —— 最坏情况可达数十分钟，
+    // 而 `GET /plugins/market` 会**阻塞到构建完成**（前端 15s 就放弃了，服务端却还在跑）。
+    // 现给整次构建一个上限：到点则**停止发起新批次**，用已采集的部分构建索引；
+    // 与既有的「坏构建保护」天然配合（部分结果不会冲掉旧缓存）。
     this.buildBudgetMs = opts.buildBudgetMs || 240000; // 默认 4 分钟
     this._deadline = 0;
     // P2-8 配套：本次构建被**预算截断**的源（部分结果不得替换完整缓存，见 _buildIndexInner）。
@@ -180,13 +180,13 @@ class PluginMarket {
 
     // ── 保护 A：**预算截断的源**必须与旧缓存取并集（P2-8 配套修复，2026-09-12）──
     //
-    //   为什么必须单独处理：下面的保护 B 判据是 `!freshSources.has(source)`
-    //   ——「本次**整个源失败**」。而被预算截断的源**仍然出现在结果里**（只是不完整），
-    //   于是保护 B **不会**保留它的旧条目：只跑到 200/2400 的 community 源
-    //   会**替换掉**缓存的完整 community 列表，市场瞬间缩水且只留一条 warn。
-    //   （这是我加整体预算时引入的回归：「截断」与「整源失败」语义不同，不能共用判据。）
+    // 为什么必须单独处理：下面的保护 B 判据是 `!freshSources.has(source)`
+    // ——「本次**整个源失败**」。而被预算截断的源**仍然出现在结果里**（只是不完整），
+    // 于是保护 B **不会**保留它的旧条目：只跑到 200/2400 的 community 源
+    // 会**替换掉**缓存的完整 community 列表，市场瞬间缩水且只留一条 warn。
+    // （这是我加整体预算时引入的回归：「截断」与「整源失败」语义不同，不能共用判据。）
     //
-    //   截断源的并集**不受 50% 比例约束** ——「不完整」本身就是需要合并的充分理由。
+    // 截断源的并集**不受 50% 比例约束** ——「不完整」本身就是需要合并的充分理由。
     const truncated = this._truncatedSources || new Set();
     if (prev && prev.plugins && prev.plugins.length > 0 && truncated.size > 0) {
       const freshNames = new Set(plugins.map((pp) => pp.name));
@@ -200,7 +200,7 @@ class PluginMarket {
     }
 
     // ── 保护 B（既有，2026-09）：本次结果比上次缓存显著缩水（<50%）→ 某源大面积失败（网络/限流），
-    //    沿用旧缓存中本次**完全缺失**的源；绝不因一次坏构建丢掉好缓存。
+    // 沿用旧缓存中本次**完全缺失**的源；绝不因一次坏构建丢掉好缓存。
     if (prev && prev.plugins && prev.plugins.length > 0 && plugins.length < prev.plugins.length * 0.5) {
       const freshSources = new Set(plugins.map((pp) => pp.source));
       const prevByKey = new Map(prev.plugins.map((pp) => [pp.name, pp]));
@@ -368,7 +368,7 @@ class PluginMarket {
 }
 
 /** raw.githubusercontent.com 镜像回退（2026-09 修复：该域名在部分网络不可达 → github/community
- *  源整源失败致插件数大幅缩水）。先直连 raw，失败/超时走 gh-proxy.com 镜像（URL 前缀包装）。 */
+ * 源整源失败致插件数大幅缩水）。先直连 raw，失败/超时走 gh-proxy.com 镜像（URL 前缀包装）。 */
 const RAW_MIRRORS = ['https://gh-proxy.com/', 'https://ghproxy.net/'];
 async function rawGet(pathPart, isJson, timeoutMs = 15000) {
   const direct = 'https://raw.githubusercontent.com/' + pathPart;

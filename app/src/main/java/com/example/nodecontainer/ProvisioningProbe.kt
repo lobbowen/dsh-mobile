@@ -133,15 +133,15 @@ object ProvisioningProbe {
      * Shizuku 三态探测：**未安装 / 已安装未授权 / 已授权可用**。
      *
      * 为什么必须细分：这三种状态对内核的**处置方式完全不同**——
-     *   · 未安装   → 引导用户去装（或改用无线调试路径）；
-     *   · 未授权   → 只需在 Shizuku App 里点一次授权，成本极低，值得重试；
-     *   · 已授权   → shell 能力理论上可用（但容器侧尚未接入 SDK，见下）。
+     * · 未安装 → 引导用户去装（或改用无线调试路径）；
+     * · 未授权 → 只需在 Shizuku App 里点一次授权，成本极低，值得重试；
+     * · 已授权 → shell 能力理论上可用（但容器侧尚未接入 SDK，见下）。
      * 只报「不可用」会让内核既不知道要不要重试，也不知道该提示用户做什么。
      *
-     * ⚠ 当前容器**未内置 Shizuku SDK**（P4 决策：先做 shell 兜底 + 探测增强，不引入
-     *   第三方 AAR 以免污染冻结容器的信任边界）。因此即使 Shizuku 完全就绪，
-     *   `shell.exec` 仍以**应用 uid** 执行（privileged=false），不会冒充 shell uid(2000)。
-     *   真正的特权 shell 需要 Shizuku SDK 的 `Shell.newProcess(...)` 通道。
+     * 当前容器**未内置 Shizuku SDK**（P4 决策：先做 shell 兜底 + 探测增强，不引入
+     * 第三方 AAR 以免污染冻结容器的信任边界）。因此即使 Shizuku 完全就绪，
+     * `shell.exec` 仍以**应用 uid** 执行（privileged=false），不会冒充 shell uid(2000)。
+     * 真正的特权 shell 需要 Shizuku SDK 的 `Shell.newProcess(...)` 通道。
      */
     private fun checkShizuku(ctx: Context): ProbeResult {
         // ① 是否安装（包存在性）
@@ -159,9 +159,9 @@ object ProvisioningProbe {
         } catch (_: Throwable) { false }
 
         // ③ 是否已授权本应用。
-        //    Shizuku 的授权记录存在 Settings.Secure 的 "shizuku_authorized_packages" 之类字段上，
-        //    不同版本键名不一致；稳妥做法是「binder 在跑 + 本包已安装」即视为可尝试授权，
-        //    这里额外读一次常见键做增强判断，读不到不影响主判定。
+        // Shizuku 的授权记录存在 Settings.Secure 的 "shizuku_authorized_packages" 之类字段上，
+        // 不同版本键名不一致；稳妥做法是「binder 在跑 + 本包已安装」即视为可尝试授权，
+        // 这里额外读一次常见键做增强判断，读不到不影响主判定。
         val authedPkgs = try {
             Settings.Secure.getString(ctx.contentResolver, "shizuku_authorized_packages") ?: ""
         } catch (_: Throwable) { "" }

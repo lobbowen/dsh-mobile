@@ -234,9 +234,9 @@ async function main() {
   const occupier = http.createServer((req, res) => { res.writeHead(500); res.end('no'); });
   await new Promise((r) => occupier.listen(3961, '127.0.0.1', r));
   const d9 = startDaemon(makeConfig(3960, 3961));
-  // ⚠ 不要用固定 sleep：守卫完成「探测目标端口 → 判定被占」的耗时随 runner 负载波动，
-  //   固定的 3s 在较慢的 runner 上不够（实测 Windows CI #24 只有 guard_started/api_listening，
-  //   于是偶发失败）。改为轮询等待目标事件，超时再判定。
+  // 不要用固定 sleep：守卫完成「探测目标端口 → 判定被占」的耗时随 runner 负载波动，
+  // 固定的 3s 在较慢的 runner 上不够（实测 Windows CI #24 只有 guard_started/api_listening，
+  // 于是偶发失败）。改为轮询等待目标事件，超时再判定。
   ev = await getEvents(3960);
   {
     const deadline = Date.now() + 20000;

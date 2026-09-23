@@ -14,15 +14,15 @@
 // 而 tsc/eslint/build 都**不会**报错（读的是已声明的可选字段）。
 //
 // 注：本项由只读审计提出，但其「环境检测永久停在占位文本」的结论**不成立**——
-//   后端确实返回 `current`，故主行本来就会渲染。真实缺陷只是上述死字段/死分支，
-//   已按真实缺陷范围修正（不夸大为 P1）。
+// 后端确实返回 `current`，故主行本来就会渲染。真实缺陷只是上述死字段/死分支，
+// 已按真实缺陷范围修正（不夸大为 P1）。
 //
 // ## 门禁
-//   A **行为级对账**：真实调用后端 nodeLtsStatus()，取其实际键集合；
-//     断言 types.ts 声明里**没有**「后端不产出且前端也不用」的幽灵字段
-//   B UI 源码不得再引用 latestLts / ltsName（node-lts 语境）
-//   C 后端真实产出的键必须都在类型声明里（防反向漂移：前端拿不到新字段）
-//   D 反向：判据能识别幽灵字段（门禁非空转）
+// A **行为级对账**：真实调用后端 nodeLtsStatus()，取其实际键集合；
+// 断言 types.ts 声明里**没有**「后端不产出且前端也不用」的幽灵字段
+// B UI 源码不得再引用 latestLts / ltsName（node-lts 语境）
+// C 后端真实产出的键必须都在类型声明里（防反向漂移：前端拿不到新字段）
+// D 反向：判据能识别幽灵字段（门禁非空转）
 // ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
@@ -60,8 +60,8 @@ function ifaceFields(src, name) {
     realKeys.includes('ok') && realKeys.includes('current'), realKeys.join(','));
 
   // A：幽灵字段 = 声明了但后端不产出。
-  //   `error` 属**失败路径**产出（nodeLtsStatus 的 catch 返回 {ok:false,error}），
-  //   成功路径不返回它 —— 故显式豁免（不是幽灵字段）。
+  // `error` 属**失败路径**产出（nodeLtsStatus 的 catch 返回 {ok:false,error}），
+  // 成功路径不返回它 —— 故显式豁免（不是幽灵字段）。
   const ERROR_PATH_ONLY = ['error'];
   const phantom = fields.filter((f) => realKeys.indexOf(f) < 0 && ERROR_PATH_ONLY.indexOf(f) < 0);
   // 先证明豁免项本身是合理的（失败路径确实产出 error），避免豁免变成藏污纳垢
@@ -95,8 +95,8 @@ function ifaceFields(src, name) {
     for (const f of uiFiles) {
       if (f.indexOf('types.ts') >= 0) continue;
       const src = fs.readFileSync(f, 'utf8');
-      // ⚠ 剥离整行注释后再查：本次修正的**说明注释里必然引用旧字段名**
-      //   （「原实现读 latestLts / ltsName」），不剥离就会自匹配。
+      // 剥离整行注释后再查：本次修正的**说明注释里必然引用旧字段名**
+      // （「原实现读 latestLts / ltsName」），不剥离就会自匹配。
       const codeOnly = src.split('\n').filter((l) => {
         const t = l.trim();
         return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*');

@@ -7,25 +7,25 @@
 // ## 缺陷
 //
 // P1-1「frozen 且探测失败」使探测闸门**恒真** → 每 5 分钟起停实例：
-//   `applyDetection` 的失败分支只写 lastProbeError，**不设 nextResetAt**；
-//   而路由的闸门是 `missingReset = frozen && !nextResetAt` → 永真。
+// `applyDetection` 的失败分支只写 lastProbeError，**不设 nextResetAt**；
+// 而路由的闸门是 `missingReset = frozen && !nextResetAt` → 永真。
 //
 // P1-3 取证链路**零出口**却在转发主路径同步写盘：
-//   evidenceTail/evidenceStats 全仓无调用方、surface.js 未登记、前端零引用，
-//   而 append（statSync + appendFileSync）发生在每个上游 >=400 的路径上。
+// evidenceTail/evidenceStats 全仓无调用方、surface.js 未登记、前端零引用，
+// 而 append（statSync + appendFileSync）发生在每个上游 >=400 的路径上。
 //
 // P2-2 `PortRegistry.release(port, ownerId)` 的第二参被**静默忽略**：
-//   调用方（objects.js）以 owner 意图调用，实际按端口号无条件删除 → 可误删他人登记。
+// 调用方（objects.js）以 owner 意图调用，实际按端口号无条件删除 → 可误删他人登记。
 //
 // P2-4 `setProviderKeys(removeMasked)` 删反代账号时**不做收尾**：
-//   缺 stopInstance / ports.unregister / instances 同步（removeProxyKey 三者齐备）
-//   → orphan 实例与端口记录再无人释放。
+// 缺 stopInstance / ports.unregister / instances 同步（removeProxyKey 三者齐备）
+// → orphan 实例与端口记录再无人释放。
 //
 // ## 锁定不变量
-//   E-a  applyDetection 失败分支必须给出 nextResetAt 兜底（仅 frozen 且无恢复点时）
-//   E-b  取证默认关闭（opt-in），且仍保留显式启用能力
-//   E-c  release 接受 ownerId 且不匹配时不释放
-//   E-d  setProviderKeys 删除路径必须复用与 removeProxyKey 同等的收尾
+// E-a applyDetection 失败分支必须给出 nextResetAt 兜底（仅 frozen 且无恢复点时）
+// E-b 取证默认关闭（opt-in），且仍保留显式启用能力
+// E-c release 接受 ownerId 且不匹配时不释放
+// E-d setProviderKeys 删除路径必须复用与 removeProxyKey 同等的收尾
 // ═══════════════════════════════════════════════════════════════════════════
 
 const path = require('node:path');
@@ -97,7 +97,7 @@ check('E-c release 签名接受第二参', /release\(port, ownerId\)/.test(
 }
 
 // ── E-e：applyProxyUpdate 的进度必须写进 task（P2-1）──
-//   行为级：task 的 steps 能被子实例登记并推进 —— 这是前端读到的那个事实源。
+// 行为级：task 的 steps 能被子实例登记并推进 —— 这是前端读到的那个事实源。
 {
   const { TaskRegistry } = require(path.join(ROOT, 'src', 'platform', 'tasks.js'));
   const os = require('node:os');
@@ -121,8 +121,8 @@ check('E-e 源码调用 tasks.step 登记步骤', /this\.tasks\.step\(task\.id/.
 check('E-e 源码调用 tasks.stepState 推进状态', /this\.tasks\.stepState\(task\.id/.test(ops), '有');
 
 // ── E-h：daemon 模式下守卫**不得**写 providers.json（三条路径全覆盖）──
-//   缺陷：`setPersistEnabled(false)` 此前只在 supervisor.js 的一处 daemon 分支执行，
-//         而 `_ensureRouterRuntime` 还有另两条返回 daemon 的路径 → 双写覆盖。
+// 缺陷：`setPersistEnabled(false)` 此前只在 supervisor.js 的一处 daemon 分支执行，
+// 而 `_ensureRouterRuntime` 还有另两条返回 daemon 的路径 → 双写覆盖。
 {
   const sv = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'supervisor', 'supervise-view.js'), 'utf8');
   const sup = fs.readFileSync(path.join(ROOT, 'src', 'supervisor.js'), 'utf8');
@@ -136,7 +136,7 @@ check('E-e 源码调用 tasks.stepState 推进状态', /this\.tasks\.stepState\(
   check('E-h supervisor.js 兜底改用同一方法（不再内联）',
     /this\._disableRouterPersist\(\);/.test(sup), '有');
   // 反向：确认不再有内联的 setPersistEnabled(false) **代码**（方法本体保留一处）。
-  //   ⚠ 必须剥离注释行 —— 说明文字里会引用该写法（我第一版就踩了这个假阳性）。
+  // 必须剥离注释行 —— 说明文字里会引用该写法（我第一版就踩了这个假阳性）。
   const stripComments = (s) => s.split(String.fromCharCode(10))
     .filter((l) => { const t = l.trim(); return !t.startsWith('//'); })
     .join(String.fromCharCode(10));
@@ -146,9 +146,9 @@ check('E-e 源码调用 tasks.stepState 推进状态', /this\.tasks\.stepState\(
 }
 
 // ── E-i：objects.js 的端口释放必须**带 owner**（P2-2 配套）──
-//   缺陷：`release(port, ownerId)` 此前忽略第二参，故 objects.js 有个
-//         `catch { release(port) }` 回退 —— 那会绕过 owner 判定（误删他人登记）。
-//   现已真正支持 owner 校验，回退必须删除。
+// 缺陷：`release(port, ownerId)` 此前忽略第二参，故 objects.js 有个
+// `catch { release(port) }` 回退 —— 那会绕过 owner 判定（误删他人登记）。
+// 现已真正支持 owner 校验，回退必须删除。
 {
   const objSrc = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'lifecycle', 'objects.js'), 'utf8');
   const body = objSrc.match(/_releasePort\(port, ownerId\) \{[\s\S]*?\n  \}/);
@@ -160,7 +160,7 @@ check('E-e 源码调用 tasks.stepState 推进状态', /this\.tasks\.stepState\(
 }
 
 // ── E-g：`setProviderKeys(add)` 的 added 必须反映真实结果（P2-5）──
-//   行为级用不到（需真供应商），故做源码级不变量 + 契约字段检查。
+// 行为级用不到（需真供应商），故做源码级不变量 + 契约字段检查。
 {
   const m = ops.match(/async setProviderKeys\(id, opts\) \{[\s\S]*?\n  \}/);
   check('E-g setProviderKeys 为 async（需 await 检测结果）', !!m, m ? 'ok' : '未找到');
@@ -175,8 +175,8 @@ check('E-e 源码调用 tasks.stepState 推进状态', /this\.tasks\.stepState\(
 }
 
 // ── E-f：OAuth 登录的**两条退出路径**必须对称清理（P2-6）──
-//   成功与超时/异常分支都必须清 `_ccLoginResolve`/`_ccLoginReject`；
-//   否则残留的 reject 会被上一轮浏览器的退出回调取到，误杀**下一次**登录。
+// 成功与超时/异常分支都必须清 `_ccLoginResolve`/`_ccLoginReject`；
+// 否则残留的 reject 会被上一轮浏览器的退出回调取到，误杀**下一次**登录。
 {
   const n = (ops.match(/_ccLoginResolve = this\._ccLoginReject = null/g) || []).length;
   check('E-f 成功与失败分支都清理 resolve/reject（两处）', n === 2, n + ' 处');

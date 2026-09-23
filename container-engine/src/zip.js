@@ -6,15 +6,15 @@
 // --------------------------
 // 本文件最初只实现了 store（不压缩），且 extractZip **完全无视 method 字段** ——
 // 它把「压缩后数据」当成「原始数据」直接写盘。后果：
-//   · 用 createZip 自己打的包（全 Stored）能解开，测试全绿；
-//   · 任何用标准工具（python zipfile / zip / 构建脚本）打的 Deflate 包，
-//     解开后 CRC 必然对不上，报 "zip 条目 CRC 校验失败"。
+// · 用 createZip 自己打的包（全 Stored）能解开，测试全绿；
+// · 任何用标准工具（python zipfile / zip / 构建脚本）打的 Deflate 包，
+// 解开后 CRC 必然对不上，报 "zip 条目 CRC 校验失败"。
 // 也就是说：**OTA 引擎实际上只能吃自己造的全未压缩包**，
 // 而外部产物（含 future 的本地 feed）一律进不来。这是个被测试掩盖的静默缺陷。
 //
 // 现在按中央目录的 method 字段分派：
-//   0 = Stored   → 直接用
-//   8 = Deflate  → zlib.inflateRawSync（**raw**，不是 zlib 头格式）
+// 0 = Stored → 直接用
+// 8 = Deflate → zlib.inflateRawSync（**raw**，不是 zlib 头格式）
 // 其余 method → 显式抛错（不静默降级，否则又是同一个坑的变体）。
 //
 // 为什么保留 createZip 默认 Stored：安卓侧 KernelManager 用 java.util.zip 解基线包，
@@ -47,8 +47,8 @@ function crc32(buf) {
  * 建 zip。
  * @param {Map<string,Buffer>} files 名称 → 内容
  * @param {object} [opts]
- *  - compress?: boolean  默认 false（Stored）。true 时对 >512B 的条目用 Deflate。
- *    ZIP_BZIP2/ZIP_LZMA 等一律不支持 —— 只有这两个 method 是安卓 zipfile 的公约数。
+ * - compress?: boolean 默认 false（Stored）。true 时对 >512B 的条目用 Deflate。
+ * ZIP_BZIP2/ZIP_LZMA 等一律不支持 —— 只有这两个 method 是安卓 zipfile 的公约数。
  */
 function createZip(files, opts) {
   const compress = !!(opts && opts.compress);
@@ -117,8 +117,8 @@ function createZip(files, opts) {
 }
 
 /** 从 EOCD 起算并返回运行期需要的元信息。
- *  zip64 不支持 —— 内核包是几 MB 级，且显式报错比静默截断好。
- *  返回 { cdOffset, count }；count 为实际解析出的条目数。
+ * zip64 不支持 —— 内核包是几 MB 级，且显式报错比静默截断好。
+ * 返回 { cdOffset, count }；count 为实际解析出的条目数。
  */
 function _readEocd(buf) {
   let eocdOff = -1;
@@ -175,7 +175,7 @@ function extractZip(buf, destDir) {
       continue;
     }
 
-    // ★ 这里就是历史缺陷所在：按 method 分派，而不是无条件当 Stored。
+    // 这里就是历史缺陷所在：按 method 分派，而不是无条件当 Stored。
     let data;
     if (method === METHOD_STORED) {
       data = Buffer.from(raw);

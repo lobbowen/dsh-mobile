@@ -11,8 +11,8 @@
 //
 // 于是建立了 `platform/exec.js` 并自称「同步 exec 的**唯一入口**」……
 // **但它从未被接入**。2026-09-11 复核实测：
-//   · 被引用次数 = 0；
-//   · 仍有 22 处 `execFileSync` 没有 timeout。
+// · 被引用次数 = 0；
+// · 仍有 22 处 `execFileSync` 没有 timeout。
 //
 // 这与「macOS 自启注释谎称由 LaunchAgent 代管」是**同一失效模式** ——
 // 文字声称的纪律，代码里没有；且因「看起来已经有了」，反而阻止了后续检查。
@@ -20,14 +20,14 @@
 // 本门禁把「声称」变成「会失败」。
 //
 // ## 断言
-//   G9-a 源码中不得存在**无 timeout** 的 execFileSync/-spawnSync 调用
-//   G9-b platform/exec.js 必须被实际引用（防再次变成死代码）
-//   G9-c 统一执行器必须设 killSignal=SIGKILL（SIGTERM 对挂起进程可能无效）
-//   G9-d 统一执行器必须设 windowsHide（GUI 进程不弹黑框，对齐壳的 CREATE_NO_WINDOW）
+// G9-a 源码中不得存在**无 timeout** 的 execFileSync/-spawnSync 调用
+// G9-b platform/exec.js 必须被实际引用（防再次变成死代码）
+// G9-c 统一执行器必须设 killSignal=SIGKILL（SIGTERM 对挂起进程可能无效）
+// G9-d 统一执行器必须设 windowsHide（GUI 进程不弹黑框，对齐壳的 CREATE_NO_WINDOW）
 //
 // 说明：分析基于**括号配对**提取完整调用表达式，并先剥离注释 ——
-//   否则「注释里提到 execFileSync」会被误报，
-//   而「调用跨多行、timeout 写在第三行」会被漏报。
+// 否则「注释里提到 execFileSync」会被误报，
+// 而「调用跨多行、timeout 写在第三行」会被漏报。
 // ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
@@ -78,10 +78,10 @@ function stripComments(src) {
 
 /** 收集 `src/` 下的 .js **以及 `bin/` 下的入口脚本**（排除测试与构建产物）。
  *
- *  ⚠ 2026-09-12（P2）：原先只扫 `src/` —— 于是 `bin/dsh-supervisor` 里的
- *    **7 处裸 `execFileSync`（全部无 timeout）**长期逃过门禁：
- *    systemctl/dbus 挂起时 CLI 会**无限阻塞**（用户看到命令卡死）。
- *  `bin/` 与会话/安装路径同属产品代码，必须同规。
+ * 2026-09-12（P2）：原先只扫 `src/` —— 于是 `bin/dsh-supervisor` 里的
+ * **7 处裸 `execFileSync`（全部无 timeout）**长期逃过门禁：
+ * systemctl/dbus 挂起时 CLI 会**无限阻塞**（用户看到命令卡死）。
+ * `bin/` 与会话/安装路径同属产品代码，必须同规。
  */
 function jsFiles() {
   const out = [];
@@ -130,7 +130,7 @@ console.log('== G9-a 子进程调用只允许出现在执行器内 ==');
   // 2026-09-11 收紧：原先只断言「必须有 timeout」，于是 18 处调用虽然带 timeout
   // 却**绕过**统一执行器 —— 执行器头注释自称「唯一入口」，而实际不是。
   // 现全部调用点已迁入执行器，故可断言这条**绝对不变量**：
-  //   `src/` 内除 `platform/exec.js` 外，不得出现 execFileSync / spawnSync。
+  // `src/` 内除 `platform/exec.js` 外，不得出现 execFileSync / spawnSync。
   //
   // 为什么这比「有 timeout」强：timeout 只是**逐个调用点**的约定（容易漏、容易退化），
   // 而「只有一处能调用」把 killSignal / windowsHide / maxBuffer / 超时默认值

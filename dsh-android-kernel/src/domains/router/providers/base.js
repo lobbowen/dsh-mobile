@@ -2,7 +2,7 @@
 
 // 供应商基座：账号（API Key / 反代实例账号）的完整生命周期与状态管理。
 // 状态前置原则：添加账号必须启动检测（拿配额）→ 检测结果直接入库（applyDetection 与运行中同机）：
-//             受限（窗口满/月额度用尽）→ frozen + limit + recovery，恢复全自动；正常 → ready。
+// 受限（窗口满/月额度用尽）→ frozen + limit + recovery，恢复全自动；正常 → ready。
 // 硬规则：一账号一实例（按 key 去重）；冻结永带 resetAt，到点自动释放。
 
 const crypto = require('node:crypto');
@@ -23,8 +23,8 @@ const QUOTA_KEYWORDS = ['insufficient_quota','quota_exceeded','quota reached','u
 const CREDIT_KEYWORDS = ['insufficient credit','insufficient credits','insufficient balance','credit balance','no credits','out of credit','purchase credits','purchase more credits','add credits','billing error','balance'];
 
 /** 默认上游限制分类（纯函数；返回 signal 字符串）：
- *  credits=预付余额不足（充值恢复）| window=时间窗配额（resetsAt 恢复）| banned=账号被封（401/403 无配额信息）
- *  | transient=平台瞬时（503/502 等，不冻结）| none=语义错误/不可判（透传，不切换）。 */
+ * credits=预付余额不足（充值恢复）| window=时间窗配额（resetsAt 恢复）| banned=账号被封（401/403 无配额信息）
+ * | transient=平台瞬时（503/502 等，不冻结）| none=语义错误/不可判（透传，不切换）。 */
 function classifyUpstreamLimited(status, text) {
   const lower = String(text || '').toLowerCase();
   const has = (kws) => kws.some((kw) => lower.includes(kw));
@@ -118,9 +118,9 @@ function maskKey(k) {
 }
 
 /** 归一化窗口重置时间 → epoch 毫秒（或 null）：
- *  兼容上游返回的 ISO 字符串（'2026-09-21T05:54:32.950Z'）、epoch 毫秒/秒数字、数字字符串。
- *  历史缺陷：_nextResetAt 直接 Number(resetsAt)，ISO 串 → NaN → 30 天兜底覆写精确恢复点，
- *  导致「月窗口 09-21 重置但账号被推到 10-03 才探测恢复」的额度恢复不同步。 */
+ * 兼容上游返回的 ISO 字符串（'2026-09-21T05:54:32.950Z'）、epoch 毫秒/秒数字、数字字符串。
+ * 历史缺陷：_nextResetAt 直接 Number(resetsAt)，ISO 串 → NaN → 30 天兜底覆写精确恢复点，
+ * 导致「月窗口 09-21 重置但账号被推到 10-03 才探测恢复」的额度恢复不同步。 */
 function normalizeResetTs(v) {
   if (v === undefined || v === null || v === '') return null;
   if (typeof v === 'number' || /^\d{1,13}$/.test(String(v).trim())) {
@@ -146,7 +146,7 @@ function fmtClock(ms) {
 }
 
 /** credits 受限判定（quota 维度纯函数，单源）：Command 订阅制——月度池=0 / 低余额提醒 / 汇总≤0 即受限
- *  （真实采样 2026-09-04：余额 0 时上游对请求回 400 insufficient credits，即使窗口未满）。 */
+ * （真实采样 2026-09-04：余额 0 时上游对请求回 400 insufficient credits，即使窗口未满）。 */
 function isQuotaCreditsLow(q) {
   if (!q) return false;
   const c = q.credits;
@@ -159,8 +159,8 @@ function isQuotaCreditsLow(q) {
 }
 
 /** 统一配额总览标签（展示/视图单源，2026-09 债务清理）：
- *  语义 = credits 受限优先（月额度用尽）；窗口：月窗口满 或 5h+周同时满 → 用尽；周满 → 周限额；
- *  5h 满 → 5h限额。修复旧 index.js 视图对「周+5h 同满无月窗口」返回 周限额 与 proxy 端 用尽 的分叉。 */
+ * 语义 = credits 受限优先（月额度用尽）；窗口：月窗口满 或 5h+周同时满 → 用尽；周满 → 周限额；
+ * 5h 满 → 5h限额。修复旧 index.js 视图对「周+5h 同满无月窗口」返回 周限额 与 proxy 端 用尽 的分叉。 */
 function quotaOverallStatus(q) {
   if (!q) return '正常';
   if (isQuotaCreditsLow(q)) return '额度用尽';
@@ -173,9 +173,9 @@ function quotaOverallStatus(q) {
 }
 
 /** 账号「月度额度重置」精确时刻（quota.monthlyResetAt，epoch ms）：仅当存在且在未来时返回，否则 0。
- *  2026-09 真实采样：Command 订阅面 /alpha/billing/subscriptions 的 currentPeriodEnd 即月额度随
- *  订阅续期重置的时刻（credits 原体无 period 字段，必须单独取订阅）。无期（预付充值制/未取到）
- *  回退周期轮询——不把「不可靠的未来时刻」当精确恢复点。 */
+ * 2026-09 真实采样：Command 订阅面 /alpha/billing/subscriptions 的 currentPeriodEnd 即月额度随
+ * 订阅续期重置的时刻（credits 原体无 period 字段，必须单独取订阅）。无期（预付充值制/未取到）
+ * 回退周期轮询——不把「不可靠的未来时刻」当精确恢复点。 */
 function monthlyResetAtOf(acc) {
   const q = (acc && acc.quota) || {};
   const v = Number(q && q.monthlyResetAt);
@@ -203,9 +203,9 @@ class ProviderBase {
   }
 
   /** 当前「实际在用/应高亮」账号 keyId（列表/头部同源派生）：
-   *   优先级 = ① 持久化锁定账号（若当前可用/在用）② 自动在用 activeAccount。
-   *   锁定账号若不可用（冻结/封号中，路由已切到别的账号），则高亮实际在用的 activeAccount——
-   *   保证前端定位的是「正在跑的账号」，而不是锁定的死账号（2026-09 审计修复）。 */
+   * 优先级 = ① 持久化锁定账号（若当前可用/在用）② 自动在用 activeAccount。
+   * 锁定账号若不可用（冻结/封号中，路由已切到别的账号），则高亮实际在用的 activeAccount——
+   * 保证前端定位的是「正在跑的账号」，而不是锁定的死账号（2026-09 审计修复）。 */
   selectedKeyId() {
     const locked = this.selectedAccountKeyId
       ? (this.accounts || []).find((a) => a.keyId === this.selectedAccountKeyId)
@@ -251,11 +251,11 @@ class ProviderBase {
     acc.quota = det.quota || null;
     const summary = this.accountQuotaSummary(acc);
     // 入库即如实、且与运行中完全同一台状态机（2026-09 用户定稿，取消 review 闸门）：
-    //   检测结果直接交给 applyDetection —— 受限账号（月额度/预付 credits 用尽、时间窗满）一律
-    //   frozen + limit(kind + recovery：credits 有订阅 periodEnd→at 否则 poll；window→at=窗口
-    //   resetsAt)，恢复全靠主循环到点自动探测解冻；额度正常 → ready 直接入池。
-    //   添加路径不再出现 review：受限与运行中被上游 400/定时探测判受限走同一处置，
-    //   不存在「需人工裁决才入池」的第二轨（时间窗满同样是自动检测、到点自动解）。
+    // 检测结果直接交给 applyDetection —— 受限账号（月额度/预付 credits 用尽、时间窗满）一律
+    // frozen + limit(kind + recovery：credits 有订阅 periodEnd→at 否则 poll；window→at=窗口
+    // resetsAt)，恢复全靠主循环到点自动探测解冻；额度正常 → ready 直接入池。
+    // 添加路径不再出现 review：受限与运行中被上游 400/定时探测判受限走同一处置，
+    // 不存在「需人工裁决才入池」的第二轨（时间窗满同样是自动检测、到点自动解）。
     this.applyDetection(acc, { ok: true, quota: det.quota || null });
     if (acc.status === 'ready' && this.events) this.events.append('account_ready', { provider: this.name, key: acc.maskedKey });
     const limited = (acc.limit && acc.limit.kind) || null;
@@ -290,18 +290,18 @@ class ProviderBase {
   }
 
   /** credits 受限判定（单源纯函数 isQuotaCreditsLow，2026-09 债务清理）：任何携带 credits 池的
-   *  quota（如 Command 订阅月额度）统一判定；窗口型无 credits 字段 → false。 */
+   * quota（如 Command 订阅月额度）统一判定；窗口型无 credits 字段 → false。 */
   _isCreditsLow(acc) { return isQuotaCreditsLow(acc && acc.quota); }
 
   /** 上游响应 → signal（M1 契约：供应商可覆写以识别专属错误码/响应结构；router 不再内置词表）。
-   *  默认 = classifyUpstreamLimited(status, bodyText)。headers 备用（Retry-After 等）。 */
+   * 默认 = classifyUpstreamLimited(status, bodyText)。headers 备用（Retry-After 等）。 */
   classifyResponse(status, headers, bodyText) {
     return classifyUpstreamLimited(status, bodyText);
   }
 
   /** 账号处置副作用（M3 契约）：router 只发 signal，具体“冻结/停实例/预热/封号”由 provider 执行。
-   *  base：credits→markCreditsExhausted；window→markQuotaExhausted(ctx.retryMs)；banned→markBanned；
-   *  none/transient 不施加账号级状态。子类可覆写（如 proxy 停实例+预热已在 mark* 覆写中体现）。 */
+   * base：credits→markCreditsExhausted；window→markQuotaExhausted(ctx.retryMs)；banned→markBanned；
+   * none/transient 不施加账号级状态。子类可覆写（如 proxy 停实例+预热已在 mark* 覆写中体现）。 */
   effect(signal, acc, ctx) {
     const c = ctx || {};
     if (signal === 'credits') { if (this.markCreditsExhausted) this.markCreditsExhausted(acc); return true; }
@@ -317,7 +317,7 @@ class ProviderBase {
   }
 
   /** credits 冻结的正向恢复证据 a)：月度重置到期。
-   *  依据 = recovery.at（订阅 periodEnd，权威）或 nextResetAt（同值镜像）任一已过当前时刻。 */
+   * 依据 = recovery.at（订阅 periodEnd，权威）或 nextResetAt（同值镜像）任一已过当前时刻。 */
   _creditsResetDue(acc) {
     if (!acc) return false;
     const cands = [acc.nextResetAt, acc.limit && acc.limit.recovery && acc.limit.recovery.at, acc.quota && acc.quota.monthlyResetAt];
@@ -329,8 +329,8 @@ class ProviderBase {
   }
 
   /** credits 冻结的正向恢复证据 b)：余额较冻结时刻回升（充值场景；periodEnd 不变的预付池）。
-   *  基线 = 冻结时刻记录的 limit.creditsAt；当前余额来自最新探测快照。
-   *  阈值宽松（严格大于即成立）——误解冻风险由「下一轮 400 再冻结」兜底，漏解冻代价更高。 */
+   * 基线 = 冻结时刻记录的 limit.creditsAt；当前余额来自最新探测快照。
+   * 阈值宽松（严格大于即成立）——误解冻风险由「下一轮 400 再冻结」兜底，漏解冻代价更高。 */
   _creditsRefilled(acc) {
     if (!acc || !acc.limit || acc.limit.kind !== 'credits') return false;
     const base = Number(acc.limit.creditsAt);
@@ -343,7 +343,7 @@ class ProviderBase {
   }
 
   /** 账号可用性判定（唯一事实，M4）：ready 且未「预付余额不足」且窗口未满。
-   *  opts.checkWindows=false 时跳过窗口断言（仅校验有效性/余额）。 */
+   * opts.checkWindows=false 时跳过窗口断言（仅校验有效性/余额）。 */
   isAccountUsable(acc, opts) {
     if (!acc || acc.status !== 'ready') return false;
     if (this._isCreditsLow(acc)) return false; // credits 余额不足不参与挑选（充值后由周期检测恢复）
@@ -352,8 +352,8 @@ class ProviderBase {
   }
 
   /** 统一受限冻结（2026-09 收敛：credits/window 同一套状态机——置 frozen + 记恢复点 + 设 limit +
-   *  事件；cause('credits'|'window') 仅作标签供 UI/日志区分原因，不做第二套处理）。
-   *  @param recovery {type:'at'|'poll', at?|periodMs?} 恢复描述；at 优先作为 nextResetAt，poll 用 now+periodMs */
+   * 事件；cause('credits'|'window') 仅作标签供 UI/日志区分原因，不做第二套处理）。
+   * @param recovery {type:'at'|'poll', at?|periodMs?} 恢复描述；at 优先作为 nextResetAt，poll 用 now+periodMs */
   _freezeLimited(acc, cause, reason, recovery) {
     if (!acc || acc.status === 'banned' || acc.status === 'discarded') return false;
     const rec = recovery || { type: 'poll', periodMs: CREDITS_RECHECK_MS };
@@ -377,8 +377,8 @@ class ProviderBase {
   }
 
   /** credits 额度用尽标记（上游 400/402/429/403 报错驱动，2026-09，真实采样校准）：
-   *  Command 为订阅制——monthlyCredits=0 表示本月订阅包含额度已用完（购买 credits 或月度重置后恢复），
-   *  无自然“到点”恢复 → 按周期重探（购买/重置后自动解冻）。反代子类覆写为 停实例 + 预热下一个。 */
+   * Command 为订阅制——monthlyCredits=0 表示本月订阅包含额度已用完（购买 credits 或月度重置后恢复），
+   * 无自然“到点”恢复 → 按周期重探（购买/重置后自动解冻）。反代子类覆写为 停实例 + 预热下一个。 */
   markCreditsExhausted(acc) {
     if (!acc || acc.status === 'banned' || acc.status === 'discarded') return;
     // 月度重置（2026-09）：订阅账号的月额度用尽有精确恢复点（subscriptions.currentPeriodEnd）→
@@ -396,20 +396,20 @@ class ProviderBase {
 
   /* ═══════ 账号状态机（统一直连/反代）═══════
    * 三态模型：限额（frozen/limited）⇄ 正常（ready，自动解冻）；封禁（banned）。
-   *  - 429/403 配额响应 → markQuotaExhausted：第一时间冻结，冻结到期 = 精确 nextResetAt；
-   *  - 401/403 非配额拒绝 → markBanned：封号（前端封号标签）；
-   *  - 定时状态检测（_probeAccountStates）→ applyDetection：恢复自动解冻 / 仍限额保持 /
-   *    其他报错记 lastProbeError；每次检测结果写 lastProbeAt（明确反馈）。
-   *  - 网络失败/流中断不产生任何账号级状态（无冷却态），由转发层换 key 重试吸收。
+   * - 429/403 配额响应 → markQuotaExhausted：第一时间冻结，冻结到期 = 精确 nextResetAt；
+   * - 401/403 非配额拒绝 → markBanned：封号（前端封号标签）；
+   * - 定时状态检测（_probeAccountStates）→ applyDetection：恢复自动解冻 / 仍限额保持 /
+   * 其他报错记 lastProbeError；每次检测结果写 lastProbeAt（明确反馈）。
+   * - 网络失败/流中断不产生任何账号级状态（无冷却态），由转发层换 key 重试吸收。
    * 字段：status / quota / nextResetAt / lastProbeAt / lastProbeError
    */
 
   /** 各窗口最近恢复时间（精确优先；无精确 resetsAt 时按窗口类型给默认恢复窗口，
-   *  保证冻结账号永远有可调度的自动恢复时间，不依赖手动刷新）。
-   *  2026-09 修复：resetsAt 经 normalizeResetTs 归一（ISO 字符串/epoch 秒/毫秒均支持）——
-   *  原实现 Number(ISO)→NaN→30d 兜底，会把精确恢复点覆写成 +30 天（额度恢复不同步根因）。
-   *  @returns {t:number|null, precise:boolean} precise=true 表示来自真实 resetsAt；
-   *    false 表示纯兜底（无任何满窗口给出精确恢复时间）——调用方不得用 false 覆写已精确的值。 */
+   * 保证冻结账号永远有可调度的自动恢复时间，不依赖手动刷新）。
+   * 2026-09 修复：resetsAt 经 normalizeResetTs 归一（ISO 字符串/epoch 秒/毫秒均支持）——
+   * 原实现 Number(ISO)→NaN→30d 兜底，会把精确恢复点覆写成 +30 天（额度恢复不同步根因）。
+   * @returns {t:number|null, precise:boolean} precise=true 表示来自真实 resetsAt；
+   * false 表示纯兜底（无任何满窗口给出精确恢复时间）——调用方不得用 false 覆写已精确的值。 */
   _nextResetAt(quota) {
     const q = quota || {};
     let soonest = null;
@@ -458,8 +458,8 @@ class ProviderBase {
   }
 
   /** limit（M2）：把「为什么受限 / 何时恢复」固化为账号一等字段，与 status 并存——
-   *  window=时间窗（recovery.at=resetsAt，到点自动恢复）；credits=预付余额（recovery.poll=周期重探，充值后恢复）；
-   *  banned=封禁（recovery.manual=人工/复核）。展示与恢复调度据此分列，不再把不同恢复塞进同一 frozen+nextResetAt。 */
+   * window=时间窗（recovery.at=resetsAt，到点自动恢复）；credits=预付余额（recovery.poll=周期重探，充值后恢复）；
+   * banned=封禁（recovery.manual=人工/复核）。展示与恢复调度据此分列，不再把不同恢复塞进同一 frozen+nextResetAt。 */
   _ensureLimit(acc) {
     if (!acc) return null;
     if (acc.limit && acc.limit.kind) return acc.limit;
@@ -487,12 +487,12 @@ class ProviderBase {
   }
 
   /** 429/403 配额响应：第一时间冻结账号（精确到恢复时间）。
-   *  冻结状态由 nextResetAt 管理恢复；账号无任何冷却中间态。 */
+   * 冻结状态由 nextResetAt 管理恢复；账号无任何冷却中间态。 */
   markQuotaExhausted(acc, cooldownMs) {
     // cooldownMs 恢复点优先级（2026-09-05 修复：429 body/头未给精确时间时不再一律 +5h）：
-    //   1) headerRetryMs/bodyResetMs 解析到的精确时长（≤30d 封顶）；
-    //   2) 已探测 quota 中「最近未来」窗口 resetsAt（官方 billing 精确值）；
-    //   3) 都没有才默认 5h（历史行为兜底）。
+    // 1) headerRetryMs/bodyResetMs 解析到的精确时长（≤30d 封顶）；
+    // 2) 已探测 quota 中「最近未来」窗口 resetsAt（官方 billing 精确值）；
+    // 3) 都没有才默认 5h（历史行为兜底）。
     let cooldown = cooldownMs > 0 ? cooldownMs : 0;
     if (!(cooldown > 0)) {
       const q = (acc && acc.quota) || {};
@@ -542,8 +542,8 @@ class ProviderBase {
   }
 
   /** 使用状态纯派生（不读写任何持久化 usage 字段）：
-   *  in-use = activeAccount 指向本账号；warming = 实例已在跑但非在用（常驻/预热拉起后待命）；
-   *  idle = 其余。子类可注入 instanceOf(acc) 提供实例实况（proxy：按 keyId 查实例；direct：无实例 → null）。 */
+   * in-use = activeAccount 指向本账号；warming = 实例已在跑但非在用（常驻/预热拉起后待命）；
+   * idle = 其余。子类可注入 instanceOf(acc) 提供实例实况（proxy：按 keyId 查实例；direct：无实例 → null）。 */
   usageOf(acc) {
     if (!acc) return 'idle';
     if (this.activeAccount && this.activeAccount.keyId === acc.keyId) return 'in-use';
@@ -562,17 +562,17 @@ class ProviderBase {
         this._setStatus(acc, 'banned', null, det.error || '账号被禁用', false);
       } else {
         acc.lastProbeError = (det && det.error) || '状态检测失败';
-        // ⚠ P1-1 修复（2026-09-12）：**探测失败也必须给一个重探时刻**。
+        // P1-1 修复（2026-09-12）：**探测失败也必须给一个重探时刻**。
         //
-        //   缺陷：本分支此前只写 lastProbeError 就返回，**不设 nextResetAt**。
-        //     而 router 的探测闸门是 `missingReset = frozen && !nextResetAt` ——
-        //     于是「frozen + 探测持续失败」的账号 `needProbe` **恒真**：
-        //     每 5 分钟 start→detect→stop 一次实例（启停风暴 + 高频打上游 billing），
-        //     与注释声称的「立即探测**一次**确认真实额度」并不相符。
+        // 缺陷：本分支此前只写 lastProbeError 就返回，**不设 nextResetAt**。
+        // 而 router 的探测闸门是 `missingReset = frozen && !nextResetAt` ——
+        // 于是「frozen + 探测持续失败」的账号 `needProbe` **恒真**：
+        // 每 5 分钟 start→detect→stop 一次实例（启停风暴 + 高频打上游 billing），
+        // 与注释声称的「立即探测**一次**确认真实额度」并不相符。
         //
-        //   现补兜底重探时刻（复用 credits 的 10min 周期）：失败 → 退避重探，
-        //     额度真恢复时仍会解冻（最多晚 10 分钟），但不再有启停风暴。
-        //     ⚠ 仅在「没有既有恢复点」时补，避免把已精确的 nextResetAt 推后。
+        // 现补兜底重探时刻（复用 credits 的 10min 周期）：失败 → 退避重探，
+        // 额度真恢复时仍会解冻（最多晚 10 分钟），但不再有启停风暴。
+        // 仅在「没有既有恢复点」时补，避免把已精确的 nextResetAt 推后。
         if (acc.status === 'frozen' && !acc.nextResetAt) {
           acc.nextResetAt = Date.now() + CREDITS_RECHECK_MS;
         }
@@ -604,9 +604,9 @@ class ProviderBase {
       // 仍限额：冻结保持，其余升级为冻结/限额（nextResetAt 精确更新）
       const nr = this._nextResetAt(acc.quota);
       // 防回推（2026-09 修复 + 2026-09 二次修复）：
-      //  - 纯兜底（+5h/+30d）不得覆写已精确的 nextResetAt（否则把真实恢复点推后）；
-      //  - 精确值仅在「更早」时收敛——但若既有 nextResetAt 已过期（<=now，如早前错误重排/窗口已过仍 frozen），
-      //    必须无条件采纳新的精确值，否则 nextResetAt 永久卡在过期值 → 每 5min 临近探测死循环（实测 fdAkeZ）。
+      // - 纯兜底（+5h/+30d）不得覆写已精确的 nextResetAt（否则把真实恢复点推后）；
+      // - 精确值仅在「更早」时收敛——但若既有 nextResetAt 已过期（<=now，如早前错误重排/窗口已过仍 frozen），
+      // 必须无条件采纳新的精确值，否则 nextResetAt 永久卡在过期值 → 每 5min 临近探测死循环（实测 fdAkeZ）。
       const precise = nr.precise && nr.t;
       const staleExisting = acc.nextResetAt && acc.nextResetAt <= Date.now();
       if (precise && (!acc.nextResetAt || staleExisting || nr.t < acc.nextResetAt)) acc.nextResetAt = nr.t;
@@ -617,8 +617,8 @@ class ProviderBase {
       // 上游 400 insufficient credits 是「月额度不足以服务请求」的权威信号；billing 面快照
       // （percent=99/remaining>0）是滞后的粗粒度展示数据——快照不满足冻结阈值不代表余额能服务
       // 请求。因此 credits 冻结的解冻【不回判阈值】，只认正向恢复证据：
-      //   a) 月度重置到期（recovery.at/nextResetAt <= now）；
-      //   b) 余额较冻结时刻回升（充值；limit.creditsAt 基线比较）。
+      // a) 月度重置到期（recovery.at/nextResetAt <= now）；
+      // b) 余额较冻结时刻回升（充值；limit.creditsAt 基线比较）。
       // 无正向证据 → 维持冻结（quota 快照已刷新供展示），按 recovery 节奏重探。
       const prev = acc.status;
       if (prev === 'frozen' && acc.limit && acc.limit.kind === 'credits') {
@@ -656,10 +656,10 @@ class ProviderBase {
   }
 
   /** 一致性守卫（serialize 前置，2026-09 架构收敛）：ready 账号已知额度已满（窗口/credits）→
-   *  写盘前归位 frozen + limit（自我修正，杜绝「ready+满额」矛盾落盘——该矛盾正是旧
-   *  预热→回收死循环的燃料：_prewarmByQuota 见 ready 就预热，回收见不可用就停）。
-   *  仅修正「可确证的矛盾」（quota 数据本身已显示满）；registering/review/discarded/banned 不动。
-   *  纯字段修正：不调 _freezeLimited/_setStatus/_persist（serialize 在持久化路径内，避免递归写盘）。 */
+   * 写盘前归位 frozen + limit（自我修正，杜绝「ready+满额」矛盾落盘——该矛盾正是旧
+   * 预热→回收死循环的燃料：_prewarmByQuota 见 ready 就预热，回收见不可用就停）。
+   * 仅修正「可确证的矛盾」（quota 数据本身已显示满）；registering/review/discarded/banned 不动。
+   * 纯字段修正：不调 _freezeLimited/_setStatus/_persist（serialize 在持久化路径内，避免递归写盘）。 */
   _normalizeConsistency(acc) {
     if (!acc) return;
     const st = acc.status;
@@ -686,8 +686,8 @@ class ProviderBase {
   }
 
   /** 锁收敛（2026-09 A 定稿）：锁只对「当前可用」账号有意义——账号因任何原因离开可用池
-   *  （冻结=任意额度窗口/封号/作废/不存在）即锁失效；恢复后由用户按需重新显式锁定，
-   *  不存在独立于账号状态机的死锁残留。调用点：serialize 前 / _setStatus 冻结封号时 / 加载恢复后。 */
+   * （冻结=任意额度窗口/封号/作废/不存在）即锁失效；恢复后由用户按需重新显式锁定，
+   * 不存在独立于账号状态机的死锁残留。调用点：serialize 前 / _setStatus 冻结封号时 / 加载恢复后。 */
   _reconcileLock() {
     const lockedId = this.selectedAccountKeyId || null;
     if (!lockedId) return;
@@ -717,8 +717,8 @@ class ProviderBase {
       proxyAppId: this.proxyAppId || null,
       proxyRunning: this.proxyRunning || false,
       selectedAccountKeyId: this.selectedAccountKeyId || this.selectedProxyKeyId || null,
-      // ★ 统一状态机（2026-09 account-state-rework）：使用状态持久化——
-      //   activeAccountKeyId = 当前在用账号（重启后恢复粘滞 + 前端锁定显示，根治「实例在跑却不显示锁定」）
+      // 统一状态机（2026-09 account-state-rework）：使用状态持久化——
+      // activeAccountKeyId = 当前在用账号（重启后恢复粘滞 + 前端锁定显示，根治「实例在跑却不显示锁定」）
       activeAccountKeyId: (this.activeAccount && this.activeAccount.keyId) || null,
       accounts: this.accounts.map((a) => {
         this._normalizeConsistency(a); // 一致性守卫：ready+满额矛盾写盘前自我修正
@@ -726,8 +726,8 @@ class ProviderBase {
           key: a.key,
           keyId: a.keyId,
           maskedKey: a.maskedKey,
-          // ★ 单事实源（2026-09 架构收敛）：只写 status（旧 validity/usage 双字段删除——
-          //   曾出现 status=ready + validity=frozen、usage=warming 粘滞的矛盾落盘）。
+          // 单事实源（2026-09 架构收敛）：只写 status（旧 validity/usage 双字段删除——
+          // 曾出现 status=ready + validity=frozen、usage=warming 粘滞的矛盾落盘）。
           status: a.status || 'registered',
           quota: a.quota || null,
           registeredAt: a.registeredAt,

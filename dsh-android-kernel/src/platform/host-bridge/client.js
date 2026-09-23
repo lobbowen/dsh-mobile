@@ -1,29 +1,29 @@
 'use strict';
 
-// ★★★ 内核侧 HostBridge 客户端 ★★★
+// 内核侧 HostBridge 客户端
 //
 // 内核跑在安卓容器（L0）里，所有**设备能力**（通知、打开浏览器、应用控制、UI 自动化、
 // Device Policy…）都由容器层的 HostBridge 承担。本模块是内核唯一的桥客户端：
 //
-//   内核（:node 进程） --connect--> HostBridge（Kotlin HostBridgeService / Android Service）
+// 内核（:node 进程） --connect--> HostBridge（Kotlin HostBridgeService / Android Service）
 //
 // ## 传输
 //
-//   Linux **抽象命名空间** Unix 域套接字：path = '\0' + socketName（前导 NUL 字节）。
-//   容器侧 `LocalServerSocket("dsh_hostbridge")` 即抽象命名空间套接字，Node 22 原生支持
-//   `net.connect('\0dsh_hostbridge')`（已实测连通）。**严禁 TCP**（控制面不经网络暴露，见 BASE_SPEC §8）。
+// Linux **抽象命名空间** Unix 域套接字：path = '\0' + socketName（前导 NUL 字节）。
+// 容器侧 `LocalServerSocket("dsh_hostbridge")` 即抽象命名空间套接字，Node 22 原生支持
+// `net.connect('\0dsh_hostbridge')`（已实测连通）。**严禁 TCP**（控制面不经网络暴露，见 BASE_SPEC §8）。
 //
 // ## 协议
 //
-//   JSON-RPC 2.0，换行分隔的 JSON 帧。连接后内核先发 `bridge.handshake{protocol,requires}`，
-//   容器回 `{protocol,capabilities,groups}`（协商结果）。之后 `call(method,params)`。
+// JSON-RPC 2.0，换行分隔的 JSON 帧。连接后内核先发 `bridge.handshake{protocol,requires}`，
+// 容器回 `{protocol,capabilities,groups}`（协商结果）。之后 `call(method,params)`。
 //
 // ## 不变量（与内核「可降级运行」契约一致）
 //
-//   · 桥**不可用**（未在容器内 / socket 不存在 / 连不上）→ 所有调用**快速失败且不抛错**
-//     （返回 null / {ok:false}），内核照常运行；调用方据此走各自降级分支。
-//   · 断线自动重连（下一次调用时惰性重连），避免内核因容器重启而需要自己重启。
-//   · 超时（默认 15s）视为失败，**绝不挂死内核事件循环**。
+// · 桥**不可用**（未在容器内 / socket 不存在 / 连不上）→ 所有调用**快速失败且不抛错**
+// （返回 null / {ok:false}），内核照常运行；调用方据此走各自降级分支。
+// · 断线自动重连（下一次调用时惰性重连），避免内核因容器重启而需要自己重启。
+// · 超时（默认 15s）视为失败，**绝不挂死内核事件循环**。
 //
 // socket 名来源：`DSH_BRIDGE_SOCKET` 环境变量（容器启动内核时注入）；默认 'dsh_hostbridge'。
 
@@ -41,10 +41,10 @@ function abstractPath(name) {
 class HostBridgeClient {
   /**
    * @param {object} [o]
-   *  - socketName?: 抽象命名空间名（默认 env DSH_BRIDGE_SOCKET 或 'dsh_hostbridge'）
-   *  - requires?: string[] 期望的 bridge:* 组令牌（握手协商用）
-   *  - timeoutMs?: 单次调用超时
-   *  - onLog?: (msg:string)=>void
+   * - socketName?: 抽象命名空间名（默认 env DSH_BRIDGE_SOCKET 或 'dsh_hostbridge'）
+   * - requires?: string[] 期望的 bridge:* 组令牌（握手协商用）
+   * - timeoutMs?: 单次调用超时
+   * - onLog?: (msg:string)=>void
    */
   constructor(o) {
     o = o || {};
@@ -186,7 +186,7 @@ class HostBridgeClient {
   /**
    * 调用桥方法。
    * @returns {Promise<{ok:boolean, result?:object, error?:{code:number,message:string,data?:object}}|null>}
-   *   桥不可用/超时 → null（调用方降级）；协议错误 → {ok:false,error}。
+   * 桥不可用/超时 → null（调用方降级）；协议错误 → {ok:false,error}。
    */
   async call(method, params) {
     if (!this._handshakeDone) {

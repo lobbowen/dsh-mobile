@@ -7,13 +7,13 @@
 const fs = require('node:fs');
 
 /** 组装原生 DSH 启动命令：存在插件启停覆盖层时附加 --patch 参数。
- *  DSH CLI（@deepseek-ai/dsh lib/bin.js）的 web 子命令带 rejectParentOptions 守卫：
- *  --patch 置于子命令之前会被判为“父级选项”直接报错退出
- *  （error: web takes none of parent --profile, --patch, ...），必须放在子命令之后：
- *    dsh web --patch <overlay> --port <targetPort>   ✔
- *    dsh --patch <overlay> web --port <targetPort>   ✘ exit:1
- *  统一端口注入：确保命令携带 --port <targetPort>（端口由统一配置/动态注册决定）——
- *  若命令已含 --port/-p 则更新为其 targetPort 值；否则在子命令后追加。 */
+ * DSH CLI（@deepseek-ai/dsh lib/bin.js）的 web 子命令带 rejectParentOptions 守卫：
+ * --patch 置于子命令之前会被判为“父级选项”直接报错退出
+ * （error: web takes none of parent --profile, --patch, ...），必须放在子命令之后：
+ * dsh web --patch <overlay> --port <targetPort>
+ * dsh --patch <overlay> web --port <targetPort> exit:1
+ * 统一端口注入：确保命令携带 --port <targetPort>（端口由统一配置/动态注册决定）——
+ * 若命令已含 --port/-p 则更新为其 targetPort 值；否则在子命令后追加。 */
 function nativeCommand(config, pluginManager) {
   const command = config.command || [];
   const [runtime, bin, ...rest] = command;

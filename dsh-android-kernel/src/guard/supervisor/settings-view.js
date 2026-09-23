@@ -14,8 +14,8 @@ const { EnvCatalog } = require('../../platform/env-catalog');
 const { guardVersion } = require('../../platform/version'); // 拆分携带：守卫版本自报
 
 // 环境目录摘要（随设置块迁移；原为 supervisor.js 模块级函数，仅本块使用）。
-// ⚠ 原 `extra.selfUpdate`（内核 npm 子包 corePackageName 条目）已删：
-//   安卓内核不经 npm 分发，更新 = 容器 OTA，内核没有"自己查自己新版本"这回事。
+// 原 `extra.selfUpdate`（内核 npm 子包 corePackageName 条目）已删：
+// 安卓内核不经 npm 分发，更新 = 容器 OTA，内核没有"自己查自己新版本"这回事。
 function envCatalogSummary(that) {
   const cat = new EnvCatalog(that.config);
   const extra = {};
@@ -25,9 +25,9 @@ function envCatalogSummary(that) {
 }
 
 class SettingsView {
-  // ⚠ autostartStatus / setAutostart 已随 PC 桌面壳删除（原委托 guard/host-service.js →
-  //   platform/os/autostart.js）。安卓内核的常驻由 APK 容器 / Android Service 决定，
-  //   内核不再提供「整条服务链开机自启」开关，对应 /autostart API 也已下架。
+  // autostartStatus / setAutostart 已随 PC 桌面壳删除（原委托 guard/host-service.js →
+  // platform/os/autostart.js）。安卓内核的常驻由 APK 容器 / Android Service 决定，
+  // 内核不再提供「整条服务链开机自启」开关，对应 /autostart API 也已下架。
 
   // ---- 环境状态（Phase1 壳写 runtime.json；EnvCatalog 声明式探测）----
   envStatus() {
@@ -55,8 +55,8 @@ class SettingsView {
   }
 
   /** Node LTS 在线检查（6h 缓存 + 失败降级）：探测当前 node 运行版本并给出 LTS 建议。
-   *  实现不做远端查询（避免守卫启动依赖网络）——本地判定 + 可刷新缓存；
-   *  失败返回 { ok:false, error } 由前端降级展示，绝不抛异常。 */
+   * 实现不做远端查询（避免守卫启动依赖网络）——本地判定 + 可刷新缓存；
+   * 失败返回 { ok:false, error } 由前端降级展示，绝不抛异常。 */
   async nodeLtsStatus() {
     try {
       const cacheFile = path.join(path.dirname(this.config.stateFile), 'node-lts-cache.json');
@@ -86,16 +86,16 @@ class SettingsView {
 
   // ---- 内核更新（单写入者契约：安装/重启归安卓容器 OTA）----
   //
-  // ⚠ `guardSelfUpdateApply` / `guardSelfUpdateRestart` / `guardSelfUpdateStatus` **已删除**，
-  //   `/self-update/*` 端点（含 410 下架桩）也**已删除** —— 安卓内核不经 npm 分发，
-  //   更新由容器 OTA 完成（单写入者 = 安卓容器），内核不持有任何自更新实现或端点。
-  //   随同删除：`platform/deploy.js`（SEA/launcher/源码三形态判定）、
-  //   `corePackageName` 配置与 env-catalog 的 selfUpdate 条目。
+  // `guardSelfUpdateApply` / `guardSelfUpdateRestart` / `guardSelfUpdateStatus` **已删除**，
+  // `/self-update/*` 端点（含 410 下架桩）也**已删除** —— 安卓内核不经 npm 分发，
+  // 更新由容器 OTA 完成（单写入者 = 安卓容器），内核不持有任何自更新实现或端点。
+  // 随同删除：`platform/deploy.js`（SEA/launcher/源码三形态判定）、
+  // `corePackageName` 配置与 env-catalog 的 selfUpdate 条目。
 
   /** 读磁盘上**运行位**的自报版本（A1 校验用）：spawn `--version`，解析 "dsh-supervisor v<ver>"。
    *
-   *  用途：容器 OTA 写入新内核后、守卫尚未重启时，面板可显示「新版本已就位，待重启生效」
-   *  （diskVersion ≠ 进程运行版本 ⇒ updatePending）。
+   * 用途：容器 OTA 写入新内核后、守卫尚未重启时，面板可显示「新版本已就位，待重启生效」
+   * （diskVersion ≠ 进程运行版本 ⇒ updatePending）。
    */
   _readBinarySelfVersion() {
     let target = null;
@@ -106,9 +106,9 @@ class SettingsView {
     if (!target) return null;
     try {
       const out = ex.runOut(target, ['--version'], { timeoutMs: 20000 });
-      // ⚠ 2026-09-11 修复（K9）：原为 /dsh-supervisor v([^s]+)/ —— 字符类 [^s] 的意图
-      //   是「非空白」，却写成了「非字母 s」：版本串里一旦出现 s 就截断，
-      //   且 \n 不在排除集内，正则会跨行吞字符。结果污染自更新状态判定。
+      // 2026-09-11 修复（K9）：原为 /dsh-supervisor v([^s]+)/ —— 字符类 [^s] 的意图
+      // 是「非空白」，却写成了「非字母 s」：版本串里一旦出现 s 就截断，
+      // 且 \n 不在排除集内，正则会跨行吞字符。结果污染自更新状态判定。
       const m = /dsh-supervisor v([^\s]+)/.exec(out);
       return m ? m[1] : null;
     } catch { return null; }
@@ -131,15 +131,15 @@ class SettingsView {
   // ---- 管家自身版本检查（与 DSH 更新解耦）：本地仓库 git 视角，配了远程才 fetch 比对 ----
   /** VCS 根解析：从**包根**上溯找最近的「外层」.git（排除自身嵌套仓）。
    *
-   *  修复（2026-09）：原实现命中 dsh-supervisor/.git 嵌套仓，其 HEAD 与真实外层仓脱节
-   *  （嵌套仓 06:29 早于外层 07:15 提交）→ UI 版本/commit 失真。
-   *  找不到外层仓时回退包根（行为与历史一致，commit 解析失败仍为 null）。
+   * 修复（2026-09）：原实现命中 dsh-supervisor/.git 嵌套仓，其 HEAD 与真实外层仓脱节
+   * （嵌套仓 06:29 早于外层 07:15 提交）→ UI 版本/commit 失真。
+   * 找不到外层仓时回退包根（行为与历史一致，commit 解析失败仍为 null）。
    *
-   *  ⚠ 二次修复（2026-09-11）：包根解析原为 `path.resolve(__dirname, '..')` 并注释
-   *  「= dsh-supervisor/」，但 §7.6 拆分把本文件从 `src/` 移到 `src/guard/supervisor/`，
-   *  该表达式实际得到 `src/guard/` —— **注释与行为已不符**，
-   *  使「排除嵌套 .git」的判据作用在错误目录（真正的包根 .git 不再被排除）。
-   *  改用 srcpath.resolvePackageRoot()（按 package.json 上溯，不受层级调整影响）。 */
+   * 二次修复（2026-09-11）：包根解析原为 `path.resolve(__dirname, '..')` 并注释
+   * 「= dsh-supervisor/」，但 §7.6 拆分把本文件从 `src/` 移到 `src/guard/supervisor/`，
+   * 该表达式实际得到 `src/guard/` —— **注释与行为已不符**，
+   * 使「排除嵌套 .git」的判据作用在错误目录（真正的包根 .git 不再被排除）。
+   * 改用 srcpath.resolvePackageRoot()（按 package.json 上溯，不受层级调整影响）。 */
   _vcsRoot() {
     const dir = require('../../platform/srcpath').resolvePackageRoot() || path.resolve(__dirname, '..');
     const innerGit = path.join(dir, '.git');
@@ -205,11 +205,11 @@ class SettingsView {
     // 取「走默认路由的真实出口网卡」的 IPv4，过滤虚拟网桥(virbr*/veth*/docker*/br-*)。
     const ips = [];
     if (enabled) {
-      // ★ 平台化（2026-09-11 修 K8）：原实现**直接**调用 `ip` (iproute2) ——
-      //   这是 Linux 专有命令；在 macOS/Windows 上抛异常后被 catch 吞掉，
-      //   于是 ips 恒为空 → 面板显示「开关已开但没有任何可访问地址」，
-      //   且**不报错**（静默降级）。同时它也是裸 execFileSync（无超时）。
-      //   现下沉到 platform/os/netinfo（三平台实现 + 经 platform/exec 有界）。
+      // 平台化（2026-09-11 修 K8）：原实现**直接**调用 `ip` (iproute2) ——
+      // 这是 Linux 专有命令；在 macOS/Windows 上抛异常后被 catch 吞掉，
+      // 于是 ips 恒为空 → 面板显示「开关已开但没有任何可访问地址」，
+      // 且**不报错**（静默降级）。同时它也是裸 execFileSync（无超时）。
+      // 现下沉到 platform/os/netinfo（三平台实现 + 经 platform/exec 有界）。
       ips.push(...netInfo.lanAddresses());
       if (!ips.length) {
         this.logger && this.logger.warn && this.logger.warn(

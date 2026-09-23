@@ -1,10 +1,10 @@
 'use strict';
 
 // 系统级统一端口管理（v2 持久化）：
-//  - 全系统所有端口（固定/实例/动态分配段）统一登记为「端口记录」，单一来源；
-//  - 端口记录持久化到 ports.json（0600）：守卫重启后固定/实例/已分配绑定全量恢复，不丢、不重复分配；
-//  - 每条记录含 owner（归属对象）：删除对象即释放端口（实例删除→释放、relay 关闭→释放、反代实例停止→释放）；
-//  - 所有监听/分配逻辑统一从 registry 取端口 + 对应关系（port/role/owner），杜绝散落与冲突。
+// - 全系统所有端口（固定/实例/动态分配段）统一登记为「端口记录」，单一来源；
+// - 端口记录持久化到 ports.json（0600）：守卫重启后固定/实例/已分配绑定全量恢复，不丢、不重复分配；
+// - 每条记录含 owner（归属对象）：删除对象即释放端口（实例删除→释放、relay 关闭→释放、反代实例停止→释放）；
+// - 所有监听/分配逻辑统一从 registry 取端口 + 对应关系（port/role/owner），杜绝散落与冲突。
 // 记录结构：{ port, role, owner, createdAt }
 
 const fs = require('node:fs');
@@ -16,16 +16,16 @@ const probe = require('../monitor/probe'); // 同层依赖（infra/probe），�
 // 动态端口池（2026-09 工业标准重构）
 //
 // 设计依据（避免打补丁，对齐标准实现）：
-//   - RFC 6335 §6：端口三段制（System 0-1023 / User 1024-49151 / Dynamic 49152-65535）。
-//     动态池是共享空间而非「每业务固定一小块」；边界值保留以便将来延伸。
-//   - Kubernetes NodePort 分配器（工业事实标准）：少数可配置范围 + 容量指标 +
-//     池满显式 ErrFull；「宁可泄漏端口，绝不双分配」（分配即生效、释放延迟）。
-//   - 选址必须避开 OS 动态端口范围（Linux 默认 net.ipv4.ip_local_port_range=32768-60999）：
-//     监听池若落入该区间，会与内核 connect() 临时源端口竞争——原 40000-43199 正落其中。
+// - RFC 6335 §6：端口三段制（System 0-1023 / User 1024-49151 / Dynamic 49152-65535）。
+// 动态池是共享空间而非「每业务固定一小块」；边界值保留以便将来延伸。
+// - Kubernetes NodePort 分配器（工业事实标准）：少数可配置范围 + 容量指标 +
+// 池满显式 ErrFull；「宁可泄漏端口，绝不双分配」（分配即生效、释放延迟）。
+// - 选址必须避开 OS 动态端口范围（Linux 默认 net.ipv4.ip_local_port_range=32768-60999）：
+// 监听池若落入该区间，会与内核 connect() 临时源端口竞争——原 40000-43199 正落其中。
 //
 // 模型：少数「物理池」+「逻辑段→池」映射。逻辑段名（role）保留为端口记录上的业务标签，
-//   端口统一直共享池取号：proxyInstance/oauthCallback 共用 managed 池（K8s 单一范围
-//   思想，杜绝段碎片化「这个段空那个段满」）；providerApi 独立池（供应商规模可弹性扩）。
+// 端口统一直共享池取号：proxyInstance/oauthCallback 共用 managed 池（K8s 单一范围
+// 思想，杜绝段碎片化「这个段空那个段满」）；providerApi 独立池（供应商规模可弹性扩）。
 // 可配置：config.portPools 覆盖（大规模部署按需调大 base/count），不写死在编译期。
 // ═══════════════════════════════════════════════════════════════════════════
 const DEFAULT_POOLS = {
@@ -43,11 +43,11 @@ const SEGMENT_POOL = {
 
 class PortRegistry {
   constructor(opts) {
-    // ⚠ 2026-09-11 修复（K7）：原为 `process.env.HOME || '/tmp'` ——
-    //   早期曾先读 process.env.HOME：无 HOME 的环境（如服务化启动）会落到 /tmp 等盘根临时目录，
-    //   与其它状态文件**不在同一目录**：state.json 在 %USERPROFILE%\.dsh\supervisor\，
-    //   ports.json 却在 \tmp\。后果：端口记录与守卫状态分裂，卸载/迁移时残留。
-    //   os.homedir() 才是正确来源（统一处理 HOME / USERPROFILE 等差异）。
+    // 2026-09-11 修复（K7）：原为 `process.env.HOME || '/tmp'` ——
+    // 早期曾先读 process.env.HOME：无 HOME 的环境（如服务化启动）会落到 /tmp 等盘根临时目录，
+    // 与其它状态文件**不在同一目录**：state.json 在 %USERPROFILE%\.dsh\supervisor\，
+    // ports.json 却在 \tmp\。后果：端口记录与守卫状态分裂，卸载/迁移时残留。
+    // os.homedir() 才是正确来源（统一处理 HOME / USERPROFILE 等差异）。
     this._file = (opts && opts.file) || path.join(require('../../platform/state-root').supervisorDir(), 'ports.json');
     this._records = new Map();   // port -> { port, role, owner, createdAt }
     this._allocLock = false;     // 分配互斥：isTaken(await) 窗口内并发调用必须串行
@@ -69,8 +69,8 @@ class PortRegistry {
   }
 
   /** 逻辑段在其所属池内的锚点偏移：同一池内各段有稳定起点（按池内段序 × 1000），
-   *  保证确定性最小空闲分配仍可预测；池空间不足时经取模回绕扩展（不越池）。
-   *  注意：偏移必须按「同池段序」而非全局段序计算，否则跨池段会锚到池外。 */
+   * 保证确定性最小空闲分配仍可预测；池空间不足时经取模回绕扩展（不越池）。
+   * 注意：偏移必须按「同池段序」而非全局段序计算，否则跨池段会锚到池外。 */
   _anchorOffset(segment) {
     const pool = SEGMENT_POOL[segment] || 'managed';
     const samePool = Object.keys(SEGMENT_POOL).filter((s) => (SEGMENT_POOL[s] || 'managed') === pool);
@@ -81,7 +81,7 @@ class PortRegistry {
   }
 
   /** 重设持久化文件（守卫构造时注入：与 stateFile 同域；测试可指向临时目录，避免污染生产记录）。
-   *  重新加载新文件内容；旧内存记录废弃（不写回旧文件——测试进程绝不触碰生产 ports.json）。 */
+   * 重新加载新文件内容；旧内存记录废弃（不写回旧文件——测试进程绝不触碰生产 ports.json）。 */
   configureFile(file) {
     if (typeof file !== 'string' || !file) return;
     this._file = file;
@@ -141,7 +141,7 @@ class PortRegistry {
 
   /* ═══════ 登记（固定 / 用户 / 动态）═══════ */
   /** 登记固定端口（主DSH/API/中转等）。同端口已被其他固定角色占用 → 报错；
-   *  user/动态记录（如实例 main 端口 = 主 DSH 端口）→ 固定端口权威覆盖。 */
+   * user/动态记录（如实例 main 端口 = 主 DSH 端口）→ 固定端口权威覆盖。 */
   register(role, port) {
     const p = Number(port);
     if (!Number.isInteger(p) || p <= 0 || p > 65535) throw new Error('ports.register: 非法端口 ' + port);
@@ -186,37 +186,37 @@ class PortRegistry {
 
   /** 释放端口。
    *
-   *  ⚠ 2026-09-12（P2）：新增可选的 `ownerId` 校验 —— 此前第二参被**静默忽略**。
+   * 2026-09-12（P2）：新增可选的 `ownerId` 校验 —— 此前第二参被**静默忽略**。
    *
-   *    缺陷：`guard/lifecycle/objects.js:264` 以 owner 意图调用
-   *    `this.ports.release(port, ownerId)`（失败才回退 `release(port)`），
-   *    但本函数的签名只有 `(port)` —— ownerId 被丢掉，**任何持有端口号的调用方
-   *    都能删掉别人 owner 的登记记录**。
+   * 缺陷：`guard/lifecycle/objects.js:264` 以 owner 意图调用
+   * `this.ports.release(port, ownerId)`（失败才回退 `release(port)`），
+   * 但本函数的签名只有 `(port)` —— ownerId 被丢掉，**任何持有端口号的调用方
+   * 都能删掉别人 owner 的登记记录**。
    *
-   *    危害：若某 managed 对象的 port 已被回收并**重新分配给另一 owner**，
-   *    旧对象迟到的 release 会误删新记录 → 新 owner 的端口失去登记（泄漏/被重复分配）。
+   * 危害：若某 managed 对象的 port 已被回收并**重新分配给另一 owner**，
+   * 旧对象迟到的 release 会误删新记录 → 新 owner 的端口失去登记（泄漏/被重复分配）。
    *
-   *  现语义：
-   *    · 不传 `ownerId`（既有调用方）→ 保持原「按端口号释放」语义（向后兼容）；
-   *    · 传了 `ownerId` → **仅当登记 owner 匹配才释放**（不匹配即 no-op，并返回 false）。
+   * 现语义：
+   * · 不传 `ownerId`（既有调用方）→ 保持原「按端口号释放」语义（向后兼容）；
+   * · 传了 `ownerId` → **仅当登记 owner 匹配才释放**（不匹配即 no-op，并返回 false）。
    *
-   *  @returns {boolean} 是否真的释放了一条记录
+   * @returns {boolean} 是否真的释放了一条记录
    */
   release(port, ownerId) {
     const p = Number(port);
     const rec = this._records.get(p);
-    // ⚠ P2 修复（2026-09-13，失效模式 a）：**空值检查必须在 owner 比较之前**。
+    // P2 修复（2026-09-13，失效模式 a）：**空值检查必须在 owner 比较之前**。
     //
-    //   缺陷：原顺序是「先比对 rec.owner，再判 !rec」——
-    //     而 rec 为 undefined 时读 rec.owner 会**抛 TypeError**
-    //     （Cannot read properties of undefined (reading 'owner')）。
-    //     实测：release(未登记端口, 任意ownerId) → TypeError。
-    //   后果：本函数文档明确写「传了 ownerId → 仅当登记 owner 匹配才释放（不匹配即 no-op，
-    //     并返回 false）」—— 而「端口尚未登记/已被别处释放」恰恰是**良构调用方最常见的场景**
-    //     （ownerId 参数的存在意义就是让「如果归我再释放」安全），本该 no-op 返回 false，
-    //     却抛异常。包裹了 try/catch 的调用方会把它静默吞掉 → 契约无声失效；
-    //     未包裹的调用方直接崩。
-    //   修法：先判空返回 false，再做 owner 比较。
+    // 缺陷：原顺序是「先比对 rec.owner，再判 !rec」——
+    // 而 rec 为 undefined 时读 rec.owner 会**抛 TypeError**
+    // （Cannot read properties of undefined (reading 'owner')）。
+    // 实测：release(未登记端口, 任意ownerId) → TypeError。
+    // 后果：本函数文档明确写「传了 ownerId → 仅当登记 owner 匹配才释放（不匹配即 no-op，
+    // 并返回 false）」—— 而「端口尚未登记/已被别处释放」恰恰是**良构调用方最常见的场景**
+    // （ownerId 参数的存在意义就是让「如果归我再释放」安全），本该 no-op 返回 false，
+    // 却抛异常。包裹了 try/catch 的调用方会把它静默吞掉 → 契约无声失效；
+    // 未包裹的调用方直接崩。
+    // 修法：先判空返回 false，再做 owner 比较。
     if (!rec) return false;
     // ownerId 为 undefined/null = 调用方未声明归属（既有语义：无条件按端口号释放）。
     if (ownerId !== undefined && ownerId !== null && rec.owner !== ownerId) return false;
@@ -250,7 +250,7 @@ class PortRegistry {
   }
 
   /** 端口是否被占用：已登记 ∪ 本机实际监听。
-   *  @param excludeOwner 若提供：该 owner 自己的登记不算占用（可复用自己绑定的端口）。 */
+   * @param excludeOwner 若提供：该 owner 自己的登记不算占用（可复用自己绑定的端口）。 */
   async isTaken(port, excludeOwner) {
     const rec = this._records.get(Number(port));
     if (rec && (!excludeOwner || rec.owner !== excludeOwner)) return true;
@@ -264,10 +264,10 @@ class PortRegistry {
 
   /* ═══════ 确定性槽位仲裁（2026-09 架构定稿）═══════
    * claimSlot(rangeKey, owner, opts)：统一「绑定持久 + 确定性分配 + 孤儿回收 + main 回迁」。
-   *   期望槽位 = ① byOwner 既有绑定（绑定永久，重启复用）→ ② opts.preferred（如 main=40000）→
-   *              ③ 段内最小空闲（按加入顺序补位，删除即释放补位）。
-   *   期望被占（登记为异 owner / 本机监听）→ 先按 opts.reclaim 特征（cmdline pgrep，YAMA 免疫）
-   *   回收「本工程旧代」→ 等释放（opts.waitMs）→ 重试；仍被外部占用 → 返回显式冲突（绝不静默跳号）。 */
+   * 期望槽位 = ① byOwner 既有绑定（绑定永久，重启复用）→ ② opts.preferred（如 main=40000）→
+   * ③ 段内最小空闲（按加入顺序补位，删除即释放补位）。
+   * 期望被占（登记为异 owner / 本机监听）→ 先按 opts.reclaim 特征（cmdline pgrep，YAMA 免疫）
+   * 回收「本工程旧代」→ 等释放（opts.waitMs）→ 重试；仍被外部占用 → 返回显式冲突（绝不静默跳号）。 */
   async claimSlot(rangeKey, owner, opts) {
     const o = opts || {};
     const range = o.range || this.rangeOf(rangeKey);
@@ -389,15 +389,15 @@ class PortRegistry {
   }
 
   // ── 注：此处原有 `_allocFree()`（自持锁的池内最小空闲分配包装）已删除（2026-09-12）──
-  //   全仓无任何调用点（`claimSlot` 用的是 `_allocFreeCore`），是死代码。
-  //   保留它反而危险：一个「看起来可公开调用」的入口会诱使后来者绕过 claimSlot 的
-  //   owner 判定与 mode 语义，直接拿到端口。
+  // 全仓无任何调用点（`claimSlot` 用的是 `_allocFreeCore`），是死代码。
+  // 保留它反而危险：一个「看起来可公开调用」的入口会诱使后来者绕过 claimSlot 的
+  // owner 判定与 mode 语义，直接拿到端口。
 
   /* ═══════ 动态分配 ═══════ */
   /** bind 探测：尝试在本机 127.0.0.1 绑定端口。能绑定 → 可分配；任何 bind 错误（典型
-   *  EADDRINUSE）→ 视为已占用。TCP connect 探测看不见“不监听但占 bind”的残留
-   *  （如对已停止反代实例端口的空闲 keep-alive 连接——connect 失败但后续 spawn bind 会撞
-   *  EADDRINUSE），本探测与真实 spawn 的绑定语义一致，能兜住这类隐藏占用。 */
+   * EADDRINUSE）→ 视为已占用。TCP connect 探测看不见“不监听但占 bind”的残留
+   * （如对已停止反代实例端口的空闲 keep-alive 连接——connect 失败但后续 spawn bind 会撞
+   * EADDRINUSE），本探测与真实 spawn 的绑定语义一致，能兜住这类隐藏占用。 */
   _canBind(port) {
     // 延迟 require：避免顶层依赖 net（本模块其余部分与网络无关）
     const net = require('node:net');
@@ -411,17 +411,17 @@ class PortRegistry {
   }
 
   /** 在指定逻辑段分配空闲端口并登记（owner 绑定）。互斥防并发同端口。
-   *  候选判占 = 端口登记 ∪ TCP connect 探测 ∪ bind 探测（三重，防隐藏占用）。
-   *  工业标准：返回「最小空闲」确定性端口；池满返回 null（调用方应转显式满错误 + 告警）。
-   *  opts.skipFirst 保留兼容（跳过池内首个候选，供特殊场景）。 */
+   * 候选判占 = 端口登记 ∪ TCP connect 探测 ∪ bind 探测（三重，防隐藏占用）。
+   * 工业标准：返回「最小空闲」确定性端口；池满返回 null（调用方应转显式满错误 + 告警）。
+   * opts.skipFirst 保留兼容（跳过池内首个候选，供特殊场景）。 */
   async allocate(rangeKey, owner, opts) {
     const range = this.rangeOf(rangeKey);
     if (!range) throw new Error('ports.allocate: 未知端口段 ' + rangeKey);
     const o = opts || {};
     const anchor = (o.range) ? 0 : this._anchorOffset(rangeKey);
     const start = anchor + ((o.skipFirst) ? 1 : 0);
-    // ⚠ 2026-09-12（P2）：此处原**内联**了一遍与 `_acquireAlloc()` 完全相同的自旋等待 ——
-    //   「同一事实两处实现」，任一处将来加超时/加日志都会分叉。已统一经该 helper。
+    // 2026-09-12（P2）：此处原**内联**了一遍与 `_acquireAlloc()` 完全相同的自旋等待 ——
+    // 「同一事实两处实现」，任一处将来加超时/加日志都会分叉。已统一经该 helper。
     await this._acquireAlloc();
     try {
       for (let n = 0; n < range.count; n++) {

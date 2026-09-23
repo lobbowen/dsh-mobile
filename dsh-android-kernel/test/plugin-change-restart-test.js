@@ -1,20 +1,20 @@
 #!/usr/bin/env node
 'use strict';
 
-// ⛔ 卸载类测试（项目政策，2026-08-31）：本脚本含插件卸载（PluginManager.uninstall）场景，涉及卸载类操作，
+// 卸载类测试（项目政策，2026-08-31）：本脚本含插件卸载（PluginManager.uninstall）场景，涉及卸载类操作，
 // 已从 npm test 自动测试链排除，仅允许作为独立脚本显式单独调用（node test/plugin-change-restart-test.js 或 npm run test:plugin-change-restart）；
 // 除非用户明确指令，禁止擅自运行。
 
 // 插件管理（**Android 内核：单一目标 = 原生主干 native**）核心行为测试：
-//  - 卸载：官方 CLI + bundles 清理 + 跨层残留（home 补丁层/原生 overlay/profile 补丁层）清理
-//    + 运行中原生 DSH 经 supervisor 回调重启；job 级核算
-//  - 停用/启用：官方补丁层机制（$DSH_HOME/cordis.patch.yml）热载面，不动 bundles（防 reconcile 击穿），
-//    无需重启；启用顺带清理 legacy overlay
-//  - 更新：检测（registry 最高版 vs 已装版）+ 执行（update/add）+ 重启生效；本地/git 型拒绝
+// - 卸载：官方 CLI + bundles 清理 + 跨层残留（home 补丁层/原生 overlay/profile 补丁层）清理
+// + 运行中原生 DSH 经 supervisor 回调重启；job 级核算
+// - 停用/启用：官方补丁层机制（$DSH_HOME/cordis.patch.yml）热载面，不动 bundles（防 reconcile 击穿），
+// 无需重启；启用顺带清理 legacy overlay
+// - 更新：检测（registry 最高版 vs 已装版）+ 执行（update/add）+ 重启生效；本地/git 型拒绝
 // 全部用桩（stub CLI / dshRunning 探针 / registry），profile 目录用真实临时目录验证文件级行为。
 //
-// ⚠ 已删除的场景（勿回潮）：沙箱实例目标（`inst-a` / `kind:'sandbox'` / `instances` 桩
-//   `probeInstance|stopInstance|startInstance`）—— 沙箱实例域已整体移除，插件只有一个安装目标。
+// 已删除的场景（勿回潮）：沙箱实例目标（`inst-a` / `kind:'sandbox'` / `instances` 桩
+// `probeInstance|stopInstance|startInstance`）—— 沙箱实例域已整体移除，插件只有一个安装目标。
 
 const path = require('node:path');
 const fs = require('node:fs');
@@ -44,7 +44,7 @@ function initProfileDir(dir, deps, bundles) {
 }
 
 /** 真实临时 profile 目录 + 桩 CLI / dshRunning 探针 / registry。
- *  opts: running/pnpmResult/pnpmError/bundlesClean/nativeRestart/distLatest */
+ * opts: running/pnpmResult/pnpmError/bundlesClean/nativeRestart/distLatest */
 function makePM(opts = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-pm-'));
   const nativeProfile = path.join(tmp, 'native', 'profiles', 'web');

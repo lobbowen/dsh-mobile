@@ -2,12 +2,12 @@
 
 // 工作流文件读取（**行尾归一化**，跨平台一致）。
 //
-// ⚠ 为什么需要它（真实 Windows CI 事故，2026-09-11）：
-//   Windows runner 的 git 检出会把 build.yml 转成 CRLF（core.autocrlf）。
-//   测试里用 `\n` 锚定的正则（如 `/\n  ([a-z]+):\n/` 提取 job 段）在 CRLF 下**完全失配**
-//   —— 因为 job 名后紧跟的是 `\r` 而非 `\n`。
-//   结果：断言取到空串 → 5 个断言失败；而同一份代码在 Linux/macOS（LF）全绿。
-//   表现为「只在 Windows 红」，极难排查（本次排查耗时较长即因此）。
+// 为什么需要它（真实 Windows CI 事故，2026-09-11）：
+// Windows runner 的 git 检出会把 build.yml 转成 CRLF（core.autocrlf）。
+// 测试里用 `\n` 锚定的正则（如 `/\n ([a-z]+):\n/` 提取 job 段）在 CRLF 下**完全失配**
+// —— 因为 job 名后紧跟的是 `\r` 而非 `\n`。
+// 结果：断言取到空串 → 5 个断言失败；而同一份代码在 Linux/macOS（LF）全绿。
+// 表现为「只在 Windows 红」，极难排查（本次排查耗时较长即因此）。
 //
 // 因此：凡要按行解析 workflow 的测试**必须**经本模块读取，禁止直接 fs.readFileSync。
 // 由 test/workflow-parse-test.js 门禁强制（含 CRLF 夹具实测）。
@@ -39,7 +39,7 @@ function stripComments(text) {
 /**
  * 按 job 名提取该 job 的文本段（行尾无关）。
  *
- * YAML 顶层 job 缩进 2 空格，其子键缩进 4+ 空格，故 `\n  <name>:\n` 只命中顶层 job。
+ * YAML 顶层 job 缩进 2 空格，其子键缩进 4+ 空格，故 `\n <name>:\n` 只命中顶层 job。
  * 入参 text 会先做行尾归一化，因此在 CRLF 检出下同样正确。
  */
 function jobSection(text, name) {

@@ -32,8 +32,8 @@ sealed class AssetStatus {
      * 资产**不在** `nativeLibraryDir` 里。
      *
      * @param inApk `true` = APK 内有这个条目，但安装期没解压出来
-     *              （`extractNativeLibs` 未生效 / `useLegacyPackaging` 未开）
-     *              `false` = APK 内就没有 —— 打包期就丢了
+     * （`extractNativeLibs` 未生效 / `useLegacyPackaging` 未开）
+     * `false` = APK 内就没有 —— 打包期就丢了
      *
      * 这两者排查方向完全相反，所以必须分开携带，不能合成一句话。
      */
@@ -47,7 +47,7 @@ sealed class AssetStatus {
     /**
      * 资产本身在，但它依赖的 `.so` 不在。
      *
-     * ★ **这是历史上完全缺失的一层。** 过去依赖缺失从不作为前置条件阻断，
+     * **这是历史上完全缺失的一层。** 过去依赖缺失从不作为前置条件阻断，
      * 结果是 exec-probe 以 linker 错误失败（`error=13`），而错误归因走到
      * 「该路径被 SELinux 禁止 exec」分支 —— **把排查方向彻底带偏**。
      *
@@ -192,13 +192,13 @@ data class PrepareReport(val entries: List<Pair<NativeExecutable, AssetStatus>>)
  * 对每个资产严格按此序，**任一步失败立即停止**，不再往下走到误导性结论：
  *
  * ```
- * ① 存在性    nativeLibraryDir 里有没有这个文件
- *              ↳ 没有 → 查 APK 内是否有该条目 → MissingFromLib(inApk)
- * ② 依赖前置  遍历 requiredDeps，每个都必须在同目录
- *              ↳ 缺 → MissingDependency    ★ 这一步是历史上缺失的
+ * ① 存在性 nativeLibraryDir 里有没有这个文件
+ * ↳ 没有 → 查 APK 内是否有该条目 → MissingFromLib(inApk)
+ * ② 依赖前置 遍历 requiredDeps，每个都必须在同目录
+ * ↳ 缺 → MissingDependency 这一步是历史上缺失的
  * ③ exec 探针 【仅对 probeArgs 非空的资产】真跑一次
- *              ↳ IOException → NotExecutable（此时可确定归因 SELinux）
- *              ↳ exit != 0 或 stdout 缺片段 → ProbeFailed
+ * ↳ IOException → NotExecutable（此时可确定归因 SELinux）
+ * ↳ exit != 0 或 stdout 缺片段 → ProbeFailed
  * ```
  *
  * ## 为什么不能省掉第 ③ 步
@@ -243,6 +243,16 @@ object NativePreparer {
                 "lib 目录内容（${listing.lines().size - 3} 项）:\n" +
                 listing.lineSequence().drop(2).joinToString("\n") { "  $it" } + "\n" +
                 report.toDiagnosticLines().joinToString("\n")
+        )
+        // 能力件逐项探针上屏；不参与 allRequiredReady，不阻断启动。
+        val capEntries = NativeAssetRegistry.CAPABILITY.map { exe ->
+            exe to verifyInternal(ctx, exe, libDir, listing, apkLibNames)
+        }
+        val capReady = capEntries.count { it.second is AssetStatus.Ready }
+        RuntimeDiagnostics.append(
+            ctx, "capability-assets", capReady == capEntries.size,
+            "能力件 $capReady/${capEntries.size} 就位",
+            PrepareReport(capEntries).toDiagnosticLines().joinToString("\n")
         )
         return report
     }
@@ -322,9 +332,9 @@ object NativePreparer {
      * ```
      *
      * 根因：Android linker 查找依赖库的目录**只有三个**：
-     *   ① `$LD_LIBRARY_PATH` 里的目录
-     *   ② 二进制 `DT_RUNPATH` 动态段列出的目录
-     *   ③ 系统默认路径 `/system/lib64`、`/system/lib`
+     * ① `$LD_LIBRARY_PATH` 里的目录
+     * ② 二进制 `DT_RUNPATH` 动态段列出的目录
+     * ③ 系统默认路径 `/system/lib64`、`/system/lib`
      * （`DT_RPATH` 在 Android 上被忽略，只有 `DT_RUNPATH` 有效。）
      *
      * `nativeLibraryDir` **不在这三者中的任何一个** —— 它只在 Java 层

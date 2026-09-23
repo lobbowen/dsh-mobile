@@ -36,17 +36,17 @@ import java.util.concurrent.Executors
  * HostBridge —— 安卓能力桥（L3，随 APK 冻结）。
  *
  * 传输：Unix 域套接字（抽象命名空间，`LocalServerSocket(SOCKET_NAME)`）。内核（:node 进程）
- *       主动 connect；本服务监听。严禁 TCP 暴露控制面（见 BASE_SPEC §8）。
+ * 主动 connect；本服务监听。严禁 TCP 暴露控制面（见 BASE_SPEC §8）。
  * 协议：JSON-RPC 2.0，换行分隔的 JSON 帧（与 container-engine/src/bridge/uds-transport.js 对齐）。
  * 握手：内核先发 `bridge.handshake`（protocol + requires 能力分组），本服务回 `capabilities`
- *       + `groups`（设备实际已预置能力的分组交集）。
+ * + `groups`（设备实际已预置能力的分组交集）。
  * 鉴权：每方法声明所需能力（caps）；调用方 requires 超出设备 capabilities → 返回
- *       ERR_CAPABILITY_MISSING(-32001)；未知方法 → METHOD_NOT_FOUND(-32601)。
+ * ERR_CAPABILITY_MISSING(-32001)；未知方法 → METHOD_NOT_FOUND(-32601)。
  * 审计：所有特权操作落 files/bridge-audit.log（持久，不随内核包切换丢失）。
  *
  * 注：抽象命名空间套接字在 Android 上等价于 `LocalServerSocket(name)`；内核侧 Node 客户端
- *     用 `net.connect('\0' + SOCKET_NAME)`（**前导 NUL 字节** = Linux 抽象命名空间；Node 22 原生支持）连接。
- *     ⚠ 不是空格前缀——那会连到文件系统里名为 " name" 的路径，永远连不通。
+ * 用 `net.connect('\0' + SOCKET_NAME)`（**前导 NUL 字节** = Linux 抽象命名空间；Node 22 原生支持）连接。
+ * 不是空格前缀——那会连到文件系统里名为 " name" 的路径，永远连不通。
  */
 class HostBridgeService : Service() {
 
@@ -218,7 +218,7 @@ class HostBridgeService : Service() {
 
     /**
      * 无障碍服务是否已在系统设置中启用（字符串层面）。
-     * ⚠ 只用于**诊断探针**展示配置状态；能力门禁请用 [DshAccessibilityService.isReady]。
+     * 只用于**诊断探针**展示配置状态；能力门禁请用 [DshAccessibilityService.isReady]。
      */
     private fun accessibilityEnabledInSettings(): Boolean {
         val enabled = try {
@@ -369,8 +369,8 @@ class HostBridgeService : Service() {
             JSONObject().apply { put("ok", true); put("timeZone", tz) }
         },
         "sys.reboot" to MethodDef(listOf("device_owner"), true) { _ ->
-            // ⚠ Android 的 DevicePolicyManager.reboot 只接受 ComponentName 一个参数
-            //   （桌面 Java 的 reboot(ComponentName, String) 在 android.jar 中不存在）。
+            // Android 的 DevicePolicyManager.reboot 只接受 ComponentName 一个参数
+            // （桌面 Java 的 reboot(ComponentName, String) 在 android.jar 中不存在）。
             requireDpm().reboot(deviceAdmin)
             JSONObject().apply { put("ok", true) }
         },
@@ -426,9 +426,9 @@ class HostBridgeService : Service() {
             JSONObject().apply { put("stopped", pkg) }
         },
         "app.install" to MethodDef(listOf("device_owner"), true) { p ->
-            // ⚠ DevicePolicyManager 没有 installPackage —— 静默安装的 API 是
-            //   PackageInstaller（须为 Device Owner + Manifest 声明 REQUEST_INSTALL_PACKAGES）。
-            //   这里走 PackageInstaller 的 createSession/write/commit 流程。
+            // DevicePolicyManager 没有 installPackage —— 静默安装的 API 是
+            // PackageInstaller（须为 Device Owner + Manifest 声明 REQUEST_INSTALL_PACKAGES）。
+            // 这里走 PackageInstaller 的 createSession/write/commit 流程。
             requireDpm() // 仅做 Device Owner 前置校验（静默安装的实际 API 走 PackageInstaller）
             val apk = p.optString("apkPath", "")
             val f = File(apk)
@@ -485,7 +485,7 @@ class HostBridgeService : Service() {
             JSONObject().apply { put("locked", true) }
         },
         "policy.setPassword" to MethodDef(listOf("device_owner"), true) { p ->
-            // ⚠ DevicePolicyManager.resetPassword(String, int) 自 **API 30 起废弃** 且仅对
+            // DevicePolicyManager.resetPassword(String, int) 自 **API 30 起废弃** 且仅对
             // 「已配置密码强度但尚未设密码」的设备生效；现代设备上基本无效。
             // 该能力属遗留路径，保留实现但显式提示调用方改用 user restrictions / 应用内锁。
             val m = requireDpm()
@@ -498,7 +498,7 @@ class HostBridgeService : Service() {
             }
         },
         "policy.wipe" to MethodDef(listOf("device_owner"), true) { p ->
-            // ⚠ wipeData(int) 自 API 29 起废弃，替代品 wipeData(int, CharSequence)。
+            // wipeData(int) 自 API 29 起废弃，替代品 wipeData(int, CharSequence)。
             // flags 语义未变；reason 作为审计留痕（Android 10+ 要求非空）。
             val m = requireDpm()
             val flags = p.optInt("flags", 0)
@@ -513,8 +513,8 @@ class HostBridgeService : Service() {
         },
         "policy.setKiosk" to MethodDef(listOf("device_owner"), true) { p ->
             // Device Owner 专用：把目标包加入 lock task 白名单。
-            // ⚠ API 34 (UPSIDE_DOWN_CAKE) 起 lock task features 与 packages 捆绑为同一策略，
-            //   必须显式调用 setLockTaskFeatures，否则部分机型上报 SecurityException。
+            // API 34 (UPSIDE_DOWN_CAKE) 起 lock task features 与 packages 捆绑为同一策略，
+            // 必须显式调用 setLockTaskFeatures，否则部分机型上报 SecurityException。
             val m = requireDpm()
             val pkgs = p.optJSONArray("packages")?.let { arr ->
                 (0 until arr.length()).map { arr.optString(it, "") }.filter { it.isNotBlank() }
@@ -787,8 +787,8 @@ class HostBridgeService : Service() {
         // 仍会拿到 -32001 —— 这是正确的降级，因为我们确实没有那套工具链。
         "build.kernelInstall" to MethodDef(listOf("kernel_update"), true) { p ->
             // 入参二选一：
-            //   { feed: true }                  —— 扫描本地 feed 目录并安装
-            //   { zipPath, sha256?, version? }  —— 安装指定路径的包
+            // { feed: true } —— 扫描本地 feed 目录并安装
+            // { zipPath, sha256?, version? } —— 安装指定路径的包
             //
             // 全程离线。验签在 Node 侧做（Kotlin 拿不到 Ed25519，见 KernelInstaller 注释）。
             val useFeed = p.optBoolean("feed", false)

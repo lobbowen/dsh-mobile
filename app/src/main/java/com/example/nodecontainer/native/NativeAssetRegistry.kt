@@ -34,7 +34,7 @@ object NativeAssetRegistry {
     /**
      * libc++ 运行期。
      *
-     * ⚠️ 它**不是**可执行文件（`probeArgs` 为空 + `probeExpect` 为 null 时，
+     * 它**不是**可执行文件（`probeArgs` 为空 + `probeExpect` 为 null 时，
      * [NativePreparer] 只校验存在性与可读性，不做 exec-probe）。
      * 但它**必须**在 `nativeLibraryDir` —— `libnode.so` 的 `DT_NEEDED` 里有它，
      * 而它不在 Android 系统镜像里，只能随包提供。
@@ -70,11 +70,48 @@ object NativeAssetRegistry {
         note = "实为可执行文件，改名 lib*.so 借 jniLibs 通道落到 exec_type 目录",
     )
 
+    /**
+     * 能力件（bash / ripgrep / flock / posix / PTY 探针）。
+     * 刻意不进 [ALL]：ALL 投影到 .github/native-assets.txt（CI 下载与 APK 审计），
+     * 小体积自编件登记会把配方软失败变硬红。此处用 listOf 直构，由 [NativePreparer] 逐项探针上屏。
+     */
+    val CAPABILITY: List<NativeExecutable> get() = listOf(
+        NativeExecutable(
+            id = "bash", libName = "libbash.so", humanName = "bash 执行器",
+            probeArgs = listOf("-c", "exit 0"), probeExpect = null,
+            requiredDeps = emptyList(), required = false,
+            note = "jniLibs 路径；P2 起 bash 改由前缀目录提供",
+        ),
+        NativeExecutable(
+            id = "ripgrep", libName = "libdshrg.so", humanName = "ripgrep（glob/grep）",
+            probeArgs = listOf("--version"), probeExpect = "ripgrep",
+            requiredDeps = emptyList(), required = false,
+            note = "缺件时 glob/grep 报 SEARCH_FAILED",
+        ),
+        NativeExecutable(
+            id = "flock", libName = "libdshflock.so", humanName = "flock(2) 原生桥",
+            probeArgs = emptyList(), probeExpect = null,
+            requiredDeps = emptyList(), required = false,
+            note = "dlopen 依赖；缺件回退 vendor 实现",
+        ),
+        NativeExecutable(
+            id = "posix", libName = "libdshposix.so", humanName = "link/linkat 用户态替代",
+            probeArgs = emptyList(), probeExpect = null,
+            requiredDeps = emptyList(), required = false,
+            note = "经 LD_PRELOAD 注入；缺件会让会话落盘失败",
+        ),
+        NativeExecutable(
+            id = "ptyprobe", libName = "libdshptyprobe.so", humanName = "PTY 探针",
+            probeArgs = emptyList(), probeExpect = null,
+            requiredDeps = emptyList(), required = false,
+            note = "真实 exec 由 NodeRuntimeService.runPtyProbe() 执行",
+        ),
+    )
     // ← 未来加资产在这里加一行即可，例如：
-    //   val APKREPACK = NativeExecutable(
-    //       id = "apkrepack", libName = "libapkrepack.so", humanName = "APK 重打包器",
-    //       probeArgs = listOf("--version"), probeExpect = null,
-    //       requiredDeps = listOf("libc++_shared.so"), required = false, ...)
+    // val APKREPACK = NativeExecutable(
+    // id = "apkrepack", libName = "libapkrepack.so", humanName = "APK 重打包器",
+    // probeArgs = listOf("--version"), probeExpect = null,
+    // requiredDeps = listOf("libc++_shared.so"), required = false, ...)
 
     /** 全部资产。顺序即诊断输出顺序（必需项放前面，便于人眼先看关键项）。 */
     val ALL: List<NativeExecutable> get() = listOf(LIBCXX, NODE)

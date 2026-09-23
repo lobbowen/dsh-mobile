@@ -3,18 +3,19 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const AGENT = require('./platform/agent').load();
 // 平台知识唯一事实源（跨平台架构规范）：os/arch→标签映射只在 src/platform/matrix.js。
 const matrix = require('./platform/matrix');
-// ⚠ 此处的 `node:child_process` 导入已删除（2026-09-12，P2 死代码清理）：
-//   全文件对 `spawn`/`execFileSync` **零调用**（仅注释提及）——
-//   它还是 G9 门禁的盲区：G9 只扫**调用**，不扫**导入**，故这一行得以长期存活。
-//   子进程一律经统一执行器（platform/exec.js / platform/os/*）。
+// 此处的 `node:child_process` 导入已删除（2026-09-12，P2 死代码清理）：
+// 全文件对 `spawn`/`execFileSync` **零调用**（仅注释提及）——
+// 它还是 G9 门禁的盲区：G9 只扫**调用**，不扫**导入**，故这一行得以长期存活。
+// 子进程一律经统一执行器（platform/exec.js / platform/os/*）。
 const pidlook = require('./platform/os/pidlookup');
 const { DaemonLifecycle } = require('./guard/proc/daemon-lifecycle');
 // 平台抽象层：进程/pid反查/文件路径/通知/浏览器（Android-only，见 platform/os/index.js）。
-// ⚠ 开机自启 / 系统服务 / 桌面通知 一律归 APK 容器与 HostBridge：
-//   capabilityProfile() 里 autostart=false、hostService='none'、desktopNotify=false。
-//   「自启」这个能力本身已从内核删除（guard/host-service.js 与 platform/os/autostart.js 已删）。
+// 开机自启 / 系统服务 / 桌面通知 一律归 APK 容器与 HostBridge：
+// capabilityProfile() 里 autostart=false、hostService='none'、desktopNotify=false。
+// 「自启」这个能力本身已从内核删除（guard/host-service.js 与 platform/os/autostart.js 已删）。
 const platform = require('./platform/os/index');
 const { RouterService } = require('./domains/router/index');
 const { TaskRegistry } = require('./platform/tasks');
@@ -47,12 +48,12 @@ class Supervisor {
     this.config = normalize(rawConfig);
     this.configPath = typeof configPath === 'string' ? configPath : null;
     // P1 跨平台审计修复：数据目录访问保护（目录级一次，覆盖全部新建/既有子文件）。
-    //   Unix    ：chmod 0700（他人无法穿越目录 → 内部文件即使 0644 也不可达）。
-    //   Windows ：icacls 移除继承 (/inheritance:r) + 仅当前用户 (OI)(CI) ——
-    //             POSIX mode 在 Windows **被忽略**，而本目录含 config.json(lanToken)、
-    //             dsh-main-token.log(DSH 访问令牌)、registry.json、frpc.toml 等敏感文件。
-    //   NTFS 继承是动态的：对父目录设置继承 ACE 会同时作用于既有子项与后续新建子项，
-    //   故**无需**对每个热写文件（state.json 每拍）做 icacls——那会造成显著写放大。
+    // Unix ：chmod 0700（他人无法穿越目录 → 内部文件即使 0644 也不可达）。
+    // Windows ：icacls 移除继承 (/inheritance:r) + 仅当前用户 (OI)(CI) ——
+    // POSIX mode 在 Windows **被忽略**，而本目录含 config.json(lanToken)、
+    // dsh-main-token.log(DSH 访问令牌)、registry.json、frpc.toml 等敏感文件。
+    // NTFS 继承是动态的：对父目录设置继承 ACE 会同时作用于既有子项与后续新建子项，
+    // 故**无需**对每个热写文件（state.json 每拍）做 icacls——那会造成显著写放大。
     this._fileProtectStatus = null;
     try {
       const fp = require('./platform/os/index').fileProtect;
@@ -95,8 +96,8 @@ class Supervisor {
     this.intents = new IntentLedger();
     this._stopping = false;
     // ── 会话生命周期（契约（docs/ANDROID-PLAN.md） §3）：
-    //   starting → running → stopping → stopped；stopping/stopped 期间抑制一切自动拉起（INV-S1）。
-    //   唯一入口 /session/stop；唯一读取口 /session/status（INV-S2/S4）。
+    // starting → running → stopping → stopped；stopping/stopped 期间抑制一切自动拉起（INV-S1）。
+    // 唯一入口 /session/stop；唯一读取口 /session/status（INV-S2/S4）。
     this._sessionState = 'starting';
     // 未守护崩溃停靠标记（阶段 2 意图单源，瞬态不持久）：guardian=false 时进程崩溃 → 置 true，
     // 使「desired=running 无条件拉起」不违背守护语义（崩溃不自救）；任何显式启动/重启/进入运行清除。
@@ -163,8 +164,8 @@ class Supervisor {
     // 消费方（api/lifecycle.js）无需再写 if(hub)…else… 双语义分支。
     this.eventHub = logCore.reader || logCore.hub;
     // ── 唯一令牌节点：全系统 DSH 访问令牌的统一获取/存储/分发（原生与沙箱共用同一服务，
-    //    安卓内核只有一种源：spawn=stdout 推送 + 本地原文恢复文件）。任何目标的令牌变化统一
-    //    经 onChange 下发消费方，不再分散接线。──
+    // 安卓内核只有一种源：spawn=stdout 推送 + 本地原文恢复文件）。任何目标的令牌变化统一
+    // 经 onChange 下发消费方，不再分散接线。──
     this.tokenService = new DshTokenService({ logger: this.logger, events: this.events });
     // main 统一守卫 spawn（2026-09-06 废弃 systemd 托管）；纯 stdout 源 + 本地原文恢复文件
     // （0600；守卫重启后 token.js 从文件尾恢复令牌→免重建 main 的会话中断，2026-09 修复）
@@ -238,8 +239,8 @@ class Supervisor {
       // dsh CLI 调用形态与主干启动命令同源（安卓容器 = node 代跑绝对入口）。
       // 惰性取用：nativeManager 在本对象之后构造，调用发生在插件操作时。
       resolveDshCli: () => (this.nativeManager ? this.nativeManager.dshCliInvocation() : null),
-      profileName: this.config.pluginsProfileName || 'web',
-      profileDir: path.join(os.homedir(), '.dsh', 'profiles', this.config.pluginsProfileName || 'web'),
+      profileName: this.config.pluginsProfileName || AGENT.profileName,
+      profileDir: path.join(os.homedir(), AGENT.homeDirName, 'profiles', this.config.pluginsProfileName || AGENT.profileName),
       overlayFile: path.join(path.dirname(this.config.stateFile), 'plugin-states.patch.yml'),
       dshPort: this.config.targetPort,
       tasks: this.tasks,
@@ -288,14 +289,14 @@ class Supervisor {
     // 概念清分（2026-09-06）：原生 DSH 是主干，软件本体由 NativeManager 独立管理（/native/* + /lifecycle/dsh/*）；
     // 沙箱实例由 InstanceManager 管理（/instances/*）。原生不挂进沙箱实例出口——不注入任何句柄/委托。
     // （EventHub 汇聚已由 LogCore.init 统一装配）；
-    //  this.eventHub = logCore.hub，聚合文件按 stateFile 派生唯一。）
+    // this.eventHub = logCore.hub，聚合文件按 stateFile 派生唯一。）
     // 系统级端口登记：固定端口统一注册，冲突启动即 fail-fast，杜绝各子系统各管各的端口
     this._registerFixedPorts();
   }
 
   /** 固定端口统一登记：主DSH / 守卫API / 中转服务。冲突即抛错（守卫启动失败，避免带病运行）。
-   *  主程序端口动态注册：用户使用场景各异（可能先装 DSH 并自定义端口）——
-   *  若配置端口无监听且检测到 DSH 进程，从进程实际参数解析端口并动态覆盖（绝不硬编码 3080）。 */
+   * 主程序端口动态注册：用户使用场景各异（可能先装 DSH 并自定义端口）——
+   * 若配置端口无监听且检测到 DSH 进程，从进程实际参数解析端口并动态覆盖（绝不硬编码 3080）。 */
   _registerFixedPorts() {
     // 端口来源以配置为准（healthUrl / command --port，normalize 已统一）。
     // 注意：不做 pgrep 启发式猜端口——同一 bin 的其它实例/残留进程会劫持监管目标
@@ -341,13 +342,13 @@ class Supervisor {
         // 实际端口 ≠ 配置端口 → 持久化（重启沿用选定端口）
         if (port !== prev) {
           // 释放旧端口的登记：否则 ports.json 会同时留旧/新两条 supervisor-api，
-          //   而 discovered_api_port() 取首条 → 壳可能永远等「已废弃的旧端口」→ 判定未就绪。
+          // 而 discovered_api_port() 取首条 → 壳可能永远等「已废弃的旧端口」→ 判定未就绪。
           try { ports.release(prev, 'system:supervisor-api'); } catch {}
           this.config.apiPort = port;
           if (this.configPath) this.persistConfigPatch({ apiPort: port });
         }
         // **登记实际绑定端口**（docs/ANDROID-PLAN.md（端口登记））：
-        //   壳的唯一就绪判据 =「ports.json 的 supervisor-api 实际值」；绝不能让配置期望值滞留在登记表。
+        // 壳的唯一就绪判据 =「ports.json 的 supervisor-api 实际值」；绝不能让配置期望值滞留在登记表。
         try { ports.register('supervisor-api', port); } catch (e) { this.logger.warn('ports.register(actual) 失败: ' + e.message); }
         this.events.append('api_listening', { host: this.config.apiHost, port });
         this.logger.info('api listening on ' + this.config.apiHost + ':' + port);
@@ -374,26 +375,26 @@ class Supervisor {
     // 唯一心跳（v3 R3 C3-2/C3-3b G3）：daemon 监督(router-daemon, 节流≈30s) +
     // main 收敛(on 模式) 都收进 ManagedRegistry.heartbeat。
     // _heartbeatBusy 防慢拍重叠（probe 超时/长 I/O 时心跳不并发，防 daemon 双监督/main 双收敛）。
-    // ⚠ P1 修复（2026-09-13）：_heartbeatBusy 必须有**兜底释放**，否则一次卡死 = 心跳永停。
+    // P1 修复（2026-09-13）：_heartbeatBusy 必须有**兜底释放**，否则一次卡死 = 心跳永停。
     //
-    //   缺陷：`if (this._heartbeatBusy) return;` 是**丢拍**语义（注释只写「防慢拍重叠」，
-    //     未声明丢拍）。更严重的是 _heartbeatBusy 只在 .finally 里释放 ——
-    //     若 heartbeat 返回的 promise 永不 settle（且 ManagedRegistry.heartbeat 内的
-    //     逐对象超时也覆盖不到的那类：例如 heartbeat 本身在进入循环前就卡住），
-    //     .finally 永不执行 → **_heartbeatBusy 永久 true → 心跳永停**。
-    //   为什么致命：managedObjects 存在时**不创建 tick 定时器**（见上），故心跳是
-    //     main 收敛/沙箱监督/daemon 监督的**唯一**周期驱动。停摆后
-    //     main 即使 desired=running 也永不 spawn/adopt、沙箱挂了永不退避重试、
-    //     router/lan daemon 失联永不被拉起，而 /status 仍显示最后一次写入的 phase
-    //     —— 用户看到「面板开着、服务全死、无任何事件」。
-    //   修法：① 保留丢拍语义（并发重入仍不可能），但用**独立兜底定时器**在
-    //     一个「远大于任何正常拍」的阈值后强制释放 busy（并记 warn），使心跳必定恢复；
-    //     ② 暴露 _lastHeartbeatAt / _heartbeatStalls，使「心跳停摆」可观测而非隐形。
+    // 缺陷：`if (this._heartbeatBusy) return;` 是**丢拍**语义（注释只写「防慢拍重叠」，
+    // 未声明丢拍）。更严重的是 _heartbeatBusy 只在 .finally 里释放 ——
+    // 若 heartbeat 返回的 promise 永不 settle（且 ManagedRegistry.heartbeat 内的
+    // 逐对象超时也覆盖不到的那类：例如 heartbeat 本身在进入循环前就卡住），
+    // .finally 永不执行 → **_heartbeatBusy 永久 true → 心跳永停**。
+    // 为什么致命：managedObjects 存在时**不创建 tick 定时器**（见上），故心跳是
+    // main 收敛/沙箱监督/daemon 监督的**唯一**周期驱动。停摆后
+    // main 即使 desired=running 也永不 spawn/adopt、沙箱挂了永不退避重试、
+    // router/lan daemon 失联永不被拉起，而 /status 仍显示最后一次写入的 phase
+    // —— 用户看到「面板开着、服务全死、无任何事件」。
+    // 修法：① 保留丢拍语义（并发重入仍不可能），但用**独立兜底定时器**在
+    // 一个「远大于任何正常拍」的阈值后强制释放 busy（并记 warn），使心跳必定恢复；
+    // ② 暴露 _lastHeartbeatAt / _heartbeatStalls，使「心跳停摆」可观测而非隐形。
     this._lastHeartbeatAt = Date.now();
     this._heartbeatStalls = 0;
-    // ⚠ 拍宽必须在 setInterval **之前**求值：它同时用作间隔与超时阈值。
-    //   （我第一版把它写在回调内部，却在 `}, iv)` 处引用 → ReferenceError，
-    //     心跳定时器根本没建起来 → smoke S1 永不进入 RUNNING。已改正。）
+    // 拍宽必须在 setInterval **之前**求值：它同时用作间隔与超时阈值。
+    // （我第一版把它写在回调内部，却在 `}, iv)` 处引用 → ReferenceError，
+    // 心跳定时器根本没建起来 → smoke S1 永不进入 RUNNING。已改正。）
     const heartbeatIv = this.config.probeIntervalMs || 5000;
     this._heartbeatTimer = setInterval(() => {
       if (this._heartbeatBusy) return;
@@ -429,9 +430,9 @@ class Supervisor {
       const rt = this._ensureRouterRuntime(true);
       if (rt.mode === 'daemon') {
         // 状态文件写权归 daemon（防双写覆盖：守卫只读，providers.json 由 daemon 独占持久化）
-        // ⚠ 2026-09-12：改用 `_disableRouterPersist()` —— 该纪律已在 `_ensureRouterRuntime`
-        //   内部对**全部三条** daemon 路径统一处置（此前只有本处执行 → 另两条路径会双写）。
-        //   本行保留为幂等兜底（明确表达「进入 daemon 即关写权」的意图）。
+        // 2026-09-12：改用 `_disableRouterPersist()` —— 该纪律已在 `_ensureRouterRuntime`
+        // 内部对**全部三条** daemon 路径统一处置（此前只有本处执行 → 另两条路径会双写）。
+        // 本行保留为幂等兜底（明确表达「进入 daemon 即关写权」的意图）。
         this._disableRouterPersist();
         if (rt.spawned) {
           // 刚拉起：等待 daemon 就绪（短轮询 43011）
@@ -466,16 +467,16 @@ class Supervisor {
 
   /** 优雅停机（**异步**）。
    *
-   *  ⚠ 2026-09-12（P1）：改为返回 Promise —— 此前是同步函数，但内部调用
-   *    `lifecycleManager.stopAll(...)`（**async**）而**不 await**：
-   *    而 `stopAll` 依次 `await lc.stop()` 停 router/lan（含反代实例、relay、frpc、端口释放）。
+   * 2026-09-12（P1）：改为返回 Promise —— 此前是同步函数，但内部调用
+   * `lifecycleManager.stopAll(...)`（**async**）而**不 await**：
+   * 而 `stopAll` 依次 `await lc.stop()` 停 router/lan（含反代实例、relay、frpc、端口释放）。
    *
-   *    调用方（bin 的 SIGTERM/SIGINT 处理、settings-view 的退出）都在 `shutdown()` 之后
-   *    **立即 `process.exit(0)`** —— 于是那些 stop 只跑了同步前缀就被**截断**：
-   *    router/lan 的子进程与端口残留成孤儿（正是该段注释声称要防的事）。
+   * 调用方（bin 的 SIGTERM/SIGINT 处理、settings-view 的退出）都在 `shutdown()` 之后
+   * **立即 `process.exit(0)`** —— 于是那些 stop 只跑了同步前缀就被**截断**：
+   * router/lan 的子进程与端口残留成孤儿（正是该段注释声称要防的事）。
    *
-   *    现语义：返回 Promise；调用方必须 `await`（或 `.then(()=>exit())`）后再退出。
-   *    重复调用返回**同一个** Promise（幂等；`_stopping` 守卫语义保留）。
+   * 现语义：返回 Promise；调用方必须 `await`（或 `.then(()=>exit())`）后再退出。
+   * 重复调用返回**同一个** Promise（幂等；`_stopping` 守卫语义保留）。
    */
   shutdown() {
     if (this._stopping) return this._shutdownPromise || Promise.resolve();
@@ -500,8 +501,8 @@ class Supervisor {
     // （反代实例进程、relay/frpc、41000+ 端口残留）。解耦后此段改为「只停观测，不停进程」：
     // 守卫重启不应影响任何被管模块（它们独立生命周期，由各自 supervisor / daemon 维持）。
     // 统一经 lifecycleManager 出口（而非直调模块对象），保证启停路径收敛到一处。
-    // ⚠ 2026-09-12（P1）：`stopAll` 是 async —— 必须 **await**，否则调用方 exit 会截断它。
-    //   返回的 Promise 存到 `_shutdownPromise`，使重复调用拿到同一个（幂等）。
+    // 2026-09-12（P1）：`stopAll` 是 async —— 必须 **await**，否则调用方 exit 会截断它。
+    // 返回的 Promise 存到 `_shutdownPromise`，使重复调用拿到同一个（幂等）。
     this._shutdownPromise = (async () => {
       try {
         if (this.lifecycleManager) {
@@ -681,14 +682,14 @@ class Supervisor {
   // ── 本节已拆分 → guard/supervisor/control-view.js（§7.6 结构性重构）──
 
   // ---- 开机自启：已随 PC 桌面壳与系统服务管理器整体删除 ----
-  //   安卓内核没有 systemd/launchd/schtasks，常驻与否由 APK 容器 / Android Service 决定，
-  //   内核不提供 /autostart 开关（guard/host-service.js 与 platform/os/{autostart,service}.js 已删）。
+  // 安卓内核没有 systemd/launchd/schtasks，常驻与否由 APK 容器 / Android Service 决定，
+  // 内核不提供 /autostart 开关（guard/host-service.js 与 platform/os/{autostart,service}.js 已删）。
 
 
   // ---- 退出管家（2026-09 用户定稿）：完全关闭 = 停全部服务链 + 守卫自身退出 ----------------
   /** 停掉被监管的 DSH 主实例（spawn/adopt 目标），并将期望状态持久化为 stopped——
-   *  「退出管家」= 用户显式要求全部停止：若只杀进程不翻 desired，容器/Android Service
-   *  拉起守卫后收敛循环会按 desired=running 重新拉起 DSH，与服务链全停意图相悖。 */
+   * 「退出管家」= 用户显式要求全部停止：若只杀进程不翻 desired，容器/Android Service
+   * 拉起守卫后收敛循环会按 desired=running 重新拉起 DSH，与服务链全停意图相悖。 */
   _stopMainDsh() {
     try {
       // 退出会话 ≠ 改变用户运行意图（契约 §6：desired 仅在用户显式启停时改变）。
@@ -716,8 +717,8 @@ class Supervisor {
   _sessionHalting() { return this._sessionState === 'stopping' || this._sessionState === 'stopped'; }
 
   /** 契约 §6 判定规则（阶段 2 意图单源）：
-   *    是否应运行 = (desired == running) && sessionState ∈ {starting, running, failed}
-   *  desired 是唯一「是否运行」权威；guardian 不参与本判定（只管崩溃重启）。 */
+   * 是否应运行 = (desired == running) && sessionState ∈ {starting, running, failed}
+   * desired 是唯一「是否运行」权威；guardian 不参与本判定（只管崩溃重启）。 */
   _shouldRun() {
     if (this._mDesired() !== 'running') return false;
     if (this._sessionHalting()) return false;
@@ -726,9 +727,9 @@ class Supervisor {
   }
 
   /** 退出内核（契约 §4.1 冻结时序）：停全部被管对象 → 置 stopped → 回执。
-   *  **守卫绝不自己 stop 自己**：进程的所有者是外部（APK 容器 / Android Service），
-   *  守卫只回执「被管对象已全部停止」，由容器侧停止守卫进程（docs/ANDROID-PLAN.md §6）。
-   *  返回 { ok, sessionState } 供容器做退出握手。 */
+   * **守卫绝不自己 stop 自己**：进程的所有者是外部（APK 容器 / Android Service），
+   * 守卫只回执「被管对象已全部停止」，由容器侧停止守卫进程（docs/ANDROID-PLAN.md §6）。
+   * 返回 { ok, sessionState } 供容器做退出握手。 */
   async shutdownAll() {
     // 幂等：已进入退出流程 → 直接回执当前态（壳可安全重试/轮询）
     if (this._sessionHalting()) return { ok: true, already: true, sessionState: this._sessionState };
@@ -738,9 +739,9 @@ class Supervisor {
     // 1) 停 DSH 主实例（本守卫是被管对象的所有者，契约 §2）
     this._stopMainDsh();
     // 2) 停路由 daemon（独立进程；DaemonLifecycle.stop 串行换代语义）
-    // ⚠ 2026-09-12（P2-2 配套）：`stop()` 现在**会如实返回 ok:false**（进程未在超时内退出时）。
-    //   此前该返回值被直接丢弃 → 孤儿 daemon 会被静默放过（与「已全部停止」的回执矛盾）。
-    //   现：失败即记事件 + warn，让面板/日志可见（仍继续后续步骤，不阻断关停流程）。
+    // 2026-09-12（P2-2 配套）：`stop()` 现在**会如实返回 ok:false**（进程未在超时内退出时）。
+    // 此前该返回值被直接丢弃 → 孤儿 daemon 会被静默放过（与「已全部停止」的回执矛盾）。
+    // 现：失败即记事件 + warn，让面板/日志可见（仍继续后续步骤，不阻断关停流程）。
     const stopDaemon = async (kind) => {
       try {
         const lc = this._daemonLifecycle(kind);
@@ -754,7 +755,7 @@ class Supervisor {
     };
     await stopDaemon('router');
     // 3) 会话置 stopped 并回执——**守卫不停止自己**：进程所有者是 APK 容器 / Android Service，
-    //    容器收到本回执后停止守卫进程（守卫随之收到 SIGTERM 自然退出）。
+    // 容器收到本回执后停止守卫进程（守卫随之收到 SIGTERM 自然退出）。
     this._setSessionState('stopped');
     this.writeState(true);
     this.events && this.events.append('session_stopped', {});
@@ -763,8 +764,8 @@ class Supervisor {
   }
 
   /** 平滑重绑 API host：旧 server close + 强制断连释放端口，新 server 重试 listen。
-   *  关键：旧 keep-alive 连接未断时端口不会释放，直接 listen 会 EADDRINUSE 把 API 打死。
-   *  这里 closeAllConnections() 立即断开空闲连接，并带重试（最多 10 次 × 300ms）。 */
+   * 关键：旧 keep-alive 连接未断时端口不会释放，直接 listen 会 EADDRINUSE 把 API 打死。
+   * 这里 closeAllConnections() 立即断开空闲连接，并带重试（最多 10 次 × 300ms）。 */
   _rebindApiHost() {
     const { createServer } = require('./api/index');
     const old = this.api;
@@ -807,8 +808,8 @@ class Supervisor {
   }
 
   /** 通知（平台层最佳努力）：关键事件即使面板没开也能触达用户。
-   *  ⚠ 安卓内核 desktopNotify:false：平台层不提供系统通知实现（无 notify-send / osascript），
-   *    通知归容器层经 HostBridge 下发；此处调用会因平台无实现而静默停用。 */
+   * 安卓内核 desktopNotify:false：平台层不提供系统通知实现（无 notify-send / osascript），
+   * 通知归容器层经 HostBridge 下发；此处调用会因平台无实现而静默停用。 */
   notify(title, body) {
     if (!this.notifyEnabled) return;
     platform.notify(title, body, () => {
@@ -833,10 +834,10 @@ class Supervisor {
   }
 
   /** 升级前停目标并【等待其真正退出】（先停后装的完整语义，消除混合版本窗口）。
-   *  - spawn 模式：stopProcess 只发 SIGTERM 即返回（SIGKILL 兜底在 stopGraceMs 后）——
-   *    若不等 exit 就开始 npm install，旧进程存活期间文件被替换。这里等待 child.exit / pid 消亡，
-   *    超时上限 = stopGraceMs + 5s 兜底（届时 SIGKILL 兜底定时器已触发）。
-   *  - 安卓内核只有 spawn/adopt 两种形态：stopProcess 均为「发信号 + 等退出」。 */
+   * - spawn 模式：stopProcess 只发 SIGTERM 即返回（SIGKILL 兜底在 stopGraceMs 后）——
+   * 若不等 exit 就开始 npm install，旧进程存活期间文件被替换。这里等待 child.exit / pid 消亡，
+   * 超时上限 = stopGraceMs + 5s 兜底（届时 SIGKILL 兜底定时器已触发）。
+   * - 安卓内核只有 spawn/adopt 两种形态：stopProcess 均为「发信号 + 等退出」。 */
   async _enterUpgradeHoldAsync() {
     // 先捕获目标引用：_enterUpgradeHold 内部 stopProcess 会清空 child/adoptedPid，
     // 必须在调用前保存，否则无法等待旧进程退出。
@@ -887,9 +888,9 @@ class Supervisor {
   // （t0 快照→拍末对比），消除「双定时器异步竞态」的假 diff；心跳拍只做聚合记账/日志。
 
   /** dsh adapter 监督单拍（C3-3b G1 observe → supervise 接管；C3-5 终态：唯一心跳驱动 main）。
-   *  每拍先调 _dshConverge()（=原 tick 收敛段；端口再推导/hold/manualRestart/adopt令牌/假死
-   *  业务钩子全在收敛段内）驱动 main，再做实例聚合视图刷新与影子记账（自洽校验日志）。
-   *  返回实然观测（ok 与探测同源），heartbeat 统一写入目录 lastObserved。 */
+   * 每拍先调 _dshConverge()（=原 tick 收敛段；端口再推导/hold/manualRestart/adopt令牌/假死
+   * 业务钩子全在收敛段内）驱动 main，再做实例聚合视图刷新与影子记账（自洽校验日志）。
+   * 返回实然观测（ok 与探测同源），heartbeat 统一写入目录 lastObserved。 */
   // ── 本节已拆分 → guard/supervisor/supervise-view.js（§7.6 结构性重构）──
 
 
@@ -902,8 +903,8 @@ class Supervisor {
   }
 
   /** 通用 entry 字段读写（变化才写）。phase/desired 走专属口（registry 事件/持久化）。
-   *  B2 归一（2026-09）：对随目录持久化的崩溃/退避字段，写后同步 registry._save —— 使目录成为唯一事实源，
-   *  state.json 降为纯投影（不再双副本）。事务开销小（仅该子集，非每拍全量）。 */
+   * B2 归一（2026-09）：对随目录持久化的崩溃/退避字段，写后同步 registry._save —— 使目录成为唯一事实源，
+   * state.json 降为纯投影（不再双副本）。事务开销小（仅该子集，非每拍全量）。 */
   _mField(name, v) {
     const e = this._mStore();
     if (arguments.length >= 2) {
@@ -934,8 +935,8 @@ class Supervisor {
 
   // ── 唯一 phase 词表（R3 C3-5 命名统一；目录 canonical 全表见 guard/lifecycle/objects.js PHASES）──
   // 守卫 legacy（大写，语义保留给 statusSummary 门面）→ 目录 canonical（小写）映射：
-  //   STOPPED→stopped / STARTING→starting / RUNNING→running / RESTARTING→restarting /
-  //   BACKOFF→backoff / OBSERVED→stopped(+process.observedOnly+adopted 位合成呈现)。
+  // STOPPED→stopped / STARTING→starting / RUNNING→running / RESTARTING→restarting /
+  // BACKOFF→backoff / OBSERVED→stopped(+process.observedOnly+adopted 位合成呈现)。
   // 沙箱域(instance state)映射在 _syncSandboxRegistryEntry：INSTALLING→installing / FAILED→failed。
   /** 守卫 legacy 大写 phase → 目录唯一词表（小写）。OBSERVED 由 process.observedOnly 表达，phase=stopped。 */
   _legacyToEntryPhase(ph) {
@@ -972,7 +973,7 @@ class Supervisor {
   }
 
   /** 读守护开关（dsh-main.json meta.guardian；守卫内唯一 guardian 读口——与 _managedMainSpec 申报同源）。
-   *  true=运行中崩溃自动接管拉起；false=崩溃后保持停止（等用户手动启动）。 */
+   * true=运行中崩溃自动接管拉起；false=崩溃后保持停止（等用户手动启动）。 */
   _mGuardian() {
     try { return this._readDshMain().guardian === true; } catch { return false; }
   }

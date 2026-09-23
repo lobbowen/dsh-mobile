@@ -4,28 +4,28 @@
 // 领域：DSH 会话访问令牌服务（DshTokenService）—— 全系统唯一的令牌节点。
 //
 // 架构定位（单一事实源，替代旧的分散实现）：
-//   「DSH 的访问令牌怎么获得」只属于系统中的一个节点（本服务）。其余任何模块
-//   （守卫生命周期 / 实例管理 / 远程控制 relay / API 呈现）只做两件事：
-//     1) 通过统一接口把「该从哪里拿令牌」登记给本服务（attach + 源描述）；
-//     2) 订阅 tokenUpdated 事件消费令牌（relay 热换 cookie、API 生成直连 URL）。
-//   全部经同一统一方法（attach 登记源 → capture 统一捕获 → 任源命中即持久化恢复文件）：
-//     · stdout 管道逐行推送（feedLine，实时、最新）——内核 spawn/adopt 的 DSH；
-//     · 恢复文件（0600 私有）：任源首次拿到令牌即回写原文行，守卫重启后从文件尾恢复。
-//   捕获顺序统一：活跃 stdout → 本地恢复文件。
+// 「DSH 的访问令牌怎么获得」只属于系统中的一个节点（本服务）。其余任何模块
+// （守卫生命周期 / 实例管理 / 远程控制 relay / API 呈现）只做两件事：
+// 1) 通过统一接口把「该从哪里拿令牌」登记给本服务（attach + 源描述）；
+// 2) 订阅 tokenUpdated 事件消费令牌（relay 热换 cookie、API 生成直连 URL）。
+// 全部经同一统一方法（attach 登记源 → capture 统一捕获 → 任源命中即持久化恢复文件）：
+// · stdout 管道逐行推送（feedLine，实时、最新）——内核 spawn/adopt 的 DSH；
+// · 恢复文件（0600 私有）：任源首次拿到令牌即回写原文行，守卫重启后从文件尾恢复。
+// 捕获顺序统一：活跃 stdout → 本地恢复文件。
 //
-// ⚠ 已删除的 PC 遗留（勿回潮）：systemd 托管实例经 `journalctl --user -u <unit>` 取令牌
-//   （沙箱实例域与本仓的 systemd 托管模式已整体删除），安卓内核没有 journald。
-//   捕获策略（退避重试、周期回填、轮换收敛）在服务内统一实现，调用方不再复制任何逻辑。
+// 已删除的 PC 遗留（勿回潮）：systemd 托管实例经 `journalctl --user -u <unit>` 取令牌
+// （沙箱实例域与本仓的 systemd 托管模式已整体删除），安卓内核没有 journald。
+// 捕获策略（退避重试、周期回填、轮换收敛）在服务内统一实现，调用方不再复制任何逻辑。
 //
 // 关键语义：
-//   - 令牌随 DSH 重启轮换：每一次捕获都以「最新一条 URL 行」为权威（stdout 最近行优先），
-//     任何历史行都不会覆盖新令牌；
-//   - “端口先起、URL 后打印”的窗口内，首次捕获可能拿到空/旧令牌 → 进入运行后必须
-//     反复捕获直至窗口结束（scheduleCapture），另由周期 ensureCaptured 兜底；
-//   - 守卫重启后内存令牌清空 → 对已运行目标由 capture 统一回填：stdout → 本地恢复文件
-//     （恢复文件为任源命中的持久化缓存，0600；main 免重建即可恢复）；
-//   - 令牌为本服务私有：绝不写入 instances.json 等配置文件；恢复文件仅为守卫私有
-//     stateDir 下的运行时令牌缓存（0600，不进任何用户配置），重启后据此/再捕获恢复。
+// - 令牌随 DSH 重启轮换：每一次捕获都以「最新一条 URL 行」为权威（stdout 最近行优先），
+// 任何历史行都不会覆盖新令牌；
+// - “端口先起、URL 后打印”的窗口内，首次捕获可能拿到空/旧令牌 → 进入运行后必须
+// 反复捕获直至窗口结束（scheduleCapture），另由周期 ensureCaptured 兜底；
+// - 守卫重启后内存令牌清空 → 对已运行目标由 capture 统一回填：stdout → 本地恢复文件
+// （恢复文件为任源命中的持久化缓存，0600；main 免重建即可恢复）；
+// - 令牌为本服务私有：绝不写入 instances.json 等配置文件；恢复文件仅为守卫私有
+// stateDir 下的运行时令牌缓存（0600，不进任何用户配置），重启后据此/再捕获恢复。
 // ═══════════════════════════════════════════════════════════════════════════
 
 const ex = require('./exec');
@@ -33,8 +33,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 /** 解析 DSH 启动输出行中的回环访问令牌（唯一实现，全仓共用）。
- *  形如：dsh web: http://127.0.0.1:3080/?token=xxx (LAN: http://192.168.x.x:3080/?token=xxx)
- *  只认 127.0.0.1 回环 URL；令牌限安全字符集（base64url）。找不到返回 null。 */
+ * 形如：dsh web: http://127.0.0.1:3080/?token=xxx (LAN: http://192.168.x.x:3080/?token=xxx)
+ * 只认 127.0.0.1 回环 URL；令牌限安全字符集（base64url）。找不到返回 null。 */
 function parseDshTokenLine(line) {
   const m = /(?:dsh web:)?\s*(?:https?:\/\/127\.0\.0\.1:\d+\/\?token=)([A-Za-z0-9_-]+)/.exec(String(line || ''));
   return m ? m[1] : null;
@@ -67,9 +67,9 @@ class DshTokenService {
   /* ═══════ 来源登记（统一接入点）═══════ */
   /**
    * 登记/更新目标的令牌来源。同一目标重复 attach 幂等（保留已推送的 stdout 行）。
-   * @param {string} id   目标标识（'main' 或实例 id，即 dsh-web@ 单元后缀）
-   * @param {object} src  { file?: string }
-   *   - file: 本地原文输出恢复文件（守卫 spawn main 专用 0600）——守卫重启后从文件尾恢复令牌
+   * @param {string} id 目标标识（'main' 或实例 id，即 dsh-web@ 单元后缀）
+   * @param {object} src { file?: string }
+   * - file: 本地原文输出恢复文件（守卫 spawn main 专用 0600）——守卫重启后从文件尾恢复令牌
    */
   attach(id, src) {
     if (!id) return;
@@ -159,7 +159,7 @@ class DshTokenService {
 
   /* ═══════ 捕获策略（服务内统一）═══════ */
   /** 进入 RUNNING 后按退避计划重试捕获，直至捕获窗口结束（每次取最新行，天然收敛到当前进程令牌）。
-   *  新进入轮次（seq 递增）或 detach 会使旧轮次的挂起重试作废。 */
+   * 新进入轮次（seq 递增）或 detach 会使旧轮次的挂起重试作废。 */
   scheduleCapture(id) {
     if (!this._sources.has(id)) return;
     const seq = ++this._seq;
@@ -211,7 +211,7 @@ class DshTokenService {
 
   /* ── 内部 ── */
   /** 把命中令牌的原文行持久化到该 id 的恢复文件（0600，追加+超限裁剪）。
-   *  任源（stdout 捕获 / 回填）首次拿到令牌即回写，文件始终是最新权威缓存。 */
+   * 任源（stdout 捕获 / 回填）首次拿到令牌即回写，文件始终是最新权威缓存。 */
   _persistTokenFile(id, file, tokenLine) {
     try {
       const fp = path.resolve(file);
@@ -221,16 +221,16 @@ class DshTokenService {
       try { size = fs.statSync(fp).size; } catch {}
       if (size > 256 * 1024) { try { fs.rmSync(fp); } catch {} } // 超限重置只留新行
       fs.appendFileSync(fp, String(tokenLine).replace(/\r?\n$/, '') + '\n', { mode: 0o600 });
-      // ⚠ P3 修复（2026-09-13，失效模式 a+g）：**mode 只对新建文件生效**。
+      // P3 修复（2026-09-13，失效模式 a+g）：**mode 只对新建文件生效**。
       //
-      //   缺陷：`appendFileSync(..., { mode: 0o600 })` 的 mode 仅在 open(O_CREAT) **创建**文件时
-      //     生效；对**已存在**的文件被内核直接忽略 —— 文件保留其原有权限位。
-      //     而本文件头注（:15/:26/:28）与函数注释都声称「恢复文件 0600 私有」。
-      //   后果：若该文件曾以 0644 落盘（旧版本 / 备份还原 / 手工放置 / stateDir 权限退化），
-      //     此后每次令牌轮换都会把**新的明文会话令牌**继续追加进一个**世界可读**的文件；
-      //     该令牌即 DSH Web 会话凭据（可直接进面板）。
-      //   修法：写后显式 chmodSync 收口（同仓 frpmgr.js 已是「写后 chmod」的写法）。
-      //     放在 append 之后：无论文件是新建还是既有，最终权限都收敛到 0600。
+      // 缺陷：`appendFileSync(..., { mode: 0o600 })` 的 mode 仅在 open(O_CREAT) **创建**文件时
+      // 生效；对**已存在**的文件被内核直接忽略 —— 文件保留其原有权限位。
+      // 而本文件头注（:15/:26/:28）与函数注释都声称「恢复文件 0600 私有」。
+      // 后果：若该文件曾以 0644 落盘（旧版本 / 备份还原 / 手工放置 / stateDir 权限退化），
+      // 此后每次令牌轮换都会把**新的明文会话令牌**继续追加进一个**世界可读**的文件；
+      // 该令牌即 DSH Web 会话凭据（可直接进面板）。
+      // 修法：写后显式 chmodSync 收口（同仓 frpmgr.js 已是「写后 chmod」的写法）。
+      // 放在 append 之后：无论文件是新建还是既有，最终权限都收敛到 0600。
       try { fs.chmodSync(fp, 0o600); } catch {}
     } catch (e) { this.logger.warn && this.logger.warn('[token] persist file(' + id + ') failed: ' + e.message); }
   }

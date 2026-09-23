@@ -14,8 +14,8 @@ const ports = require('../../guard/lifecycle/ports').shared;
 const guardian = require('../../guard/guardian/index');
 
 /** 监督拍内拉取 router 域摘要的超时（ms）。
- *  必须远小于心跳拍宽对「阻塞」的容忍度：摘要只是只读缓存，失败即降级。
- *  对照 _ctlCall 的默认 120s —— 那会阻塞整条唯一心跳（见调用点说明）。 */
+ * 必须远小于心跳拍宽对「阻塞」的容忍度：摘要只是只读缓存，失败即降级。
+ * 对照 _ctlCall 的默认 120s —— 那会阻塞整条唯一心跳（见调用点说明）。 */
 const ROUTER_SUMMARY_TIMEOUT_MS = 5000;
 
 class ControlView {
@@ -62,18 +62,18 @@ class ControlView {
 
   /** 通用 ctl 调用（router 43107 / lan 43108 共用）。
    *
-   *  ⚠ 2026-09-12（P2 去重）：实现已收敛到 `platform/loghub.ctlCall` ——
-   *    此前这里是**第二份逐行近似**的实现，与 loghub 那份已分叉：
-   *      默认超时不同（此处 120s / 那边 3s）、错误对象形状不同。
-   *    本包装只负责本层契约：默认 120s（面板写操作可达秒级） + 在 Error 上挂 ok/error。
+   * 2026-09-12（P2 去重）：实现已收敛到 `platform/loghub.ctlCall` ——
+   * 此前这里是**第二份逐行近似**的实现，与 loghub 那份已分叉：
+   * 默认超时不同（此处 120s / 那边 3s）、错误对象形状不同。
+   * 本包装只负责本层契约：默认 120s（面板写操作可达秒级） + 在 Error 上挂 ok/error。
    */
   _ctlCall(port, method, args, timeoutMs) {
     return require('../../platform/loghub').ctlCall(port, method, args, timeoutMs || 120000, { withErrorFields: true });
   }
 
   /** router-daemon 控制通道端口（单一来源：config；缺省见 platform/config DEFAULTS）。
-   *  历史教训：曾散落硬编码 43011，而该值实际落在 providerApi 动态段（43000+）内，
-   *  与供应商独立端点发生注册表双占冲突；ctl 通道必须与动态分配段解耦。 */
+   * 历史教训：曾散落硬编码 43011，而该值实际落在 providerApi 动态段（43000+）内，
+   * 与供应商独立端点发生注册表双占冲突；ctl 通道必须与动态分配段解耦。 */
   _routerCtlPort() { return Number(this.config && this.config.routerCtlPort) || 43107; }
 
   _makeRouterFacade() { return this._makeCtlFacade(this._routerCtlPort()); }
@@ -114,8 +114,8 @@ class ControlView {
   // 避免前端 2s 心跳每次触发全量同步扫 /proc 挤占事件循环。
   async listPorts() {
     // 归一化收拢（2026-09）：系统端口登记分散在注册表文件（同 stateDir）——
-    //   ports.json（守卫共享：system/oauth/managed-ctl）
-    //   ports-router.json（router-daemon 独占：proxyInstance 反代 41000+ / providerApi 43000+ —— 智能路由实例）
+    // ports.json（守卫共享：system/oauth/managed-ctl）
+    // ports-router.json（router-daemon 独占：proxyInstance 反代 41000+ / providerApi 43000+ —— 智能路由实例）
     // /ports 聚合去重合并，才是「整个系统的运行状态」。安卓内核已剥离远程控制/relay，
     // 此处仅聚合守卫共享段与 router 段（远程控制域已删，无 lan 端口段）。
     try { ports.reload(); } catch (e) { this.logger && this.logger.warn && this.logger.warn('ports reload: ' + (e && e.message)); }
@@ -153,11 +153,11 @@ class ControlView {
   }
 
   /** 端口集合激活探测（整批 3s TTL 缓存）。active=true 表示该端口当前有进程在监听。
-   *  2026-09 复检根治：改为纯 TCP connect 探测（probe.portListening）——不再依赖 pid 映射。
-   *  背景：findListeningPing 需读 /proc/<pid>/fd 反查 socket→pid，对本机「守卫管理树外/孙进程」
-   *  （router-daemon 的反代子进程）常因读取权限返回 null → 端口明明在监听却恒报 inactive（前端端口
-   *  管理「无任何实例激活」失真，实测 41038 在听而 active=false）。TCP connect 与端口是否被监听
-   *  直接等价（同 infra/ports 判占用语义），无需任何 /proc 权限，三平台一致。 */
+   * 2026-09 复检根治：改为纯 TCP connect 探测（probe.portListening）——不再依赖 pid 映射。
+   * 背景：findListeningPing 需读 /proc/<pid>/fd 反查 socket→pid，对本机「守卫管理树外/孙进程」
+   * （router-daemon 的反代子进程）常因读取权限返回 null → 端口明明在监听却恒报 inactive（前端端口
+   * 管理「无任何实例激活」失真，实测 41038 在听而 active=false）。TCP connect 与端口是否被监听
+   * 直接等价（同 infra/ports 判占用语义），无需任何 /proc 权限，三平台一致。 */
   async _portActives(portsList) {
     const now = Date.now();
     const key = portsList.join(',');
@@ -174,14 +174,14 @@ class ControlView {
   }
 
   /** 统一受管进程生命周期实例（懒加载单例；router daemon 专用，2026-09 架构定稿）。
-   *  身份文件（owner 连续：守卫重启=接管既有 daemon）+ spawn latch + 换代停旧→等死→等端口释放 全在核心内。 */
+   * 身份文件（owner 连续：守卫重启=接管既有 daemon）+ spawn latch + 换代停旧→等死→等端口释放 全在核心内。 */
   _daemonLifecycle(kind) {
     if (!this.configPath) return null; // 非守卫实例（测试）绝不管理独立 daemon
     if (!this._lc) this._lc = {};
     if (this._lc[kind]) return this._lc[kind];
     const cfgPath = this.configPath;
-    // ⚠ 路径解析必须用**单一真源**（2026-09-11 生产级修复）：
-    //   srcpath 用「存在性验证」代替脆弱的相对推算法。Android 内核仅保留 router daemon。
+    // 路径解析必须用**单一真源**（2026-09-11 生产级修复）：
+    // srcpath 用「存在性验证」代替脆弱的相对推算法。Android 内核仅保留 router daemon。
     const script = require('../../platform/srcpath').daemonScript('router');
     if (!script) return null;
     const dir = path.dirname(this.config.stateFile);
@@ -219,9 +219,9 @@ class ControlView {
 
 
   /** 唯一心跳驱动的 daemon 监督单拍（v3 R3 C3-2）：
-   *  router-daemon 的「期望运行 + 失联守护拉起」，由 ManagedRegistry.heartbeat 经 adapter 调用
-   *  （节流≈30s，与原 L3 监督 tick 等价）。守卫重启不影响 daemon（进程独立）。
-   *  @returns {ok:boolean} daemon 当前在线（heartbeat 统一写入目录实然）。 */
+   * router-daemon 的「期望运行 + 失联守护拉起」，由 ManagedRegistry.heartbeat 经 adapter 调用
+   * （节流≈30s，与原 L3 监督 tick 等价）。守卫重启不影响 daemon（进程独立）。
+   * @returns {ok:boolean} daemon 当前在线（heartbeat 统一写入目录实然）。 */
   async _daemonSuperviseOnce(kind) {
     if (this._stopping) return { ok: false };
     // INV-S1 全域（契约 §3.3）：会话退出中/已退出 → 不再监督拉起 router daemon。
@@ -248,15 +248,15 @@ class ControlView {
           // R4 域摘要入目录（黑盒摘要引用，只读缓存；拉取失败仅降级——不影响监督）
           try {
             if (this.routerDaemonActive() && this.managedObjects) {
-              // ⚠ P2 修复（2026-09-13）：**必须给这一处显式短超时**。
-              //   domainSummary 经 ctl 转发，而 _ctlCall 的默认超时是 **120s**（见本文件 :67-69）。
-              //   本 await 位于心跳的**串行** for 循环内 → 会把同拍后续的 router/主实例
-              //   全部阻塞，并与「心跳是唯一周期驱动」复合：一拍最长 120s，
-              //   期间 main 收敛、沙箱自愈、daemon 监督全部停摆（且只有 debug 级日志）。
-              //   摘要只是**只读缓存**，失败可降级，不值得阻塞监督 → 5s 上限。
-              //   ⚠ 必须直接走 _ctlCall 的 timeoutMs 形参：门面 proxy 的签名是
-              //     fn=(...args)=>_ctlCall(port,prop,args)，把 {timeoutMs} 当**方法参数**传
-              //     会被送到 daemon 的 domainSummary 而不是当超时用（我第一版就写错了）。
+              // P2 修复（2026-09-13）：**必须给这一处显式短超时**。
+              // domainSummary 经 ctl 转发，而 _ctlCall 的默认超时是 **120s**（见本文件 :67-69）。
+              // 本 await 位于心跳的**串行** for 循环内 → 会把同拍后续的 router/主实例
+              // 全部阻塞，并与「心跳是唯一周期驱动」复合：一拍最长 120s，
+              // 期间 main 收敛、沙箱自愈、daemon 监督全部停摆（且只有 debug 级日志）。
+              // 摘要只是**只读缓存**，失败可降级，不值得阻塞监督 → 5s 上限。
+              // 必须直接走 _ctlCall 的 timeoutMs 形参：门面 proxy 的签名是
+              // fn=(...args)=>_ctlCall(port,prop,args)，把 {timeoutMs} 当**方法参数**传
+              // 会被送到 daemon 的 domainSummary 而不是当超时用（我第一版就写错了）。
               const s = await this._ctlCall(this._routerCtlPort(), 'domainSummary', [], ROUTER_SUMMARY_TIMEOUT_MS);
               const e = this.managedObjects.get('router-daemon');
               if (e && s && typeof s === 'object') {
@@ -334,7 +334,7 @@ class ControlView {
   }
 
   /** R4 域摘要（目录合成视图）：daemon 监督模式 → 目录 router-daemon 项 domainSummary
-   *  （监督拍经 ctl 拉取的只读缓存，目录只存引用）；内嵌模式 → 本地 RouterService 实时摘要。 */
+   * （监督拍经 ctl 拉取的只读缓存，目录只存引用）；内嵌模式 → 本地 RouterService 实时摘要。 */
   routerDomainSummary() {
     if (this.routerDaemonActive()) {
       try {
@@ -355,10 +355,10 @@ class ControlView {
   }
 
   /** router 生命周期视图同步（C3-5b：取代旧观测镜像层——视图数据并入目录/本拍实然）。
-   *  契约：desired 只表达「应运行」（由启停动作设置）；healthy/error/lastProbeAt 只由真实观测写入；
-   *  phase 收敛为守卫视角期望视图（desired=running→running；stopped→stopped）。
-   *  红线：不读取/不写入 router 业务状态（回收/切换/预热/冻结仍归资源自治）。
-   *  @param o { ok?:boolean, error?:string } 本拍实然（缺省回退目录 router-daemon lastObserved） */
+   * 契约：desired 只表达「应运行」（由启停动作设置）；healthy/error/lastProbeAt 只由真实观测写入；
+   * phase 收敛为守卫视角期望视图（desired=running→running；stopped→stopped）。
+   * 红线：不读取/不写入 router 业务状态（回收/切换/预热/冻结仍归资源自治）。
+   * @param o { ok?:boolean, error?:string } 本拍实然（缺省回退目录 router-daemon lastObserved） */
   _syncRouterLifecycleView(o) {
     const lc = this.lifecycleManager ? this.lifecycleManager.get('router') : null;
     if (!lc) return;
@@ -375,11 +375,11 @@ class ControlView {
       lc.healthy = false;
       return;
     }
-    // ⚠ phase 必须反映**观测到的 ok**，不能无条件置 running（2026-09-11 修复，与 K4 同族）：
-    //   旧实现无论 ok 与否都 _setPhase('running') ——
-    //   于是 daemon 还没就绪时面板显示「运行中」，与 healthy=false 自相矛盾。
-    //   现：ok → running；未 ok 且从未 running 过 → starting（拉起中，不谎报）；
-    //       曾 running 则保持 running 相位（进程可能仍在，只是探活失败）。
+    // phase 必须反映**观测到的 ok**，不能无条件置 running（2026-09-11 修复，与 K4 同族）：
+    // 旧实现无论 ok 与否都 _setPhase('running') ——
+    // 于是 daemon 还没就绪时面板显示「运行中」，与 healthy=false 自相矛盾。
+    // 现：ok → running；未 ok 且从未 running 过 → starting（拉起中，不谎报）；
+    // 曾 running 则保持 running 相位（进程可能仍在，只是探活失败）。
     if (ok) {
       if (lc.phase !== 'running') lc._setPhase('running');
       lc.error = null;
@@ -393,7 +393,7 @@ class ControlView {
   }
 
   /** 守护动作事件（阶段四，事件脊）：统一记录守护决策/动作，带资源关联键，供审计回放。
-   *   action: pull(拉起) | skip-guardian-off(守护关闭仅观测)。只读统一状态机 restartCount，不碰业务。 */
+   * action: pull(拉起) | skip-guardian-off(守护关闭仅观测)。只读统一状态机 restartCount，不碰业务。 */
   _guardianEvent(resource, action, extra) {
     const lc = this.lifecycleManager ? this.lifecycleManager.get(resource) : null;
     const e = Object.assign({ resource, action }, extra || {});

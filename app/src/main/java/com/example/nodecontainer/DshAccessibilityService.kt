@@ -17,12 +17,12 @@ import org.json.JSONObject
  * DSH 无障碍服务 —— ui_automation 方法组的**真实执行体**。
  *
  * 职责（对应 BRIDGE_PROTOCOL.md §3.2 的六个方法）：
- *   ui.tap        → [performTap]   GestureDescription 单点手势（API 24+）
- *   ui.swipe      → [performSwipe] GestureDescription 路径手势
- *   ui.inputText  → [inputText]    ACTION_SET_TEXT（API 21+）→ ACTION_PASTE 兜底
- *   ui.getUiTree  → [dumpUiTree]   rootInActiveWindow + getWindows 递归采集
- *   ui.waitFor    → [waitForNode]  轮询轮询节点出现（由 HostBridgeService 驱动）
- *   ui.screenshot → 不在此（需 MediaProjection，属 P5）
+ * ui.tap → [performTap] GestureDescription 单点手势（API 24+）
+ * ui.swipe → [performSwipe] GestureDescription 路径手势
+ * ui.inputText → [inputText] ACTION_SET_TEXT（API 21+）→ ACTION_PASTE 兜底
+ * ui.getUiTree → [dumpUiTree] rootInActiveWindow + getWindows 递归采集
+ * ui.waitFor → [waitForNode] 轮询轮询节点出现（由 HostBridgeService 驱动）
+ * ui.screenshot → 不在此（需 MediaProjection，属 P5）
  *
  * 与 HostBridgeService 的连接方式：HostBridgeService 跑在**主进程**，AccessibilityService
  * 由系统在同一进程绑定（Manifest 未指定 android:process），因此二者共享进程内的
@@ -30,14 +30,14 @@ import org.json.JSONObject
  * 抛 ERR_CAPABILITY_MISSING(-32001) —— 与 spec 的降级语义一致。
  *
  * 配置前提（app/src/main/res/xml/accessibility_service_config.xml）：
- *   canRetrieveWindowContent="true"          → getRootInActiveWindow / getWindows 可用
- *   flagReportViewIds                        → viewIdResourceName 非空
- *   flagRetrieveInteractiveWindows           → getWindows 可拿到悬浮窗 / 输入法窗口
+ * canRetrieveWindowContent="true" → getRootInActiveWindow / getWindows 可用
+ * flagReportViewIds → viewIdResourceName 非空
+ * flagRetrieveInteractiveWindows → getWindows 可拿到悬浮窗 / 输入法窗口
  *
- * ⚠ 线程：本类的公开方法由 HostBridgeService 的工作线程调用。dispatchGesture /
- *   findAccessibilityNodeInfosByViewId / performAction 均线程安全（内部走 binder 到
- *   系统无障碍服务），但 [waitForNode] 的 sleep 轮询必须由调用线程阻塞，故放在
- *   HostBridgeService 的缓存线程池中执行（executor 已是无界线程池，不阻塞 accept 循环）。
+ * 线程：本类的公开方法由 HostBridgeService 的工作线程调用。dispatchGesture /
+ * findAccessibilityNodeInfosByViewId / performAction 均线程安全（内部走 binder 到
+ * 系统无障碍服务），但 [waitForNode] 的 sleep 轮询必须由调用线程阻塞，故放在
+ * HostBridgeService 的缓存线程池中执行（executor 已是无界线程池，不阻塞 accept 循环）。
  */
 class DshAccessibilityService : AccessibilityService() {
 
@@ -115,8 +115,8 @@ class DshAccessibilityService : AccessibilityService() {
      * 采集当前界面节点树。
      *
      * 双来源合并：
-     *  1) getWindows()      —— 覆盖悬浮窗 / 输入法 / 系统弹窗（getRootInActiveWindow 拿不到）
-     *  2) rootInActiveWindow —— 保底：部分 ROM 在无焦点窗口时 getWindows 为空
+     * 1) getWindows() —— 覆盖悬浮窗 / 输入法 / 系统弹窗（getRootInActiveWindow 拿不到）
+     * 2) rootInActiveWindow —— 保底：部分 ROM 在无焦点窗口时 getWindows 为空
      *
      * 节点序列化为 JSON：{cls, pkg, id, text, desc, bounds:[l,t,r,b], clickable, editable,
      * scrollable, enabled, focused, children:[...]}
@@ -232,9 +232,9 @@ class DshAccessibilityService : AccessibilityService() {
      * 向当前输入焦点写入文本。
      *
      * 三级降级（越靠前越通用）：
-     *  1. 「输入焦点节点」performAction(ACTION_SET_TEXT)  —— 最标准，一次到位
-     *  2. 「可编辑节点」逐个尝试 ACTION_FOCUS + ACTION_SET_TEXT
-     *  3. 剪贴板 ACTION_PASTE —— 部分自绘控件（Compose / Flutter / 游戏引擎）不吃 SET_TEXT
+     * 1. 「输入焦点节点」performAction(ACTION_SET_TEXT) —— 最标准，一次到位
+     * 2. 「可编辑节点」逐个尝试 ACTION_FOCUS + ACTION_SET_TEXT
+     * 3. 剪贴板 ACTION_PASTE —— 部分自绘控件（Compose / Flutter / 游戏引擎）不吃 SET_TEXT
      *
      * @param selector 可选：{id: "pkg:id/xxx"} 或 {text: "占位符文本"}，用于精确定位输入框
      */
@@ -333,8 +333,8 @@ class DshAccessibilityService : AccessibilityService() {
 
     /**
      * 轮询等待条件成立。条件三选一（按优先级）：
-     *   {id: "pkg:id/xxx"} / {text: "..."} / {className: "android.widget.Button"}，
-     *   可选 {pkg: "目标包名"} 限定包名。
+     * {id: "pkg:id/xxx"} / {text: "..."} / {className: "android.widget.Button"}，
+     * 可选 {pkg: "目标包名"} 限定包名。
      *
      * @return 命中返回 {found:true, elapsedMs, node:{...}}；超时返回 {found:false, elapsedMs}
      */

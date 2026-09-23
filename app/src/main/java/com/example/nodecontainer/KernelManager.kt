@@ -9,17 +9,17 @@ import java.security.MessageDigest
  * 内核（L1）版本管理 —— 与容器引擎 OTA 引擎共用同一套指针约定。
  *
  * 布局（与 container-engine/src/ota-engine.js、kernel-bundle.js 对齐）：
- *   files/kernel/CURRENT                 -> 当前生效版本号（原子写）
- *   files/kernel/<version>/kernel.json   -> 内核包清单（含 entry/signature/requires）
- *   files/kernel/<version>/bin/dsh-supervisor -> 内核入口（**由 node 解释执行**）
+ * files/kernel/CURRENT -> 当前生效版本号（原子写）
+ * files/kernel/<version>/kernel.json -> 内核包清单（含 entry/signature/requires）
+ * files/kernel/<version>/bin/dsh-supervisor -> 内核入口（**由 node 解释执行**）
  *
  * 与 Node 运行时版本（NodeVersionManager，files/node/CURRENT）是两套独立指针：
- *   - Node 运行时（L0）冻结；
- *   - 内核（L1）经签名 OTA 热更新。
+ * - Node 运行时（L0）冻结；
+ * - 内核（L1）经签名 OTA 热更新。
  * 二者互不替代。
  *
  * ============================================================================
- *  ⚠️ dsh-supervisor 是【脚本】，不是可执行的二进制 —— 不要试图 exec 它
+ * dsh-supervisor 是【脚本】，不是可执行的二进制 —— 不要试图 exec 它
  * ============================================================================
  * 它落在 `filesDir`（label = `app_data_file`），**SELinux W^X 禁止 execve**。
  * 正确用法是把它当**参数**交给 node：
@@ -224,10 +224,10 @@ class KernelManager(private val context: Context) {
      * 首启兜底 **＋ 基线升级通道**：APK 内置基线内核包经**完整校验**后落地并切指针。
      *
      * 两种资产名（CI 的 scripts/build-kernel-baseline.sh 同时产出）：
-     *   · `baseline-<version>.zip` —— 版本写在资产名里，**不解包即可与 CURRENT 比较**，
-     *     高于 CURRENT 才落地（只升不降，防止 feed/OTA 装的更新版本被旧 APK 压回）；
-     *   · `baseline.zip`（历史名）—— 版本要解包才知道，维持旧语义：仅 CURRENT 缺失时
-     *     兜底安装，避免每次开机重读 1.2MB 资产。
+     * · `baseline-<version>.zip` —— 版本写在资产名里，**不解包即可与 CURRENT 比较**，
+     * 高于 CURRENT 才落地（只升不降，防止 feed/OTA 装的更新版本被旧 APK 压回）；
+     * · `baseline.zip`（历史名）—— 版本要解包才知道，维持旧语义：仅 CURRENT 缺失时
+     * 兜底安装，避免每次开机重读 1.2MB 资产。
      *
      * 为什么需要升级分支：`AlreadyPresent` 让新 APK 里的新内核在已装内核的设备上
      * 永远不生效 —— 真机上唯一被验证过的交付动作就是「装新 APK」，若内核更新
@@ -235,15 +235,15 @@ class KernelManager(private val context: Context) {
      * 后续 OTA 覆盖升级仍走 [KernelInstaller] 同一入口。
      *
      * ============================================================================
-     *  ⚠️ 基线包**同样必须验签** —— 不能因为"它是 APK 里带的"就跳过
+     * 基线包**同样必须验签** —— 不能因为"它是 APK 里带的"就跳过
      * ============================================================================
      * 直觉上「APK 已经验过签名了，里面的资产自然是可信的」。
      * 这个直觉在这里**不成立**，原因是信任根不同：
-     *   · APK 签名锚定的是 **Play/发布者**（Android 平台信任）；
-     *   · 内核签名锚定的是 **容器私钥**（`ota-public.pem`，本架构自己的信任根）。
+     * · APK 签名锚定的是 **Play/发布者**（Android 平台信任）；
+     * · 内核签名锚定的是 **容器私钥**（`ota-public.pem`，本架构自己的信任根）。
      * 二者是两把独立的钥匙。若基线包跳过内核验签，那么：
-     *   任何能重打 APK 的人（不必持有容器私钥）都能塞进一个任意内核，
-     *   双信任根就退化成了单信任根。
+     * 任何能重打 APK 的人（不必持有容器私钥）都能塞进一个任意内核，
+     * 双信任根就退化成了单信任根。
      * 所以 [KernelInstaller.install] 对基线包与外部包一视同仁。
      *
      * 返回结构化的 [BaselineResult]，而不是历史上的 `String?` —— 后者让

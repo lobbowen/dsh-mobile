@@ -1,17 +1,17 @@
 'use strict';
 
 // 插件安装管理器（工业级，双机制：原生宿主 × 沙箱实例）：
-//  - 目标系统：插件作用域 = 原生实例 / 沙箱实例 / 全部（每实例独立 DSH + profile）；
-//  - 官方生效模型（dsh-app-boot/profile-boot 语义）：
-//      · bundle 层变化（安装/卸载/更新）→ 启动时装配 → 需要重启生效（_applyPluginChange）；
-//      · 补丁层变化（停用/启用）→ cordis.patch.yml（profile 级 + home 级）运行时热载（patchReload=live
-//        默认开启）→ 无需重启。supervisor 管理的停用面统一为「home 级补丁层 $DSH_HOME/cordis.patch.yml」，
-//        原生与沙箱共用同一文件语义，不再改 profile bundles（避免 reconcile 击穿）。
-//  - 卸载按目标「检测并卸载」+ 跨层残留清理（home 补丁层 / 原生 overlay / profile 补丁层检测）；
-//  - 更新：检测（registry 最高版 vs 已装版）+ 执行（dsh plugin … update，官方 pnpm 更新 + reconcile）；
-//  - 异步 CLI：spawn + 超时 + 行进度（不阻塞事件循环）；
-//  - 作用域互斥：同一目标同时只允许一个插件操作（install/uninstall/update 共用锁，启停走文件原子写）；
-//  - Job 管理：install/uninstall/update 统一任务模型，保留最近 MAX_JOBS 个（防内存堆积）。
+// - 目标系统：插件作用域 = 原生实例 / 沙箱实例 / 全部（每实例独立 DSH + profile）；
+// - 官方生效模型（dsh-app-boot/profile-boot 语义）：
+// · bundle 层变化（安装/卸载/更新）→ 启动时装配 → 需要重启生效（_applyPluginChange）；
+// · 补丁层变化（停用/启用）→ cordis.patch.yml（profile 级 + home 级）运行时热载（patchReload=live
+// 默认开启）→ 无需重启。supervisor 管理的停用面统一为「home 级补丁层 $DSH_HOME/cordis.patch.yml」，
+// 原生与沙箱共用同一文件语义，不再改 profile bundles（避免 reconcile 击穿）。
+// - 卸载按目标「检测并卸载」+ 跨层残留清理（home 补丁层 / 原生 overlay / profile 补丁层检测）；
+// - 更新：检测（registry 最高版 vs 已装版）+ 执行（dsh plugin … update，官方 pnpm 更新 + reconcile）；
+// - 异步 CLI：spawn + 超时 + 行进度（不阻塞事件循环）；
+// - 作用域互斥：同一目标同时只允许一个插件操作（install/uninstall/update 共用锁，启停走文件原子写）；
+// - Job 管理：install/uninstall/update 统一任务模型，保留最近 MAX_JOBS 个（防内存堆积）。
 // 边界：安装级内置组件（dsh-base / web-app）只读展示，拒绝一切变更操作。
 
 const { spawn } = require('node:child_process');
@@ -20,10 +20,11 @@ const path = require('node:path');
 const os = require('node:os');
 // 平台知识唯一事实源（跨平台架构规范）：能力查询（进程组语义）经此，不自行判断 platform。
 const matrix = require('../../platform/matrix');
+const AGENT = require('../../platform/agent').load();
 const { semverCompare } = require('../dist/index');
 const { dirSizeBytes } = require('../../platform/fs-utils');
 
-const PROTECTED = new Set(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app']);
+const PROTECTED = new Set(AGENT.protectedPackages);
 const MAX_JOBS = 50;      // job 保留上限（超出清理最旧）
 const CLI_TIMEOUT_MS = 180000; // 单次 dsh plugin CLI 超时
 
@@ -41,9 +42,9 @@ class PluginManager {
     this.profileDir = opts.profileDir;         // 原生 profile 目录
     this.overlayFile = opts.overlayFile;
     this.dshPort = opts.dshPort;
-    // ⚠ 已删除的依赖（勿回潮）：`opts.instances`（沙箱实例域 InstanceManager）——
-    //   Android 内核只有原生主干一个安装目标，插件不再有沙箱目标。
-    //   原生 DSH 是否运行改由 `dshRunning` 探针注入（supervisor 持有真实运行态）。
+    // 已删除的依赖（勿回潮）：`opts.instances`（沙箱实例域 InstanceManager）——
+    // Android 内核只有原生主干一个安装目标，插件不再有沙箱目标。
+    // 原生 DSH 是否运行改由 `dshRunning` 探针注入（supervisor 持有真实运行态）。
     this.dshRunning = opts.dshRunning || null;
     this.onNativeRestart = opts.onNativeRestart || null; // 原生 DSH 重启回调（supervisor 注入 → requestRestart()，走守卫生命周期）
     this.logger = opts.logger || console;
@@ -76,8 +77,8 @@ class PluginManager {
   }
 
   /** 严格解析目标：Android 内核**只有一个安装目标** —— 原生主干（native）。
-   *  `all` 与 `native` 等价（历史上 all = native + 全部沙箱实例；沙箱实例域已删除）。
-   *  其它目标（含旧的 `id:<实例id>` 写法）一律报错，不静默降级。 */
+   * `all` 与 `native` 等价（历史上 all = native + 全部沙箱实例；沙箱实例域已删除）。
+   * 其它目标（含旧的 `id:<实例id>` 写法）一律报错，不静默降级。 */
   resolveTargets(targetStr) {
     let str = (targetStr === undefined || targetStr === null || targetStr === '') ? 'native' : String(targetStr);
     if (str.startsWith('id:')) str = str.slice(3); // 旧前端写法（已无实例目标）
@@ -96,7 +97,7 @@ class PluginManager {
   }
 
   /** 从目标 profile 的 dsh.profile.bundles 中移除指定插件（bundle 型插件卸载必需）。
-   *  返回是否实际移除了；profile 无该插件时返回 false。 */
+   * 返回是否实际移除了；profile 无该插件时返回 false。 */
   _removeFromProfileBundles(target, pluginName) {
     const profilePath = path.join(target.profileDir, 'package.json');
     const profile = this._readProfile(target.profileDir);
@@ -116,13 +117,13 @@ class PluginManager {
 
   /* ═══════ 补丁层（停用/启用的官方热载面）═══════ */
   /** 目标 DSH 的 home 级补丁层文件：$DSH_HOME/cordis.patch.yml。
-   *  原生与沙箱同规则：<$DSH_HOME>/cordis.patch.yml（并且都是 profileDir 的上上级目录）。 */
+   * 原生与沙箱同规则：<$DSH_HOME>/cordis.patch.yml（并且都是 profileDir 的上上级目录）。 */
   _targetHomePatchPath(target) {
     return path.resolve(path.dirname(path.dirname(target.profileDir)), 'cordis.patch.yml');
   }
 
   /** 读 home 补丁层（supervisor 管理面，JSON 数组）。
-   *  返回 { ok, entries }；文件缺失 ok=true/[]；非 JSON（用户 YAML）返回 ok=false 并附原因。 */
+   * 返回 { ok, entries }；文件缺失 ok=true/[]；非 JSON（用户 YAML）返回 ok=false 并附原因。 */
   _readHomePatch(target) {
     const file = this._targetHomePatchPath(target);
     let raw = null;
@@ -149,19 +150,19 @@ class PluginManager {
   }
 
   /** 解析插件在目标 loader 树中的补丁目标 entry id：
-   *  - native：优先运行时 inventory 的 entryId；不可达时回落包名；
-   *  insert/include 型（非 bundle）条目的自定义 id 需 inventory 支撑（P3），未达时按包名处理并记录。
+   * - native：优先运行时 inventory 的 entryId；不可达时回落包名；
+   * insert/include 型（非 bundle）条目的自定义 id 需 inventory 支撑（P3），未达时按包名处理并记录。
    *
-   *  ⚠ P1-5 修复（2026-09-12）：匹配从**子串**改为**版本感知的包名边界匹配**。
+   * P1-5 修复（2026-09-12）：匹配从**子串**改为**版本感知的包名边界匹配**。
    *
-   *    缺陷：原为 `moduleName.includes(name)` —— 于是停用 `@scope/dsh-tool` 时，
-   *      `@scope/dsh-tool-extra` 的 entryId 也被收进 ids → 下游 `ids.includes(e.id)`
-   *      把它一并置 `disabled`（**误伤无关插件**）。
-   *      典型反例：`dsh-tool` 是 `dsh-tool-extra` 的子串。
+   * 缺陷：原为 `moduleName.includes(name)` —— 于是停用 `@scope/dsh-tool` 时，
+   * `@scope/dsh-tool-extra` 的 entryId 也被收进 ids → 下游 `ids.includes(e.id)`
+   * 把它一并置 `disabled`（**误伤无关插件**）。
+   * 典型反例：`dsh-tool` 是 `dsh-tool-extra` 的子串。
    *
-   *    修法：按「包名后紧跟 / 或字符串结束」判定边界，即 `name` 或 `name/...`
-   *      （覆盖 `@scope/pkg` 与其子路径导入），但**不接受** `name-extra` 这类前缀延长。
-   *      同时保留精确相等的情形（moduleName 恰为包名）。
+   * 修法：按「包名后紧跟 / 或字符串结束」判定边界，即 `name` 或 `name/...`
+   * （覆盖 `@scope/pkg` 与其子路径导入），但**不接受** `name-extra` 这类前缀延长。
+   * 同时保留精确相等的情形（moduleName 恰为包名）。
    */
   async _patchEntryIdsForPlugin(target, name) {
     const ids = new Set([name]); // 包名兜底（bundle 插件的 loader entry id）
@@ -183,30 +184,30 @@ class PluginManager {
   async _scrubPluginLayers(target, name, onLog) {
     // 与 setBundleEnabled 共用补丁层写串行队列（防并发读改写丢失更新）
     //
-    // ⚠ P1 修复（2026-09-13，失效模式 g）：**队列不得被单次异常永久毒化**。
-    //   见下方 _enqueueBundleOp 的完整说明（两处共用同一收敛点）。
+    // P1 修复（2026-09-13，失效模式 g）：**队列不得被单次异常永久毒化**。
+    // 见下方 _enqueueBundleOp 的完整说明（两处共用同一收敛点）。
     return this._enqueueBundleOp('scrub', () => this._scrubPluginLayersInner(target, name, onLog));
   }
 
   /** 补丁层写串行队列的**唯一入队点**（setBundleEnabled / _scrubPluginLayers 共用）。
    *
-   *  ⚠ P1 修复（2026-09-13，失效模式 g：纪律只在一处执行）：
+   * P1 修复（2026-09-13，失效模式 g：纪律只在一处执行）：
    *
-   *    缺陷：两处入队都写成 `this._bundleOpQueue = this._bundleOpQueue.then(fn)` ——
-   *      **没有 catch**。一旦某个 fn 抛异常（补丁层写盘失败：EACCES / EIO / ENOSPC 等），
-   *      队列 Promise 变为 rejected，此后**每一次** .then() 都直接跳过回调、继续向下传播
-   *      同一个 rejection —— 队列被**永久毒化**。
-   *    后果：进程剩余生命周期内，
-   *      · 每次 POST /plugins/enable|disable 都返回**上一次的旧错误**，写盘根本没发生；
-   *      · 每次卸载的 _scrubPluginLayers 静默跳过，而 uninstall 的 .then 照常推进 →
-   *        **卸载报成功但 home 补丁层未清**；
-   *      · 全程无 warn/error 日志（调用方拿到 rejection 但多为 .catch 忽略）。
+   * 缺陷：两处入队都写成 `this._bundleOpQueue = this._bundleOpQueue.then(fn)` ——
+   * **没有 catch**。一旦某个 fn 抛异常（补丁层写盘失败：EACCES / EIO / ENOSPC 等），
+   * 队列 Promise 变为 rejected，此后**每一次** .then() 都直接跳过回调、继续向下传播
+   * 同一个 rejection —— 队列被**永久毒化**。
+   * 后果：进程剩余生命周期内，
+   * · 每次 POST /plugins/enable|disable 都返回**上一次的旧错误**，写盘根本没发生；
+   * · 每次卸载的 _scrubPluginLayers 静默跳过，而 uninstall 的 .then 照常推进 →
+   * **卸载报成功但 home 补丁层未清**；
+   * · 全程无 warn/error 日志（调用方拿到 rejection 但多为 .catch 忽略）。
    *
-   *    同文件 _withScopeLock(:396) 正是**正确写法**（`= run.catch(() => {})`）——
-   *    同一纪律只在两条路径中的一条执行。
+   * 同文件 _withScopeLock(:396) 正是**正确写法**（`= run.catch(() => {})`）——
+   * 同一纪律只在两条路径中的一条执行。
    *
-   *    修法：收敛到本唯一入队点，链尾永远 .catch 掉错误（不毒化），
-   *      同时把错误落日志并如实返回给调用方（不吞错）。
+   * 修法：收敛到本唯一入队点，链尾永远 .catch 掉错误（不毒化），
+   * 同时把错误落日志并如实返回给调用方（不吞错）。
    */
   _enqueueBundleOp(tag, fn) {
     const run = this._bundleOpQueue.then(fn);
@@ -317,9 +318,9 @@ class PluginManager {
   }
 
   /** CLI 参数注入防护：插件操作的目标参数（spec/name）来自 API/外部输入，
-   *  若以 '-' 开头会被 dsh/pnpm 当作选项解析（如 install('-y foo')、name='--store-dir'）。
-   *  包名/规格不可能合法以 '-' 开头（npm 名首字符须为字母/@/.），此处统一拒绝（2026-09 审计修复）。
-   *  @returns {string|null} 错误信息（null = 全部参数安全） */
+   * 若以 '-' 开头会被 dsh/pnpm 当作选项解析（如 install('-y foo')、name='--store-dir'）。
+   * 包名/规格不可能合法以 '-' 开头（npm 名首字符须为字母/@/.），此处统一拒绝（2026-09 审计修复）。
+   * @returns {string|null} 错误信息（null = 全部参数安全） */
   _assertSafeCliArgs(args) {
     for (const a of args) {
       if (typeof a === 'string' && a.length > 1 && a[0] === '-' && !/^-[0-9]/.test(a)) {
@@ -339,14 +340,14 @@ class PluginManager {
       let timer = null; // 提升到 executor 顶层：settle 必须能访问（此前 const 定义在 .then 内，settle 引用越界 → ReferenceError → resolve 不执行 → job 永久 running）
       const settle = (v) => { if (!settled) { settled = true; if (timer) clearTimeout(timer); resolve(v); } };
       this._registryOriginAsync().then((regRaw) => {
-        // ⚠ P1-6 修复（2026-09-12）：registry 为 null 时**不得写进 env**。
+        // P1-6 修复（2026-09-12）：registry 为 null 时**不得写进 env**。
         //
-        //   缺陷：`selectRegistry` 在全镜像不可达时**返回 null**（dist/index.js:283 的分支），
-        //     而 Node 的 spawn 会把 env 值强转字符串 —— `{X: null}` 变成 `'null'`（已实测）。
-        //     于是 pnpm 收到 `npm_config_registry='null'` → 报错内容与真实原因（无可用镜像）无关，
-        //     把排查引向错误方向。
+        // 缺陷：`selectRegistry` 在全镜像不可达时**返回 null**（dist/index.js:283 的分支），
+        // 而 Node 的 spawn 会把 env 值强转字符串 —— `{X: null}` 变成 `'null'`（已实测）。
+        // 于是 pnpm 收到 `npm_config_registry='null'` → 报错内容与真实原因（无可用镜像）无关，
+        // 把排查引向错误方向。
         //
-        //   修法：null/空 → **不注入该键**（让 pnpm 用自身默认），并把无可用镜像如实记日志。
+        // 修法：null/空 → **不注入该键**（让 pnpm 用自身默认），并把无可用镜像如实记日志。
         const reg = regRaw || null;
         const envBase = Object.assign({}, process.env, target.env);
         if (reg) { envBase.npm_config_registry = reg; envBase.NPM_CONFIG_REGISTRY = reg; }
@@ -363,11 +364,11 @@ class PluginManager {
           const cli = this.resolveDshCli ? this.resolveDshCli() : null;
           const bin = cli ? cli.bin : target.bin;
           const prefix = cli ? cli.args : [];
-          // ⚠ P1-7 修复（2026-09-12）：`detached: true` 让子进程**自成进程组**，
-          //   这样才能用 `process.kill(-pid)` 杀**整棵树**（同 dist/index.js:452 的 npm 安装）。
-          //   缺陷：原实现无 detached，且超时只用 `child.kill()` 杀**直接子进程** ——
-          //     dsh plugin → pnpm 的**孙进程**（真正在跑安装的那个）会成为孤儿，
-          //     继续占用 profile 目录与 pnpm store 锁。
+          // P1-7 修复（2026-09-12）：`detached: true` 让子进程**自成进程组**，
+          // 这样才能用 `process.kill(-pid)` 杀**整棵树**（同 dist/index.js:452 的 npm 安装）。
+          // 缺陷：原实现无 detached，且超时只用 `child.kill()` 杀**直接子进程** ——
+          // dsh plugin → pnpm 的**孙进程**（真正在跑安装的那个）会成为孤儿，
+          // 继续占用 profile 目录与 pnpm store 锁。
           child = spawn(bin, [...prefix, ...cliArgs, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: true });
         } catch (e) { return settle({ ok: false, error: e.message }); }
         // 整树终止（POSIX/安卓 = 进程组，与平台能力声明一致）
@@ -468,7 +469,7 @@ class PluginManager {
   _sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
   /** 原生 DSH 是否运行中（决定插件变更要不要触发重启）。
-   *  运行态由守卫注入（dshRunning），插件层不自行探测进程。 */
+   * 运行态由守卫注入（dshRunning），插件层不自行探测进程。 */
   _targetRunning(target) {
     if (!target || target.kind !== 'native') return false;
     try { return typeof this.dshRunning === 'function' ? this.dshRunning() === true : false; } catch { return false; }
@@ -479,8 +480,8 @@ class PluginManager {
    * 只在启动时装配（dsh-client-modules 文档明确：plugin-set changes take effect
    * on restart）——运行中的进程不会热载 bundles，卸载后仍会服务旧清单里已删除的
    * client.js（浏览器报 Failed to load plugins），必须重启才能生效。
-   *  - native：走 onNativeRestart 回调（supervisor.requestRestart，守卫生命周期统一处理）
-   *  ⚠ 已删除的路径：sandbox 目标走 InstanceManager 停/起（沙箱实例域已删除）。
+   * - native：走 onNativeRestart 回调（supervisor.requestRestart，守卫生命周期统一处理）
+   * 已删除的路径：sandbox 目标走 InstanceManager 停/起（沙箱实例域已删除）。
    * 仅对「实际变更」的目标执行；未运行的目标记日志待下次启动生效，不阻塞流程。
    * @param target 变更目标
    * @param kind 操作类型（uninstall / enable / disable）
@@ -584,8 +585,8 @@ class PluginManager {
         try { res = await this._runCli(target, ['remove', name], { onLine: (l) => { jt.log.push(l); if (jt.log.length > 30) jt.log.shift(); } }); }
         catch (e) { res = { ok: false, error: (e && e.message) || String(e) }; }
         // ── bundle 型插件清理：dsh plugin remove 只移除 dependencies，
-        //    reconcile 对带 dsh.bundle 声明的插件会保留在 dsh.profile.bundles → DSH 仍加载。
-        //    这里直接从 profile 的 bundles 数组移除，确保卸载彻底生效。
+        // reconcile 对带 dsh.bundle 声明的插件会保留在 dsh.profile.bundles → DSH 仍加载。
+        // 这里直接从 profile 的 bundles 数组移除，确保卸载彻底生效。
         let bundlesCleaned = false;
         try {
           bundlesCleaned = this._removeFromProfileBundles(target, name);
@@ -656,7 +657,7 @@ class PluginManager {
   }
 
   /** 已装清单：原生详细（inventory 运行态）× 各目标聚合（每插件目标分布）。
-   *  返回 targets（Android 内核只有原生主干一个目标）+ thirdParty（含 targetNames）。 */
+   * 返回 targets（Android 内核只有原生主干一个目标）+ thirdParty（含 targetNames）。 */
   async listInstalled() {
     const nativeDetail = await this._listInstalledNative();
     const targets = [this._nativeTarget()];   // Android 内核：唯一安装目标（沙箱目标已删）
@@ -668,9 +669,9 @@ class PluginManager {
       }
     }
     // enabled 计算：任一目标处于启用态即视为启用——
-    //  生效面：bundles 加载层 + home 补丁层（$DSH_HOME/cordis.patch.yml，热载）禁用行 + 原生 legacy overlay
-    //  - disabledByPatch：home 补丁层中该插件有 disabled:true 行 → 禁用（双域一致）
-    //  - disabledByOverlay：原生 legacy --patch overlay 行 → 禁用（迁移期兼容）
+    // 生效面：bundles 加载层 + home 补丁层（$DSH_HOME/cordis.patch.yml，热载）禁用行 + 原生 legacy overlay
+    // - disabledByPatch：home 补丁层中该插件有 disabled:true 行 → 禁用（双域一致）
+    // - disabledByOverlay：原生 legacy --patch overlay 行 → 禁用（迁移期兼容）
     const overlayIds = new Set(this.overlayEntries.map((e) => e.id));
     const homePatchDisabledIds = (t) => {
       const hp = this._readHomePatch(t);
@@ -739,22 +740,22 @@ class PluginManager {
       counts: { rows: rows.length, active: rows.filter((r0) => r0.fiberPhase === 'active').length, disabledBase: rows.filter((r0) => r0.baseDisabled).length, pkgs: builtinPkgs.length },
       rows,
       builtinBundles: bundles.filter((n) => PROTECTED.has(n)).map((n) => ({ name: n, readonly: true })),
-      installationOwned: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
+      installationOwned: AGENT.protectedPackages,
     };
   }
 
   /** 整插件启停（官方补丁层机制，双域统一）
-   *  停用/启用写入目标 DSH 的 home 级补丁层 $DSH_HOME/cordis.patch.yml
-   *  （原生 ~/.dsh ；沙箱 <dataDir>/.dsh）。该层运行时热载（patchReload=live 默认开启），
-   *  运行中即时生效、无需重启；未运行则下次启动生效。不再改 dsh.profile.bundles，
-   *  从根本上消除官方 reconcile「把 dependencies 中带 dsh.bundle 的包自动加回 bundles」的击穿。
-   *  @param name 插件名（loader 补丁目标 id = 包名；native 优先用 inventory entryId）
-   *  @param on true=启用（移除禁用行，并清 legacy overlay 禁用行） false=禁用（写入 disabled 行）
-   *  @param targetStr 目标（native | all | 实例id）；缺省 native。 */
+   * 停用/启用写入目标 DSH 的 home 级补丁层 $DSH_HOME/cordis.patch.yml
+   * （原生 ~/.dsh ；沙箱 <dataDir>/.dsh）。该层运行时热载（patchReload=live 默认开启），
+   * 运行中即时生效、无需重启；未运行则下次启动生效。不再改 dsh.profile.bundles，
+   * 从根本上消除官方 reconcile「把 dependencies 中带 dsh.bundle 的包自动加回 bundles」的击穿。
+   * @param name 插件名（loader 补丁目标 id = 包名；native 优先用 inventory entryId）
+   * @param on true=启用（移除禁用行，并清 legacy overlay 禁用行） false=禁用（写入 disabled 行）
+   * @param targetStr 目标（native | all | 实例id）；缺省 native。 */
   async setBundleEnabled(name, on, targetStr) {
     // 补丁层读改写必须串行：并发 enable/disable（或与卸载的 scrub）会在同一文件上
     // 各自 read→write 导致丢失更新（原子 rename 只防撕裂，不防丢改）
-    // ⚠ P1 修复（2026-09-13）：经**唯一入队点**（异常不毒化队列）——见 _enqueueBundleOp。
+    // P1 修复（2026-09-13）：经**唯一入队点**（异常不毒化队列）——见 _enqueueBundleOp。
     return this._enqueueBundleOp('setBundleEnabled', () => this._setBundleEnabledInner(name, on, targetStr));
   }
 

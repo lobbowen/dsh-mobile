@@ -4,28 +4,29 @@
 // 职责（完整生命周期，单通道）：安装状态探测 / 版本检测 / 安装 / 升级（先停后装、验证、回滚）/ 卸载。
 // 状态机（安装态）：uninstalled → installing → installed → uninstalling → uninstalled；
 // 升级态（upgradeState，正交于安装态）：idle → restarting → verifying → done | failed（失败含 rolling_back → failed）。
-//   注：2026-09 审计修正——原注释写 upgrading，代码实际用 restarting（manager.js upgradeState 赋值处）。
+// 注：2026-09 审计修正——原注释写 upgrading，代码实际用 restarting（manager.js upgradeState 赋值处）。
 // 关键：安装/升级/回滚共用同一安装执行核心（_runInstall），无重复逻辑；
-//       版本检测/升级统一走 domain/dist（全局镜像源），无第二通道；
-//       安装时记录安装清单(manifest)，卸载时按清单全量清理，不留残留。
+// 版本检测/升级统一走 domain/dist（全局镜像源），无第二通道；
+// 安装时记录安装清单(manifest)，卸载时按清单全量清理，不留残留。
 
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const AGENT = require('../../platform/agent').load();
 const { spawn } = require('node:child_process');
 const ex = require('../../platform/exec');
 // npm 的统一解析入口（经 platform/os/exec-path）。
-//   ⚠ 经**模块对象**调用而非解构：解构是值绑定，无法被测试替换 ——
-//     曾因此让行为测试意外执行了真实 npm（见构造函数 `_npmBin` 的说明）。
+// 经**模块对象**调用而非解构：解构是值绑定，无法被测试替换 ——
+// 曾因此让行为测试意外执行了真实 npm（见构造函数 `_npmBin` 的说明）。
 const execPath = require('../../platform/os/exec-path');
 const runtimeContract = require('../../platform/runtime-contract');
 // npm 的**唯一 spawn 调用形态**：恒返回 `{bin, args}`，调用方拼
 // `inv.args.concat(自己的参数)` 后再 spawn。
-//   · 测试注入（构造期 opts.npmBin，或赋值 _npmBinArgs）优先 —— 结构上保证
-//     不触碰真实 npm；假 npm 的做法是 bin=process.execPath + args=[要跑的 .js]，
-//     因为 POSIX #!/bin/sh 脚本在非 POSIX 环境无法执行。
-//   · 生产经契约统一解析：安卓 = node 代跑 npm-cli.js（W^X 下 bin/ 里的 npm
-//     shim 脚本不可 execve），无契约退回 ambient 'npm'（PC 形态，不变量 C2）。
+// · 测试注入（构造期 opts.npmBin，或赋值 _npmBinArgs）优先 —— 结构上保证
+// 不触碰真实 npm；假 npm 的做法是 bin=process.execPath + args=[要跑的 .js]，
+// 因为 POSIX #!/bin/sh 脚本在非 POSIX 环境无法执行。
+// · 生产经契约统一解析：安卓 = node 代跑 npm-cli.js（W^X 下 bin/ 里的 npm
+// shim 脚本不可 execve），无契约退回 ambient 'npm'（PC 形态，不变量 C2）。
 function npmSpawn(self) {
   if (self && self._npmBin) {
     return { bin: self._npmBin, args: Array.isArray(self._npmBinArgs) ? self._npmBinArgs.slice() : [] };
@@ -42,17 +43,17 @@ class NativeManager {
     this.logger = opts.logger || console;
     this.stateDir = opts.stateDir;          // ~/.dsh/supervisor
     this.manifestFile = path.join(this.stateDir, 'native-manifest.json');
-    this.dshHome = path.join(os.homedir(), '.dsh'); // DSH 数据目录（守卫数据在 ~/.dsh/supervisor，分开）
+    this.dshHome = path.join(os.homedir(), AGENT.homeDirName); // 被管控 Agent 的数据目录（守卫数据另置）
     this.npmRoot = opts.npmRoot || null;    // npm 全局根（测试可注入隔离目录）
     // npm 可执行的解析入口（**依赖注入**，默认经跨平台解析）。
-    //   ⚠ 为什么必须可注入（2026-09-12 事故）：
-    //     我写 P1-F 行为测试时用「patch 模块导出」的方式替换 npmBin，
-    //     但 `const { npmBin } = require(...)` 是**值绑定**，patch 无效 ——
-    //     于是测试里那次「伪造的卸载挂起」实际执行了**真实 npm**。
-    //     该次恰好是 no-op（目标 prefix 无此包），但这是**侥幸**：
-    //     若目标 prefix 真装了包，测试就会删掉用户环境。
-    //     故：把 npm 可执行做成构造期可注入依赖，测试才能在**结构上**
-    //     保证不触碰真实 npm（而不是依赖环境巧合）。
+    // 为什么必须可注入（2026-09-12 事故）：
+    // 我写 P1-F 行为测试时用「patch 模块导出」的方式替换 npmBin，
+    // 但 `const { npmBin } = require(...)` 是**值绑定**，patch 无效 ——
+    // 于是测试里那次「伪造的卸载挂起」实际执行了**真实 npm**。
+    // 该次恰好是 no-op（目标 prefix 无此包），但这是**侥幸**：
+    // 若目标 prefix 真装了包，测试就会删掉用户环境。
+    // 故：把 npm 可执行做成构造期可注入依赖，测试才能在**结构上**
+    // 保证不触碰真实 npm（而不是依赖环境巧合）。
     this._npmBin = opts.npmBin || null;
     this.hooks = opts.hooks || {};          // 守卫生命周期钩子（supervisor 注入）：升级需停/起 DSH 时回调
     this.tasks = opts.tasks || null;        // 统一安装/更新任务注册表（持久化历史 + 统一 API）
@@ -194,8 +195,8 @@ class NativeManager {
   /* ═══════ 环境检查 ═══════ */
   checkEnvironment() {
     const errors = [];
-    // ⚠ 经统一执行器（2026-09-11）：原为裸 execFileSync **无 timeout** ——
-    //   npm/node 在 PATH 指向网络盘、或 npm 因缓存锁挂起时会无限阻塞守卫事件循环。
+    // 经统一执行器（2026-09-11）：原为裸 execFileSync **无 timeout** ——
+    // npm/node 在 PATH 指向网络盘、或 npm 因缓存锁挂起时会无限阻塞守卫事件循环。
     const nv = ex.runOut(runtimeContract.nodeBin('node'), ['--version']);
     if (!nv || !nv.trim()) errors.push('node 未安装或不可执行');
     const inv = npmSpawn(this);
@@ -219,12 +220,12 @@ class NativeManager {
   }
 
   /** 记录安装清单。
-   *  dataPaths 语义（2026-09 审计修正）：卸载时是否连带删除 ~/.dsh 用户数据目录。
-   *  - 默认不认领：调用方未显式传 dataPaths 时为空数组（卸载只卸 npm 包，保留用户数据）；
-   *  - 仅全新安装且 ~/.dsh 无既有 DSH 数据时，install() 才传 dataPaths（见 install）；
-   *  - 升级/回滚调用本方法时传既有 manifest 的 dataPaths（保留首装认领，不覆盖/不新增）。
-   *  @param {string} version
-   *  @param {string[]|undefined} dataPaths 卸载时删除的数据路径（默认 []） */
+   * dataPaths 语义（2026-09 审计修正）：卸载时是否连带删除 ~/.dsh 用户数据目录。
+   * - 默认不认领：调用方未显式传 dataPaths 时为空数组（卸载只卸 npm 包，保留用户数据）；
+   * - 仅全新安装且 ~/.dsh 无既有 DSH 数据时，install() 才传 dataPaths（见 install）；
+   * - 升级/回滚调用本方法时传既有 manifest 的 dataPaths（保留首装认领，不覆盖/不新增）。
+   * @param {string} version
+   * @param {string[]|undefined} dataPaths 卸载时删除的数据路径（默认 []） */
   _recordManifest(version, dataPaths) {
     // dataPaths 未显式传（升级/回滚）：继承既有 manifest 的认领——首装认领不因升级丢失
     let claim = Array.isArray(dataPaths) ? dataPaths : null;
@@ -240,12 +241,12 @@ class NativeManager {
     this._applyLaunchCommand(npmRoot);
     this.ensureRequireBuiltinShim();
     this.ensureFlockShim();
-    this.ensureLinkPublishShim();
-    this.ensurePtcEnvShim();
-    this.ensureCapabilityEnvShim();
+    this.ensureRipgrepPackage();
+    this.ensureSharpWasm();
+    this.ensureNodePtyPrebuild();
     const bin = this.binPath();
     let pkgDir = null;
-    try { pkgDir = path.join(npmRoot, this.config.packageName || '@deepseek-ai/dsh'); } catch {}
+    try { pkgDir = path.join(npmRoot, this.config.packageName); } catch {}
     this._saveManifest({
       installedAt: new Date().toISOString(),
       version,
@@ -260,20 +261,20 @@ class NativeManager {
 
   /* ═══════ 启动命令写回 + dsh CLI 调用形态（安卓容器）═══════ */
   /** 安装/升级/回滚成功后把 config.command 落为**绝对形态**：
-   *    [契约 node（libnode.so）, <npmRoot>/<pkg> 的 bin 入口脚本绝对路径, 'web', '--no-open']
-   *  --no-open：dsh web 启动后会 spawn xdg-open/open 打开默认浏览器 —— 安卓无此命令，
-   *  且面板本就由容器 WebView 呈现，URL 交给外部打开没有意义。
-   *  为什么必须写回：模板形态 ['node','dsh','web'] 依赖 PATH 与可 execve 的
-   *  dsh shim —— 安卓容器两者都不成立（W^X）；装完不写回，守卫重启即拉不起。
-   *  只认容器契约形态（npmEntry 在场）；PC（无契约）行为逐字不变。解析失败静默
-   *  保留原命令（不变量 C2：绝不让已成功的安装因写回失败而报错）。 */
+   * [契约 node（libnode.so）, <npmRoot>/<pkg> 的 bin 入口脚本绝对路径, 'web', '--no-open']
+   * --no-open：dsh web 启动后会 spawn xdg-open/open 打开默认浏览器 —— 安卓无此命令，
+   * 且面板本就由容器 WebView 呈现，URL 交给外部打开没有意义。
+   * 为什么必须写回：模板形态 ['node','dsh','web'] 依赖 PATH 与可 execve 的
+   * dsh shim —— 安卓容器两者都不成立（W^X）；装完不写回，守卫重启即拉不起。
+   * 只认容器契约形态（npmEntry 在场）；PC（无契约）行为逐字不变。解析失败静默
+   * 保留原命令（不变量 C2：绝不让已成功的安装因写回失败而报错）。 */
   _applyLaunchCommand(npmRoot) {
     try {
       const c = runtimeContract.read();
       if (!c || !c.npmEntry) return;
       const root = npmRoot || this.npmRoot;
       if (!root) return;
-      const pkgDir = path.join(root, this.config.packageName || '@deepseek-ai/dsh');
+      const pkgDir = path.join(root, this.config.packageName);
       const pj = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
       const b = pj.bin;
       const rel = typeof b === 'string' ? b : (b && (b.dsh || Object.values(b)[0])) || null;
@@ -293,7 +294,7 @@ class NativeManager {
   }
 
   /** dsh CLI 调用形态（插件域共用主干形态）：config.command 已是写回后的
-   *  node 代跑形态时返回 {bin, args}；否则 null（调用方退回 dsh 逻辑名）。 */
+   * node 代跑形态时返回 {bin, args}；否则 null（调用方退回 dsh 逻辑名）。 */
   dshCliInvocation() {
     try {
       const c = runtimeContract.read();
@@ -310,11 +311,11 @@ class NativeManager {
   }
 
   /** 安卓容器自愈：给安装树里的 node-addon-require-builtin 投放 JS 垫片。
-   *  根因与方案见 require-builtin-shim.js 头注释。幂等（已投放即 no-op），
-   *  每次 spawn 前由守卫调用 —— 覆盖安装/内核升级后旧 dsh 不重装也能被修复。
-   *  门控同 _applyLaunchCommand：只认容器契约形态（npmEntry 在场），PC 行为逐字不变；
-   *  失败只告警不抛（不变量 C2：绝不让运行因自愈失败而中断）。
-   *  @param {string} [rootOverride] 显式 npm 全局根（安装完成路径传入刚解析的值） */
+   * 根因与方案见 require-builtin-shim.js 头注释。幂等（已投放即 no-op），
+   * 每次 spawn 前由守卫调用 —— 覆盖安装/内核升级后旧 dsh 不重装也能被修复。
+   * 门控同 _applyLaunchCommand：只认容器契约形态（npmEntry 在场），PC 行为逐字不变；
+   * 失败只告警不抛（不变量 C2：绝不让运行因自愈失败而中断）。
+   * @param {string} [rootOverride] 显式 npm 全局根（安装完成路径传入刚解析的值） */
   ensureRequireBuiltinShim(rootOverride) {
     try {
       const c = runtimeContract.read();
@@ -342,11 +343,11 @@ class NativeManager {
   }
 
   /** 安卓容器自愈：给安装树里的 @deepseek-ai/node-addon-system 投放 flock 垫片
-   *  （真 flock(2) 走 APK jniLibs 的 libdshflock.so，根因见 flock-shim.js 头注释）。
-   *  门控 = 容器契约形态（同 ensureRequireBuiltinShim）**且** 容器已递来
-   *  DSH_FLOCK_NATIVE 路径 —— PC/dev 无该变量 ⇒ 树不动、行为逐字不变。
-   *  幂等；失败只告警不抛（不变量 C2）。
-   *  @param {string} [rootOverride] 显式 npm 全局根（安装完成路径传入刚解析的值） */
+   * （真 flock(2) 走 APK jniLibs 的 libdshflock.so，根因见 flock-shim.js 头注释）。
+   * 门控 = 容器契约形态（同 ensureRequireBuiltinShim）**且** 容器已递来
+   * DSH_FLOCK_NATIVE 路径 —— PC/dev 无该变量 ⇒ 树不动、行为逐字不变。
+   * 幂等；失败只告警不抛（不变量 C2）。
+   * @param {string} [rootOverride] 显式 npm 全局根（安装完成路径传入刚解析的值） */
   ensureFlockShim(rootOverride) {
     try {
       const c = runtimeContract.read();
@@ -375,119 +376,82 @@ class NativeManager {
     }
   }
 
-  /** 安卓容器自愈：把安装树 5 处 link(2) 独占发布桥到 renameat2(RENAME_NOREPLACE)
-   *  （SELinux 禁 app 硬链接，真机实证 EACCES；根因与锚点见 link-publish-shim.js）。
-   *  门控同 ensureFlockShim：契约在场 + 容器递来原生库路径声明
-   *  （DSH_PUBLISH_NATIVE 或 DSH_FLOCK_NATIVE 任一，helper 从后者目录推导前者）；
-   *  PC/dev 无这些变量 ⇒ 树不动、行为逐字不变。幂等；失败只告警不抛（不变量 C2）。
-   *  @param {string} [rootOverride] 显式 npm 全局根（安装完成路径传入刚解析的值） */
-  ensureLinkPublishShim(rootOverride) {
+
+  /** 把 @vscode/ripgrep-android-arm64 平台包补给安装树（指向 $PREFIX/bin/rg）。
+   * 门控：契约在场 + PREFIX 下确有 rg；PC/dev 不动。幂等；失败只告警不抛。
+   * @param {string} [rootOverride] 显式 npm 全局根 */
+  ensureRipgrepPackage(rootOverride) {
     try {
       const c = runtimeContract.read();
       if (!c || !c.npmEntry) return null;
-      const hasNative = (v) => typeof v === 'string' && v.trim() !== '';
-      if (!hasNative(process.env.DSH_PUBLISH_NATIVE) && !hasNative(process.env.DSH_FLOCK_NATIVE)) return null;
       const root = rootOverride || this.npmRoot || (this._manifest() || {}).npmRoot || null;
       if (!root || !fs.existsSync(root)) return null;
-      const r = require('./link-publish-shim').ensureShim(root);
+      const r = require('./ripgrep-package').ensureRipgrepPackage(root);
       for (const a of r.results) {
-        if (a.status === 'applied') {
-          this.linkShimApplied = true;
-          if (this.events) this.events.append('link_shim_applied', { file: a.file });
-          this.logger.info && this.logger.info('link 发布垫片已投放: ' + a.file);
-        } else if (a.status === 'failed') {
-          if (this.events) this.events.append('link_shim_failed', { file: a.file, error: a.error });
-          this.logger.warn && this.logger.warn('link 发布垫片投放失败: ' + a.file + ' ' + a.error);
-        } else if (a.status === 'already') {
-          this.linkShimApplied = true;
-        }
+        if (this.events) this.events.append('ripgrep_package_applied', { file: a.file });
+        this.logger.info && this.logger.info('ripgrep 平台包已补给: ' + a.file);
       }
       return r;
     } catch (e) {
-      this.logger.warn && this.logger.warn('link 发布垫片检查异常（忽略）: ' + e.message);
+      this.logger.warn && this.logger.warn('ripgrep 平台包补给异常（忽略）: ' + e.message);
       return null;
     }
   }
 
-  /** 安卓容器自愈：给 PTC/workflow 子进程环境白名单补 LD_LIBRARY_PATH
-   *  （Android linker 只认该变量/DT_RUNPATH，剥掉 ⇒ libnode.so 子进程 libc++ 符号
-   *   缺失必崩；根因见 ptc-env-shim.js 头注释）。
-   *  门控同 ensureFlockShim（DSH_FLOCK_NATIVE = 设备容器标记）；PC/dev 树不动。
-   *  幂等；失败只告警不抛（不变量 C2）。
-   *  @param {string} [rootOverride] 显式 npm 全局根（安装完成路径传入刚解析的值） */
-  ensurePtcEnvShim(rootOverride) {
+  /** Android 走 sharp 的 wasm 回退：把 @img/sharp-wasm32 补给 DSH 树（真实依赖，非替代实现）。
+   * 门控：契约在场 + DSH 树内确有 sharp。幂等；失败只告警不抛。
+   * @param {string} [rootOverride] 显式 npm 全局根 */
+  ensureSharpWasm(rootOverride) {
     try {
       const c = runtimeContract.read();
       if (!c || !c.npmEntry) return null;
-      const native = process.env.DSH_FLOCK_NATIVE;
-      if (!native || !String(native).trim()) return null;
       const root = rootOverride || this.npmRoot || (this._manifest() || {}).npmRoot || null;
-      if (!root || !fs.existsSync(root)) return null;
-      const r = require('./ptc-env-shim').ensureShim(root);
-      for (const a of r.results) {
-        if (a.status === 'applied') {
-          this.ptcEnvShimApplied = true;
-          if (this.events) this.events.append('ptc_env_shim_applied', { file: a.file });
-          this.logger.info && this.logger.info('PTC 环境垫片已投放: ' + a.file);
-        } else if (a.status === 'failed') {
-          if (this.events) this.events.append('ptc_env_shim_failed', { file: a.file, error: a.error });
-          this.logger.warn && this.logger.warn('PTC 环境垫片投放失败: ' + a.file + ' ' + a.error);
-        } else if (a.status === 'already') {
-          this.ptcEnvShimApplied = true;
-        }
+      if (!root) return null;
+      const dshDir = path.join(root, this.config.packageName);
+      if (!fs.existsSync(dshDir)) return null;
+      const r = require('./sharp-wasm').ensureSharpWasm(dshDir, {
+        npmInvocation: npmSpawn(this),
+        tmpdir: this.stateDir,
+        env: runtimeContract.npmEnv(process.env),
+      });
+      if (this.events && r.status !== 'already' && r.status !== 'skipped') {
+        this.events.append('sharp_wasm_' + r.status, { reason: r.reason || null });
       }
+      if (r.status === 'applied') this.logger.info && this.logger.info('sharp wasm 回退包已补给');
       return r;
     } catch (e) {
-      this.logger.warn && this.logger.warn('PTC 环境垫片检查异常（忽略）: ' + e.message);
+      this.logger.warn && this.logger.warn('sharp wasm 补给异常（忽略）: ' + e.message);
       return null;
     }
   }
 
-  /** 安卓容器自愈：bash/rg 二进制路径与终端进程检视平台门的能力垫片
-   *  （4 处桌面硬编码 → 容器 env 旋钮；根因与锚点见 capability-env-shim.js）。
-   *  门控同 ensurePtcEnvShim；PC/dev 树不动。幂等；失败只告警不抛（不变量 C2）。
-   *  @param {string} [rootOverride] 显式 npm 全局根（安装完成路径传入刚解析的值） */
-  ensureCapabilityEnvShim(rootOverride) {
+  /** 把容器构建的 pty.node 投到 node-pty 的 loader 查找位（prebuilds/android-arm64/）。
+   * 门控：契约在场 + DSH 树内确有 node-pty + $PREFIX/lib/pty.node 存在。幂等；失败只告警不抛。
+   * @param {string} [rootOverride] 显式 npm 全局根 */
+  ensureNodePtyPrebuild(rootOverride) {
     try {
       const c = runtimeContract.read();
       if (!c || !c.npmEntry) return null;
-      const native = process.env.DSH_FLOCK_NATIVE;
-      if (!native || !String(native).trim()) return null;
       const root = rootOverride || this.npmRoot || (this._manifest() || {}).npmRoot || null;
-      if (!root || !fs.existsSync(root)) return null;
-      const r = require('./capability-env-shim').ensureShim(root);
-      for (const a of r.results) {
-        if (a.status === 'applied') {
-          this.capShimApplied = true;
-          if (this.events) this.events.append('cap_shim_applied', { file: a.file });
-          this.logger.info && this.logger.info('能力垫片已投放: ' + a.file);
-        } else if (a.status === 'failed') {
-          if (this.events) this.events.append('cap_shim_failed', { file: a.file, error: a.error });
-          this.logger.warn && this.logger.warn('能力垫片投放失败: ' + a.file + ' ' + a.error);
-        } else if (a.status === 'already') {
-          this.capShimApplied = true;
-        }
-      }
+      if (!root) return null;
+      const dshDir = path.join(root, this.config.packageName);
+      const src = process.env.PREFIX ? path.join(process.env.PREFIX, 'lib', 'pty.node') : null;
+      const r = require('./node-pty-prebuild').ensureNodePtyPrebuild(dshDir, src);
+      if (this.events && r.status === 'applied') this.events.append('node_pty_prebuild_applied', { path: r.path });
+      if (r.status === 'applied') this.logger.info && this.logger.info('node-pty 预编译件已就位');
       return r;
     } catch (e) {
-      this.logger.warn && this.logger.warn('能力垫片检查异常（忽略）: ' + e.message);
+      this.logger.warn && this.logger.warn('node-pty 预编译件投放异常（忽略）: ' + e.message);
       return null;
     }
   }
 
   /** 卸载时拟删除的 DSH 用户数据路径（仅当本 supervisor 是干净 ~/.dsh 的首装者才认领）。
-   *  语义：~/.dsh 无任何既有 DSH 数据时，本安装视为主权安装——卸载连带清理数据；
-   *        若已存在 sessions/storages/profiles/settings.yaml/.credentials.yaml 等用户数据，
-   *        视为既有环境（可能由用户手动/其它工具建立），卸载只卸 npm 包，绝不删用户数据。 */
+   * 语义：~/.dsh 无任何既有 DSH 数据时，本安装视为主权安装——卸载连带清理数据；
+   * 若已存在 sessions/storages/profiles/settings.yaml/.credentials.yaml 等用户数据，
+   * 视为既有环境（可能由用户手动/其它工具建立），卸载只卸 npm 包，绝不删用户数据。 */
   _claimDataPaths() {
-    const paths = [
-      path.join(this.dshHome, 'sessions'),
-      path.join(this.dshHome, 'storages'),
-      path.join(this.dshHome, 'profiles'),
-      path.join(this.dshHome, 'settings.yaml'),
-      path.join(this.dshHome, '.credentials.yaml'),
-      path.join(this.dshHome, '.anonymous-user-id'),
-    ];
+    const paths = AGENT.dataPaths.map((p) => path.join(this.dshHome, p));
     // 任一 DSH 数据已存在（无论是否来自本 supervisor）→ 不认领
     for (const p of paths) {
       try { if (fs.existsSync(p)) return []; } catch { return []; }
@@ -498,12 +462,12 @@ class NativeManager {
 
   /* ═══════ 安装执行核心（安装/升级/回滚共用，唯一实现）═══════ */
   /** 安装执行（唯一入口 = dist.runNpmInstall）：
-   *  - installCommandTemplate（测试/特殊环境）经 commandTemplate 透传，完整替换执行命令（fake-npm 等）；
-   *  - 行日志统一经 onLine 写入升级日志 +（安装中）安装日志。
-   *  旧版在 native 复制整套 spawn/killTree/超时/行收集实现，已收敛删除（2026-09 架构收敛）。 */
+   * - installCommandTemplate（测试/特殊环境）经 commandTemplate 透传，完整替换执行命令（fake-npm 等）；
+   * - 行日志统一经 onLine 写入升级日志 +（安装中）安装日志。
+   * 旧版在 native 复制整套 spawn/killTree/超时/行收集实现，已收敛删除（2026-09 架构收敛）。 */
   _runInstall(version, registry) {
     if (!this.dist) return Promise.resolve({ ok: false, error: 'dist 分发服务不可用，无法安装', output: [] });
-    const pkg = this.config.packageName || '@deepseek-ai/dsh';
+    const pkg = this.config.packageName;
     const tpl = this.config.installCommandTemplate;
     return this.dist.runNpmInstall({
       pkg,
@@ -526,7 +490,7 @@ class NativeManager {
   }
 
   /** 升级后健康验证（统一走 dist.waitPortHealthy）：端口 + 稳定期。
-   *  返回 { ok, reason }。 */
+   * 返回 { ok, reason }。 */
   async _waitNativeHealthy(port, timeoutMs) {
     if (!this.dist) return { ok: false, reason: 'dist 分发服务不可用' };
     return this.dist.waitPortHealthy({ host: '127.0.0.1', port, timeoutMs });
@@ -568,16 +532,16 @@ class NativeManager {
     try { return Number(new URL(this.config.healthUrl).port) || null; } catch { return null; }
   }
 
-  // ⚠ _mainUnit()（systemd 托管单元名）已删：安卓内核无系统服务管理器，
-  //   原生 DSH 由内核直接 spawn/adopt，健康验证只按端口+稳定期（dist.waitPortHealthy）。
+  // _mainUnit()（systemd 托管单元名）已删：安卓内核无系统服务管理器，
+  // 原生 DSH 由内核直接 spawn/adopt，健康验证只按端口+稳定期（dist.waitPortHealthy）。
 
   /* ═══════ 安装（统一任务模型）═══════ */
   async install(version) {
     if (this.tasks && this.tasks.isBusy('native', 'main')) return { ok: false, error: '已有任务在进行中' };
     if (this.installing) return { ok: false, error: '安装已在进行中' };
     if (this.uninstalling) return { ok: false, error: '卸载进行中，请稍后再装' };
-    // ⚠ 2026-09-12（P2）：显式拒绝「升级进行中」（见 upgrade 内的对称说明）。
-    //   `busy()` 覆盖 installing/restarting/verifying/rolling_back（upgradeState 非 idle/done/failed）。
+    // 2026-09-12（P2）：显式拒绝「升级进行中」（见 upgrade 内的对称说明）。
+    // `busy()` 覆盖 installing/restarting/verifying/rolling_back（upgradeState 非 idle/done/failed）。
     if (this.busy()) return { ok: false, error: '升级进行中，请稍后再装（state=' + this.upgradeState + '）' };
     if (version && !VERSION_RE.test(version)) return { ok: false, error: '非法版本号: ' + version };
     const env = this.checkEnvironment();
@@ -601,9 +565,9 @@ class NativeManager {
       }
     }
     const registry = await this._selectRegistry();
-    if (task) this.tasks.log(task.id, '安装 ' + (this.config.packageName || '@deepseek-ai/dsh') + '@' + target + (registry ? ' via ' + registry : ''));
+    if (task) this.tasks.log(task.id, '安装 ' + this.config.packageName + '@' + target + (registry ? ' via ' + registry : ''));
     if (this.events) this.events.append('native_install_started', { version: target, registry });
-    this.logger.info && this.logger.info('native install: ' + (this.config.packageName || '@deepseek-ai/dsh') + '@' + target + (registry ? ' via ' + registry : ''));
+    this.logger.info && this.logger.info('native install: ' + this.config.packageName + '@' + target + (registry ? ' via ' + registry : ''));
     const res = await this._runInstall(target, registry);
     if (!res.ok) {
       this.installing = null;
@@ -626,8 +590,8 @@ class NativeManager {
 
   /* ═══════ 安装入口（异步任务模式）═══════ */
   /** 启动安装（API 用）：同步前置检查，通过则后台执行 install() 并立即返回。
-   *  结果/进度经 status().state|lastInstall|installLog 暴露，前端轮询呈现——消除"点击后真空"。
-   *  返回 { ok:false, error }（前置拒绝）或 { ok:true, started:true }。 */
+   * 结果/进度经 status().state|lastInstall|installLog 暴露，前端轮询呈现——消除"点击后真空"。
+   * 返回 { ok:false, error }（前置拒绝）或 { ok:true, started:true }。 */
   startInstall(version) {
     if (this.installing) return { ok: false, error: '安装已在进行中' };
     if (this.uninstalling) return { ok: false, error: '卸载进行中，请稍后再装' };
@@ -677,13 +641,13 @@ class NativeManager {
   async upgrade(requestedVersion) {
     if (this.tasks && this.tasks.isBusy('native', 'main')) return { ok: false, error: '已有任务在进行中' };
     if (this.busy()) return { ok: false, error: 'upgrade already in progress (state=' + this.upgradeState + ')' };
-    // ⚠ 2026-09-12（P2）：**显式**检查安装/卸载锁，不再只依赖 tasks。
-    //   缺陷：本方法**从不设置** `this.installing`，而 `install()` 也**不检查** `busy()` ——
-    //     两者的互斥完全依赖 `tasks.isBusy('native','main')` 这一**可选**依赖。
-    //     生产中 `tasks` 总被注入（supervisor.js:328-334）故当前成立；
-    //     但一旦未注入（嵌入/测试/将来重构），install 与 upgrade 会**并发跑两个
-    //     `npm install -g`** —— 同前缀并发写 npm 全局目录，结果不可预期。
-    //   现补上与 install/uninstall 对称的三个显式锁（`installing` 同时充当 upgrade 的安装互斥）。
+    // 2026-09-12（P2）：**显式**检查安装/卸载锁，不再只依赖 tasks。
+    // 缺陷：本方法**从不设置** `this.installing`，而 `install()` 也**不检查** `busy()` ——
+    // 两者的互斥完全依赖 `tasks.isBusy('native','main')` 这一**可选**依赖。
+    // 生产中 `tasks` 总被注入（supervisor.js:328-334）故当前成立；
+    // 但一旦未注入（嵌入/测试/将来重构），install 与 upgrade 会**并发跑两个
+    // `npm install -g`** —— 同前缀并发写 npm 全局目录，结果不可预期。
+    // 现补上与 install/uninstall 对称的三个显式锁（`installing` 同时充当 upgrade 的安装互斥）。
     if (this.installing) return { ok: false, error: '安装/升级已在进行中' };
     if (this.uninstalling) return { ok: false, error: '卸载进行中，请稍后再试' };
     if (requestedVersion && !VERSION_RE.test(requestedVersion)) return { ok: false, error: '非法版本号: ' + requestedVersion };
@@ -867,13 +831,13 @@ class NativeManager {
 
   /* ═══════ 卸载（全量清理，不留残留）═══════ */
   /** 启动卸载（API 用）：同步前置检查 + 后台执行，立即返回（消除同步 execFileSync 冻结守卫事件循环）。
-   *  进度/结果经 status().state|lastUninstall 暴露。 */
+   * 进度/结果经 status().state|lastUninstall 暴露。 */
   startUninstall() {
     if (this.installing) return { ok: false, error: '安装进行中，无法卸载' };
     if (this.uninstalling) return { ok: false, error: '卸载已在进行中' };
     // P2 配套：与 uninstall() 对称 —— 升级进行中同样拒绝（否则前置检查通过后，
-    //   uninstall() 内部的 busy() 会拒绝，但那时已 begin 了 task 并置了 uninstalling，
-    //   徒增一次「已接受却立即失败」的体验）。
+    // uninstall() 内部的 busy() 会拒绝，但那时已 begin 了 task 并置了 uninstalling，
+    // 徒增一次「已接受却立即失败」的体验）。
     if (this.busy()) return { ok: false, error: '升级进行中，无法卸载（state=' + this.upgradeState + '）' };
     this.uninstall().then(() => {}).catch((e) => {
       this.uninstalling = null;
@@ -889,11 +853,11 @@ class NativeManager {
     if (this.tasks && this.tasks.isBusy('native', 'main')) return { ok: false, error: '已有任务在进行中' };
     if (this.installing) return { ok: false, error: '安装进行中，无法卸载' };
     if (this.uninstalling) return { ok: false, error: '卸载已在进行中' };
-    // ⚠ 2026-09-12（P2）：**必须也拒绝「升级进行中」**。
-    //   缺陷：`upgrade()` 全程只改 `upgradeState`，**从不设置** `this.installing` ——
-    //     故升级期间 uninstall 的三个旧检查全部通过 → 会在 npm 正装新版时**卸载它**，
-    //     留下「包装了一半 + manifest 被清」的不可恢复状态。
-    //     （由新增的行为测试 K-d 抓出：升级中 uninstall 返回了 ok:true。）
+    // 2026-09-12（P2）：**必须也拒绝「升级进行中」**。
+    // 缺陷：`upgrade()` 全程只改 `upgradeState`，**从不设置** `this.installing` ——
+    // 故升级期间 uninstall 的三个旧检查全部通过 → 会在 npm 正装新版时**卸载它**，
+    // 留下「包装了一半 + manifest 被清」的不可恢复状态。
+    // （由新增的行为测试 K-d 抓出：升级中 uninstall 返回了 ok:true。）
     if (this.busy()) return { ok: false, error: '升级进行中，无法卸载（state=' + this.upgradeState + '）' };
 
     // 先停运行中的 DSH：运行进程中直接删包/数据文件会懒加载崩溃；且 desired=running 时守卫会
@@ -913,7 +877,7 @@ class NativeManager {
     if (this.tasks) {
       task = this.tasks.begin('native', 'uninstall', { id: 'main', name: '原生 DeepSeek Harness' }, { from: this.installedVersion(), createdBy: 'user' });
       this.tasks.start(task.id);
-      this.tasks.log(task.id, '卸载 ' + (this.config.packageName || '@deepseek-ai/dsh'));
+      this.tasks.log(task.id, '卸载 ' + this.config.packageName);
     }
     this.uninstalling = true;
     if (this.events) this.events.append('native_uninstall_started', {});
@@ -922,18 +886,18 @@ class NativeManager {
     // 关键：注入 --prefix（与 install/_recordManifest 一致）——否则测试/自定义环境会真实卸载宿主全局 DSH
     const uninstallArgs = ['uninstall', '-g'];
     if (this.npmRoot) uninstallArgs.push('--prefix', this.npmRoot);
-    uninstallArgs.push(this.config.packageName || '@deepseek-ai/dsh');
-    // ⚠ P1-F 修复（2026-09-12）：**必须有超时看门狗**。
-    //   旧实现只监听 error/exit，且 `this.uninstalling` 只在本函数末尾复位 ——
-    //   npm 一旦挂起（registry 不可达、凭证助手弹窗等待、网络盘卡住），
-    //   Promise **永不 settle** → `uninstalling` 永为真 → 之后 install/uninstall **全部被拒**，
-    //   任务永久 running，用户只能重启守卫。
-    //   对照：同仓安装路径（domains/dist.runNpmInstall）本就有 timeout + killTree，唯独卸载漏了。
-    //   现：超时 → 杀进程树 → 以明确的「超时」结论收尾（而非无限等待）。
+    uninstallArgs.push(this.config.packageName);
+    // P1-F 修复（2026-09-12）：**必须有超时看门狗**。
+    // 旧实现只监听 error/exit，且 `this.uninstalling` 只在本函数末尾复位 ——
+    // npm 一旦挂起（registry 不可达、凭证助手弹窗等待、网络盘卡住），
+    // Promise **永不 settle** → `uninstalling` 永为真 → 之后 install/uninstall **全部被拒**，
+    // 任务永久 running，用户只能重启守卫。
+    // 对照：同仓安装路径（domains/dist.runNpmInstall）本就有 timeout + killTree，唯独卸载漏了。
+    // 现：超时 → 杀进程树 → 以明确的「超时」结论收尾（而非无限等待）。
     // 超时**可注入**（测试用）：默认与 Rust 侧 npm 上限（15min）同量级。
-    //   ⚠ 为什么必须可注入：真实 15 分钟无法在测试里等待，于是「超时是否真的会触发」
-    //     就只能靠静态断言（看代码形状）—— 而静态断言**无法证明行为**。
-    //     可注入之后才能做行为级验证（见 test/uninstall-timeout-behavior-test.js）。
+    // 为什么必须可注入：真实 15 分钟无法在测试里等待，于是「超时是否真的会触发」
+    // 就只能靠静态断言（看代码形状）—— 而静态断言**无法证明行为**。
+    // 可注入之后才能做行为级验证（见 test/uninstall-timeout-behavior-test.js）。
     const UNINSTALL_TIMEOUT_MS = (typeof this.config.uninstallTimeoutMs === 'number' && this.config.uninstallTimeoutMs > 0)
       ? this.config.uninstallTimeoutMs
       : 15 * 60 * 1000;
@@ -971,12 +935,12 @@ class NativeManager {
       if (m.binPath) rm(m.binPath);
       for (const p of (m.dataPaths || [])) rm(p);
     }
-    // ⚠ 2026-09-11 修复（K10）：**卸载失败时不得删除 manifest**。
-    //   旧实现在 exitCode!==0 时只打日志，随后**无条件** rm(manifestFile)。
-    //   而 npm uninstall 非 0（离线/权限/包被占用）时包其实**还在**：
-    //   记录一旦丢失，之后即使卸载成功也不再知道要清哪些残留
-    //   （packageDir / binPath / dataPaths），也无法向用户说明「上次卸载失败了」。
-    //   正确语义：成功 → 清 manifest（已无残留可追）；失败 → **保留**以便重试与如实上报。
+    // 2026-09-11 修复（K10）：**卸载失败时不得删除 manifest**。
+    // 旧实现在 exitCode!==0 时只打日志，随后**无条件** rm(manifestFile)。
+    // 而 npm uninstall 非 0（离线/权限/包被占用）时包其实**还在**：
+    // 记录一旦丢失，之后即使卸载成功也不再知道要清哪些残留
+    // （packageDir / binPath / dataPaths），也无法向用户说明「上次卸载失败了」。
+    // 正确语义：成功 → 清 manifest（已无残留可追）；失败 → **保留**以便重试与如实上报。
     if (exitCode === 0) {
       rm(this.manifestFile);
     } else {
@@ -998,11 +962,11 @@ class NativeManager {
       else this.tasks.fail(task.id, 'npm uninstall 退出码 ' + exitCode);
     }
     // `timedOut` 必须出现在**返回值**里（不只 lastUninstall）：
-    //   调用方（面板/任务）据此把「超时」与「普通失败」区分开 —— 前者应提示可重试。
+    // 调用方（面板/任务）据此把「超时」与「普通失败」区分开 —— 前者应提示可重试。
     return { ok: exitCode === 0, removed, timedOut: uninstallTimedOut, error: uninstallError };
     } finally {
       // 结构性保证：本函数任何路径（含抛出）都必须释放卸载锁 ——
-      //   旧实现只在正常路径末尾复位，任何异常都会让 `uninstalling` 永久为真。
+      // 旧实现只在正常路径末尾复位，任何异常都会让 `uninstalling` 永久为真。
       this.uninstalling = null;
     }
   }

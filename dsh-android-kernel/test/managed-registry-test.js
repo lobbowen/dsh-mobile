@@ -12,13 +12,13 @@ const TMP = fs2.mkdtempSync(path.join(os.tmpdir(), 'mreg-'));
 const { ManagedRegistry, PHASES, DESIRED, MANAGED_KINDS } = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'objects'));
 
 let failures = 0;
-// ⚠ 2026-09-13（P3 测试基建缺陷）：本文件原以**硬编码常量**报告总数 ——
-//     const passCount = 26;  ...  (passCount - failures)
-//   而文件里实际有 **40** 个 check()。后果：
-//     · 汇总的「断言数」与真实执行数脱钩（内核聚合断言计数因此**少算 14**）；
-//     · 更危险的是它伪装成一道门禁：**删掉 14 个既有 check**，汇总仍打印「26 passed」，
-//       看不出覆盖缩水 —— 正是历史审计记录的「假门禁」形状。
-//   修法：由 check() 自己累加真实总数，汇总恒等于实执行数（不可能是常量）。
+// 2026-09-13（P3 测试基建缺陷）：本文件原以**硬编码常量**报告总数 ——
+// const passCount = 26; ... (passCount - failures)
+// 而文件里实际有 **40** 个 check()。后果：
+// · 汇总的「断言数」与真实执行数脱钩（内核聚合断言计数因此**少算 14**）；
+// · 更危险的是它伪装成一道门禁：**删掉 14 个既有 check**，汇总仍打印「26 passed」，
+// 看不出覆盖缩水 —— 正是历史审计记录的「假门禁」形状。
+// 修法：由 check() 自己累加真实总数，汇总恒等于实执行数（不可能是常量）。
 let checks = 0;
 const check = (name, cond, extra) => { checks++; if (!cond) failures++; console.log((cond ? 'PASS' : 'FAIL') + ' ' + name + (extra !== undefined ? '  ← ' + JSON.stringify(extra) : '')); };
 
@@ -138,9 +138,9 @@ const fakePorts = {
   await dp.heartbeat(1000);
   check('derivePhase: 失联 → phase stopped', dp.get('rd').phase === 'stopped');
   // 10. heartbeat 逐对象超时（2026-09-13 P1）：单个 adapter 卡死不得停摆整条心跳
-  //   缺陷：`await fn(e)` 无超时 → 任一 adapter 的 promise 永不 settle 即让心跳永停，
-  //     而心跳是 main 收敛/沙箱监督/daemon 监督的**唯一周期驱动**（managedObjects 存在时
-  //     不创建 tick 定时器）→「面板开着、服务全死、无任何事件」。
+  // 缺陷：`await fn(e)` 无超时 → 任一 adapter 的 promise 永不 settle 即让心跳永停，
+  // 而心跳是 main 收敛/沙箱监督/daemon 监督的**唯一周期驱动**（managedObjects 存在时
+  // 不创建 tick 定时器）→「面板开着、服务全死、无任何事件」。
   {
     const toFile = path.join(TMP, 'hb-timeout.json');
     const to = new ManagedRegistry({ file: toFile, logger: null });

@@ -3,10 +3,10 @@
 
 // Command Code 反代额度获取（detectInstanceQuota commandcode-billing 分支）回归测试。
 // 覆盖 2026-09 审计修复的判定语义：
-//   ① 窗口耗尽只由 used/cap 推导（>=100% → rate-limited），不依赖上游可选的 exceeded 标志——
-//      实况 bug：上游 100% 窗口不返 exceeded 时旧实现存出 weekly.status=ok + percent=100 矛盾记录；
-//   ② 信封兼容：上游可能返 { data: { windowLimits, credits } } 或平铺；
-//   ③ used/cap 字符串/数字均解析；monthlyRemaining 累加（字段缺席置 null）。
+// ① 窗口耗尽只由 used/cap 推导（>=100% → rate-limited），不依赖上游可选的 exceeded 标志——
+// 实况 bug：上游 100% 窗口不返 exceeded 时旧实现存出 weekly.status=ok + percent=100 矛盾记录；
+// ② 信封兼容：上游可能返 { data: { windowLimits, credits } } 或平铺；
+// ③ used/cap 字符串/数字均解析；monthlyRemaining 累加（字段缺席置 null）。
 // 全部经本地 fetch mock，不触碰真实 Command Code / 外部服务。
 
 const path = require('node:path');
@@ -26,12 +26,12 @@ const CC_APP = {
   pkg: 'commandcode-api-proxy',
   healthPath: '/health', modelPath: '/v1/models', upstream: 'https://api.commandcode.ai',
   repo: null, registry: 'commandcode-api-proxy',
-  // ⚠ 2026-09-12 校正：fixture 必须与生产配置（proxy-apps.js）**逐键一致** ——
-  //   此前缺 `subscriptionsPath` 与 `monthlyCapUsd`，而两者在 `quota-strategies.js`
-  //   里**都被消费**（:106 拉订阅期、:124 推导月用量百分比）。
-  //   于是本测试一直在跑「回退分支」（无 subscriptionsPath → 用常量路径；
-  //   无 monthlyCapUsd → monthly 为 null），**从未覆盖生产的真实路径**。
-  //   这类「fixture 与生产配置漂移」会给出虚假的覆盖信心。
+  // 2026-09-12 校正：fixture 必须与生产配置（proxy-apps.js）**逐键一致** ——
+  // 此前缺 `subscriptionsPath` 与 `monthlyCapUsd`，而两者在 `quota-strategies.js`
+  // 里**都被消费**（:106 拉订阅期、:124 推导月用量百分比）。
+  // 于是本测试一直在跑「回退分支」（无 subscriptionsPath → 用常量路径；
+  // 无 monthlyCapUsd → monthly 为 null），**从未覆盖生产的真实路径**。
+  // 这类「fixture 与生产配置漂移」会给出虚假的覆盖信心。
   quota: {
     type: 'commandcode-billing',
     apiBase: 'https://api.commandcode.ai',

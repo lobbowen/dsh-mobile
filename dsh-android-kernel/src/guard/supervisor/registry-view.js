@@ -11,8 +11,8 @@ class RegistryView {
   // ══ 原生 DSH = 守卫核心服务：main 元数据自足（2026-09-06 概念清分）══
   // main 不再登记为沙箱实例（instances.json 只含沙箱）；其元数据（只有守护开关 guardian）
   // 落守卫核心存储 <stateDir>/dsh-main.json。进程生命周期事实源 = config.targetPort(守卫 spawn/观测)。
-  // ⚠ 已删字段（远程控制域与公网暴露随 relay/frpc 一并下架，勿回潮）：
-  //   remoteEnabled / remoteToken / frpEnabled / frpRemotePort / wanPort 及其事件 dsh_remote_changed、dsh_frp_changed。
+  // 已删字段（远程控制域与公网暴露随 relay/frpc 一并下架，勿回潮）：
+  // remoteEnabled / remoteToken / frpEnabled / frpRemotePort / wanPort 及其事件 dsh_remote_changed、dsh_frp_changed。
   _dshMainFile() {
     try { return path.join(path.dirname(this.config.stateFile), 'dsh-main.json'); } catch { return null; }
   }
@@ -74,7 +74,7 @@ class RegistryView {
       domain: 'native',
       kind: 'native',
       guardian: m.guardian,
-      // ⚠ unitName（系统服务管理器单元名）已删：安卓内核无系统服务管理器，main 由守卫 spawn/观测
+      // unitName（系统服务管理器单元名）已删：安卓内核无系统服务管理器，main 由守卫 spawn/观测
       // 实时运行态：native 条目带 state（UI 与 /status 消费）
       state: {
         running: Boolean(this._mChild() || this._mAdoptPid()),
@@ -85,8 +85,8 @@ class RegistryView {
   }
 
   /** main 元数据补丁（白名单只有 guardian：守护自动拉起开关）。
-   *  ⚠ 远程控制/公网暴露（remoteEnabled/remoteToken/frpEnabled/frpRemotePort/wanPort）已随
-   *    relay/frpc 域整体删除，body 里出现这些键一律**忽略**（不做兼容、不报错）。 */
+   * 远程控制/公网暴露（remoteEnabled/remoteToken/frpEnabled/frpRemotePort/wanPort）已随
+   * relay/frpc 域整体删除，body 里出现这些键一律**忽略**（不做兼容、不报错）。 */
   patchDshMain(patch) {
     const p = patch || {};
     const meta = this._readDshMain();
@@ -119,7 +119,7 @@ class RegistryView {
   }
 
   /** 启动对齐：main + daemon 申报入册（幂等：已注册则 update 应然）。
-   *  ⚠ 沙箱实例申报已随实例域删除（安卓内核 multiInstance=false，无受管沙箱）。 */
+   * 沙箱实例申报已随实例域删除（安卓内核 multiInstance=false，无受管沙箱）。 */
   _syncManagedRegistry() {
     const reg = this.managedObjects;
     if (!reg) return;
@@ -159,14 +159,14 @@ class RegistryView {
 
   // ══ C3-3b G4：main(dsh) 状态唯一存储 = 目录 main entry（this.* 并行字段已删除）══
   // 存储图（C3-3b G4）：
-  //   phase → entry.phase（唯一词表小写；OBSERVED 由 process.observedOnly/adopted 位合成呈现）
-  //   desired → entry.desired（registry.update 持久化，managed-objects.json 与 state.json 一致）
-  //   child/adoptedPid/adopted/observedOnly/startDeadline/restartAt/spawnBlockedUntil/missingNotified
-  //     /failStreak/lastProbe*/lastFailure/lastRestartAt → entry.process（句柄/瞬态，不持久化）
-  //   crashWindow*/backoff*/restartCount → entry 退避字段（registry 持久化 + state.json 双份恢复）
+  // phase → entry.phase（唯一词表小写；OBSERVED 由 process.observedOnly/adopted 位合成呈现）
+  // desired → entry.desired（registry.update 持久化，managed-objects.json 与 state.json 一致）
+  // child/adoptedPid/adopted/observedOnly/startDeadline/restartAt/spawnBlockedUntil/missingNotified
+  // /failStreak/lastProbe*/lastFailure/lastRestartAt → entry.process（句柄/瞬态，不持久化）
+  // crashWindow*/backoff*/restartCount → entry 退避字段（registry 持久化 + state.json 双份恢复）
   // 读写口：守卫内一律经 _m*/_mSet*（本组 helper 是全部读写口，无 this.<字段> 残留）；
-  //   类上另保留 get/set phase|desired|child|adoptedPid|adopted|observedOnly|restartCount|
-  //   spawnBlockedUntil|missingNotified 兼容访问器（外部/测试经统一状态读写口）。
+  // 类上另保留 get/set phase|desired|child|adoptedPid|adopted|observedOnly|restartCount|
+  // spawnBlockedUntil|missingNotified 兼容访问器（外部/测试经统一状态读写口）。
 
   /** B2 归一：随目录持久化的崩溃/退避字段变化后，落盘目录（once 防抖避免每 tick 全量写）。 */
   _persistCrashField() {

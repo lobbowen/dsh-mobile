@@ -10,7 +10,7 @@
 // 本测试用**内核真实过滤逻辑的等价实现**（下方 kernelAccepts/mapResult，逐行对齐 TS 源码）
 // 去消化容器侧应当产出的报文，锁定两侧字段一致；任一侧漂移即失败。
 //
-// ⚠ 这是「第三套契约」（UI↔宿主 postMessage），与前两套（runtime.json / kernel.json）无关。
+// 这是「第三套契约」（UI↔宿主 postMessage），与前两套（runtime.json / kernel.json）无关。
 
 const makeRunner = require('./harness');
 const fs = require('fs');

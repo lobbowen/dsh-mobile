@@ -1,36 +1,36 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  生成 APK 内置的基线内核包 → app/src/main/assets/kernel/baseline.zip
+# 生成 APK 内置的基线内核包 → app/src/main/assets/kernel/baseline.zip
 #
-#  为什么需要这个脚本
-#  ----------------
-#  KernelManager.ensureBaseline() 一直想读 assets/kernel/baseline.zip，
-#  但**这个文件从来不存在**（assets/ 下只有 node/ + node-versions.json +
-#  ota-public.pem）。后果是真机无网首启时静默返回 null，表现为
-#  「没有内核包」—— 而那是构建期缺陷，不是运行时状态。
+# 为什么需要这个脚本
+# ----------------
+# KernelManager.ensureBaseline() 一直想读 assets/kernel/baseline.zip，
+# 但**这个文件从来不存在**（assets/ 下只有 node/ + node-versions.json +
+# ota-public.pem）。后果是真机无网首启时静默返回 null，表现为
+# 「没有内核包」—— 而那是构建期缺陷，不是运行时状态。
 #
-#  本脚本把它补上，并坚持一条底线：
-#    **基线包必须用容器私钥签名**（与 OTA 包同一把 ed25519 私钥）。
-#  理由：APK 签名锚定发布者，内核签名锚定容器私钥，是两把独立钥匙。
-#  若基线包跳过验签，任何能重打 APK 的人就能塞进任意内核，双信任根退化。
+# 本脚本把它补上，并坚持一条底线：
+# **基线包必须用容器私钥签名**（与 OTA 包同一把 ed25519 私钥）。
+# 理由：APK 签名锚定发布者，内核签名锚定容器私钥，是两把独立钥匙。
+# 若基线包跳过验签，任何能重打 APK 的人就能塞进任意内核，双信任根退化。
 #
-#  用法
-#  ----
-#    ./scripts/build-kernel-baseline.sh [kernel-src-dir] [version] [abi]
-#    例：./scripts/build-kernel-baseline.sh ../dsh-android-kernel 0.1.0
+# 用法
+# ----
+# ./scripts/build-kernel-baseline.sh [kernel-src-dir] [version] [abi]
+# 例：./scripts/build-kernel-baseline.sh ../dsh-android-kernel 0.1.0
 #
-#  前置
-#  ----
-#    - keys/ota-private.pem 存在（scripts/keygen.sh 或 CI secret 注入）
-#    - kernel-src-dir 是一个可运行的内核源码目录（含 bin/dsh-supervisor）
+# 前置
+# ----
+# - keys/ota-private.pem 存在（scripts/keygen.sh 或 CI secret 注入）
+# - kernel-src-dir 是一个可运行的内核源码目录（含 bin/dsh-supervisor）
 #
-#  产物
-#  ----
-#    app/src/main/assets/kernel/baseline.zip   设备端首启解包用
-#    app/src/main/assets/kernel/baseline-<version>.zip
-#                                           同名带版本号副本：设备端基线**升级**通道
-#                                           （KernelManager 按名比对 CURRENT，只升不降）
-#    (release/kernel-<version>.zip 也会被 build-bundle 顺带产出，可忽略)
+# 产物
+# ----
+# app/src/main/assets/kernel/baseline.zip 设备端首启解包用
+# app/src/main/assets/kernel/baseline-<version>.zip
+# 同名带版本号副本：设备端基线**升级**通道
+# （KernelManager 按名比对 CURRENT，只升不降）
+# (release/kernel-<version>.zip 也会被 build-bundle 顺带产出，可忽略)
 # ============================================================================
 set -euo pipefail
 

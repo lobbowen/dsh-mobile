@@ -1,10 +1,10 @@
 'use strict';
 
 // 智能路由底座（RouterService）：中转服务整体生命周期 + 对外 API + 状态监控。
-//  - 无公用/默认入口：每个已激活供应商持有自己独立的 API 端点（端口/账号池隔离）；
-//  - 供应商集合管理（直连/反代，各自独立隔离）；
-//  - 账号生命周期（注册/检测/入池/作废/冻结/释放）转发到对应 provider；
-//  - 公用切换引擎（SwitchEngine）驱动自动切换；统一持久化（RouterStore）。
+// - 无公用/默认入口：每个已激活供应商持有自己独立的 API 端点（端口/账号池隔离）；
+// - 供应商集合管理（直连/反代，各自独立隔离）；
+// - 账号生命周期（注册/检测/入池/作废/冻结/释放）转发到对应 provider；
+// - 公用切换引擎（SwitchEngine）驱动自动切换；统一持久化（RouterStore）。
 
 const http = require('node:http');
 const https = require('node:https');
@@ -30,18 +30,18 @@ class RouterService {
     this.usageTotalsFile = opts.usageTotalsFile || null; // 账号统计持久化文件（byKey/请求/Token 累计）
     // 自动取证（2026-09）：上游限流/拒绝响应证据 JSONL（与 providers.json 同目录，测试经 providerFile 天然隔离）
     this.evidenceFile = opts.evidenceFile || (this.providerFile ? path.join(path.dirname(this.providerFile), 'router-upstream-evidence.jsonl') : null);
-    // ⚠ 2026-09-12（P1-3）：取证改为**显式 opt-in**（默认关）。
+    // 2026-09-12（P1-3）：取证改为**显式 opt-in**（默认关）。
     //
-    //   此前它**无条件启用**，但整条链路**零消费点**：
-    //     · 产出：本文件 onEvidence → switch._capture（对上游 >=400）→ evidence.append；
-    //     · 读取：evidenceTail/evidenceStats **全仓无调用方**，surface.js 未登记任何路由，
-    //       前端 grep evidence = 0。
-    //   即：持续按 4MB 轮转写 JSONL，却没有任何出口可读回 ——
-    //     而 append 每次做 statSync + appendFileSync，**同步执行在转发主路径上**（4xx/5xx）。
+    // 此前它**无条件启用**，但整条链路**零消费点**：
+    // · 产出：本文件 onEvidence → switch._capture（对上游 >=400）→ evidence.append；
+    // · 读取：evidenceTail/evidenceStats **全仓无调用方**，surface.js 未登记任何路由，
+    // 前端 grep evidence = 0。
+    // 即：持续按 4MB 轮转写 JSONL，却没有任何出口可读回 ——
+    // 而 append 每次做 statSync + appendFileSync，**同步执行在转发主路径上**（4xx/5xx）。
     //
-    //   模块自身头部也写着「（2026-09，下一步）」—— 它是**为后续工作预留的脚手架**，
-    //   尚未接线。故不删除（设计已完成且有测试），但不再让它对主路径征税：
-    //     需要者显式传 `evidenceEnabled: true`（或后续补上读取出口时默认开）。
+    // 模块自身头部也写着「（2026-09，下一步）」—— 它是**为后续工作预留的脚手架**，
+    // 尚未接线。故不删除（设计已完成且有测试），但不再让它对主路径征税：
+    // 需要者显式传 `evidenceEnabled: true`（或后续补上读取出口时默认开）。
     this.evidenceEnabled = opts.evidenceEnabled === true;
     this.evidence = (this.evidenceFile && this.evidenceEnabled) ? new UpstreamEvidence({ file: this.evidenceFile }) : null;
     // 端口注册表隔离：直接构造 RouterService（测试/嵌入）注入 portsFile → 使用独立记录文件，
@@ -65,10 +65,10 @@ class RouterService {
     this.switcher = new SwitchEngine({
       logger: this.logger,
       events: this.events,
-      // ⚠ 2026-09-12：原 `getProviders: () => this.providers` 已删除 ——
-      //   `SwitchEngine` 构造函数接收它但**从不读取**（switch.js 内零引用），
-      //   属「声明了能力但零消费」。删除以免读者以为 switch 会回查 provider 列表
-      //   （它实际只经 pickFor 的回调拿数据，不持有该引用）。
+      // 2026-09-12：原 `getProviders: () => this.providers` 已删除 ——
+      // `SwitchEngine` 构造函数接收它但**从不读取**（switch.js 内零引用），
+      // 属「声明了能力但零消费」。删除以免读者以为 switch 会回查 provider 列表
+      // （它实际只经 pickFor 的回调拿数据，不持有该引用）。
       onPersist: () => this._save(),
       onEvidence: this.evidence ? (rec) => { if (!this.evidence.append(rec) && this.logger && this.logger.debug) this.logger.debug('[evidence] append failed'); } : null,
     });
@@ -105,17 +105,17 @@ class RouterService {
     }
     // 统一恢复持久化锁定（直连/反代共用；反代旧数据 selectedProxyKeyId 兼容迁移）
     prov.selectedAccountKeyId = p.selectedAccountKeyId || p.selectedProxyKeyId || null;
-    // ★ 统一状态机恢复（account-state-rework）：恢复「当前在用账号」与每账号使用状态
-    //   ——旧数据无 activeAccountKeyId/usage 时安全降级（active 待首个请求重新标；usage 默认 idle），
-    //   账号 key/配额等字段逐项恢复，绝不丢弃。
+    // 统一状态机恢复（account-state-rework）：恢复「当前在用账号」与每账号使用状态
+    // ——旧数据无 activeAccountKeyId/usage 时安全降级（active 待首个请求重新标；usage 默认 idle），
+    // 账号 key/配额等字段逐项恢复，绝不丢弃。
     const restoredActiveId = p.activeAccountKeyId || null;
     prov.accounts = (p.accounts || []).map((a) => {
       const acc = {
         key: a.key || null,
         keyId: a.keyId,
         maskedKey: a.maskedKey,
-        // ★ 单事实源（2026-09 架构收敛）：只读 status——旧 validity 字段删除（曾 status+validity 双写分叉）；
-        //   usage 不反序列化（纯派生，由 usageOf 从 activeAccount/实例实况算）。
+        // 单事实源（2026-09 架构收敛）：只读 status——旧 validity 字段删除（曾 status+validity 双写分叉）；
+        // usage 不反序列化（纯派生，由 usageOf 从 activeAccount/实例实况算）。
         status: a.status || a.validity || 'registered',
         quota: a.quota || null,
         registeredAt: a.registeredAt || Date.now(),
@@ -137,12 +137,12 @@ class RouterService {
 
   _save() {
     if (this._persistEnabled === false) return; // L3：状态文件由 router-daemon 独占写（守卫监督模式不写，防双写覆盖）
-    // ⚠ P2/P3 修复（2026-09-13）：providers.json 解析失败后**禁止回写**。
-    //   缺陷：store.load() 曾把「解析失败」与「本来就是空」混为一谈（静默返回空列表），
-    //     而本类在启动维护阶段会立刻 _save()，把「空」覆盖回文件 →
-    //     一次外部损坏/半写即让**全部供应商与账号配置（含 API Key）静默清零且不可恢复**。
-    //   现 store 在解析失败时置 loadedOk=false 并保留 .corrupt-<ts> 现场；
-    //   本处在 loadedOk=false 时跳过写盘，给人修复/恢复的机会（并已由 store 记 error 日志）。
+    // P2/P3 修复（2026-09-13）：providers.json 解析失败后**禁止回写**。
+    // 缺陷：store.load() 曾把「解析失败」与「本来就是空」混为一谈（静默返回空列表），
+    // 而本类在启动维护阶段会立刻 _save()，把「空」覆盖回文件 →
+    // 一次外部损坏/半写即让**全部供应商与账号配置（含 API Key）静默清零且不可恢复**。
+    // 现 store 在解析失败时置 loadedOk=false 并保留 .corrupt-<ts> 现场；
+    // 本处在 loadedOk=false 时跳过写盘，给人修复/恢复的机会（并已由 store 记 error 日志）。
     if (this.store && typeof this.store.canPersist === 'function' && !this.store.canPersist()) {
       if (this.logger && this.logger.warn) {
         this.logger.warn('router save skipped：providers.json 读取异常（已保留现场），拒绝用空态覆盖');
@@ -185,9 +185,9 @@ class RouterService {
   stop() { return this._stopAll(); }
 
   /** 优雅退出（router-daemon shutdown 专用，2026-09 根治停服孤儿化）：停实例并【确认子进程已死】
-   *  再返回——stopInstance 的 SIGKILL 兜底是 unref 1.5s 定时器，daemon 随即 process.exit 会令其随
-   *  进程消亡永不触发 → 子进程孤儿化、stdio 管道死（426880/677630 两次实锤，adopt 复用即楔死/EPIPE）。
-   *  经各反代 provider.waitAllStopped 轮询 _terminatingPids，未退即 SIGKILL 兜底。 */
+   * 再返回——stopInstance 的 SIGKILL 兜底是 unref 1.5s 定时器，daemon 随即 process.exit 会令其随
+   * 进程消亡永不触发 → 子进程孤儿化、stdio 管道死（426880/677630 两次实锤，adopt 复用即楔死/EPIPE）。
+   * 经各反代 provider.waitAllStopped 轮询 _terminatingPids，未退即 SIGKILL 兜底。 */
   async stopAndWait(timeoutMs) {
     this._stopAll();
     for (const p of this.providers) {
@@ -199,8 +199,8 @@ class RouterService {
   }
 
   /** 停止全部反代实例进程（测试收尾 / 守卫优雅退出用）：防止子进程残留占用
-   *  41000+ 动态端口段（历史上 ensure-instance / p2p-api 泄漏过 verproxy / dry-run 子进程）。
-   *  进程态不落盘，重启后由 _ensureProxyInstances 按需重建；账号端口绑定（persisted）保留。 */
+   * 41000+ 动态端口段（历史上 ensure-instance / p2p-api 泄漏过 verproxy / dry-run 子进程）。
+   * 进程态不落盘，重启后由 _ensureProxyInstances 按需重建；账号端口绑定（persisted）保留。 */
   stopAllInstances() {
     // force=true：服务停服/优雅退出，无视在用/在途仲裁强制停——否则在用账号实例被 defer 逃脱关停
     // → daemon 退出即孤儿（停服孤儿化根因①：426880/677630/795363 三次实锤）
@@ -211,8 +211,8 @@ class RouterService {
   }
 
   /* ---- 周期维护：反代自动更新检测 / 官方配额与单价同步 / 冻结实例到点释放 ----
-   *  旧 KeyPool 时代 5min 定时检查 npm 版本 + 同步官方 /usage + models.dev 单价；
-   *  重分层到 RouterService 后这些定时器曾丢失，此处恢复（启动拉一次 + 周期循环）。 */
+   * 旧 KeyPool 时代 5min 定时检查 npm 版本 + 同步官方 /usage + models.dev 单价；
+   * 重分层到 RouterService 后这些定时器曾丢失，此处恢复（启动拉一次 + 周期循环）。 */
   _startMaintenance() {
     // 启动即拉一次：反代版本检查（内部自带 6h TTL）+ 官方配额 + 官方单价
     this.refreshProxyUpdateInfo().catch(() => {});
@@ -242,7 +242,7 @@ class RouterService {
   }
 
   /** 实例生命周期监控（2026-09 分层原则）：只查进程/端口（生命周期层），不探业务。
-   *  发现实例进程死/端口消失 → 清 pid（adopt 实例无 exit 事件，需周期发现），由请求按需激活重建。 */
+   * 发现实例进程死/端口消失 → 清 pid（adopt 实例无 exit 事件，需周期发现），由请求按需激活重建。 */
   async _monitorProxyInstancesHealth() {
     for (const p of this.providers) {
       if (p.kind === 'proxy' && typeof p.monitorLifecycle === 'function') {
@@ -252,9 +252,9 @@ class RouterService {
   }
 
   /** 单个供应商实例对账（幂等 reconcile）：
-   *  期望运行集 = 常驻 1（resident，ready+usable）＋ 至多 1 备胎（仅当有可用账号额度将耗尽 ≥80%）。
-   *  取代旧 _ensureProviderInstances（只保 primary，不与回收对账）与旧 _stopIdleProxyInstances
-   *  （独立回收，与预热相向打架）——启停现在只有一个决策者（见 providers/proxy.js reconcile 注释）。 */
+   * 期望运行集 = 常驻 1（resident，ready+usable）＋ 至多 1 备胎（仅当有可用账号额度将耗尽 ≥80%）。
+   * 取代旧 _ensureProviderInstances（只保 primary，不与回收对账）与旧 _stopIdleProxyInstances
+   * （独立回收，与预热相向打架）——启停现在只有一个决策者（见 providers/proxy.js reconcile 注释）。 */
   async _ensureProviderInstances(p) {
     if (!p || p.kind !== 'proxy') return;
     if (typeof p.reconcileInstances === 'function') {
@@ -272,9 +272,9 @@ class RouterService {
   }
 
   /** 账号状态轮询（状态机核心）：每小时全量 + nextResetAt 临近精确触发。
-   *  对每个账号调官方检测（直连 usage API / 反代 commandcode billing）→ applyDetection：
-   *  恢复自动解冻、仍限额保持冻结并更新精确恢复时间、401/禁用标 banned、报错记 lastProbeError。
-   *  反代检测：临时激活实例 → 查真实状态 → 检测完停用（非活跃账号），资源消耗最低。 */
+   * 对每个账号调官方检测（直连 usage API / 反代 commandcode billing）→ applyDetection：
+   * 恢复自动解冻、仍限额保持冻结并更新精确恢复时间、401/禁用标 banned、报错记 lastProbeError。
+   * 反代检测：临时激活实例 → 查真实状态 → 检测完停用（非活跃账号），资源消耗最低。 */
   _probeAccountStates() {
     // in-flight 去重：单轮探测可能超过 5min 周期与下一轮重叠（并发探测同一账号，违背自身防风控目标）
     if (this._probeRunning) return Promise.resolve();
@@ -337,10 +337,10 @@ class RouterService {
   }
 
   /** 实例对账（2026-09 架构收敛：启停唯一决策者）：
-   *  期望运行集 = 常驻 1（resident，ready+usable）＋ 至多 1 备胎（仅当任一可用账号额度将耗尽 ≥80%）。
-   *  对账 = 期望集实例拉起（幂等）＋ 其余无在途实例停止（幂等）。
-   *  取代旧「回收（_stopIdleProxyInstances）+ 预热（_prewarmByQuota）两条相向路径」——
-   *  旧预热只看 percent≥80 不看可用性 → 预热已限额账号 → 回收同 tick 停掉 → 5min 启停死循环（实况 41012）。 */
+   * 期望运行集 = 常驻 1（resident，ready+usable）＋ 至多 1 备胎（仅当任一可用账号额度将耗尽 ≥80%）。
+   * 对账 = 期望集实例拉起（幂等）＋ 其余无在途实例停止（幂等）。
+   * 取代旧「回收（_stopIdleProxyInstances）+ 预热（_prewarmByQuota）两条相向路径」——
+   * 旧预热只看 percent≥80 不看可用性 → 预热已限额账号 → 回收同 tick 停掉 → 5min 启停死循环（实况 41012）。 */
   _stopIdleProxyInstances() {
     for (const p of this.providers) {
       if (p.kind !== 'proxy' || p.activated !== true) continue;
@@ -349,10 +349,10 @@ class RouterService {
   }
 
   /** 维护周期入口：每 5min 触发。
-   *  倒计时机制（防风控——不周期全量探测供应商 API）：
-   *  - 精确触发：任一 frozen/limited 账号 nextResetAt ≤ now+5min（到点/临近）→ 探测该批账号；
-   *  - 低频兜底：1h 一次，仅探测 nextResetAt 已过但未恢复的账号（防倒计时计算失误漏恢复）。
-   *  其余账号一律不探测（避免高频调用 billing/usage 触发风控封号）。 */
+   * 倒计时机制（防风控——不周期全量探测供应商 API）：
+   * - 精确触发：任一 frozen/limited 账号 nextResetAt ≤ now+5min（到点/临近）→ 探测该批账号；
+   * - 低频兜底：1h 一次，仅探测 nextResetAt 已过但未恢复的账号（防倒计时计算失误漏恢复）。
+   * 其余账号一律不探测（避免高频调用 billing/usage 触发风控封号）。 */
   _probeAccountStatesIfDue() {
     const now = Date.now();
     // 本地倒计时计算（不探测 API）：frozen 账号从 quota.resetsAt 推算 nextResetAt——
@@ -513,7 +513,7 @@ class RouterService {
   }
 
   /** 守卫/路由器启动恢复：已激活供应商端点 + 反代主实例常驻（幂等）。
-   *  兼容迁移：旧激活供应商可能尚无 apiPort → 启动时补分配（此后持久化，重启复用）。 */
+   * 兼容迁移：旧激活供应商可能尚无 apiPort → 启动时补分配（此后持久化，重启复用）。 */
   async _startActivatedProviders() {
     for (const p of this.providers) {
       if (p.activated !== true) continue;
@@ -562,9 +562,9 @@ class RouterService {
   }
 
   /** 域摘要（R4：router-daemon 黑盒经 ctl 向守卫目录呈报的紧凑摘要，目录只存引用）。
-   *  内容：运行态 / providers 数 / 已激活独立端点数 / 账号数 / 反代实例数 / 自治资源端口记录数。
-   *  守卫侧每监督拍(≈30s)拉取并写 router-daemon 目录项 domainSummary（只读缓存，不持久化）；
-   *  不在摘要内暴露账号明细/令牌/额度——黑盒内部数据仍只经既有 /router/* 实时 API。 */
+   * 内容：运行态 / providers 数 / 已激活独立端点数 / 账号数 / 反代实例数 / 自治资源端口记录数。
+   * 守卫侧每监督拍(≈30s)拉取并写 router-daemon 目录项 domainSummary（只读缓存，不持久化）；
+   * 不在摘要内暴露账号明细/令牌/额度——黑盒内部数据仍只经既有 /router/* 实时 API。 */
   domainSummary() {
     let providers = 0;
     let activatedProviders = 0;
@@ -591,8 +591,8 @@ class RouterService {
   }
 
   /** 资源端口视图（阶段迁移 S1，2026-09）：router 自治资源的端口段（proxyInstance+providerApi），
-   *  由 router 自供并经 ctl 暴露——守卫不经手、不自建视图（黑盒边界）。
-   *  按 owner 前缀筛；附 TCP active 探测（实时监听态）。 */
+   * 由 router 自供并经 ctl 暴露——守卫不经手、不自建视图（黑盒边界）。
+   * 按 owner 前缀筛；附 TCP active 探测（实时监听态）。 */
   async portsView() {
     const probe = require('../../guard/monitor/probe');
     const recs = ports.list().filter((r) => String(r.owner || '').startsWith('proxy:') || String(r.owner || '').startsWith('providerApi:'));
@@ -721,15 +721,15 @@ class RouterService {
     if (idx < 0) return { ok: false, error: '供应商不存在' };
     const removed = this.providers.splice(idx, 1)[0];
     this._stopProviderServer(id); // 删除即停用：关闭其独立端点
-    // ⚠ P1 修复（2026-09-13，失效模式 g）：**删除路径必须 force 停实例**。
-    //   缺陷：stopInstance(inst) 不带 force 时，若账号 ready+可用且被 selected/activeAccount
-    //     指向（正是在用的最常见态），proxy.js:374 只置 _stopPendingUntilIdle 就 return，**不 kill**；
-    //     而本函数紧接着把整个 provider 从 this.providers 摘除 ——
-    //     延迟标记所在对象随即**不可达**，reconcile/monitor 再也看不到该实例，
-    //     补刀路径（_retryPendingStop / 周期停循环）也无从触发。
-    //   后果：正在服务、持用户 API Key 并占用端口的反代实例进程**永不被回收**（端口登记已释放，
-    //     注册表视图还显示空闲）。对照 index.js:196（停服）是传 force=true 的。
-    //   修法：删除语义统一 force=true —— 与「删除即回收」的契约一致。
+    // P1 修复（2026-09-13，失效模式 g）：**删除路径必须 force 停实例**。
+    // 缺陷：stopInstance(inst) 不带 force 时，若账号 ready+可用且被 selected/activeAccount
+    // 指向（正是在用的最常见态），proxy.js:374 只置 _stopPendingUntilIdle 就 return，**不 kill**；
+    // 而本函数紧接着把整个 provider 从 this.providers 摘除 ——
+    // 延迟标记所在对象随即**不可达**，reconcile/monitor 再也看不到该实例，
+    // 补刀路径（_retryPendingStop / 周期停循环）也无从触发。
+    // 后果：正在服务、持用户 API Key 并占用端口的反代实例进程**永不被回收**（端口登记已释放，
+    // 注册表视图还显示空闲）。对照 index.js:196（停服）是传 force=true 的。
+    // 修法：删除语义统一 force=true —— 与「删除即回收」的契约一致。
     if (removed.kind === 'proxy') { for (const i of removed.instances || []) { try { removed.stopInstance(i, true); } catch {} } }
     // 端口登记级联释放（「删除对象即释放端口」契约，ports.js）：删供应商必须释放其
     // providerApi 端点 + 各反代实例（proxy:<keyId>）记录，否则 owner 永久累积、池最终耗尽。

@@ -7,29 +7,29 @@
 // ## 缺陷（失效模式 e + h，后果最严重的一类：静默全停）
 //
 // supervisor.js 的心跳：
-//   · `if (this._heartbeatBusy) return;` 是**丢拍**语义（注释只写「防慢拍重叠」）；
-//   · `_heartbeatBusy` 只在 `.finally` 里释放 —— 若 heartbeat 返回的 promise
-//     **永不 settle**，`.finally` 永不执行 → busy 永久 true → **心跳永停**。
+// · `if (this._heartbeatBusy) return;` 是**丢拍**语义（注释只写「防慢拍重叠」）；
+// · `_heartbeatBusy` 只在 `.finally` 里释放 —— 若 heartbeat 返回的 promise
+// **永不 settle**，`.finally` 永不执行 → busy 永久 true → **心跳永停**。
 //
 // 为什么致命：`managedObjects` 存在时**不创建 tick 定时器**（supervisor.js:455），
-//   故心跳是 main 收敛 / 沙箱监督 / daemon 监督的**唯一**周期驱动。
-//   心跳停摆后：main 即使 desired=running 也永不 spawn/adopt、沙箱挂了永不退避重试、
-//   router/lan daemon 失联永不被拉起 —— 而 /status 仍显示最后一次写入的 phase，
-//   没有任何「心跳已停」的暴露字段 → 用户看到「面板开着、服务全死、无任何事件」。
+// 故心跳是 main 收敛 / 沙箱监督 / daemon 监督的**唯一**周期驱动。
+// 心跳停摆后：main 即使 desired=running 也永不 spawn/adopt、沙箱挂了永不退避重试、
+// router/lan daemon 失联永不被拉起 —— 而 /status 仍显示最后一次写入的 phase，
+// 没有任何「心跳已停」的暴露字段 → 用户看到「面板开着、服务全死、无任何事件」。
 //
 // ## 修法
-//   · objects.js：逐对象 supervise/observe 加超时（拍宽 × ADAPTER_TIMEOUT_TICKS）；
-//   · supervisor.js：独立**兜底释放**定时器（拍宽 × 12）强制释放 busy 并记 warn，
-//     同时暴露 _lastHeartbeatAt / _heartbeatStalls 使停摆可观测。
+// · objects.js：逐对象 supervise/observe 加超时（拍宽 × ADAPTER_TIMEOUT_TICKS）；
+// · supervisor.js：独立**兜底释放**定时器（拍宽 × 12）强制释放 busy 并记 warn，
+// 同时暴露 _lastHeartbeatAt / _heartbeatStalls 使停摆可观测。
 //
 // ## 本门禁
-//   A 兜底释放的结构在（阈值、计数、日志）
-//   B **行为**：用真实 setInterval+busy 结构复现，断言「拍内 promise 永不 settle 时，
-//     兜底在阈值后释放 busy，使下一拍能再次进入」——这是缺陷的核心可证伪点。
-//   C 可观测字段存在
-//   D 拍宽变量**必须在 setInterval 之前求值**（我第一版把它写在回调内却在
-//     `}, iv)` 处引用 → ReferenceError → 定时器根本没建起来 → smoke S1 全红）。
-//     这条断言专门锁住那个自伤。
+// A 兜底释放的结构在（阈值、计数、日志）
+// B **行为**：用真实 setInterval+busy 结构复现，断言「拍内 promise 永不 settle 时，
+// 兜底在阈值后释放 busy，使下一拍能再次进入」——这是缺陷的核心可证伪点。
+// C 可观测字段存在
+// D 拍宽变量**必须在 setInterval 之前求值**（我第一版把它写在回调内却在
+// `}, iv)` 处引用 → ReferenceError → 定时器根本没建起来 → smoke S1 全红）。
+// 这条断言专门锁住那个自伤。
 // ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
@@ -88,8 +88,8 @@ const code = raw.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n'
 
   console.log('== D 拍宽变量在 setInterval 之前求值（锁住我第一版的自伤）==');
   {
-    // ⚠ 必须定位到**心跳那一个** setInterval，而不是文件里更早的其它 setInterval
-    //   （我第一版用 indexOf('setInterval(') 命中了前面的定时器 → 假红）。
+    // 必须定位到**心跳那一个** setInterval，而不是文件里更早的其它 setInterval
+    // （我第一版用 indexOf('setInterval(') 命中了前面的定时器 → 假红）。
     const iIv = code.indexOf('const heartbeatIv = this.config.probeIntervalMs');
     const iSet = code.indexOf('this._heartbeatTimer = setInterval(');
     check('D heartbeatIv 在 setInterval 之前声明', iIv > 0 && iSet > iIv, 'iv@' + iIv + ' set@' + iSet);

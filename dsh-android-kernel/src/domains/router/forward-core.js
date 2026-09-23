@@ -12,21 +12,21 @@ const { keyFingerprint, maskKey } = require('./providers/base');
 // router 不再持有任何供应商词表/状态码特判（INV-4）；默认实现与覆盖点在 providers/base.js。
 /** 读上游响应体（有界：**字节上限 + 时间上限**）：限制判定 / 透传都需要。
  *
- *  ⚠ P2 修复（2026-09-12）：原实现**只有字节上限、没有时间上限** ——
- *    它只监听 `end`/`error`，若上游「先发响应头（4xx/5xx）、再挂住不结束」，
- *    本 Promise **永不 settle**。
+ * P2 修复（2026-09-12）：原实现**只有字节上限、没有时间上限** ——
+ * 它只监听 `end`/`error`，若上游「先发响应头（4xx/5xx）、再挂住不结束」，
+ * 本 Promise **永不 settle**。
  *
- *    更要紧的是**调用时机**：`forwardOnce` 在收到响应头时就会 settle 并清掉
- *    connectGuard/responseGuard，故这次读取发生在**所有超时守卫解除之后** ——
- *    该请求的 handler 会永远 await（客户端连接悬挂、永不返回）。
+ * 更要紧的是**调用时机**：`forwardOnce` 在收到响应头时就会 settle 并清掉
+ * connectGuard/responseGuard，故这次读取发生在**所有超时守卫解除之后** ——
+ * 该请求的 handler 会永远 await（客户端连接悬挂、永不返回）。
  *
- *  修法：加 `timeoutMs`（默认 15s）。超时即**带已有内容 resolve**（而不是 reject）——
- *    语义与原实现一致（上游出错时也返回已读到的部分），调用方照常做 classifyResponse。
- *    并顺手 `destroy()`，避免半开的连接残留。
+ * 修法：加 `timeoutMs`（默认 15s）。超时即**带已有内容 resolve**（而不是 reject）——
+ * 语义与原实现一致（上游出错时也返回已读到的部分），调用方照常做 classifyResponse。
+ * 并顺手 `destroy()`，避免半开的连接残留。
  *
- *  ⚠ 为什么是「带部分内容 resolve」而非「报错」：本函数服务于**错误响应的判定**
- *    （`status >= 400` 分支），此时「读到多少算多少」正是调用方需要的；
- *    若改成 reject，会把一次上游异常升级成 router 自身的异常路径。
+ * 为什么是「带部分内容 resolve」而非「报错」：本函数服务于**错误响应的判定**
+ * （`status >= 400` 分支），此时「读到多少算多少」正是调用方需要的；
+ * 若改成 reject，会把一次上游异常升级成 router 自身的异常路径。
  */
 function readUpstreamBody(ur, maxBytes, timeoutMs) {
   return new Promise((resolve) => {
@@ -92,9 +92,9 @@ function extractUsage(text) {
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 /** 按 models.dev 单价估算一次调用的费用（$）。
- *  entry = { model, promptTokens, completionTokens, pricing? }；pricing 为转发时快照的 officialPricing/全局索引。
- *  单价缺失（未同步/未知模型）→ 0（不虚报费用）。
- *  模型名归一化：反代/直连可能带供应商前缀（deepseek/deepseek-v4-flash）→ 去前缀查索引。 */
+ * entry = { model, promptTokens, completionTokens, pricing? }；pricing 为转发时快照的 officialPricing/全局索引。
+ * 单价缺失（未同步/未知模型）→ 0（不虚报费用）。
+ * 模型名归一化：反代/直连可能带供应商前缀（deepseek/deepseek-v4-flash）→ 去前缀查索引。 */
 function estimateCost(entry) {
   const pricing = entry && entry.pricing;
   if (!pricing || typeof pricing !== 'object') return 0;
@@ -116,21 +116,21 @@ function estimateCost(entry) {
 
 /** **实例的唯一解析入口**（P2 修复，2026-09-12）。
  *
- *  ⚠ 为什么需要它：仓内对「账号 → 实例」有**两个事实源**：
- *    · `acc.instance`（账号对象上的内联引用）——
- *      `proxy.js:755` 的注释明确写着「acc.instance 字段已废弃」；
- *    · `prov.instanceOf(acc)`（按 keyId 映射到 instances 列表）。
- *    而 `acc.instance` 曾散落在本文件 **12 处**被读取 ——
- *    （2026-09-12 已全部迁入本函数；此处保留历史说明以便理解为何要有 instOf）。
- *    「同一事实两处表达」正是本仓反复出现问题的形态。
+ * 为什么需要它：仓内对「账号 → 实例」有**两个事实源**：
+ * · `acc.instance`（账号对象上的内联引用）——
+ * `proxy.js:755` 的注释明确写着「acc.instance 字段已废弃」；
+ * · `prov.instanceOf(acc)`（按 keyId 映射到 instances 列表）。
+ * 而 `acc.instance` 曾散落在本文件 **12 处**被读取 ——
+ * （2026-09-12 已全部迁入本函数；此处保留历史说明以便理解为何要有 instOf）。
+ * 「同一事实两处表达」正是本仓反复出现问题的形态。
  *
- *    危害（当下未爆发但是定时炸弹）：两条路径维护的是**不同对象**——
- *      `proxy.js` 的停/查路径走 `instances`，而转发/选号路径走 `acc.instance`。
- *      任一侧未来只清一边时，「转发的目标端口」与「对账/端口释放所见的实例」就会不一致
- *      → 转发到已释放端口，或实例泄漏。
+ * 危害（当下未爆发但是定时炸弹）：两条路径维护的是**不同对象**——
+ * `proxy.js` 的停/查路径走 `instances`，而转发/选号路径走 `acc.instance`。
+ * 任一侧未来只清一边时，「转发的目标端口」与「对账/端口释放所见的实例」就会不一致
+ * → 转发到已释放端口，或实例泄漏。
  *
- *  修法：本函数统一走 `instanceOf`（它内部 `find(keyId) || acc.instance`，
- *    即**已是两者的安全超集**），故迁移不改变当下行为，只消除分叉风险。
+ * 修法：本函数统一走 `instanceOf`（它内部 `find(keyId) || acc.instance`，
+ * 即**已是两者的安全超集**），故迁移不改变当下行为，只消除分叉风险。
  */
 function instOf(prov, acc) {
   if (!acc) return null;
@@ -230,8 +230,8 @@ const forwardMethods = {
         if (rt.prov && typeof rt.prov.markInstanceNetFail === 'function') rt.prov.markInstanceNetFail(acc);
         this.log('ERR net fail key=' + maskKey(acc.key) + ' err=' + out.error);
         // 实例级处置【先于清 pid】（2026-09 复检根治：旧序先清 pid 再 markInstanceNetFail → 其内部
-        //   `!inst.pid → return` 令请求级熔断成死代码；且上游超时从不重启实例 → 楔死实例每次请求撞上
-        //   → 换账号（前端「账号不断切换」实证链路））
+        // `!inst.pid → return` 令请求级熔断成死代码；且上游超时从不重启实例 → 楔死实例每次请求撞上
+        // → 换账号（前端「账号不断切换」实证链路））
         if (activeProv && activeProv.kind === 'proxy' && inst) {
           if (isTimeout && typeof activeProv.restartInstance === 'function') {
             // 连接/响应超时 = 实例疑似卡死（CPU 旋转、completion 挂死而 /health 秒回）：立即实例级重启
@@ -286,8 +286,8 @@ const forwardMethods = {
         return res.end(act.body !== undefined ? act.body : text);
       }
       // P1-1 修复（2026-09-12）：**请求确认成功**（2xx 走到这里）才清零失败计数。
-      //   此前清零发生在循环头的 markUsed（请求发出**前**），使「连续 ≥2 次失败」
-      //   在数学上不可达 —— 请求级熔断是死代码。
+      // 此前清零发生在循环头的 markUsed（请求发出**前**），使「连续 ≥2 次失败」
+      // 在数学上不可达 —— 请求级熔断是死代码。
       const okInst = instOf(activeProv, acc);
       if (activeProv && activeProv.kind === 'proxy' && okInst
           && typeof activeProv.markRequestOk === 'function') {
@@ -354,15 +354,15 @@ const forwardMethods = {
       decInflight();
       this.log('STREAM_ABORTED key=' + maskKey(acc.key) + ' bytes=' + bytes);
       // 2026-09 二次修正：上游流中断（aborted/error/close）做【实例级】自愈但【不】做账号级处置。
-      //   - markInstanceNetFail → markInstanceProblem 只累加 _unhealthyCount → 连续 ≥2 次断流
-      //     才 restartInstance 重启该实例（清坏状态，2min 退避防风暴）——它【不冻结账号/不切走】；
-      //   - 曾误删此调用（把"账号级不过度介入"误做成连实例自愈也去掉）→ 断流实例坏状态残留不重启
-      //     （如 Kbobt7 health 200 但请求处理卡死，monitor 探活也抓不到）→ 反复 400 的根因之一。
+      // - markInstanceNetFail → markInstanceProblem 只累加 _unhealthyCount → 连续 ≥2 次断流
+      // 才 restartInstance 重启该实例（清坏状态，2min 退避防风暴）——它【不冻结账号/不切走】；
+      // - 曾误删此调用（把"账号级不过度介入"误做成连实例自愈也去掉）→ 断流实例坏状态残留不重启
+      // （如 Kbobt7 health 200 但请求处理卡死，monitor 探活也抓不到）→ 反复 400 的根因之一。
       //
-      // ⚠ P1-2 修复（2026-09-12）：此处原调用 `prov.markNetFail(acc)` —— **该方法全仓不存在**，
-      //   `typeof ... === 'function'` 恒为 false，故这段自愈**从未执行过**。
-      //   与 P1-1 叠加后，断流路径的实例级熔断此前**完全失效**。
-      //   现改用真实存在的方法名（proxy.js 提供 markInstanceNetFail，其内部即 markInstanceProblem）。
+      // P1-2 修复（2026-09-12）：此处原调用 `prov.markNetFail(acc)` —— **该方法全仓不存在**，
+      // `typeof ... === 'function'` 恒为 false，故这段自愈**从未执行过**。
+      // 与 P1-1 叠加后，断流路径的实例级熔断此前**完全失效**。
+      // 现改用真实存在的方法名（proxy.js 提供 markInstanceNetFail，其内部即 markInstanceProblem）。
       if (prov && typeof prov.markInstanceNetFail === 'function') { try { prov.markInstanceNetFail(acc); } catch {} }
       if (this.events) this.events.append('router_stream_aborted', { key: maskKey(acc.key), model: meta.model, bytes });
       // 上游中断仍须通知客户端：res.destroy() 关闭客户端连接（读到截断→客户端自己决定重试，
@@ -389,8 +389,8 @@ const forwardMethods = {
   },
 
   /** 账号请求在途计数（proxyFor 对每次实际转发尝试 +1；对应 writeThrough/错误路径 -1）。
-   *  供回收/对账判定「实例在途不回收」——此前 inflight 只读不写（死代码），
-   *  实例可能被回收杀在途流。 */
+   * 供回收/对账判定「实例在途不回收」——此前 inflight 只读不写（死代码），
+   * 实例可能被回收杀在途流。 */
   _beginInflight(acc) { try { if (acc) acc.inflight = (acc.inflight || 0) + 1; } catch {} },
   _endInflight(acc, prov) {
     try {
@@ -401,8 +401,8 @@ const forwardMethods = {
         prov._retryPendingStop(acc);
       }
       // 在途归零 → 补做「被延后的实例重启」（P1-3 修复的消费点）。
-      //   与上面的待停补刀同构：都是「在途期间不能动实例，故记下意图、空闲后执行」。
-      //   旧实现只写 `_restartPending` 而**无任何读取点** → 「延后」实为「丢弃」。
+      // 与上面的待停补刀同构：都是「在途期间不能动实例，故记下意图、空闲后执行」。
+      // 旧实现只写 `_restartPending` 而**无任何读取点** → 「延后」实为「丢弃」。
       const pendInst = instOf(prov, acc);
       if (acc.inflight === 0 && pendInst && prov && typeof prov.flushRestartPending === 'function') {
         prov.flushRestartPending(pendInst);
@@ -442,9 +442,9 @@ const forwardMethods = {
       const req = mod.request(target, { method, headers, agent }, (ur) => { if (this.logger && this.logger.debug) this.logger.debug('[fw] hdrs ' + maskKey(key) + ' status=' + ur.statusCode + ' after ' + (Date.now() - startedAtRef) + 'ms'); settle({ phase: 'ok', res: ur, upstreamReq: req }); });
       req.setTimeout(0);
       // 连接级守卫（2026-09 恢复——曾误删导致反复 400）：TCP 建连/握手 15s 上限（防黑洞）。
-      //   CHANGELOG 0.9.2：15s 防 TCP 黑洞/握手挂死；0.10.0：30s 响应头防「已连接静默」挂死。
-      //   响应头到达即由 settle 解除——长流（SSE）不受限（CHANGELOG 明示"长流不限时长"）。
-      //   曾误以为守卫会掐超长上下文（首 token>30s）而删除 → 上游/实例黑洞时请求无限挂 → 400。
+      // CHANGELOG 0.9.2：15s 防 TCP 黑洞/握手挂死；0.10.0：30s 响应头防「已连接静默」挂死。
+      // 响应头到达即由 settle 解除——长流（SSE）不受限（CHANGELOG 明示"长流不限时长"）。
+      // 曾误以为守卫会掐超长上下文（首 token>30s）而删除 → 上游/实例黑洞时请求无限挂 → 400。
       connectGuard = setTimeout(() => { const err = new Error('connect timeout after 15s'); req.destroy(err); settle({ phase: 'net-error', error: err.message }); }, 15000);
       // 响应头守卫：180s（放宽自 30s——超长上下文/慢推理首 token 需要更久；仍防「已连接但静默」挂死）
       responseGuard = setTimeout(() => { const err = new Error('response timeout after 180s'); req.destroy(err); settle({ phase: 'net-error', error: err.message }); }, 180000);

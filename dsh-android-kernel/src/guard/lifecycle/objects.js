@@ -4,16 +4,16 @@
 // 管家注册机（ManagedRegistry）—— 控制平面 v3 的声明目录（2026-09-06 定稿）。
 //
 // 定位：守卫核心层 = 大管家。本目录记录「管家直接负责」的受管对象的应然声明与所有权：
-//   - 身份（kind/id/name）
-//   - 应然（desired：用户意图 / guardian：自动拉起策略）——持久，由业务申报
-//   - 所有权（端口 owner 引用 / root 路径 / unit 或 daemon 声明 / 进程模式）——持久
-//   - 类型适配器引用（observe/apply 实现留在类型模块，经 registerAdapter 挂接，不持久化）
+// - 身份（kind/id/name）
+// - 应然（desired：用户意图 / guardian：自动拉起策略）——持久，由业务申报
+// - 所有权（端口 owner 引用 / root 路径 / unit 或 daemon 声明 / 进程模式）——持久
+// - 类型适配器引用（observe/apply 实现留在类型模块，经 registerAdapter 挂接，不持久化）
 //
 // 铁律（v3 设计公理落地）：
-//   1) 实然（pid/占用/健康）只来自观测，绝不写回目录；
-//   2) 注册即存在、注销即不存在（限管家直接负责的对象）；域自治对象不入簿（经 ctl 摘要）；
-//   3) 目录不是第二状态源：phase 由调谐循环驱动（R3 挂接），业务不得直接改目录 phase；
-//   4) 路径由 root 派生，不登记路径清单；端口只登记所有权引用（联动统一端口注册表）。
+// 1) 实然（pid/占用/健康）只来自观测，绝不写回目录；
+// 2) 注册即存在、注销即不存在（限管家直接负责的对象）；域自治对象不入簿（经 ctl 摘要）；
+// 3) 目录不是第二状态源：phase 由调谐循环驱动（R3 挂接），业务不得直接改目录 phase；
+// 4) 路径由 root 派生，不登记路径清单；端口只登记所有权引用（联动统一端口注册表）。
 // ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
@@ -29,7 +29,7 @@ const ADAPTER_TIMEOUT_TICKS = 6;
 const DESIRED = ['running', 'stopped'];
 
 /** 受管对象类型表（显式、稳定；不造通用 CRD）。future 扩展经 registerKind 声明能力。 */
-/** ⚠ 已删除的类型（勿回潮）：'sandbox-instance'（沙箱实例域已整体移除，内核 Android-only 单主干）。 */
+/** 已删除的类型（勿回潮）：'sandbox-instance'（沙箱实例域已整体移除，内核 Android-only 单主干）。 */
 const MANAGED_KINDS = {
   dsh:              { label: '原生 DSH',       startable: true, guardable: true },
   'router-daemon':  { label: '智能路由 daemon', startable: true, guardable: true },
@@ -91,7 +91,7 @@ function normalizeOwnership(own) {
     ports,
     rootPath: o.rootPath ? String(o.rootPath) : null,
     daemonScript: o.daemonScript ? String(o.daemonScript) : null,
-    // ⚠ 'systemd' 已随实例/沙箱域与系统服务管理器托管模式删除（安卓无 systemd）。
+    // 'systemd' 已随实例/沙箱域与系统服务管理器托管模式删除（安卓无 systemd）。
     processMode: ['spawn', 'daemon', 'adopted'].includes(o.processMode) ? o.processMode : null,
     meta: (o.meta && typeof o.meta === 'object') ? Object.assign({}, o.meta) : null, // 域备注（只读参考）
   };
@@ -112,8 +112,8 @@ class ManagedRegistry {
     this._adapters = {};          // kind -> { observe, apply }
     this._loaded = false;
     // 是否「从既有磁盘文件加载」（阶段 2 状态单源迁移判定）：
-    //   true  = 历史库已有权威目录 → 以目录 desired 为准，state.json 不回灌（纯投影）；
-    //   false = 目录文件原不存在（首启/老库迁移）→ 允许 state.json 的 desired 作一次性种子。
+    // true = 历史库已有权威目录 → 以目录 desired 为准，state.json 不回灌（纯投影）；
+    // false = 目录文件原不存在（首启/老库迁移）→ 允许 state.json 的 desired 作一次性种子。
     // 注意：必须记录「构造前是否存在」，而非 _save 之后——构造函数随后会创建文件（否则判定失真）。
     this._loadedFromDisk = false;
     if (this.file) {
@@ -173,7 +173,7 @@ class ManagedRegistry {
   }
 
   /** B2 归一：崩溃/退避字段变化时的持久化入口（防抖 50ms 合并同拍多次变更，避免写放大）。
-   *  仅落盘目录文件；由 supervisor._persistCrashField 在 _mField 变更后调用。 */
+   * 仅落盘目录文件；由 supervisor._persistCrashField 在 _mField 变更后调用。 */
   persistCrashState() {
     if (this._crashSaveTimer) return; // 已排期，合并
     this._crashSaveTimer = setTimeout(() => {
@@ -251,11 +251,11 @@ class ManagedRegistry {
     const e = this.get(id);
     if (!e) return { ok: false, error: '未注册: ' + id };
     const o = opts || {};
-    // ⚠ P3 修复（2026-09-13）：**清掉节流游标**。
-    //   _nextTickAt 原先只写不读其它、且**没有任何清除路径**（全仓仅 heartbeat 内一处读写）。
-    //   对象注销后若同 id 重新注册，旧游标不会跟着新对象走（新对象是新 entry，天然无游标），
-    //   故注销本身影响有限；真正的缺口是「守卫重启才自然丢失」——
-    //   在 unregister 处显式清除，使生命周期边界上的语义完整、可测。
+    // P3 修复（2026-09-13）：**清掉节流游标**。
+    // _nextTickAt 原先只写不读其它、且**没有任何清除路径**（全仓仅 heartbeat 内一处读写）。
+    // 对象注销后若同 id 重新注册，旧游标不会跟着新对象走（新对象是新 entry，天然无游标），
+    // 故注销本身影响有限；真正的缺口是「守卫重启才自然丢失」——
+    // 在 unregister 处显式清除，使生命周期边界上的语义完整、可测。
     e._nextTickAt = null;
     // 级联停/清理由调用方决定（域业务保留最终权力）；这里只做目录应做的：
     // 1) 释放所有权端口（若注入统一端口注册表，按 owner=本对象释放）
@@ -269,10 +269,10 @@ class ManagedRegistry {
 
   /** 释放本对象持有的端口（按 owner）。
    *
-   *  ⚠ 2026-09-12（P2-2 配套）：`PortRegistry.release()` 现已**真正支持** `ownerId` 校验
-   *    （此前第二参被静默忽略，故这里曾有 `catch { release(port) }` 的回退）。
-   *    回退现已删除 —— 保留它会绕过 owner 判定，正是 P2-2 要堵的「误删他人端口登记」。
-   *    记录返回值仅用于日志（不匹配即 no-op 是期望行为，不是错误）。
+   * 2026-09-12（P2-2 配套）：`PortRegistry.release()` 现已**真正支持** `ownerId` 校验
+   * （此前第二参被静默忽略，故这里曾有 `catch { release(port) }` 的回退）。
+   * 回退现已删除 —— 保留它会绕过 owner 判定，正是 P2-2 要堵的「误删他人端口登记」。
+   * 记录返回值仅用于日志（不匹配即 no-op 是期望行为，不是错误）。
    */
   _releasePort(port, ownerId) {
     if (!this.ports || typeof this.ports.release !== 'function') return;
@@ -304,8 +304,8 @@ class ManagedRegistry {
    * @returns {{ observed: string[], errors: string[] }}
    */
   /** 单对象 supervise/observe 的**超时上限**（拍宽的倍数）。
-   *  6 倍拍宽 ≈ 30s（默认拍宽 5s）：远大于任何正常监督耗时，又保证有界 ——
-   *  任一 adapter 卡死时心跳在 ~30s 内恢复推进，而不是永久停摆。 */
+   * 6 倍拍宽 ≈ 30s（默认拍宽 5s）：远大于任何正常监督耗时，又保证有界 ——
+   * 任一 adapter 卡死时心跳在 ~30s 内恢复推进，而不是永久停摆。 */
   _adapterTimeoutMs(iv) { return Math.max(1000, (iv || 5000) * ADAPTER_TIMEOUT_TICKS); }
 
   /** 给单对象的监督 promise 加超时（超时即按失败处理，绝不无限等待）。 */
@@ -340,22 +340,22 @@ class ManagedRegistry {
       const tickEvery = ad.tickEvery || (e.ownership && e.ownership.meta && e.ownership.meta.tickEvery) || 1;
       if (tickEvery > 1) {
         if (e._nextTickAt && now < e._nextTickAt) continue; // 节流(daemon 类≈6拍30s)
-        // ⚠ 用**本次实际执行时刻**前推（而非 heartbeat 入口的 now）：
-        //   本循环是串行的，前面的对象耗时会让 now 变陈旧 → 节流窗被系统性拉长。
+        // 用**本次实际执行时刻**前推（而非 heartbeat 入口的 now）：
+        // 本循环是串行的，前面的对象耗时会让 now 变陈旧 → 节流窗被系统性拉长。
         e._nextTickAt = Date.now() + tickEvery * iv;
       }
       try {
-        // ⚠ P1 修复（2026-09-13）：**单个 adapter 不得拖死整条心跳**。
+        // P1 修复（2026-09-13）：**单个 adapter 不得拖死整条心跳**。
         //
-        //   缺陷：此处 `await fn(e)` 没有任何超时。心跳是 main 收敛 / 沙箱监督 /
-        //     daemon 监督的**唯一周期驱动**（supervisor.js:452-455 在 managedObjects 存在时
-        //     不创建 tick 定时器）。只要任一 adapter 的 promise 永不 settle（ctl 卡死、
-        //     子进程无响应、await 了一个不会 resolve 的 I/O），本循环就永久停在这一拍；
-        //     而 supervisor 侧以 _heartbeatBusy 防重叠 → **心跳永停**，
-        //     表现为「面板开着、服务全死、却没有任何事件」。
-        //   修法：每对象加超时（上限 = 拍宽 × ADAPTER_TIMEOUT_TICKS）。超时按**异常**处理
-        //     （记 errors + warn，并落一条 {ok:false} 观测），使循环继续推进到下一个对象。
-        //     超时值取「拍宽的 6 倍」：远大于正常监督耗时，又保证有界。
+        // 缺陷：此处 `await fn(e)` 没有任何超时。心跳是 main 收敛 / 沙箱监督 /
+        // daemon 监督的**唯一周期驱动**（supervisor.js:452-455 在 managedObjects 存在时
+        // 不创建 tick 定时器）。只要任一 adapter 的 promise 永不 settle（ctl 卡死、
+        // 子进程无响应、await 了一个不会 resolve 的 I/O），本循环就永久停在这一拍；
+        // 而 supervisor 侧以 _heartbeatBusy 防重叠 → **心跳永停**，
+        // 表现为「面板开着、服务全死、却没有任何事件」。
+        // 修法：每对象加超时（上限 = 拍宽 × ADAPTER_TIMEOUT_TICKS）。超时按**异常**处理
+        // （记 errors + warn，并落一条 {ok:false} 观测），使循环继续推进到下一个对象。
+        // 超时值取「拍宽的 6 倍」：远大于正常监督耗时，又保证有界。
         const res = await this._withTimeout(fn(e), iv * ADAPTER_TIMEOUT_TICKS, e.id);
         // 超时必须进 errors 汇总（否则调用方只看 errors/observed 会以为一切正常）
         if (res && res.__timedOut) errors.push(e.id + ':' + (res.error || '监督超时'));

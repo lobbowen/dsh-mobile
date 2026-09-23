@@ -8,8 +8,8 @@ android {
     // compileSdk 必须 >= 35：依赖里的 androidx.core 1.15.0 / core-ktx 1.15.0 带有
     // AAR metadata 声明，要求使用方 compileSdk >= 35。原先是 34，导致 gradle 在
     // :app:checkDebugAarMetadata 阶段失败：
-    //   Dependency 'androidx.core:core:1.15.0' requires libraries and applications
-    //   that depend on it to compile against version 35 or later of the Android APIs.
+    // Dependency 'androidx.core:core:1.15.0' requires libraries and applications
+    // that depend on it to compile against version 35 or later of the Android APIs.
     //
     // 关键区分：compileSdk 只决定"用哪个版本的 API 头来编译"，
     // 与 minSdk（APK 能装到哪些设备上）完全独立。所以这次提升
@@ -23,7 +23,9 @@ android {
     defaultConfig {
         applicationId = "com.example.nodecontainer"
         minSdk = 24
-        targetSdk = 34
+        // targetSdk 决定 SELinux 域：28 落在 untrusted_app_27，允许 exec app home。
+        // 取舍与依据见 docs/ADR-001；link(2) 不在此豁免内，走自有原语。
+        targetSdk = 28
         versionCode = 1
         versionName = "0.1.0"
         // 当前仅支持 arm64-v8a（bionic 链接的 Node 二进制只编这个 ABI）。
@@ -34,46 +36,46 @@ android {
     }
 
     // =========================================================================
-    //  签名配置：**从环境变量/密钥文件注入，缺失时退化为 debug 并显式警告**
+    // 签名配置：**从环境变量/密钥文件注入，缺失时退化为 debug 并显式警告**
     // =========================================================================
-    //  为什么必须有这一段（这是一个真实的、用户可见的缺陷）：
+    // 为什么必须有这一段（这是一个真实的、用户可见的缺陷）：
     //
-    //  此前本项目**没有任何 signingConfig** —— 每次 CI 出包都用 AGP 自动生成的
-    //  debug keystore（`~/.android/debug.keystore`，由 runner 现场生成，
-    //  指纹每次都不同）。后果是：
+    // 此前本项目**没有任何 signingConfig** —— 每次 CI 出包都用 AGP 自动生成的
+    // debug keystore（`~/.android/debug.keystore`，由 runner 现场生成，
+    // 指纹每次都不同）。后果是：
     //
-    //    · `adb install -r` 新包 → INSTALL_FAILED_UPDATE_INCOMPATIBLE
-    //      （签名不一致，Android 拒绝覆盖安装）
-    //    · 「设备自我升级 APK」这条路彻底走不通 —— 而它是 A'（重打包路线）
-    //      与 app.install 静默升级能力的**共同绝对前提**
-    //    · 增量升级、灰度推送等一切依赖"应用身份稳定"的机制都不成立
+    // · `adb install -r` 新包 → INSTALL_FAILED_UPDATE_INCOMPATIBLE
+    // （签名不一致，Android 拒绝覆盖安装）
+    // · 「设备自我升级 APK」这条路彻底走不通 —— 而它是 A'（重打包路线）
+    // 与 app.install 静默升级能力的**共同绝对前提**
+    // · 增量升级、灰度推送等一切依赖"应用身份稳定"的机制都不成立
     //
-    //  所以这里让它可注入。设计上的三个取舍：
+    // 所以这里让它可注入。设计上的三个取舍：
     //
-    //  ① **可选而非必需**。没配密钥时**不报错**，退化为 debug 签名继续出包 ——
-    //     本项目大部分场景（本地开发、功能验证）只需要一个能装的包，
-    //     强制要求密钥会让这些场景全部卡住。
+    // ① **可选而非必需**。没配密钥时**不报错**，退化为 debug 签名继续出包 ——
+    // 本项目大部分场景（本地开发、功能验证）只需要一个能装的包，
+    // 强制要求密钥会让这些场景全部卡住。
     //
-    //  ② **但必须显式警告**。缺失时打 WARNING 并说明后果 ——
-    //     静默退化会让"发布包签名不稳定"这件事永远浮不出来，
-    //     而那正是上面三个后果的根源。
+    // ② **但必须显式警告**。缺失时打 WARNING 并说明后果 ——
+    // 静默退化会让"发布包签名不稳定"这件事永远浮不出来，
+    // 而那正是上面三个后果的根源。
     //
-    //  ③ **读文件而非只读环境变量**。密钥库是二进制，环境变量传它会
-    //     有很大的转义/长度风险。所以约定：CI 从 secret 解出文件放到
-    //     `keys/release.keystore`，这里按文件存在性判断
-    //     （`keys/` 整体 gitignored，与 ota-private.pem 一致）。
+    // ③ **读文件而非只读环境变量**。密钥库是二进制，环境变量传它会
+    // 有很大的转义/长度风险。所以约定：CI 从 secret 解出文件放到
+    // `keys/release.keystore`，这里按文件存在性判断
+    // （`keys/` 整体 gitignored，与 ota-private.pem 一致）。
     // =========================================================================
     val releaseKeystore = rootProject.file("keys/release.keystore")
     val hasReleaseKeystore = releaseKeystore.exists()
 
     // 密码先取到局部不可变 val，再赋给 signingConfig。
     //
-    // ⚠️ 不能写成 `storePassword = System.getenv(...) ?: ""` 后紧跟
-    //    `require(storePassword.isNotEmpty())` —— 会直接编译失败：
-    //      Smart cast to 'String' is impossible, because 'storePassword'
-    //      is a mutable property that could have been changed by this time
-    //    ApkSigningConfig 的这两个属性是 `var`，Kotlin 拒绝对可变属性做
-    //    智能转换。用局部 val 绕开，同时也让"读环境变量"只发生一次。
+    // 不能写成 `storePassword = System.getenv(...) ?: ""` 后紧跟
+    // `require(storePassword.isNotEmpty())` —— 会直接编译失败：
+    // Smart cast to 'String' is impossible, because 'storePassword'
+    // is a mutable property that could have been changed by this time
+    // ApkSigningConfig 的这两个属性是 `var`，Kotlin 拒绝对可变属性做
+    // 智能转换。用局部 val 绕开，同时也让"读环境变量"只发生一次。
     val keystorePw = System.getenv("DSH_KEYSTORE_PASSWORD") ?: ""
     val keyPw = System.getenv("DSH_KEY_PASSWORD") ?: keystorePw
     val keyAliasName = System.getenv("DSH_KEY_ALIAS") ?: "dsh"
@@ -142,26 +144,26 @@ android {
     packaging {
         jniLibs {
             // =====================================================================
-            //  这是「node 能否在真机跑起来」的开关，别改。
+            // 这是「node 能否在真机跑起来」的开关，别改。
             // =====================================================================
             // 背景：Android 10+ 的 SELinux 禁止 exec 应用可写目录里的文件
-            //   (files/ → app_data_file，execve 返回 EACCES)
+            // (files/ → app_data_file，execve 返回 EACCES)
             // 唯一被允许执行的是系统在安装时解压出来的 native lib 目录：
-            //   /data/app/<pkg>/lib/<abi>/  (exec_type)
+            // /data/app/<pkg>/lib/<abi>/ (exec_type)
             // 真机实证（Android 16/API 36）：
-            //   IOException: Cannot run program ".../files/node/24.21.0/node":
-            //   error=13, Permission denied
+            // IOException: Cannot run program ".../files/node/24.21.0/node":
+            // error=13, Permission denied
             //
             // 所以 node 以 jniLibs/arm64-v8a/libnode.so 的形式打包，
             // 运行时执行 applicationInfo.nativeLibraryDir/libnode.so。
             //
             // useLegacyPackaging 必须为 true：
-            //   AGP 3.6+ 默认(false)会把 .so 以【压缩】形式放进 APK，
-            //   安装时不解压到 lib dir，而是在 APK 内直接 mmap 加载。
-            //   那种模式下列表 dir 根本看不到文件，File.exists() 为 false，
-            //   更不可能被 exec。置 true 后系统才会把 .so 真正解压落盘到
-            //   /data/app/.../lib/arm64-v8a/libnode.so，我们才能 ProcessBuilder 启动它。
-            //   代价是 APK 体积变大（不压缩），这对本地运行时是必要且可接受的。
+            // AGP 3.6+ 默认(false)会把 .so 以【压缩】形式放进 APK，
+            // 安装时不解压到 lib dir，而是在 APK 内直接 mmap 加载。
+            // 那种模式下列表 dir 根本看不到文件，File.exists() 为 false，
+            // 更不可能被 exec。置 true 后系统才会把 .so 真正解压落盘到
+            // /data/app/.../lib/arm64-v8a/libnode.so，我们才能 ProcessBuilder 启动它。
+            // 代价是 APK 体积变大（不压缩），这对本地运行时是必要且可接受的。
             useLegacyPackaging = true
 
             // -----------------------------------------------------------------
@@ -172,18 +174,18 @@ android {
             // 替代写法明确指向它："Use jniLibs.keepDebugSymbols.add() instead."
             //
             // 为什么这两个文件必须豁免 strip：
-            //   AGP 默认会把 jniLibs 里的 .so 交给 NDK 的 llvm-strip 处理以减小体积。
-            //   但这两个文件【不是普通的共享库】：
-            //     · libnode.so      —— 其实是一个可执行文件，只是被改名为 lib*.so，
-            //                          借 jniLibs 这条通道落到可执行目录（见上文 W^X 说明）。
-            //                          strip 会破坏它被 exec 所需的信息。
-            //     · libc++_shared.so —— node 的运行期动态依赖，符号由它提供。
-            //                          真机报的 cannot locate symbol
-            //                          "_ZTVNSt6__ndk119basic_ostringstream..." 正指向它；
-            //                          strip 掉符号表只会让动态链接更无解。
+            // AGP 默认会把 jniLibs 里的 .so 交给 NDK 的 llvm-strip 处理以减小体积。
+            // 但这两个文件【不是普通的共享库】：
+            // · libnode.so —— 其实是一个可执行文件，只是被改名为 lib*.so，
+            // 借 jniLibs 这条通道落到可执行目录（见上文 W^X 说明）。
+            // strip 会破坏它被 exec 所需的信息。
+            // · libc++_shared.so —— node 的运行期动态依赖，符号由它提供。
+            // 真机报的 cannot locate symbol
+            // "_ZTVNSt6__ndk119basic_ostringstream..." 正指向它；
+            // strip 掉符号表只会让动态链接更无解。
             //
-            //   这两个文件由 CI 用与 node 相同的 NDK 亲自挑选/产出，不需要 AGP 再加工。
-            //   显式豁免，避免「体积看着小了、真机反而加载失败」这类极难排查的副作用。
+            // 这两个文件由 CI 用与 node 相同的 NDK 亲自挑选/产出，不需要 AGP 再加工。
+            // 显式豁免，避免「体积看着小了、真机反而加载失败」这类极难排查的副作用。
             // -----------------------------------------------------------------
             // ↓ 直接读清单，不再硬编码文件名。
             //
@@ -208,11 +210,11 @@ android {
 /**
  * 读 `.github/native-assets.txt`（NativeAssetRegistry 的投影）。
  *
- * ⚠️ 必须是 **普通函数**，不能用 `val ... by lazy` 的委托属性：
+ * 必须是 **普通函数**，不能用 `val ... by lazy` 的委托属性：
  * 在 Gradle Kotlin DSL 里，脚本体的 `val x by lazy {}` 其委托对象是在
  * 脚本**求值过程中**才赋值的，而 `packaging { }` 这个 lambda 会在同一次
  * 求值里先于该赋值执行 —— 于是拿到的是 null，报
- *   `Cannot invoke "kotlin.Lazy.getValue()" because "<local1>" is null`
+ * `Cannot invoke "kotlin.Lazy.getValue()" because "<local1>" is null`
  * （CI 真实踩过）。函数没有这个求值顺序问题。
  *
  * 文件缺失/为空时直接抛异常，**刻意不静默降级**：

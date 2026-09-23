@@ -41,13 +41,13 @@ class SuperviseView {
   }
 
   /** main(dsh) 当前状态快照（tick 探测后采样；纯读零副作用）。
-   *  probeOk/probeHttpOk 即本拍真实探测（与旧 tick 决策同源）——影子与 actual 用同一输入。 */
+   * probeOk/probeHttpOk 即本拍真实探测（与旧 tick 决策同源）——影子与 actual 用同一输入。 */
   // ── 本节已拆分 → guard/supervisor/converge-view.js（§7.6 结构性重构）──
 
   /** 把守卫对 DSH 的观测状态合成到 lifecycleManager 的 dsh 项（C3-3b G5：仅视图，不驱动守卫逻辑）。
-   *  数据源 = registry.get('main') 目录项：desired/phase 取应然与受管相位；
-   *  healthy/error/lastProbeAt 由观测合成（收敛探测镜像 process.lastProbe* 优先——与心跳
-   *  lastObserved 同源同义：L1 端口在线 + L2 HTTP 健康），不再经观测镜像喂入。 */
+   * 数据源 = registry.get('main') 目录项：desired/phase 取应然与受管相位；
+   * healthy/error/lastProbeAt 由观测合成（收敛探测镜像 process.lastProbe* 优先——与心跳
+   * lastObserved 同源同义：L1 端口在线 + L2 HTTP 健康），不再经观测镜像喂入。 */
   _syncDshLifecycleView() {
     if (!this.lifecycleManager) return;
     const dsh = this.lifecycleManager.get('dsh');
@@ -94,24 +94,24 @@ class SuperviseView {
   }
 
   /** 独立 router-daemon 是否在运行（探测 ctl 端口监听者 cmdline 是否 router-daemon，2026-09 L3）。
-   *  守卫与 router-daemon 解耦后：守卫探测到 daemon 在跑 → 不再内嵌启动 router（避免双占 ctl 口），
-   *  只做监督（lifecycleManager 周期探活 ctl 口，异常时拉起 daemon）。 */
+   * 守卫与 router-daemon 解耦后：守卫探测到 daemon 在跑 → 不再内嵌启动 router（避免双占 ctl 口），
+   * 只做监督（lifecycleManager 周期探活 ctl 口，异常时拉起 daemon）。 */
   _routerDaemonActive() {
     try {
       const pid = pidlook.findListeningPid(this._routerCtlPort());
       if (!pid) return false;
       // 2026-09-13 修复（P1）：路径字面量是 "/"，而 Windows 的 cmdline 是反斜杠
-      //   → 直接 indexOf 永远 -1 → 认不出 daemon 已在跑（可能重复拉起）。
+      // → 直接 indexOf 永远 -1 → 认不出 daemon 已在跑（可能重复拉起）。
       const cmd = pidlook.normCmdline(pidlook.readCmdline(pid) || '');
       return cmd.indexOf('router-daemon') >= 0 || cmd.indexOf('service-daemon') >= 0 || cmd.indexOf('/domains/router/daemon.js') >= 0;
     } catch { return false; }
   }
 
   /** R5 游离对象自检（低频只告警，不自动处理；异主隔离红线：绝不强杀/释放）。
-   *   覆盖：① daemon 族(43107/router ctl) 被监听但本守卫期望停止且无管理锁（异主/残留）；
-   *   ② 端口登记 owner=inst:* 但实例已不存在（正常应被 _syncInstancePorts 即时清理的残留）；
-   *   ③ 目录项期望 running/starting 但观测长期失联（幽灵/死登记——监督介入前的观测线索）。
-   *   结果只写日志 + orphan_audit 事件（同指纹 10min 抑制），供审计排查。 */
+   * 覆盖：① daemon 族(43107/router ctl) 被监听但本守卫期望停止且无管理锁（异主/残留）；
+   * ② 端口登记 owner=inst:* 但实例已不存在（正常应被 _syncInstancePorts 即时清理的残留）；
+   * ③ 目录项期望 running/starting 但观测长期失联（幽灵/死登记——监督介入前的观测线索）。
+   * 结果只写日志 + orphan_audit 事件（同指纹 10min 抑制），供审计排查。 */
   _orphanAudit() {
     if (this._stopping) return;
     const now = Date.now();
@@ -183,19 +183,19 @@ class SuperviseView {
   }
 
   /** 拉起独立 router-daemon（detached 子进程——守卫退出不影响它；幂等：ctl 口已被占则不重复拉起）。
-   *  @returns { active:boolean, mode:'daemon'|'embedded'|'error', error? } */
+   * @returns { active:boolean, mode:'daemon'|'embedded'|'error', error? } */
   _ensureRouterRuntime(desiredRunning) {
     try {
       const daemonActive = this._routerDaemonActive();
       const managed = this._daemonManaged();
-      // ⚠ 2026-09-12（P2）：**把「daemon 模式下守卫不得写状态文件」收敛到本函数**。
+      // 2026-09-12（P2）：**把「daemon 模式下守卫不得写状态文件」收敛到本函数**。
       //
-      //   缺陷：该纪律此前只在 supervisor.js 的一处 daemon 分支里执行
-      //     （`setPersistEnabled(false)`），而本函数**还有另外两个**会返回
-      //     `mode:'daemon'` 的路径（下面的「已在跑」与本段）—— 经它们进入 daemon 模式时
-      //     _persistEnabled 仍为 true，守卫会与 daemon **双写 providers.json**，
-      //     后写者覆盖前者（正是该纪律要防的事）。
-      //   现统一在此处置：任何返回 daemon 模式的路径都已关闭写权。
+      // 缺陷：该纪律此前只在 supervisor.js 的一处 daemon 分支里执行
+      // （`setPersistEnabled(false)`），而本函数**还有另外两个**会返回
+      // `mode:'daemon'` 的路径（下面的「已在跑」与本段）—— 经它们进入 daemon 模式时
+      // _persistEnabled 仍为 true，守卫会与 daemon **双写 providers.json**，
+      // 后写者覆盖前者（正是该纪律要防的事）。
+      // 现统一在此处置：任何返回 daemon 模式的路径都已关闭写权。
       if (desiredRunning !== false && daemonActive && managed) {
         // daemon 已在跑且为本守卫管理：监督模式（守卫不再内嵌启动）
         this._disableRouterPersist();
@@ -237,9 +237,9 @@ class SuperviseView {
 
   /** daemon 模式下关闭守卫对 providers.json 的写权（防双写覆盖）。
    *
-   *  为什么抽成方法：`_ensureRouterRuntime` 有**三条**会返回 daemon 模式的路径，
-   *  该纪律必须在**每条**上执行 —— 集中一处，避免将来新增路径时再漏（本缺陷即由此产生）。
-   *  幂等：重复调用无副作用。
+   * 为什么抽成方法：`_ensureRouterRuntime` 有**三条**会返回 daemon 模式的路径，
+   * 该纪律必须在**每条**上执行 —— 集中一处，避免将来新增路径时再漏（本缺陷即由此产生）。
+   * 幂等：重复调用无副作用。
    */
   _disableRouterPersist() {
     if (this.router && typeof this.router.setPersistEnabled === 'function') {
@@ -248,18 +248,18 @@ class SuperviseView {
   }
 
   /** L3 监督（30s tick，见 start()）：router 期望运行但 daemon 失联 → 重新拉起（幂等）。
-   *  纯进程/端口检查（无业务探活）。守卫退出不影响 daemon；本方法只补「期望运行时的异常拉起」。 */
+   * 纯进程/端口检查（无业务探活）。守卫退出不影响 daemon；本方法只补「期望运行时的异常拉起」。 */
 
   /** adopt 令牌接管（2026-09 第四轮修复，见 CHANGELOG「adopt 令牌接管」；曾因工作区回滚丢失，2026-09-04 依回归测试重建）：
-   *  守卫重启后新守卫 _adopt() 接管的是旧守卫 spawn 的主 DSH——被接管进程非本守卫 spawn，
-   *  其启动令牌只打印在旧守卫已断开的 stdout 管道里（令牌服务不落盘）→ 主令牌永久不可达 →
-   *  relay 无法用令牌向回环 DSH 换 dsh-auth cookie → 远程控制 401。
-   *  语义（RUNNING tick 每周期调用，幂等）：
-   *   - 非「被接管且主令牌空置」→ 复位观察并返回（本守卫 spawn 有 child 管道 / 令牌已就绪）
-   *   - 观察窗（config.tokenReclaimGraceMs，默认 20s）内令牌迟到（journald/补获）→ 复位观察不干预
-   *   - 窗口过仍空置 → 受控重建一次（_beginRestart('adopt_token_reclaim', {countCrash:false})：
-   *     杀 adopt 进程 → RESTARTING → 自 spawn 建新 stdout 管道 → 令牌必然可捕获）
-   *   - _tokenReclaimTried 保证每次接管仅重建一次，防重启循环 */
+   * 守卫重启后新守卫 _adopt() 接管的是旧守卫 spawn 的主 DSH——被接管进程非本守卫 spawn，
+   * 其启动令牌只打印在旧守卫已断开的 stdout 管道里（令牌服务不落盘）→ 主令牌永久不可达 →
+   * relay 无法用令牌向回环 DSH 换 dsh-auth cookie → 远程控制 401。
+   * 语义（RUNNING tick 每周期调用，幂等）：
+   * - 非「被接管且主令牌空置」→ 复位观察并返回（本守卫 spawn 有 child 管道 / 令牌已就绪）
+   * - 观察窗（config.tokenReclaimGraceMs，默认 20s）内令牌迟到（journald/补获）→ 复位观察不干预
+   * - 窗口过仍空置 → 受控重建一次（_beginRestart('adopt_token_reclaim', {countCrash:false})：
+   * 杀 adopt 进程 → RESTARTING → 自 spawn 建新 stdout 管道 → 令牌必然可捕获）
+   * - _tokenReclaimTried 保证每次接管仅重建一次，防重启循环 */
   _maybeReclaimAdoptToken() {
     try {
       const tokenOk = !!(this.tokenService && this.tokenService.get('main'));
@@ -299,8 +299,8 @@ class SuperviseView {
   }
 
   /** 假死识别（健康维度判定）：进程/端口在但 HTTP 不健康 → 连续 failThreshold 次判故障重启。
-   *  单次抖动不清零（failStreak 单调累积直到达到阈值或恢复健康），达到阈值即触发。
-   *  httpProbeEnabled=false 时 healthOk 恒为 true（monitor.probe 已退化），此处天然不触发。 */
+   * 单次抖动不清零（failStreak 单调累积直到达到阈值或恢复健康），达到阈值即触发。
+   * httpProbeEnabled=false 时 healthOk 恒为 true（monitor.probe 已退化），此处天然不触发。 */
   _applyHealthCheck(healthOk) {
     if (healthOk) {
       this._mSetFailStreak(0);

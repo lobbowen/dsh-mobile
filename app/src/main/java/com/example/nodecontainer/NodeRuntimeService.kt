@@ -12,6 +12,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.nodecontainer.native.AssetStatus
 import com.example.nodecontainer.native.NativeAssetRegistry
+import com.example.nodecontainer.native.PrefixProvisioner
 import com.example.nodecontainer.native.NativePreparer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,14 +40,14 @@ import java.net.URL
  * libc 四道关）与验证手段收敛在 `native/` 包，见 [NativePreparer]。
  *
  * 流程（对齐 container-engine/src/boot.js 与 docs/BASE_SPEC.md §9）：
- *   0. 预置体检（ProvisioningProbe，PROVISIONING.md §4）—— 控制面能力可见。
- *   1. 启动 HostBridge（UDS 能力桥，独立服务）。
- *   2. 原生资产统一准备：存在性 → 依赖前置 → exec-probe（`NativePreparer.prepare`）。
- *      全过程**任一必需项失败即中止**，且给出精确到修复动作的归因。
- *   3. server.js 探针就位。
- *   4. 写 runtime.json（schema 2，容器写内核读）。
- *   5. spawn 内核进程（注入 DSH_ANDROID 环境）。
- *   6. 轮询控制面端口；失败/进程退出 → 退避重启（START_STICKY 保活）。
+ * 0. 预置体检（ProvisioningProbe，PROVISIONING.md §4）—— 控制面能力可见。
+ * 1. 启动 HostBridge（UDS 能力桥，独立服务）。
+ * 2. 原生资产统一准备：存在性 → 依赖前置 → exec-probe（`NativePreparer.prepare`）。
+ * 全过程**任一必需项失败即中止**，且给出精确到修复动作的归因。
+ * 3. server.js 探针就位。
+ * 4. 写 runtime.json（schema 2，容器写内核读）。
+ * 5. spawn 内核进程（注入 DSH_ANDROID 环境）。
+ * 6. 轮询控制面端口；失败/进程退出 → 退避重启（START_STICKY 保活）。
  *
  * 关键点：一次包升级 = 重启 :node 进程（用户侧“热”的，无 APK 重编）。
  */
@@ -118,7 +119,7 @@ class NodeRuntimeService : Service() {
     }
 
     /** 执行随包 PTY 探针（静态 C，无 libc++ 依赖，直接 exec），stdout 逐行上屏。
-     *  缺件（旧 APK/dev）静默跳过——该二进制刻意不登记进 native-assets.txt（同小体积绑定先例）。 */
+     * 缺件（旧 APK/dev）静默跳过——该二进制刻意不登记进 native-assets.txt（同小体积绑定先例）。 */
     private fun runPtyProbe() {
         val bin = File(NativePreparer.libSearchPath(this).substringBefore(File.pathSeparatorChar), "libdshptyprobe.so")
         if (!bin.isFile) {
@@ -210,10 +211,10 @@ class NodeRuntimeService : Service() {
             // ---- 0) 内核版本指针 ----
             //
             // 顺序是刻意设计的，每一步解决不同的失败模式：
-            //   0a) 已有内核 → 直接用（最常见路径，零额外开销）
-            //   0b) 无内核 → 尝试本地 feed（A'' 自举：用户把新包放到 /sdcard）
-            //   0c) 仍无内核 → 落到 APK 内置基线（无网首启的兜底）
-            //   0d) 都没有 → 回落探针模式，并把「缺基线」记为构建缺陷
+            // 0a) 已有内核 → 直接用（最常见路径，零额外开销）
+            // 0b) 无内核 → 尝试本地 feed（A'' 自举：用户把新包放到 /sdcard）
+            // 0c) 仍无内核 → 落到 APK 内置基线（无网首启的兜底）
+            // 0d) 都没有 → 回落探针模式，并把「缺基线」记为构建缺陷
             //
             // 为什么本地 feed 优先于内置基线：本地 feed 意味着"有人明确要装这个版本"，
             // 意图比"用出厂版本"更强；而基线只是"什么都没有时的兜底"。反过来的话，
@@ -221,9 +222,9 @@ class NodeRuntimeService : Service() {
             val km = KernelManager(this)
 
             // 0b) 本地 feed：设备上（/sdcard 等）若有 kernel-<ver>.zip + manifest，就地升级。
-            //     这是 A'' 自举的落点 —— 全程离线、不依赖网络与 PC。
-            //     不再限定 CURRENT 缺失：feed 的语义就是「有人明确要装这个版本」（见类注释
-            //     「放了包没反应」），旧门禁把它退化成只有首启兜底才生效。
+            // 这是 A'' 自举的落点 —— 全程离线、不依赖网络与 PC。
+            // 不再限定 CURRENT 缺失：feed 的语义就是「有人明确要装这个版本」（见类注释
+            // 「放了包没反应」），旧门禁把它退化成只有首启兜底才生效。
             val feed = LocalKernelFeed.scan(this)
             if (feed != null) {
                 RuntimeDiagnostics.append(
@@ -288,9 +289,9 @@ class NodeRuntimeService : Service() {
             // ---- 1) 原生资产统一准备（存在性 → 依赖前置 → exec-probe） ----
             //
             // 这一步取代了历史上的三处分散逻辑：
-            //   · NodeProvisioner.ensureBundledNode   （只知道 libnode.so 存在与否）
-            //   · diagnoseNativeLibs()                （只打日志，从不阻断 → 缺陷 1）
-            //   · runExecProbe(nodeBin)               （归因只按 errno 罗列可能 → 缺陷 2）
+            // · NodeProvisioner.ensureBundledNode （只知道 libnode.so 存在与否）
+            // · diagnoseNativeLibs() （只打日志，从不阻断 → 缺陷 1）
+            // · runExecProbe(nodeBin) （归因只按 errno 罗列可能 → 缺陷 2）
             //
             // 三者叠加出的真实故障：libc++_shared.so 缺失 → exec-probe 以 linker 错误失败
             // → errno=13 → 归因到「SELinux 禁止 exec」→ 真因（依赖缺失）永远浮不出来。
@@ -345,10 +346,10 @@ class NodeRuntimeService : Service() {
             reapOrphanKernel()
 
             //
-            // ⚠️ 注意第一个参数是 nodeBin（nativeLibraryDir 下的 libnode.so，唯一可 exec 的东西），
-            //    entry 是**脚本参数**、不是被 exec 的目标 —— 它落在 filesDir（app_data_file），
-            //    W^X 禁止 execve。把两者顺序写反必在真机上 error=13。
-            //    不变式由 km.assertNotDirectlyExecutable() 守护。
+            // 注意第一个参数是 nodeBin（nativeLibraryDir 下的 libnode.so，唯一可 exec 的东西），
+            // entry 是**脚本参数**、不是被 exec 的目标 —— 它落在 filesDir（app_data_file），
+            // W^X 禁止 execve。把两者顺序写反必在真机上 error=13。
+            // 不变式由 km.assertNotDirectlyExecutable() 守护。
             val pb = if (hasKernel && kernelDir != null && entry != null) {
                 val uiDir = File(kernelDir, "manager/dist").absolutePath
                 ProcessBuilder(nodeBin.absolutePath, entry.absolutePath, "daemon")
@@ -370,24 +371,23 @@ class NodeRuntimeService : Service() {
                             // 文件缺席时垫片 dlopen 失败 ⇒ 逐字回退 vendor 原始语义，
                             // 故此路径只是声明，不要求此刻存在。
                             put("DSH_FLOCK_NATIVE", File(nodeBin.parentFile, "libdshflock.so").absolutePath)
-                            // link(2)→renameat2(RENAME_NOREPLACE) 桥（同为 NDK 现编，
-                            // 根因见 native/publish/ + link-publish-shim.js 头注释）。
-                            put("DSH_PUBLISH_NATIVE", File(nodeBin.parentFile, "libdshpublish.so").absolutePath)
-                            // ── android.9 能力旋钮（配套 capability-env-shim.js / cordis.patch.yml）──
+                            // link(2) 用户态替代：经 LD_PRELOAD 注入 DSH 进程，见 native/posix/。
+                            put("LD_PRELOAD", File(nodeBin.parentFile, "libdshposix.so").absolutePath)
+                            // ── 权限模式旋钮（配套 cordis.patch.yml）──
                             // 权限模式：Android untrusted_app 无任何用户态沙箱原语
                             //（bwrap/landlock/seatbelt 全被 SELinux 域拒），dsh 默认
                             // workspace-write 会让 bash/PTC 每条命令 fail-closed。
                             // danger-full-access = 放弃 dsh 层二次隔离、以外层 SELinux
                             // 为 confinement（产品拍板 2026-09-23）。
                             put("DSH_PERMISSION_MODE", "danger-full-access")
-                            // bash/rg 二进制：CI NDK 现编、lib*.so 形态进 nativeLibraryDir
-                            //（唯一可 exec 通道，见 NativePreparer 注释）；守卫投放的
-                            // 能力垫片把 dsh 树里硬编码的查找路径接到这两个 env 上。
-                            put("DSH_BASH_BIN", File(nodeBin.parentFile, "libbash.so").absolutePath)
-                            put("DSH_RIPGREP_BIN", File(nodeBin.parentFile, "libdshrg.so").absolutePath)
-                            // SHELL：dsh-api-terminal-controller 的默认 shell 发现走
-                            // process.env.SHELL（vendor 原样支持，无需补丁）。
-                            put("SHELL", File(nodeBin.parentFile, "libbash.so").absolutePath)
+                            // $PREFIX：把 nativeLibraryDir 的 lib*.so 以真名复制为可执行文件，
+                            // 供 DSH 按名字解析（bash/rg），不再改 DSH 内部路径。见 docs/ADR-001。
+                            val prefixRoot = PrefixProvisioner.root(this@NodeRuntimeService)
+                            val prefixBin = PrefixProvisioner.binDir(this@NodeRuntimeService)
+                            PrefixProvisioner.provision(this@NodeRuntimeService)
+                            put("PREFIX", prefixRoot.absolutePath)
+                            put("PATH", prefixBin.absolutePath + File.pathSeparator + (getenv("PATH") ?: ""))
+                            put("SHELL", PrefixProvisioner.bashBin(this@NodeRuntimeService)?.absolutePath ?: "/system/bin/sh")
                         }
                     }
             } else {
@@ -454,7 +454,7 @@ class NodeRuntimeService : Service() {
      * 不是 node 子进程的 pid，含义完全不同，用了会误导诊断。
      *
      * 可行做法：Android 的 Process 实现把 pid 编进了 toString()，形如
-     *   "Process[pid=12345, exitValue=\"not exited\"]"
+     * "Process[pid=12345, exitValue=\"not exited\"]"
      * 这里用正则提取，解析失败一律降级为 "n/a"。
      */
     private fun currentPid(p: Process?): String {
@@ -691,7 +691,7 @@ class NodeRuntimeService : Service() {
         const val TAG = "NodeRuntimeService"
         const val NOTIF_ID = 1001
         // 内核**控制面**（supervisor API）端口：与内核 src/platform/config.js 的 apiPort 默认值(36360)一致。
-        // ⚠ 不是 3080 —— 3080 是内核 healthUrl（被管控的 DSH 应用端口），不是 supervisor 控制面。
+        // 不是 3080 —— 3080 是内核 healthUrl（被管控的 DSH 应用端口），不是 supervisor 控制面。
         const val KERNEL_CONTROL_PORT = 36360
         /** 内置探针 server.js 端口（无内核包时的首启验证）。 */
         const val PORT = 3080
@@ -702,7 +702,7 @@ class NodeRuntimeService : Service() {
         /** stderr 上屏的行数上限（全文始终落 node-stderr.log）。 */
         const val STDERR_SCREEN_LINES = 60
         /** 子进程崩溃镜像（守卫给 dsh stderr 行加 "[stderr] " 前缀）单独放宽：
-         *  真机 2026-09-22 的秒退死因恰恰排在守卫自身几十行日志之后，统一限量把它挡在了屏幕外。 */
+         * 真机 2026-09-22 的秒退死因恰恰排在守卫自身几十行日志之后，统一限量把它挡在了屏幕外。 */
         const val CHILD_STDERR_SCREEN_LINES = 400
     }
 }

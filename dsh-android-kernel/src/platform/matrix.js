@@ -5,31 +5,31 @@
 //
 // ## 铁律
 //
-//   `process.platform` / `process.arch` **只允许出现在 `src/platform/**`**。
-//   业务域（domains/、guard/、api/ 等）必须经本模块或平台层能力取平台事实，
-//   **不得**自建 os/arch 映射表、不得直接判断 platform。
+// `process.platform` / `process.arch` **只允许出现在 `src/platform/**`**。
+// 业务域（domains/、guard/、api/ 等）必须经本模块或平台层能力取平台事实，
+// **不得**自建 os/arch 映射表、不得直接判断 platform。
 //
 // ## 为什么（本仓付出过的代价）
 //
-//   同一事实（os/arch → 标签）曾散落 **5 份**（platform/os/*、domains/relay/frpmgr、
-//   domains/dist、settings-view、plugins），5 份副本必然漂移，且业务域持有的平台知识
-//   **在非本平台上不会被校验** —— 这正是「内部业务开发悄悄破坏跨平台构建」的机制。
-//   现收口为 1 份，并由门禁守住。
+// 同一事实（os/arch → 标签）曾散落 **5 份**（platform/os/*、domains/relay/frpmgr、
+// domains/dist、settings-view、plugins），5 份副本必然漂移，且业务域持有的平台知识
+// **在非本平台上不会被校验** —— 这正是「内部业务开发悄悄破坏跨平台构建」的机制。
+// 现收口为 1 份，并由门禁守住。
 //
 // ## 安卓事实
 //
-//   安卓上 Node 的 `process.platform === 'linux'`、`arch === 'arm64'`
-//   （**与桌面 Linux 无法仅靠 process.platform 区分**，判定真源是 platform/android.js）。
-//   故受支持组合只有 **linux/arm64**（osTag='android' 仅作展示用标签）。
+// 安卓上 Node 的 `process.platform === 'linux'`、`arch === 'arm64'`
+// （**与桌面 Linux 无法仅靠 process.platform 区分**，判定真源是 platform/android.js）。
+// 故受支持组合只有 **linux/arm64**（osTag='android' 仅作展示用标签）。
 //
-// ⚠ 已删除的 PC 遗留（勿回潮）：darwin-x64/arm64、win-x64 发布组合，
-//   frp 官方产物标签映射（FRP_OS/FRP_ARCH：windows/amd64）——远程控制域（relay/frpc）已整体删除。
+// 已删除的 PC 遗留（勿回潮）：darwin-x64/arm64、win-x64 发布组合，
+// frp 官方产物标签映射（FRP_OS/FRP_ARCH：windows/amd64）——远程控制域（relay/frpc）已整体删除。
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** 受支持的平台组合（安卓）：
- *   · linux/arm64 —— 真机（绝大多数安卓设备）；
- *   · linux/x64  —— x86_64 模拟器与 CI（安卓官方模拟器即此架构）。
- *  osTag —— 展示/标签用的 os 段；npmTag —— <osTag>-<arch>。 */
+ * · linux/arm64 —— 真机（绝大多数安卓设备）；
+ * · linux/x64 —— x86_64 模拟器与 CI（安卓官方模拟器即此架构）。
+ * osTag —— 展示/标签用的 os 段；npmTag —— <osTag>-<arch>。 */
 const SUPPORTED = [
   { platform: 'linux', arch: 'arm64', osTag: 'android', npmTag: 'android-arm64' },
   { platform: 'linux', arch: 'x64', osTag: 'android', npmTag: 'android-x64' },

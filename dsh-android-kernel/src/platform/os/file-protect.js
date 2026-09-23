@@ -1,6 +1,6 @@
 'use strict';
 
-// ★ 文件/目录访问保护 —— Android-only（POSIX 语义）★
+// 文件/目录访问保护 —— Android-only（POSIX 语义）
 //
 // 产品大量使用 `fs.writeFileSync(f, data, { mode: 0o600 })` 保护敏感文件
 // （config.json 含 lanToken、registry.json、state.json 等）。
@@ -10,21 +10,21 @@
 // 逐文件保护用于「目录已存在、文件为历史遗留」的场景。全部 best-effort：失败不阻断主流程，
 // 但结果可观测（返回值）。
 //
-// ⚠ 已删除的 PC 遗留（勿回潮）：Windows `icacls /inheritance:r /grant:r`（NTFS ACL）——
-//   安卓没有 NTFS/ACL 语义，也不存在该二进制。
+// 已删除的 PC 遗留（勿回潮）：Windows `icacls /inheritance:r /grant:r`（NTFS ACL）——
+// 安卓没有 NTFS/ACL 语义，也不存在该二进制。
 
 const fs = require('node:fs');
 const path = require('node:path');
 
 /** 保护单个文件（chmod 0600）。
- *  @returns {{ok:boolean, mode:string, reason?:string}} */
+ * @returns {{ok:boolean, mode:string, reason?:string}} */
 function protectFile(file) {
   try { fs.chmodSync(file, 0o600); return { ok: true, mode: 'posix-0600' }; }
   catch (e) { return { ok: false, mode: 'posix-0600', reason: e.message }; }
 }
 
 /** 保护目录（chmod 0700）。建议在数据目录创建后调用一次——内部新建文件自动继承约束。
- *  @returns {{ok:boolean, mode:string, reason?:string}} */
+ * @returns {{ok:boolean, mode:string, reason?:string}} */
 function protectDir(dir) {
   try { fs.chmodSync(dir, 0o700); return { ok: true, mode: 'posix-0700' }; }
   catch (e) { return { ok: false, mode: 'posix-0700', reason: e.message }; }
@@ -38,12 +38,12 @@ function ensurePrivateDir(dir) {
 
 /** 写入敏感文件并施加保护（原子写 + 保护；避免「写完到保护之间」的可读窗口）。
  *
- *  ⚠ **保护失败必须如实返回 `ok:false`**（P2-1 修复精神）：此前实现无条件 `return {ok:true}`，
- *     把「icacls/权限收紧失败」当成成功上报 —— 本仓禁忌「catch 后当成功」。
+ * **保护失败必须如实返回 `ok:false`**（P2-1 修复精神）：此前实现无条件 `return {ok:true}`，
+ * 把「icacls/权限收紧失败」当成成功上报 —— 本仓禁忌「catch 后当成功」。
  *
- *  @param {string} file 目标文件（自动创建父目录）
- *  @param {string|Buffer} data
- *  @returns {{ok:boolean, reason?:string, mode?:string}} */
+ * @param {string} file 目标文件（自动创建父目录）
+ * @param {string|Buffer} data
+ * @returns {{ok:boolean, reason?:string, mode?:string}} */
 function writePrivate(file, data) {
   try {
     const dir = path.dirname(file);

@@ -22,16 +22,16 @@ import androidx.core.content.ContextCompat
 
 /**
  * 入口 Activity，也是“可观测”面板 + 内核 UI 宿主帧：
- *  - 内核未就绪时显示“启动诊断”文本（逐阶段、带时间戳的状态，来自 RuntimeDiagnostics）。
- *  - 探测到内核控制面（127.0.0.1:KERNEL_CONTROL_PORT）就绪后，切换到 WebView 加载**内核同源托管的宿主帧**
- *    （http://127.0.0.1:<port>/__host）。宿主帧内以 iframe 嵌内核面板（同源）—— 这样面板既满足
- *    `hasHostBridge()`（window.parent !== window），又满足内核 Origin 闸（同源→写操作不被 403）。
- *  - 面板经 postMessage 发 dsh:kernel-update-request → 宿主帧转交本 Activity（DshNative.onRequest）
- *    → 重启 :node 进程（重读 CURRENT / 触发 OTA）→ 回灌 dsh:kernel-update-result（**严格按内核契约**）。
- *  - 提供“重试”按钮：清空诊断、重启 NodeRuntimeService 重新走全流程。
- *  - 提供“授权屏幕捕获”按钮：MediaProjection 授权**无法预置**（不同于 Device Owner），
- *    必须由用户点系统弹窗。授权结果缓存到 files/screen-capture-grant.json，之后可后台复用，
- *    这是内核 ui.screenshot 能工作的前置条件。
+ * - 内核未就绪时显示“启动诊断”文本（逐阶段、带时间戳的状态，来自 RuntimeDiagnostics）。
+ * - 探测到内核控制面（127.0.0.1:KERNEL_CONTROL_PORT）就绪后，切换到 WebView 加载**内核同源托管的宿主帧**
+ * （http://127.0.0.1:<port>/__host）。宿主帧内以 iframe 嵌内核面板（同源）—— 这样面板既满足
+ * `hasHostBridge()`（window.parent !== window），又满足内核 Origin 闸（同源→写操作不被 403）。
+ * - 面板经 postMessage 发 dsh:kernel-update-request → 宿主帧转交本 Activity（DshNative.onRequest）
+ * → 重启 :node 进程（重读 CURRENT / 触发 OTA）→ 回灌 dsh:kernel-update-result（**严格按内核契约**）。
+ * - 提供“重试”按钮：清空诊断、重启 NodeRuntimeService 重新走全流程。
+ * - 提供“授权屏幕捕获”按钮：MediaProjection 授权**无法预置**（不同于 Device Owner），
+ * 必须由用户点系统弹窗。授权结果缓存到 files/screen-capture-grant.json，之后可后台复用，
+ * 这是内核 ui.screenshot 能工作的前置条件。
  */
 class MainActivity : AppCompatActivity() {
 
@@ -53,11 +53,11 @@ class MainActivity : AppCompatActivity() {
     /**
      * 截屏授权（ui.screenshot 的前置）。
      *
-     * ⚠ MediaProjection 与 Device Owner 的本质区别：它**不能预置**，必须由用户在系统弹窗
+     * MediaProjection 与 Device Owner 的本质区别：它**不能预置**，必须由用户在系统弹窗
      * 上点一次「开始录制」。所以这里必须有个 Activity 承接 startActivityForResult。
      * 拿到 resultCode + data 后：
-     *   ① saveGrant() 落盘缓存（进程重启后可复用，避免每次截图都弹窗）；
-     *   ② 拉起 ScreenCaptureService 建 projection。
+     * ① saveGrant() 落盘缓存（进程重启后可复用，避免每次截图都弹窗）；
+     * ② 拉起 ScreenCaptureService 建 projection。
      */
     private val requestCapture = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -106,7 +106,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 电池优化豁免引导：未入白名单时弹系统确认框；ROM 拒绝该 intent 时退到
-     *  电池优化设置列表页。常驻产品的稳定性前置——Doze/省电策略会冻结 :node 心跳。 */
+     * 电池优化设置列表页。常驻产品的稳定性前置——Doze/省电策略会冻结 :node 心跳。 */
     private fun requestBatteryExemption() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
         val pm = getSystemService(POWER_SERVICE) as PowerManager
@@ -178,7 +178,7 @@ class MainActivity : AppCompatActivity() {
     /**
      * 原生侧接收内核发来的 dsh:kernel-update-request，处理并回灌结果。
      * 回灌**严格按内核 kernelUpdateBridge.ts 的契约**：{v,type,requestId,ok,stage,version,restartUncertain,error}。
-     * ⚠ 缺 v / ok 会导致内核侧直接丢弃消息（面板超时）。
+     * 缺 v / ok 会导致内核侧直接丢弃消息（面板超时）。
      */
     fun handleKernelUpdateRequest(json: String) {
         try {
