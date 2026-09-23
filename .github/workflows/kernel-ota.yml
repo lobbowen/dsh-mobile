@@ -212,4 +212,24 @@ jobs:
             --title "Kernel OTA ${{ env.KERNEL_VER }}" \
             --notes-file /tmp/notes.md
 
+          # ---- 滚动 feed：设备端只认一个**不动**的入口 ----
+          # 每次发布的 tag 是 kernel-<version>，设备端不该追着版本号跑。
+          # 所以额外把 manifest（+ 本次 zip）挂到一个固定 tag 上：
+          #   <baseUrl>/kernel-latest/kernel-manifest.json
+          # 与 apk-latest 同一个思路：版本化资产用于追溯，latest 用于稳定入口。
+          LATEST="kernel-latest"
+          if gh release view "$LATEST" --repo '${{ github.repository }}' >/dev/null 2>&1; then
+            gh release upload "$LATEST" release/kernel-manifest.json \
+              --repo '${{ github.repository }}' --clobber
+            gh release upload "$LATEST" "release/kernel-${{ env.KERNEL_VER }}.zip" \
+              --repo '${{ github.repository }}' --clobber
+          else
+            gh release create "$LATEST" \
+              release/kernel-manifest.json \
+              "release/kernel-${{ env.KERNEL_VER }}.zip" \
+              --repo '${{ github.repository }}' \
+              --title "Kernel OTA (latest feed)" \
+              --notes "滚动内核 feed：设备端读 kernel-latest/kernel-manifest.json 判断是否有更新。"
+          fi
+
 

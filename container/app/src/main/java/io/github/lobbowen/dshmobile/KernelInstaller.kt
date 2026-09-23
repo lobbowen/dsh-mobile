@@ -71,6 +71,7 @@ object KernelInstaller {
     enum class Source(val label: String) {
         APK_ASSET("APK 内置基线"),
         LOCAL_FILE("本地文件 feed"),
+        OTA("远端 OTA"),
         NONE("无"),
     }
 
