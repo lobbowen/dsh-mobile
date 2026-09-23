@@ -175,7 +175,7 @@
 ### 3.7 notification（通知）
 | 方法 | 参数 | 依赖 | 落地 |
 |---|---|---|---|
-| `notif.read` | — | **Notification Access** | ⏳ |
+| `notif.read` | `limit?` | **Notification Access** | ✅ NotificationListenerService |
 | `notif.post` | `title`, `text` | 基础 | ✅ |
 
 ### 3.8 system（系统信息）

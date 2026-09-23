@@ -38,7 +38,7 @@ const ROOT = path.resolve(__dirname, '..', '..', '..');
 // ---------------------------------------------------------------------------
 
 const REGISTRY_KT = path.join(
-  ROOT, 'container/app/src/main/java/com/example/nodecontainer/native/NativeAssetRegistry.kt'
+  ROOT, 'container/app/src/main/java/io/github/lobbowen/dshmobile/native/NativeAssetRegistry.kt'
 );
 
 /** 去掉注释（行注释 + 块注释），避免注释里的示例被当成真声明。 */
@@ -306,7 +306,7 @@ if (fs.existsSync(INJECT_PY)) {
 //   NativeAssetRegistry.kt 自身除外（它就是定义处）。
 // ---------------------------------------------------------------------------
 
-const KT_DIR = path.join(ROOT, 'container/app/src/main/java/com/example/nodecontainer');
+const KT_DIR = path.join(ROOT, 'container/app/src/main/java/io/github/lobbowen/dshmobile');
 const REGISTRY_BASENAME = 'NativeAssetRegistry.kt';
 
 /** 递归收集 .kt 文件。 */

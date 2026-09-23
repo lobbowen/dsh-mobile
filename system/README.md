@@ -22,7 +22,7 @@ Tier S 是底座正解：容器成为特权系统服务，垫片全部消失。
 ## 目录内容
 
 - `Android.bp`：以 priv-app 形式把 APK 打进系统镜像。
-- `privapp-permissions-com.example.nodecontainer.xml`：特权权限白名单（priv-app 必需）。
+- `privapp-permissions-io.github.lobbowen.dshmobile.xml`：特权权限白名单（priv-app 必需）。
 - `sepolicy/`：容器自有域 `dsh_container` 的最小权限策略与文件标签。
 - `init/init.dsh.rc`：开机即起、崩溃重启的容器服务定义。
 - `kernel/dsh_container.configfrag`：自有内核需打开的内核配置（命名空间等）。

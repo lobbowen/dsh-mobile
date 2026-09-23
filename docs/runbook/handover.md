@@ -157,7 +157,7 @@ android-node-container/
 │       │   │   └── server.js          内核启动入口
 │       │   ├── kernel/baseline.zip    ⚠ gitignored，构建产物（无网首启用）
 │       │   └── ota-public.pem         ★ ed25519 公钥锚点（焊死）
-│       └── java/com/example/nodecontainer/
+│       └── java/io/github/lobbowen/dshmobile/
 │           ├── LocalKernelFeed.kt     ★ 从 feed 目录发现内核包（167 行）
 │           ├── KernelInstaller.kt     ★ 编排安装（212 行，不做密码学）
 │           ├── NodeKernelVerifier.kt  ★ 调 Node 校验器（151 行）

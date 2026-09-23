@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.nodecontainer"
+    namespace = "io.github.lobbowen.dshmobile"
     // compileSdk 必须 >= 35：依赖里的 androidx.core 1.15.0 / core-ktx 1.15.0 带有
     // AAR metadata 声明，要求使用方 compileSdk >= 35。原先是 34，导致 gradle 在
     // :app:checkDebugAarMetadata 阶段失败：
@@ -21,7 +21,7 @@ android {
     buildToolsVersion = "35.0.0"
 
     defaultConfig {
-        applicationId = "com.example.nodecontainer"
+        applicationId = "io.github.lobbowen.dshmobile"
         minSdk = 24
         // targetSdk 决定 SELinux 域：28 落在 untrusted_app_27，允许 exec app home。
         // 取舍与依据见 docs/ADR-001；link(2) 不在此豁免内，走自有原语。
@@ -193,7 +193,7 @@ android {
             // ↓ 直接读清单，不再硬编码文件名。
             //
             // 清单来源：.github/native-assets.txt —— 它是
-            // app/src/main/java/com/example/nodecontainer/native/NativeAssetRegistry.kt
+            // app/src/main/java/io/github/lobbowen/dshmobile/native/NativeAssetRegistry.kt
             // 的**投影**（注册表是唯一事实来源）。
             //
             // 这样做的意义：加一个新的可执行资产时，只要改注册表 + 这份清单，

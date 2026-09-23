@@ -30,7 +30,7 @@ dsh-mobile/                                  # 单仓双子项目（M）
 │  │  ├─ jniLibs/arm64-v8a/libnode.so       # NDK 产出的 node（构建时注入）
 │  │  │                                      #   ⚠ 必须 lib*.so 且放 jniLibs（见 §2.1）
 │  │  ├─ assets/{node/, node-versions.json, ota-public.pem}
-│  │  └─ java/com/example/nodecontainer/    # 服务 / HostBridge / OTA / 诊断 / 原生资产
+│  │  └─ java/io/github/lobbowen/dshmobile/    # 服务 / HostBridge / OTA / 诊断 / 原生资产
 │  ├─ engine/                               # 可测 OTA 引擎（Node，零依赖）
 │  ├─ native/{posix,flock,ptyprobe}/        # C 源：随包原生桥与探针
 │  └─ _artifacts/                           # 产物样本（可重建）
@@ -142,7 +142,7 @@ IOException: Cannot run program ".../files/node/24.21.0/node": error=13, Permiss
 >
 > 协议细节、方法表、错误码见 [`docs/BRIDGE_PROTOCOL.md`](docs/BRIDGE_PROTOCOL.md)；实现与 [`container-engine/src/bridge/*`](container-engine/src/bridge) 对齐。
 > 跨仓互通由 `container-engine/test/bridge-interop-test.js` 实测（内核真实客户端 ←→ 容器参考桥，真实 UDS）。
-> 权限预置与自检见 [`docs/PROVISIONING.md`](docs/PROVISIONING.md)；`Device Owner` 激活：`adb shell dpm set-device-owner com.example.nodecontainer/.DeviceAdminReceiver`。
+> 权限预置与自检见 [`docs/PROVISIONING.md`](docs/PROVISIONING.md)；`Device Owner` 激活：`adb shell dpm set-device-owner io.github.lobbowen.dshmobile/.DeviceAdminReceiver`。
 
 ---
 
