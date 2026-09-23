@@ -62,7 +62,7 @@ function main() {
   // 加一个环境变量开关是最小改动，同时保持默认行为完全不变。
   const outDir = process.env.DSH_BUNDLE_OUT_DIR
     ? path.resolve(process.env.DSH_BUNDLE_OUT_DIR)
-    : path.resolve(__dirname, '..', '..', 'release');
+    : path.resolve(__dirname, '..', '..', '..', 'release');
   fs.mkdirSync(outDir, { recursive: true });
   const zipPath = path.join(outDir, `kernel-${version}.zip`);
   fs.writeFileSync(zipPath, zipBuf);
