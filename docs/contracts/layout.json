@@ -86,7 +86,8 @@
       "from": "_artifacts",
       "to": "container/_artifacts",
       "kind": "dir",
-      "expectFiles": 2
+      "_expectFilesNote": "P1 迁移基线为 2；ADR-0005 删除了签入的内核包 baseline/baseline.zip（1.2MB），故降为 1。这是**有意的文件减少**，不是迁移丢失。",
+      "expectFiles": 1
     },
     {
       "from": "dsh-android-kernel",
@@ -180,9 +181,12 @@
     "inject-libcxx-into-apk.py": "L0",
     "stage-npm-assets.sh": "L0",
     "build-kernel-bundle.sh": "L1",
-    "build-kernel-baseline.sh": "L1",
-    "build-kernel-feed.sh": "L1",
     "keygen.sh": "L1",
+    "gen-native-assets.js": "cross",
+    "gen-version.js": "cross",
+    "require-ci.js": "cross",
+    "validate-workflows.py": "cross",
+    "native-deps.txt": "L0",
     "make-release.sh": "cross",
     "gh-access.sh": "cross",
     "validate-workflow.py": "cross",

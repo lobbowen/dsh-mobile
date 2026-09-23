@@ -59,9 +59,9 @@
    - ✅ `device_policy` 全组：`policy.* / sys.setTime / sys.setTimeZone / sys.reboot / app.install / app.uninstall / app.grantPermission`（P1 修正 13 处 API 误用；`app.install/uninstall` 走 `PackageInstaller`）。
    - ✅ `storage`：`fs.read / fs.write / fs.list / fs.mkdir` 真实实现（P5）。需 `MANAGE_EXTERNAL_STORAGE`（Manifest 已声明，属 AppOps 特殊权限，需跳设置页或 Device Owner 静默授予）。
    - ✅ `shell`：`shell.exec` 已按**必备能力**落定（ADR-0003）—— 内置 Shizuku SDK，经 UserService 以 **shell uid(2000)** 执行；未装/未启动/未授权时能力不可用（`-32001`），**不做应用 uid 兜底**。环境前提：非 root 机型需 adb / 无线调试启动一次 Shizuku 并授权本应用。
-   - ✅ `build`：**P3 已收口（决策：不做内置编译链）**。设备编译工具链经实测证伪（无 aarch64 版 aapt2，见 `ARCHITECTURE.md` §2.3），「全内置 vs 首启下载 vs 最小子集」三选一并撤销。本组语义修正为「从本地 feed 安装已签名内核」（A''）：`build.kernelInstall`（feed/zipPath 双模式，验签走 Node 一次性进程，失败不破坏现状，`restartRequired` 由调用方处理）、`build.kernelStatus`、`build.status`（旧名兼容）均已真实实现（能力 `kernel_update`，任意设备具备）；`build.apk` 已废弃，返回带迁移指引的 `-32602`。若未来出现「设备侧重打包修改 APK」的真实需求，另立方案（纯 Node 重打包 + 重签名，不引入原生工具链）。
+   - ✅ `build`：**P3 已收口（决策：不做内置编译链）**。设备编译工具链经实测证伪（无 aarch64 版 aapt2，见 `ARCHITECTURE.md` §2.3），「全内置 vs 首启下载 vs 最小子集」三选一并撤销。本组语义修正为「**从 OTA 源安装/升级已签名内核**」（ADR-0005，唯一入口）：`build.kernelInstall`（参数 `checkOnly?`；验签走 Node 一次性进程，失败不破坏现状，`restartRequired` 由调用方处理）、`build.kernelStatus`、`build.status`（旧名兼容）均已真实实现（能力 `kernel_update`，任意设备具备）；本地 feed 与 APK 内置基线已在 S1/S2 收敛删除；`build.apk` 已废弃，返回带迁移指引的 `-32602`。若未来出现「设备侧重打包修改 APK」的真实需求，另立方案（纯 Node 重打包 + 重签名，不引入原生工具链）。
 2. **OTA 下发编排**：`OtaEngine` 已具备验签/解包/原子指针能力；设备上“轮询 manifest→下载→apply→回滚”的调度器由内核侧 bootstrap（Node）承接，本仓未内置一个独立 Kotlin OTA 调度器（按 BASE_SPEC §5，OTA 引擎逻辑归于内核引导）。
-3. **基线内核 `assets/kernel/baseline.zip`**：`KernelManager.ensureBaseline` 已支持首启离线落地，但本仓未内置基线内核包（由 `kernel-ota.yml` 构建产出后纳入）。
+3. ~~**基线内核 `assets/kernel/baseline.zip`**~~ **已于 ADR-0005 整体删除**：内核不再随 APK 分发，`ensureBaseline`/`BaselineResult` 一并与仓库里那个签入的 1.2MB 基线包一起移除。内核来源只剩 OTA。
 4. **Kotlin 已过 CI 编译，待真机验证**：fast-apk（`b47df7f`）14/14 步全绿、APK 审计通过、已发布到 `apk-latest`。
    编译过程暴露并修复了 6 处**存量 API 误用**（详见下方「编译修复」），说明此前「只评审不编译」确实藏了真 bug。
    **剩下的是真机验证**：`adb shell dpm set-device-owner …` → 开无障碍 → 点「授权屏幕捕获」→ 看 `provisioning.json` 五项体检是否全绿。

@@ -514,86 +514,19 @@ jobs:
           set -euo pipefail
           ./scripts/stage-npm-assets.sh
 
-      - name: Build kernel baseline bundle
-        # 生成 APK 内置的基线内核包 → container/app/src/main/assets/kernel/baseline.zip
-        #
-        # 为什么必须有这一步：KernelManager.ensureBaseline() 一直想读这个文件，
-        # 但它**从来不存在**（assets/ 下只有 node/ + ota-public.pem）。后果是
-        # 真机无网首启时静默返回 null，表现为「没有内核包」—— 那是构建期缺陷，
-        # 却被当成运行时状态，排查代价极高。
-        #
-        # 内核源码从内核仓取（与本工作流解耦：本流程不重编 Node，但要带内核）。
-        # 失败不阻断 APK 产出 —— 没有基线包时设备仍能靠本地 feed 升级，
-        # 只是失去"无网首启"能力。但**必须显式警告**，不能静默跳过。
-        continue-on-error: true
-        env:
-          OTA_PRIVATE_KEY_PEM: ${{ secrets.OTA_PRIVATE_KEY_PEM }}
+      # ADR-0005：内核**不随 APK 分发**。这里刻意**什么都不做** —— 曾经这一步会现场拉内核源码、
+      # 签名、把 baseline.zip 塞进 APK，后果是"内核一改就要重出 APK"。现在内核只从 OTA 源安装
+      # （见 kernel-ota.yml）。若有人把内核塞回 assets/kernel/，下面这条断言会直接红。
+      - name: Assert the APK carries NO kernel assets
         run: |
-          set -uo pipefail
-          echo "== 内核源码（单仓子目录） =="
-          KDIR="kernel"
-          rm -rf /tmp/kernel-src
-          if [ -d "$KDIR" ]; then
-            cp -a "$KDIR" /tmp/kernel-src
-            echo "[ok] 使用同仓内核源码: $KDIR"
-          else
-            echo "::warning title=无基线内核::仓内找不到 $KDIR；APK 将不含基线内核（无网首启不可用，仍可走本地 feed 升级）"
-            exit 0
-          fi
-
-          # 私钥：CI secret。缺失则跳过（不产未签名基线包 —— 见脚本头注释）。
-          # 先查私钥再构建面板：没密钥就根本走不到打包，几分钟的 ui 构建是白烧。
-          if [ -z "${OTA_PRIVATE_KEY_PEM:-}" ]; then
-            echo "::warning title=无基线内核::secrets.OTA_PRIVATE_KEY_PEM 未配置，跳过基线包生成（基线包必须签名，不可省）"
-            exit 0
-          fi
-          mkdir -p keys
-          printf '%s' "$OTA_PRIVATE_KEY_PEM" > keys/ota-private.pem
-          chmod 600 keys/ota-private.pem
-
-          # ⚠ ui/dist 被 .gitignore 排除，但它是内核包【运行期必需】的面板产物 ——
-          # git 检出里没有它，直接打包会产出「能启动但打不开控制面板」的残缺内核
-          # （交接文档点名的"构建成功但真机不可用"陷阱）。必须在打包前现场构建。
-          echo "== 构建内核面板 (ui/dist) =="
-          if ! (cd /tmp/kernel-src/ui && npm ci --no-audit --no-fund && npm run build); then
-            echo "::error title=面板构建失败::ui 构建非零退出；跳过基线包（宁可不带，也不带缺面板的残缺包）"
+          set -euo pipefail
+          KD=container/app/src/main/assets/kernel
+          if [ -d "$KD" ] && [ -n "$(ls -A "$KD" 2>/dev/null)" ]; then
+            echo "::error title=APK 含内核资产::ADR-0005 规定内核不随 APK 分发；assets/kernel/ 必须为空或不存在。"
+            ls -la "$KD"
             exit 1
           fi
-
-          echo "== 生成基线包 =="
-          chmod +x scripts/build-kernel-baseline.sh
-          if ./scripts/build-kernel-baseline.sh /tmp/kernel-src; then
-            echo "[ok] 基线包已生成"
-            ls -la container/app/src/main/assets/kernel/baseline.zip
-          else
-            echo "::error title=基线包生成失败::build-kernel-baseline.sh 非零退出 —— 详见上一步输出"
-            exit 1
-          fi
-
-      - name: Verify kernel baseline bundle
-        # 基线包刚生成，此刻才能验它 —— 这是 DSH_REQUIRE_BASELINE=1 真正该待的地方。
-        #
-        # 为什么不在 gradle 之前跑（那是上一版的做法，也是上一版 CI 变红的原因）：
-        # 基线包是构建产物，生成它在第 11 步（要拉内核源码 + 注入私钥，代价高）。
-        # 把"要求产物存在"的断言排在"生成产物"之前，等于自己制造一次必然失败。
-        #
-        # continue-on-error 说明：本步骤失败**不该**阻断 APK 产出 ——
-        # 没有基线包时设备仍能靠本地 feed 升级，只是失去"无网首启"能力。
-        # 但失败消息必须足够明确（见 kernel-baseline-test.js 的 FAIL 文案），
-        # 且下游 "Audit APK contents" 会**如实报告** APK 里到底有没有基线包 ——
-        # 「构建成功」不等于「设备开箱可用」，这个区别必须留在日志里。
-        continue-on-error: true
-        env:
-          DSH_REQUIRE_BASELINE: '1'
-        run: |
-          set -uo pipefail
-          cd container/engine
-          npm run test:baseline 2>&1 | tee /tmp/baseline-test.log
-          RC=${PIPESTATUS[0]}
-          echo
-          echo "=== 基线包测试汇总 ==="
-          echo "$(grep -c '^PASS' /tmp/baseline-test.log || true) 个 PASS，$(grep -c '^FAIL' /tmp/baseline-test.log || true) 个 FAIL"
-          exit $RC
+          echo "[ok] APK 不含内核资产（内核只从 OTA 源安装）"
 
       - name: Inject release keystore (optional, for stable signing)
         id: signing
@@ -728,21 +661,18 @@ jobs:
           # libdshpty.so：上游 node-pty 配方，软失败（终端降级，不影响其它能力）
           if unzip -l "$APK" | grep -q "lib/${ABI}/libdshpty.so"; then echo "[ok] lib/${ABI}/libdshpty.so"; else echo "::warning title=能力降级::lib/${ABI}/libdshpty.so 不在 APK —— 终端 PTY 不可用"; fi
 
-          # --- 基线内核包审计 ---
+          # --- 内核资产审计（ADR-0005：APK **不允许**含内核）---
           #
-          # 上面那步（Build kernel baseline bundle）是 continue-on-error 的 ——
-          # 它失败时构建继续，但这里必须把「APK 里到底有没有基线内核」**如实报告**。
-          # 否则「构建成功」会被误读成「设备开箱可用」，而实际上无网首启起不来。
+          # 与历史行为**相反**：过去 APK 带内核、缺了才警告；现在内核只从 OTA 源安装，
+          # APK 里出现内核资产意味着架构被改回去了 —— 所以这里是**硬失败**。
           echo
-          echo "--- 基线内核包 ---"
-          if unzip -l "$APK" | grep -q 'assets/kernel/baseline.zip'; then
-            SIZE=$(unzip -l "$APK" | awk '/assets\/kernel\/baseline\.zip/{print $1}')
-            echo "[ok] 含 assets/kernel/baseline.zip（$SIZE 字节）"
+          echo "--- 内核资产（必须为空）---"
+          if unzip -l "$APK" | grep -qE 'assets/kernel/'; then
+            echo "::error title=APK 含内核资产::ADR-0005 规定内核不随 APK 分发（内核只从 OTA 源安装）。"
+            unzip -l "$APK" | grep -E 'assets/kernel/' || true
+            exit 1
           else
-            echo "::warning title=APK 无基线内核::assets/kernel/baseline.zip 不在 APK 内。"
-            echo "  影响：设备无网首启时无内核可跑，只能回落探针模式。"
-            echo "  仍可用：本地 feed（/sdcard/dsh/kernel-feed/）升级内核。"
-            echo "  常见原因：OTA_PRIVATE_KEY_PEM secret 未配置、或内核仓拉取失败。"
+            echo "[ok] APK 不含内核资产（内核经 OTA 安装）"
           fi
 
           # --- npm 基础环境审计（硬失败）---

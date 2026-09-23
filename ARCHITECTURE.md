@@ -210,7 +210,7 @@ provider（只认硬件密钥，导入软件 PKCS8 会 `InvalidKeySpecException`
 ```
 ┌─ Kotlin（宿主进程 :main，生命周期长）────────────────────┐
 │  KernelInstaller   编排：解包 / 原子 rename / 切 CURRENT  │
-│  LocalKernelFeed   发现：扫本地 feed 目录                 │
+│  KernelOtaUpdater  取源：查远端 feed（唯一来源，ADR-0005）│
 │  ── 不含任何密码学 ──                                     │
 └──────────────────┬──────────────────────────────────────┘
                    │ spawn 一次性进程，传 zip + 公钥路径

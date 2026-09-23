@@ -98,7 +98,7 @@ dsh-mobile/
 | 脚本 | 服务对象 |
 |---|---|
 | `build-node-android.sh`、`build-apk-local.sh`、`keygen-android-keystore.sh`、`inject-libcxx-into-apk.py`、`stage-npm-assets.sh` | L0 容器 |
-| `build-kernel-bundle.sh`、`build-kernel-baseline.sh`、`build-kernel-feed.sh`、`keygen.sh` | L1 内核 |
+| `build-kernel-bundle.sh`、`keygen.sh` | L1 内核（`build-kernel-baseline.sh`/`build-kernel-feed.sh` 已于 ADR-0005 删除） |
 | `make-release.sh`、`gh-access.sh`、`validate-workflow.py`、`attach-and-publish.sh` | 跨层/CI |
 
 ---

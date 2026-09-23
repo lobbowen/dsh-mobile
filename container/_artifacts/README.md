@@ -70,6 +70,7 @@ baseline/baseline.zip                ad2047f2...   ← 同一个包
 **重新生成产物**（而不是用这份样本）：
 
 ```bash
-./scripts/build-kernel-baseline.sh ../dsh-android-kernel   # 基线包
-./scripts/build-kernel-feed.sh ../dsh-android-kernel 0.1.0-android.1   # feed
+# ADR-0005 之后：内核**不再随 APK 分发**，基线包与 feed 脚本已删除。
+# 内核产物由 CI 的 kernel-ota.yml 构建 + 签名后发布到 Release（通道 kernel-canary / kernel-stable），
+# 设备端经 OTA 安装。本目录不再承载内核样本。
 ```

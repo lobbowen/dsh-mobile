@@ -223,12 +223,9 @@ cd container-engine && npm test
 # bridge-e2e 14 / bridge-interop 14 / kernel-update-bridge 22 / e2e-mock-kernel 8
 # ⇒ 228 passed, 0 failed（12 套件）
 #
-# 另有 kernel-baseline 8 条断言，但它验的是**构建产物**（app/src/main/assets/
-# kernel/baseline.zip，gitignored），所以单独拆成 test:baseline：
-#   npm run test:logic     逻辑测试（不依赖任何产物，CI 上必跑、秒级）
-#   npm run test:baseline  产物测试（需 DSH_REQUIRE_BASELINE=1 才强制）
-# 拆分理由：产物"存不存在"取决于流水线跑到哪一步，与"逻辑对不对"混在一起
-# 会让两者互相污染（曾导致一次必然假红）。
+# 说明（ADR-0005）：曾经另有 test:baseline（验 APK 内置基线产物），已随
+# "内核不随 APK 分发"整体删除 —— 内核只从 OTA 源安装，产物断言不再属于本仓逻辑测试。
+#   npm run test:logic   逻辑测试（不依赖任何产物，CI 上必跑、秒级）
 ```
 
 注：`bridge-interop` 读的是**同仓子目录** `dsh-android-kernel/`（单仓布局的默认路径，
