@@ -151,3 +151,20 @@ renameat2 NOREPLACE: available
 修法（环境层，不改 DSH）：`native/posix/open-fallback.c` —— 在 `open/openat` 因 EACCES 失败、
 且目标确为 `$HOME` 的祖先目录时，返回 `$HOME` 的只读目录句柄，让调用方的 fsync 完成。
 上游正确修法应是把 durable 边界设到 `$DSH_HOME` 或容忍 EACCES，已记录。
+## 追加决策：容器根（2026-09-23）
+
+### 结构性结论
+
+真机实测：`/data/user/0`、`/data`、`/` 对 app 均 EACCES；`/storage/emulated/0/...` 链上也有断点。
+即 **Android 上不存在祖先链整条可打开的路径**。
+DSH（`dsh-attachment-local.ensureDurableHome`）把边界写成 `parse(home).root`，逐级 fsync 到 `/`，
+因此必然失败。这类故障（bash/exec/link/祖先 fsync）同源：
+**Agent 运行在系统命名空间里，却假设自己拥有从 `/` 开始的整棵文件系统。**
+
+### 决策：给 Agent 自己的根，而不是继续按 syscall 打补丁
+
+- 路线 A（内核级）：`unshare(CLONE_NEWUSER|CLONE_NEWNS)` + 绑定挂载 + `pivot_root`，
+  得到真实容器根；零翻译开销、覆盖静态二进制与直接 syscall。可行性由 `native/rootprobe` 在真机判定。
+- 路线 B（用户态）：`libdshposix` 内实现路径命名空间（绝对路径解析进 `$DSH_ROOT`，
+  `/proc`、`/dev`、`/system`、nativeLibraryDir 直通）。无特权，覆盖 Node 及其原生插件。
+- 选定顺序：A 可行则 A；否则 B。二者都会让症状级补丁（如 `open-fallback`）变为多余并删除。

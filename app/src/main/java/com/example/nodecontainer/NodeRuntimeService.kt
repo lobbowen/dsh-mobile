@@ -107,6 +107,7 @@ class NodeRuntimeService : Service() {
         // PTY/shell 取证（终端真假的判定实验，见 native/ptyprobe/PROVENANCE.md）：
         // 结果上屏，决定 node-pty 移植走真 PTY 还是管道假 PTY。
         runPtyProbe()
+        runRootProbe()
         // 先拉起 HostBridge（UDS 能力桥），再启动内核
         startHostBridge()
         loopJob = scope.launch { supervisorLoop() }
@@ -137,6 +138,23 @@ class NodeRuntimeService : Service() {
     }
 
     /** 对候选写路径各做一次「写→读回→删」实测，结果上屏。异常只记录不抛出。 */
+    /** 容器根可行性探针（native/rootprobe，静态 C）：能否自建 namespace 并 pivot_root。 */
+    private fun runRootProbe() {
+        val bin = File(NativePreparer.libSearchPath(this).substringBefore(File.pathSeparatorChar), "libdshrootprobe.so")
+        if (!bin.isFile) {
+            RuntimeDiagnostics.append(this, "rootprobe", null, "容器根探针未随包（跳过）", bin.absolutePath)
+            return
+        }
+        val r = try {
+            val p = ProcessBuilder(bin.absolutePath).redirectErrorStream(true).start()
+            val out = p.inputStream.bufferedReader().readText()
+            if (!p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) { p.destroy(); "timeout" } else out.trim()
+        } catch (e: Throwable) {
+            "${e::class.java.simpleName}: ${e.message}"
+        }
+        RuntimeDiagnostics.append(this, "rootprobe", null, "容器根可行性结果", r)
+    }
+
     private fun probeFilesystemWrites() {
         val targets = linkedMapOf(
             "files" to File(filesDir, ".dsh-write-probe"),
