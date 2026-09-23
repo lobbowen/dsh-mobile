@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
-const REGISTRY = path.join(ROOT, 'container/app/src/main/java/com/example/nodecontainer/native/NativeAssetRegistry.kt');
+const REGISTRY = path.join(ROOT, 'container/app/src/main/java/io/github/lobbowen/dshmobile/native/NativeAssetRegistry.kt');
 const OUT = path.join(ROOT, '.github/native-assets.txt');
 
 function stripKotlinComments(src) {
@@ -50,7 +50,7 @@ const lines = [
   '# 随包原生资产清单 —— 由 CI 与构建脚本共同读取',
   '#',
   '# ⚠ 本文件由 scripts/gen-native-assets.js 生成，**请勿手改**。',
-  '#   来源：container/app/src/main/java/com/example/nodecontainer/native/NativeAssetRegistry.kt',
+  '#   来源：container/app/src/main/java/io/github/lobbowen/dshmobile/native/NativeAssetRegistry.kt',
   '#   CI 会运行生成器并 `git diff --exit-code` 校验。',
   '#',
   '# 格式：每行一个文件名（不含 lib/<abi>/ 前缀），空行与 # 开头的行忽略。',

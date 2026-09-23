@@ -99,7 +99,7 @@ error=13, Permission denied
 重打包工具），"哪些文件要能 exec、各自依赖什么、怎么验证"就必须是**数据**
 而不是散落的特判。
 
-**唯一事实来源**：`app/src/main/java/com/example/nodecontainer/native/NativeAssetRegistry.kt`
+**唯一事实来源**：`app/src/main/java/io/github/lobbowen/dshmobile/native/NativeAssetRegistry.kt`
 
 ```kotlin
 val LIBCXX = NativeExecutable(

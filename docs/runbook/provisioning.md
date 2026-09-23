@@ -26,7 +26,7 @@
 ### 3.1 设为 Device Owner（核心，一次性）
 ```bash
 # 通过 ADB（设备已连电脑/同网无线调试）
-adb shell dpm set-device-owner com.example.nodecontainer/.DeviceAdminReceiver
+adb shell dpm set-device-owner io.github.lobbowen.dshmobile/.DeviceAdminReceiver
 # 或出厂式：NFC/QR 配网（企业批量部署）
 ```
 - 需先声明 `DeviceAdminReceiver` 与 `device_admin` 元数据，并在 `AndroidManifest.xml` 注册 DPC。
