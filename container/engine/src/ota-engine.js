@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { extractZip } = require('./zip');
 const { sha256, verifyManifest } = require('./verify');
+const { isNewer } = require('./kernel-version');
 
 class OtaEngine {
   constructor({ baseDir, httpGet, publicKeyPem, capabilities, runtime, protocol, log }) {
@@ -139,7 +140,9 @@ class OtaEngine {
   /** 是否有可用更新（manifest 版本 ≠ 当前且非空）。 */
   checkUpdate(manifest) {
     const cur = this.currentVersion();
-    if (cur && cur === manifest.version) return { available: false };
+    // 只有**严格更新**才算"有更新"。原实现是 `cur === manifest.version` 的"不等于"判定 ——
+    // 那意味着远端给一个**更旧**的版本也会被当成可更新，即**允许降级**。
+    if (!isNewer(manifest.version, cur)) return { available: false };
     return { available: true, version: manifest.version, manifest };
   }
 }

@@ -198,6 +198,27 @@ jobs:
           设备只安装已签名内核，不生产内核。
           NOTES
 
+          # ── 版本前进门禁（ADR-0004 §2）────────────────────────────────────
+          # 设备端的更新判定是**版本比较**（只有比 CURRENT 新才切换指针）。
+          # 因此发布一个"不大于已发布"的版本 = 设备永远不更新，且**没有任何报错**。
+          # 用与设备端**同一规则**的比较器，避免出现两套语义。
+          LATEST="kernel-latest"
+          CUR=""
+          if gh release view "$LATEST" --repo '${{ github.repository }}' >/dev/null 2>&1; then
+            TMPD="$(mktemp -d)"
+            if gh release download "$LATEST" -p kernel-manifest.json -O "$TMPD/m.json" --repo '${{ github.repository }}' 2>/dev/null; then
+              CUR="$(node -p "require('$TMPD/m.json').version || ''" 2>/dev/null || true)"
+            else
+              echo "::warning title=feed 读取失败::未取到 kernel-latest 的 manifest，本次跳过版本前进检查"
+            fi
+          fi
+          if [ -n "$CUR" ]; then
+            echo "[version] 已发布内核=$CUR，本次=$KERNEL_VER"
+            node -e "const {isNewer}=require('./container/engine/src/kernel-version'); if(!isNewer(process.argv[1],process.argv[2])){process.exit(1)}" "$KERNEL_VER" "$CUR" \
+              || { echo "::error title=内核版本未前进::本次 $KERNEL_VER 不大于已发布 $CUR —— 设备端会判为「无更新」而静默失效。请递增 kernel/package.json 的 version（见 docs/adr/0004-dual-version-streams.md §2）。"; exit 1; }
+            echo "[ok] 版本前进（$CUR → $KERNEL_VER）"
+          fi
+
           # 内核版本唯一性门禁（ADR-0004 §2）：版本一经发布即冻结。
           # 复用版本号 → 设备端版本比较判为"无更新" → **静默不生效**（与壳的 versionCode 回退同类）。
           if gh release view "kernel-${{ env.KERNEL_VER }}" --repo '${{ github.repository }}' >/dev/null 2>&1; then
@@ -223,6 +244,13 @@ jobs:
               --repo '${{ github.repository }}' --clobber
             gh release upload "$LATEST" "release/kernel-${{ env.KERNEL_VER }}.zip" \
               --repo '${{ github.repository }}' --clobber
+            # 清理：滚动 feed 只保留**本次**的 zip（否则会随每次发布无限堆积历史包）。
+            KEEP="kernel-${{ env.KERNEL_VER }}.zip"
+            gh api "repos/${{ github.repository }}/releases/tags/$LATEST" \
+              --jq ".assets[] | select(.name | test(\"^kernel-[0-9]\")) | select(.name != \"$KEEP\") | .id" 2>/dev/null \
+              | while read -r id; do
+                  [ -n "$id" ] && gh api -X DELETE "repos/${{ github.repository }}/releases/assets/$id"
+                done || true
           else
             gh release create "$LATEST" \
               release/kernel-manifest.json \
