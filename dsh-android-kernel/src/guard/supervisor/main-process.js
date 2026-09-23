@@ -93,8 +93,16 @@ class MainProcess {
       if (!c || !c.npmEntry) return command;
       // 覆盖安装后 /data/app 随机段目录消失 → 持久化 command[0] 失效（ENOENT 冷静期
       // 死循环，真机 2026-09-23）。契约是容器每次启动前重写的当前事实源，据此自愈。
-      if (this.nativeManager && typeof this.nativeManager.repairLaunchNodePath === 'function') {
-        this.nativeManager.repairLaunchNodePath();
+      // 入参 command 是调用方**先于本函数**求出的快照数组（nativeCommand 返回新数组），
+      // 自愈只改得到 config.command ⇒ 必须把修复结果同步回本轮快照，否则同一轮照用
+      // 死路径（真机 12:54 实证：自愈日志已打出新路径，5s 后 spawn 仍 ENOENT 旧路径）。
+      const snapNode = command[0];
+      const repaired = !!(this.nativeManager && typeof this.nativeManager.repairLaunchNodePath === 'function'
+        && this.nativeManager.repairLaunchNodePath() === true);
+      const curNode = this.config && Array.isArray(this.config.command) ? this.config.command[0] : null;
+      if (repaired && curNode && curNode !== snapNode) {
+        command = command.slice();
+        command[0] = curNode;
       }
       if (this.nativeManager && typeof this.nativeManager.ensureRequireBuiltinShim === 'function') {
         this.nativeManager.ensureRequireBuiltinShim();
@@ -221,9 +229,11 @@ class MainProcess {
       if (this._mChild() === child && this._mPhase() === 'STARTING') {
         this._mSetChild(null);
         if (err.code === 'ENOENT') {
-          // 命令不存在（如 DSH 未安装）：进入冷静期，等面板一键安装，不刷崩溃
-          this.events.append('dsh_command_missing', { command: this.config.command[0] });
-          this.logger.warn('command missing: ' + this.config.command.join(' ') + ' — 60s 冷静期内不再尝试');
+          // 命令不存在（如 DSH 未安装）：进入冷静期，等面板一键安装，不刷崩溃。
+          // 取证恒打**本轮实际 execve 的那条命令**（launchCommand）而非 config.command：
+          // 两者可不同（覆盖安装自愈只改后者），真机 12:54 因此把排查指向了错误路径。
+          this.events.append('dsh_command_missing', { command: launchCommand[0] });
+          this.logger.warn('command missing: ' + launchCommand.join(' ') + ' — 60s 冷静期内不再尝试');
           if (!this._mMissingNotified()) {
             this._mSetMissingNotified(true);
             this.notify('未检测到 DeepSeek Harness', '可在 dsh-supervisor 面板一键安装');

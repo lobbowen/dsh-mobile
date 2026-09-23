@@ -161,6 +161,15 @@ function probeNative(entry) {
   writeContract();
   const f1 = makeFake(path.join(TMP, 'dsh1.log'), shimCalls);
   f1.spawnCommand = () => [process.execPath, entryJs, 'web', '--no-open'];
+  // ── S4b 本轮快照同步（真机 12:54 实证：自愈日志已打出新路径，同一轮 spawn 仍吃修复前快照）──
+  {
+    const cfgB = { dshLogFile: path.join(TMP, 'dshB.log'), startTimeoutMs: 5000, command: [staleSo, entryJs, 'web', '--no-open'] };
+    const fb = makeFake(cfgB.dshLogFile, { n: 0 });
+    fb.config = cfgB;
+    fb.nativeManager = new NativeManager({ config: cfgB, logger: { info() {}, warn() {}, error() {} }, events: { append() {} }, stateDir: path.join(TMP, 'stateB') });
+    const cb = fb._androidLaunchReady(fb.spawnCommand());
+    check('S4b 自愈后本轮 spawn 即用新路径（不吃修复前快照）', cb[0] === process.execPath && cfgB.command[0] === process.execPath, JSON.stringify(cb));
+  }
   check('S4 有契约 → flag 插在 node 与入口之间且只一次', (() => { const c = f1._androidLaunchReady(f1.spawnCommand()); return JSON.stringify(c) === JSON.stringify([process.execPath, '--expose-internals', entryJs, 'web', '--no-open']) && JSON.stringify(f1._androidLaunchReady(c)) === JSON.stringify(c); })());
   const c1 = f1._androidLaunchReady(f1.spawnCommand());
   check('S4 有契约 → spawn 前调用 ensureRequireBuiltinShim', shimCalls.n > 0, 'calls=' + shimCalls.n);
@@ -175,6 +184,21 @@ function probeNative(entry) {
   const spawnEv = f1.log.find((e) => e.n === 'spawn');
   check('S4 实际 spawn 命令带 flag', spawnEv.d.command[1] === '--expose-internals' && spawnEv.d.command[2] === entryJs, JSON.stringify(spawnEv.d.command));
   check('S4 注入 flag 后子进程正常启动退出码 0', f1.log.find((e) => e.n === 'dsh_exited').d.code === 0);
+
+  // ── S4c ENOENT 取证恒打**实际 execve 的那条命令**（真机 12:54：missing 日志读 config.command，
+  //    与本轮真正尝试的路径不一致，把排查指向了错误路径）──
+  {
+    const dead = path.join(TMP, 'dead-dir', 'libnode.so');
+    const warns = [];
+    const fc = makeFake(path.join(TMP, 'dshC.log'), { n: 0 });
+    fc.config = { dshLogFile: path.join(TMP, 'dshC.log'), startTimeoutMs: 5000, command: [dead, entryJs, 'web'] };
+    fc.logger = { info() {}, warn: (m) => warns.push(String(m)), error() {} };
+    fc.spawnCommand = () => fc.config.command.slice();
+    await fc._startProcess();
+    await waitFor(() => fc.log.some((e) => e.n === 'dsh_command_missing'), 8000, 'dsh_command_missing(S4c)');
+    const ev = fc.log.find((e) => e.n === 'dsh_command_missing');
+    check('S4c missing 事件与告警都打实际尝试的命令', ev.d.command === dead && warns.some((w) => w.indexOf('command missing: ' + dead) === 0), JSON.stringify([ev.d, warns]));
+  }
 
   // ── S5 非零退出取证：本轮 startup-*.log 尾部进 dsh_exited，旧报告不顶缸 ──
   const dshHome = path.join(TMP, 'dsh-home');

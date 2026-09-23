@@ -1,6 +1,6 @@
 {
   "name": "dsh-android-kernel",
-  "version": "0.1.0-android.10",
+  "version": "0.1.0-android.11",
   "private": true,
   "description": "DSH 移动端（Android）内核：运行于冻结 APK 容器 Node 运行时的控制面板 / 生命周期管理器（Manager），经公共 npm 拉取并管理 Codex / Claude Code / DeepSeek Harness 等 Agent 产品。",
   "license": "UNLICENSED",
