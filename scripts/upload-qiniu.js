@@ -16,6 +16,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
+// ⚠ URL-safe base64，但**保留 '=' padding** —— 实测去掉 padding 会 401 BadToken。
 const B64URL = (buf) => Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
 
 function uploadToken(ak, sk, bucket, key, ttlSec) {
@@ -24,9 +25,12 @@ function uploadToken(ak, sk, bucket, key, ttlSec) {
     deadline: Math.floor(Date.now() / 1000) + (ttlSec || 3600),
     insertOnly: 0,            // 0 = 允许覆盖同名 key（同版本重发是标准动作）
   };
-  const putPolicy = JSON.stringify(policy);
-  const sign = crypto.createHmac('sha1', sk).update(putPolicy).digest();
-  return ak + ':' + B64URL(sign) + ':' + B64URL(putPolicy);
+  // ⚠ 关键（实测踩过）：签名对象是 **base64url 编码后的 policy 串**，不是 policy 原文。
+  // 最初按直觉签了原文 → 401 BadToken；靠给官方 SDK 插桩 crypto.createHmac
+  // 才看出入参是编码后的字符串。算法 HMAC-SHA1，结果同样做 URL-safe base64。
+  const encodedPolicy = B64URL(JSON.stringify(policy));
+  const sign = crypto.createHmac('sha1', sk).update(encodedPolicy).digest();
+  return ak + ':' + B64URL(sign) + ':' + encodedPolicy;
 }
 
 function multipart(fields, fileField, fileName, fileBuf, mime) {
