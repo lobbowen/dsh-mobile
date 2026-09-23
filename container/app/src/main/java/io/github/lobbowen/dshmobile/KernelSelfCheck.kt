@@ -145,12 +145,14 @@ object KernelSelfCheck {
         val parts = try {
             (ctx.cacheDir.listFiles() ?: emptyArray()).filter { it.name.endsWith(".zip.part") }
         } catch (_: Throwable) { emptyList<File>() }
+        // 语义修正（真机实测）：「无半包」是**干净状态**，不该标成未知；
+        // 只有"存在半包"才值得注意（说明下载被中断过，虽然续传是预期行为）。
         out += SelfCheckReport.Item(
             "partial",
-            null,
+            parts.isEmpty(),
             "下载半包",
-            if (parts.isEmpty()) "无半包（说明没有中断过的下载）"
-            else parts.joinToString(", ") { it.name + "=" + it.length() + "B" },
+            if (parts.isEmpty()) "无半包（没有中断过的下载）"
+            else "存在半包（会被续传，非错误）：" + parts.joinToString(", ") { it.name + "=" + it.length() + "B" },
         )
 
         // ⑦ Shizuku（四态；shell.exec 的必备能力，ADR-0003）

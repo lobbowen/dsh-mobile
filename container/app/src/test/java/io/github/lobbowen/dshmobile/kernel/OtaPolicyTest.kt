@@ -60,6 +60,19 @@ class OtaPolicyTest {
     }
 
     // ③ 是否更新
+    @Test fun 稳定态报已是最新_而不是疑似重放() {
+        // 真机实测：设备装好后水位 == manifest 的 sequence，同一份 manifest 再来一次。
+        // 此时必须报"已是最新"，否则日志看起来像被攻击了（归因误导）。
+        val v = OtaPolicy.evaluate(input(remote = "1.0.0", current = "1.0.0", seq = 100L, lastSeq = 100L))
+        assertTrue("稳定态应为 UpToDate，实际 " + v, v is OtaPolicy.Verdict.UpToDate)
+    }
+
+    @Test fun 版本确实更新但序列重放_仍必须被拦() {
+        // 顺序调整**不能**削弱安全性：远端更新 + 序列不前进 = 重放，必须拒。
+        assertEquals("manifest-replay",
+            rejectCode(OtaPolicy.evaluate(input(remote = "0.2.0", current = "0.1.0", seq = 100L, lastSeq = 100L))))
+    }
+
     @Test fun 相等版本判为已是最新() {
         assertTrue(OtaPolicy.evaluate(input(remote = "1.0.0", current = "1.0.0")) is OtaPolicy.Verdict.UpToDate)
     }
