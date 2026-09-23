@@ -11,7 +11,7 @@
 #      路径经 runtime.json 的 npmEntry 契约投放给内核。
 #  版本与 sha512 双钉：registry 内容不可假设不变；升级 npm = 主动改这里。
 #
-#  用法：scripts/stage-npm-assets.sh [输出目录，默认 app/src/main/assets/npm]
+#  用法：scripts/stage-npm-assets.sh [输出目录，默认 container/app/src/main/assets/npm]
 #  产物：npm.zip（bin/lib/node_modules/package.json）+ version.txt
 # ============================================================================
 set -euo pipefail
@@ -19,7 +19,7 @@ set -euo pipefail
 NPM_VER="11.19.0"   # Node 24.21.0 官方捆绑版
 NPM_SHA512="SDd/hHg3KqHE5Ht2NHWxNYNtqCQ2pXAPLl6OtQhPyED5PHsRfrOtO199MZTIG2cQoQ1ZRI9t28shrD+2cr3AAw=="
 
-OUT="${1:-app/src/main/assets/npm}"
+OUT="${1:-container/app/src/main/assets/npm}"
 REPO_ROOT="$PWD"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
