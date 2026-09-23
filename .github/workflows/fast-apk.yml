@@ -670,6 +670,31 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon assembleDebug
 
+      - name: Gate — verify APK signing identity（稳定签名）
+        # 为什么必须有：debug 签名每次构建指纹都不同 → 既有设备无法覆盖安装
+        # （INSTALL_FAILED_UPDATE_INCOMPATIBLE），"设备自我升级 / 静默升级"整条路不成立。
+        # 语义：
+        #   · 配了 keys/release.keystore 却仍是 debug 签名 → **硬红**（配置存在却没生效，是真 bug）
+        #   · 完全没配 → 醒目 warning（开发包可用，但**不可发布**），并指向运维手册
+        run: |
+          set -euo pipefail
+          APK="$(find container/app/build/outputs/apk/debug -name '*.apk' -type f | head -1)"
+          [ -n "$APK" ] || { echo "::error::未找到 APK"; exit 1; }
+          APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)"
+          [ -n "$APKSIGNER" ] || APKSIGNER="apksigner"
+          DN="$("$APKSIGNER" verify --print-certs "$APK" 2>/dev/null | grep -i 'certificate DN' | head -1 || true)"
+          echo "[dsh-signing] APK=$APK"
+          echo "[dsh-signing] ${DN:-（未取到证书 DN）}"
+          if echo "$DN" | grep -qi 'CN=Android Debug'; then
+            if [ -f keys/release.keystore ]; then
+              echo "::error title=签名未生效::检测到 keys/release.keystore，但 APK 仍是 debug 签名 —— 检查 ANDROID_KEYSTORE_PASSWORD / DSH_KEYSTORE_PASSWORD 是否注入成功。"
+              exit 1
+            fi
+            echo "::warning title=开发签名（不可发布）::未配置 ANDROID_KEYSTORE_BASE64，本次为 debug 签名；既有设备无法覆盖安装，且无自我升级能力。见 docs/runbook/release-identity.md"
+          else
+            echo "[ok] 稳定签名（非 debug）"
+          fi
+
       - name: Audit APK contents
         run: |
           set -euo pipefail
