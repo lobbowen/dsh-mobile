@@ -267,4 +267,10 @@ dependencies {
     implementation("dev.rikka.shizuku:provider:13.1.5")
     // Android 9+ 隐藏 API 豁免（Shizuku API 内部需要）
     implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
+
+    // ==== JVM 单元测试（`./gradlew :app:testDebugUnitTest`）====
+    // 为什么必须有：内核下载器这类**纯 JVM 逻辑**过去完全没有夹具，只能靠真机碰运气。
+    // 用 JDK 自带的 com.sun.net.httpserver.HttpServer 起本地 HTTP 服务，就能真实覆盖
+    // Range 断点续传 / 416 / 提前断 / sha256 不符 等分支 —— 不需要 MockWebServer 之类额外依赖。
+    testImplementation("junit:junit:4.13.2")
 }
