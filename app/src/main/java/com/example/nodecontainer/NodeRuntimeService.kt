@@ -368,6 +368,14 @@ class NodeRuntimeService : Service() {
             // entry 是**脚本参数**、不是被 exec 的目标 —— 它落在 filesDir（app_data_file），
             // W^X 禁止 execve。把两者顺序写反必在真机上 error=13。
             // 不变式由 km.assertNotDirectlyExecutable() 守护。
+            // 容器根：Agent 的家搬进它自己的根，祖先遍历不再越出 app 沙箱。
+            val containerRoot = ContainerRoot.prepare(this)
+            RuntimeDiagnostics.append(
+                this, "container-root", null,
+                if (containerRoot) "已启用：Agent 家=${ContainerRoot.DSH_HOME_PATH}（根=${ContainerRoot.root(this).absolutePath}）"
+                else "未启用（真实路径；.rootns-off 或未就绪）",
+                "libdshrootns.so + libdshposix.so"
+            )
             val pb = if (hasKernel && kernelDir != null && entry != null) {
                 val uiDir = File(kernelDir, "manager/dist").absolutePath
                 ProcessBuilder(nodeBin.absolutePath, entry.absolutePath, "daemon")
@@ -406,6 +414,18 @@ class NodeRuntimeService : Service() {
                             put("PREFIX", prefixRoot.absolutePath)
                             put("PATH", prefixBin.absolutePath + File.pathSeparator + (getenv("PATH") ?: ""))
                             put("SHELL", PrefixProvisioner.bashBin(this@NodeRuntimeService)?.absolutePath ?: "/system/bin/sh")
+                            // 容器根：DSH_ROOT 驱动路径解析，DSH_HOME/HOME 走命名空间；
+                            // $PREFIX、TMPDIR、代码树保持真实路径（静态 bash/rg 与原生插件直通）。
+                            if (containerRoot) {
+                                val libDir = nodeBin.parentFile!!
+                                put("DSH_ROOT", ContainerRoot.root(this@NodeRuntimeService).absolutePath)
+                                put("DSH_REAL_ROOT", filesDir.absolutePath)
+                                put("DSH_HOME", ContainerRoot.DSH_HOME_PATH)
+                                put("HOME", ContainerRoot.HOME_PATH)
+                                put("LD_PRELOAD",
+                                    File(libDir, "libdshposix.so").absolutePath + " " +
+                                        File(libDir, "libdshrootns.so").absolutePath)
+                            }
                         }
                     }
             } else {
@@ -414,7 +434,7 @@ class NodeRuntimeService : Service() {
             }
             pb.environment().apply {
                 // Node 在安卓沙箱里需要 HOME / TMPDIR，否则部分模块报错
-                put("HOME", filesDir.absolutePath)
+                put("HOME", if (containerRoot) ContainerRoot.HOME_PATH else filesDir.absolutePath)
                 put("TMPDIR", cacheDir.absolutePath)
                 put("NODE_PATH", File(filesDir, "node_modules").absolutePath)
                 // 必需项，理由见 NativePreparer.probe() 的注释。漏了 node 会在动态链接期直接失败。
