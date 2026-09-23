@@ -133,14 +133,31 @@ object KernelInstaller {
         val version = verify.version
             ?: return InstallResult(false, null, source, "no-version", "校验通过但包内无 version", verify.raw)
 
-        // ---- 2) 目标已存在则直接复用（幂等：重复安装同一版本不重写）----
+        // ---- 1.5) 版本下限（anti-rollback floor，ADR-0005 C1）----
+        //
+        // 只与 CURRENT 比较是不够的：一次健康失败回退后 CURRENT 会降回来，
+        // "比 CURRENT 新"的判据也跟着被拉低 —— 更旧的包于是又能装上。
+        // 下限记录的是**曾成功提交过的最高版本**，只增不减；低于它一律拒绝，
+        // **即使签名合法**：签名只证明"这包是我们发的"，不证明"它不该被回退"。
         val km = KernelManager(context)
+        if (km.isBelowFloor(version)) {
+            return InstallResult(
+                ok = false, version = version, source = source, reason = "version-below-floor",
+                detail = "候选 " + version + " 低于版本下限 " + km.floorVersion() + " —— 拒绝安装（防回退）。",
+                nodeVerifyOutput = verify.raw,
+            )
+        }
+        val previousVersion = km.currentVersion()
+
+        // ---- 2) 目标已存在则直接复用（幂等：重复安装同一版本不重写）----
         val dest = km.kernelDir(version)
         if (dest.isDirectory && km.entryPath(version).exists()) {
             km.setCurrentVersion(version)
+            // 已落盘也要重新标记"待命"：只有健康检查通过才算提交（C2）。
+            km.markPending(version, previousVersion)
             return InstallResult(
                 ok = true, version = version, source = source, reason = "already-installed",
-                detail = "该版本已落盘，直接切指针", nodeVerifyOutput = verify.raw,
+                detail = "该版本已落盘，直接切指针（待健康检查通过后提交）", nodeVerifyOutput = verify.raw,
             )
         }
 
@@ -201,9 +218,12 @@ object KernelInstaller {
         }
 
         km.setCurrentVersion(version)
+        // 安装 ≠ 提交：先标"待命"，由启动链在**健康检查通过**后提交（提升下限），
+        // 起不来则回滚到 previousVersion 且下限不降（ADR-0005 C2）。
+        km.markPending(version, previousVersion)
         return InstallResult(
             ok = true, version = version, source = source, reason = null,
-            detail = "已落盘并切换指针: ${dest.absolutePath}", nodeVerifyOutput = verify.raw,
+            detail = "已落盘并切换指针（待健康检查通过后提交）: ${dest.absolutePath}", nodeVerifyOutput = verify.raw,
         )
     }
 

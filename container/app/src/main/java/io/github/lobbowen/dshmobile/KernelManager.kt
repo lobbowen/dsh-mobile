@@ -155,6 +155,67 @@ class KernelManager(private val context: Context) {
         tmp.renameTo(currentPointer)
     }
 
+    // =========================================================================
+    // 版本下限与提交/回滚（ADR-0005 收尾条款 C1 / C2）
+    // =========================================================================
+    // 为什么需要 FLOOR：
+    //   设备端的"只升不降"只与 CURRENT 比较。一次健康失败回退后 CURRENT 降回去，
+    //   那条判据也被拉低 —— 更旧的包（哪怕是合法签名的旧包）又能装上。
+    //   FLOOR 记的是**曾成功提交过的最高版本**，只增不减；低于它一律拒绝。
+    //
+    // 为什么需要 PENDING：
+    //   安装成功 ≠ 这个内核能跑。真正的"提交"时机是**首次健康检查通过**。
+    //   在此之前它只是 pending；健康始终起不来 → 回滚到 from，且**下限不降**
+    //   （否则"回滚"就成了降级的后门）。
+
+    private val floorFile: File get() = File(kernelRoot, "FLOOR")
+    private val pendingFile: File get() = File(kernelRoot, "PENDING")
+
+    fun floorVersion(): String? = try {
+        floorFile.readText().trim().ifBlank { null }
+    } catch (_: Throwable) { null }
+
+    /** 提升下限（**只增不减**：不高于现有下限的调用被忽略）。 */
+    fun setFloor(version: String) {
+        val cur = floorVersion()
+        if (cur != null && compareKernelVersions(version, cur) <= 0) return
+        kernelRoot.mkdirs()
+        val tmp = File(kernelRoot, "FLOOR.tmp")
+        tmp.writeText(version)
+        tmp.renameTo(floorFile)
+    }
+
+    /** 候选是否**低于下限** → 拒绝安装（即使签名合法）。 */
+    fun isBelowFloor(version: String): Boolean {
+        val f = floorVersion() ?: return false
+        return compareKernelVersions(version, f) < 0
+    }
+
+    data class Pending(val version: String, val from: String?)
+
+    /** 记录"已安装但尚未提交"的版本及其来源版本（首行 version，次行 from）。 */
+    fun markPending(version: String, from: String?) {
+        kernelRoot.mkdirs()
+        pendingFile.writeText(version + "\n" + (from ?: ""))
+    }
+
+    fun pending(): Pending? = try {
+        val lines = pendingFile.readText().split("\n")
+        val v = lines.getOrNull(0)?.trim().orEmpty()
+        if (v.isBlank()) null else Pending(v, lines.getOrNull(1)?.trim()?.ifBlank { null })
+    } catch (_: Throwable) { null }
+
+    fun clearPending() {
+        try { pendingFile.delete() } catch (_: Throwable) { }
+    }
+
+    /** 回滚：把 CURRENT 指回 [from]（目录仍在时）。**下限不动**。 */
+    fun rollbackTo(from: String): Boolean {
+        if (!File(kernelRoot, from).isDirectory) return false
+        setCurrentVersion(from)
+        return true
+    }
+
     /** 内核版本比较：数字段按数值、其余按字符串逐 token 比较（0.1.0-android.10 > 0.1.0-android.2）。 */
     internal fun compareKernelVersions(a: String, b: String): Int {
         val ta = Regex("\\d+|\\D+").findAll(a).map { it.value }.toList()
