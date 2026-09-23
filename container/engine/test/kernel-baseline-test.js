@@ -36,12 +36,12 @@ const { execFileSync } = require('child_process');
 const makeRunner = require('./harness');
 const { check, finish } = makeRunner('kernel-baseline');
 
-const ROOT = path.resolve(__dirname, '..', '..');
+const ROOT = path.resolve(__dirname, '..', '..', '..');
 const { listZip } = require('../src/zip');
 
-const BASELINE = path.join(ROOT, 'app', 'src', 'main', 'assets', 'kernel', 'baseline.zip');
-const ANCHOR = path.join(ROOT, 'app', 'src', 'main', 'assets', 'ota-public.pem');
-const VERIFIER = path.join(ROOT, 'app', 'src', 'main', 'assets', 'node', 'kernel-verify.js');
+const BASELINE = path.join(ROOT, 'container', 'app', 'src', 'main', 'assets', 'kernel', 'baseline.zip');
+const ANCHOR = path.join(ROOT, 'container', 'app', 'src', 'main', 'assets', 'ota-public.pem');
+const VERIFIER = path.join(ROOT, 'container', 'app', 'src', 'main', 'assets', 'node', 'kernel-verify.js');
 
 // REQUIRE_BASELINE 的语义在这里比在 selfboot 里更纯粹：
 // 本文件**就是**为验基线包而存在的，所以"没包"基本等同于"这次没验成"。
@@ -106,7 +106,7 @@ if (bList.length) {
 // 用**与设备端同一个校验器**跑，而不是重新实现一遍 —— 若这里过了而
 // 设备上不过，差异只可能来自数据而非逻辑。
 if (!fs.existsSync(ANCHOR)) {
-  check('公钥锚点存在 app/src/main/assets/ota-public.pem', false, ANCHOR);
+  check('公钥锚点存在 container/app/src/main/assets/ota-public.pem', false, ANCHOR);
 } else if (!fs.existsSync(VERIFIER)) {
   check('设备端校验器存在 assets/node/kernel-verify.js', false, VERIFIER);
 } else {

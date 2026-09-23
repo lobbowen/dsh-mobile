@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "updated": "2026-09-23",
+  "rootAllow": [
+    "README.md",
+    "ARCHITECTURE.md",
+    ".github",
+    ".gitignore",
+    "container",
+    "kernel",
+    "system",
+    "docs",
+    "scripts",
+    "gradle",
+    "gradlew",
+    "gradlew.bat",
+    "gradle.properties",
+    "settings.gradle.kts",
+    "build.gradle.kts",
+    "_archive"
+  ],
+  "layers": {
+    "L0": {
+      "title": "容器（冻结 APK）",
+      "paths": [
+        "container/app",
+        "container/engine",
+        "container/native",
+        "container/_artifacts"
+      ]
+    },
+    "L1": {
+      "title": "内核（签名 OTA 热更新）",
+      "paths": [
+        "kernel"
+      ]
+    },
+    "S": {
+      "title": "Tier S（ROM 集成）",
+      "paths": [
+        "system"
+      ]
+    },
+    "CI": {
+      "title": "CI 与工具",
+      "paths": [
+        ".github",
+        "scripts"
+      ]
+    },
+    "DOCS": {
+      "title": "文档",
+      "paths": [
+        "docs",
+        "README.md",
+        "ARCHITECTURE.md"
+      ]
+    },
+    "ARCHIVE": {
+      "title": "归档（只读）",
+      "paths": [
+        "_archive"
+      ]
+    }
+  },
+  "moves": [
+    {
+      "from": "app",
+      "to": "container/app",
+      "kind": "dir",
+      "expectFiles": 34
+    },
+    {
+      "from": "container-engine",
+      "to": "container/engine",
+      "kind": "dir",
+      "expectFiles": 30
+    },
+    {
+      "from": "native",
+      "to": "container/native",
+      "kind": "dir",
+      "expectFiles": 7
+    },
+    {
+      "from": "_artifacts",
+      "to": "container/_artifacts",
+      "kind": "dir",
+      "expectFiles": 2
+    },
+    {
+      "from": "dsh-android-kernel",
+      "to": "kernel",
+      "kind": "dir",
+      "expectFiles": 236
+    },
+    {
+      "from": "docs/ADR-001-android-execution-domain.md",
+      "to": "docs/adr/0001-android-execution-domain.md",
+      "kind": "file"
+    },
+    {
+      "from": "docs/GIT-REPO-STANDARD.md",
+      "to": "docs/runbook/git-repo-standard.md",
+      "kind": "file"
+    },
+    {
+      "from": "docs/BRIDGE_PROTOCOL.md",
+      "to": "docs/contracts/bridge-protocol.md",
+      "kind": "file"
+    },
+    {
+      "from": "docs/HANDOVER.md",
+      "to": "docs/runbook/handover.md",
+      "kind": "file"
+    },
+    {
+      "from": "docs/PROVISIONING.md",
+      "to": "docs/runbook/provisioning.md",
+      "kind": "file"
+    },
+    {
+      "from": "docs/CONTRIBUTING.md",
+      "to": "docs/runbook/contributing.md",
+      "kind": "file"
+    },
+    {
+      "from": "README-交接包.md",
+      "to": "_archive/README-交接包.md",
+      "kind": "file"
+    },
+    {
+      "from": "CONTAINER-STATUS.md",
+      "to": "docs/runbook/container-status.md",
+      "kind": "file"
+    }
+  ],
+  "legacyForbidden": [
+    "app",
+    "container-engine",
+    "native",
+    "dsh-android-kernel",
+    "_artifacts",
+    "README-交接包.md"
+  ],
+  "generated": [
+    "container/app/build/",
+    ".gradle/",
+    "container/engine/node_modules/",
+    "container/app/src/main/assets/npm/",
+    "container/app/src/main/assets/node-bin/",
+    "container/app/src/main/assets/kernel/baseline.zip",
+    "release/",
+    "feed/"
+  ],
+  "secrets": [
+    "<filesDir>/.secrets/",
+    "keys/",
+    "*.keystore",
+    "keystore.properties",
+    ".env*",
+    "*.token"
+  ],
+  "scriptsOwnership": {
+    "build-node-android.sh": "L0",
+    "build-apk-local.sh": "L0",
+    "keygen-android-keystore.sh": "L0",
+    "inject-libcxx-into-apk.py": "L0",
+    "stage-npm-assets.sh": "L0",
+    "build-kernel-bundle.sh": "L1",
+    "build-kernel-baseline.sh": "L1",
+    "build-kernel-feed.sh": "L1",
+    "keygen.sh": "L1",
+    "make-release.sh": "cross",
+    "gh-access.sh": "cross",
+    "validate-workflow.py": "cross",
+    "attach-and-publish.sh": "cross"
+  }
+}

@@ -30,4 +30,4 @@ if [ ! -f "$ROOT/keys/ota-private.pem" ]; then
   exit 1
 fi
 
-exec node "$ROOT/container-engine/bin/build-bundle.js" "$SRC" "$VER" "$ABI" "$URL_BASE"
+exec node "$ROOT/container/engine/bin/build-bundle.js" "$SRC" "$VER" "$ABI" "$URL_BASE"

@@ -55,7 +55,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 #   3. 二进制解释器必须是 Android 的 linker（/system/bin/linker64）——
 #      我们交叉编译出来的 node 正是 bionic 链接，已用 `file` 验证满足。
 # ---------------------------------------------------------------------------
-OUT_DIR="$ROOT/app/src/main/jniLibs/arm64-v8a"
+OUT_DIR="$ROOT/container/app/src/main/jniLibs/arm64-v8a"
 OUT_NAME="libnode.so"
 mkdir -p "$OUT_DIR"
 

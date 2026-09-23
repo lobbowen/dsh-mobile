@@ -33,7 +33,7 @@ const { execFileSync } = require('child_process');
 const makeRunner = require('./harness');
 const { check, finish } = makeRunner('kernel-selfboot');
 
-const ROOT = path.resolve(__dirname, '..', '..');
+const ROOT = path.resolve(__dirname, '..', '..', '..');
 const {
   extractZip, createZip, listZip, readEntry, crc32,
   METHOD_STORED, METHOD_DEFLATE,
@@ -223,7 +223,7 @@ check('rollback 回到 4.2.0', rb === '4.2.0' && eng.currentVersion() === '4.2.0
 // ============================================================================
 console.log('\n--- ③ 设备端校验器一致性 ---');
 
-const VERIFIER = path.join(ROOT, 'app', 'src', 'main', 'assets', 'node', 'kernel-verify.js');
+const VERIFIER = path.join(ROOT, 'container', 'app', 'src', 'main', 'assets', 'node', 'kernel-verify.js');
 check('设备端校验器存在', fs.existsSync(VERIFIER));
 
 const pubPath = path.join(tmp, 'pub.pem');
@@ -446,18 +446,18 @@ check('build.apk 仍可解析（老调用方拿到带解释的错误而非 -3260
   methods.methodCaps('build.apk') !== null);
 
 // 校验器契约：Kotlin 侧约定的前缀必须与 JS 一致
-const KOTLIN_VERIFIER = path.join(ROOT, 'app', 'src', 'main', 'java', 'com', 'example', 'nodecontainer', 'NodeKernelVerifier.kt');
+const KOTLIN_VERIFIER = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'com', 'example', 'nodecontainer', 'NodeKernelVerifier.kt');
 if (fs.existsSync(KOTLIN_VERIFIER)) {
   const kt = fs.readFileSync(KOTLIN_VERIFIER, 'utf8');
   check('Kotlin 侧结果前缀与 JS 一致', kt.includes('DSH_VERIFY_RESULT '));
   check('Kotlin 侧引用 kernel-verify.js 资产',
     kt.includes('kernel-verify.js') || fs.readFileSync(
-      path.join(ROOT, 'app', 'src', 'main', 'java', 'com', 'example', 'nodecontainer', 'NodeProvisioner.kt'), 'utf8'
+      path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'com', 'example', 'nodecontainer', 'NodeProvisioner.kt'), 'utf8'
     ).includes('kernel-verify.js'));
 }
 
 // feed 目录约定（LocalKernelFeed）必须与文档/脚本一致
-const FEED_KT = path.join(ROOT, 'app', 'src', 'main', 'java', 'com', 'example', 'nodecontainer', 'LocalKernelFeed.kt');
+const FEED_KT = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'com', 'example', 'nodecontainer', 'LocalKernelFeed.kt');
 if (fs.existsSync(FEED_KT)) {
   const fk = fs.readFileSync(FEED_KT, 'utf8');
   check('feed 目录名约定为 kernel-feed', fk.includes('"kernel-feed"'));
@@ -466,7 +466,7 @@ if (fs.existsSync(FEED_KT)) {
 }
 
 // KernelInstaller 必须复用 Node 校验器（不能自己验签）
-const INSTALLER_KT = path.join(ROOT, 'app', 'src', 'main', 'java', 'com', 'example', 'nodecontainer', 'KernelInstaller.kt');
+const INSTALLER_KT = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'com', 'example', 'nodecontainer', 'KernelInstaller.kt');
 if (fs.existsSync(INSTALLER_KT)) {
   const ik = fs.readFileSync(INSTALLER_KT, 'utf8');
   check('KernelInstaller 调用 NodeKernelVerifier', ik.includes('NodeKernelVerifier.verify'));

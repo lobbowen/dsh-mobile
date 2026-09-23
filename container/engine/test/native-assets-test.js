@@ -31,14 +31,14 @@ const makeRunner = require('./harness');
 
 const { check, finish } = makeRunner('native-assets');
 
-const ROOT = path.resolve(__dirname, '..', '..');
+const ROOT = path.resolve(__dirname, '..', '..', '..');
 
 // ---------------------------------------------------------------------------
 // 读取权威源：NativeAssetRegistry.kt
 // ---------------------------------------------------------------------------
 
 const REGISTRY_KT = path.join(
-  ROOT, 'app/src/main/java/com/example/nodecontainer/native/NativeAssetRegistry.kt'
+  ROOT, 'container/app/src/main/java/com/example/nodecontainer/native/NativeAssetRegistry.kt'
 );
 
 /** 去掉注释（行注释 + 块注释），避免注释里的示例被当成真声明。 */
@@ -180,7 +180,7 @@ if (manifest) {
 //      所以这里核对的是「gradle 确实在读清单」而非硬编码 —— 防有人图省事改回去。
 // ---------------------------------------------------------------------------
 
-const GRADLE_KTS = path.join(ROOT, 'app/build.gradle.kts');
+const GRADLE_KTS = path.join(ROOT, 'container/app/build.gradle.kts');
 check('app/build.gradle.kts 存在', fs.existsSync(GRADLE_KTS));
 if (fs.existsSync(GRADLE_KTS)) {
   const g = stripKotlinComments(fs.readFileSync(GRADLE_KTS, 'utf8'));
@@ -306,7 +306,7 @@ if (fs.existsSync(INJECT_PY)) {
 //   NativeAssetRegistry.kt 自身除外（它就是定义处）。
 // ---------------------------------------------------------------------------
 
-const KT_DIR = path.join(ROOT, 'app/src/main/java/com/example/nodecontainer');
+const KT_DIR = path.join(ROOT, 'container/app/src/main/java/com/example/nodecontainer');
 const REGISTRY_BASENAME = 'NativeAssetRegistry.kt';
 
 /** 递归收集 .kt 文件。 */
@@ -343,7 +343,7 @@ if (fs.existsSync(KT_DIR)) {
 // ① → Node 侧 mock：server.js 的 sys.nativeAssets 必须与注册表同形
 // ---------------------------------------------------------------------------
 
-const SERVER_JS = path.join(ROOT, 'container-engine/src/bridge/server.js');
+const SERVER_JS = path.join(ROOT, 'container/engine/src/bridge/server.js');
 if (fs.existsSync(SERVER_JS)) {
   const js = fs.readFileSync(SERVER_JS, 'utf8');
   check(
@@ -360,7 +360,7 @@ if (fs.existsSync(SERVER_JS)) {
   );
 }
 
-const METHODS_JS = path.join(ROOT, 'container-engine/src/bridge/methods.js');
+const METHODS_JS = path.join(ROOT, 'container/engine/src/bridge/methods.js');
 if (fs.existsSync(METHODS_JS)) {
   const js = fs.readFileSync(METHODS_JS, 'utf8');
   check(

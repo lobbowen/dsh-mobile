@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "AndroidNodeContainer"
 include(":app")
+project(":app").projectDir = file("container/app")

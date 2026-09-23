@@ -12,7 +12,7 @@
 | 事实 | 值 |
 |---|---|
 | 主仓 | `lobbowen/dsh-mobile`（public） |
-| 远端 main | `b34f889`（2026-09-23 **重建**：单一根提交，363 文件） |
+| 远端 main | `453ceae`（2026-09-23 **重建**：单一根提交；含 P2 容器根清理） |
 | 形态 | **单仓双子项目（M）**：容器目录 + `dsh-android-kernel/` |
 | 本工作副本 | 已建 `.git`；旧历史与全部旧 ref 备份于本机 `work/_backup/` |
 | 旧 ref 快照 | `work/_backup/dsh-mobile/BACKUP-REFS.txt`（3 分支 / 26 tag 的真实 SHA） |
@@ -143,6 +143,12 @@ on:
 
 **无本地 git 的沙箱**：用纯 JS 实现（`isomorphic-git`）或 GitHub Git Data API；
 流程与红线完全一致，只是命令替换。参见 `scripts/attach-and-publish.sh`。
+
+> **踩坑记录（2026-09-23，血泪）**：用 GitHub **Git Data API 建树**时，`POST /git/trees` 的 `content`
+> **只收明文**。传 `encoding:"base64"` 会被忽略，base64 字符串被当成正文写进 blob ⇒ **远端所有文件损坏**、
+> **所有 workflow 启动即失败（0 job）**、`workflow_dispatch` 返回 422。
+> 正确做法：二进制先 `POST /git/blobs`（只有它支持 base64）拿 sha，再在 tree 里引用；文本直接给 `content`。
+> 快速自检：`GET /contents/<path>?ref=main` 的大小若是原文件的 ~1.33 倍，就是踩了这个坑。
 
 ---
 

@@ -23,7 +23,7 @@ const { check, finish } = makeRunner('kernel-update-bridge');
 // 用的是软探测（存在才比，不存在就说明"未验证"），所以内核源码不在时不会崩，
 // 只是少验几条"两侧常量是否漂移"的断言 —— 少验时必须能在日志里数出来
 // （本套满配 22 条；若掉到 16 条就说明路径没指对，而不是"正常"）。
-const KERNEL_REPO = process.env.DSH_KERNEL_REPO || path.join(__dirname, '..', '..', 'dsh-android-kernel');
+const KERNEL_REPO = process.env.DSH_KERNEL_REPO || path.join(__dirname, '..', '..', '..', 'kernel');
 
 // ── 内核侧契约常量（须与 kernelUpdateBridge.ts 一致）──
 const KERNEL_BRIDGE_PROTOCOL_VERSION = 1;
