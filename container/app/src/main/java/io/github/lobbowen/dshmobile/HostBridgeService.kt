@@ -791,62 +791,30 @@ class HostBridgeService : Service() {
         // 未来若真有了 arm64 工具链再置位即可，不需要改这里的代码路径。
         // 现在它**不会被** deviceCapabilities() 置位，所以依赖它的调用方
         // 仍会拿到 -32001 —— 这是正确的降级，因为我们确实没有那套工具链。
+        // 内核**安装/升级的唯一入口**，且**只从 OTA 源**（ADR-0005）。
+        //
+        // 为什么只留一条：来源若有多条（本地 feed / 内置基线 / 远端），就会出现多份
+        // "安装语义"，它们迟早不一致；更糟的是其中任何一条都能**绕过版本下限**。
+        // 收敛成一条，安全性也一并收敛。
+        //
+        // 参数：{ checkOnly?: bool } —— true 只检查（不下载不安装），供"检查更新"用。
+        // 返回值里 `available`（有新版本）与 `updated`（真装了）**必须分开**：
+        //   "发现新版本但没装"和"装了"是两件事，调用方要能区分。
+        //
+        // **不自己重启**：重启会让调用方（面板/内核）半途消失、收不到回执。
         "build.kernelInstall" to MethodDef(listOf("kernel_update"), true) { p ->
-            // 入参二选一：
-            // { feed: true } —— 扫描本地 feed 目录并安装
-            // { zipPath, sha256?, version? } —— 安装指定路径的包
-            //
-            // 全程离线。验签在 Node 侧做（Kotlin 拿不到 Ed25519，见 KernelInstaller 注释）。
-            val useFeed = p.optBoolean("feed", false)
-            val zip: File
-            var manifestJson: JSONObject? = null
-            var source = KernelInstaller.Source.NONE
-            var feedHandle: LocalKernelFeed.Feed? = null
-
-            if (useFeed) {
-                val feed = LocalKernelFeed.scan(this)
-                    ?: throw BridgeError(
-                        CODE_INVALID_PARAM,
-                        "本地 feed 目录里没有候选内核包。放置位置：" +
-                            "${getExternalFilesDir(null)?.let { File(it, "kernel-feed") }} 或 " +
-                            "/sdcard/dsh/kernel-feed/，文件名需为 kernel-*.zip"
-                    )
-                feedHandle = feed
-                zip = feed.zip
-                manifestJson = feed.manifestJson
-                source = KernelInstaller.Source.LOCAL_FILE
-            } else {
-                val path = p.optString("zipPath", "")
-                if (path.isBlank()) {
-                    throw BridgeError(CODE_INVALID_PARAM, "需要 feed=true 或提供 zipPath")
-                }
-                zip = requireReadableFile(path)
-                // 允许调用方直接给锚点（本地 feed 场景下 manifest 往往单独存在）
-                val sha = p.optString("sha256", "").ifBlank { null }
-                val ver = p.optString("version", "").ifBlank { null }
-                if (sha != null || ver != null) {
-                    manifestJson = JSONObject().apply {
-                        sha?.let { put("sha256", it) }
-                        ver?.let { put("version", it) }
-                    }
-                }
-                source = KernelInstaller.Source.LOCAL_FILE
-            }
-
-            val res = KernelInstaller.install(this, zip, manifestJson, source)
-            if (res.ok) feedHandle?.let { LocalKernelFeed.consume(it) }
-
+            val checkOnly = p.optBoolean("checkOnly", false)
+            val ota = KernelOtaUpdater.checkAndUpdate(this, KernelManager(this), checkOnly)
             JSONObject().apply {
-                put("ok", res.ok)
-                put("version", res.version ?: JSONObject.NULL)
-                put("source", res.source.label)
-                put("reason", res.reason ?: JSONObject.NULL)
-                put("detail", res.detail)
-                put("verifierOutput", res.nodeVerifyOutput.take(4000))
-                // 明确告知调用方「需要重启才生效」—— 本方法**不**自己重启进程。
-                // 理由：重启会让调用方（内核自己）在半途消失，无法收到回执；
-                // 由调用方决定何时重启，语义更清晰。
-                put("restartRequired", res.ok)
+                put("ok", if (checkOnly) ota.checked else ota.updated)
+                put("checked", ota.checked)
+                put("available", ota.available)
+                put("updated", ota.updated)
+                put("current", ota.current ?: JSONObject.NULL)
+                put("version", ota.remote ?: JSONObject.NULL)
+                put("source", KernelInstaller.Source.OTA.label)
+                put("detail", ota.detail)
+                put("restartRequired", ota.updated)
             }
         },
         "build.kernelStatus" to MethodDef(listOf("kernel_update"), false) { _ ->
@@ -856,31 +824,6 @@ class HostBridgeService : Service() {
                 put("current", cur ?: JSONObject.NULL)
                 put("installed", JSONArray(km.installedVersions()))
                 put("integrity", JSONArray(km.integrityChecks()))
-                val feed = LocalKernelFeed.scan(this@HostBridgeService)
-                put("feedPending", feed?.zip?.absolutePath ?: JSONObject.NULL)
-            }
-        },
-        // 手动触发远端内核升级 —— 内核/面板在"用户点了检查更新"时调用。
-        //
-        // 与 build.kernelInstall 的分工：
-        //   · kernelInstall —— 从**本地** feed 安装（adb 投放，离线，明确意图）；
-        //   · kernelUpdate  —— 从**远端** feed 检查/升级（联网）。
-        // 两者共用同一条校验链（KernelInstaller：验签 + sha256 + 协议兼容）。
-        //
-        // 参数：{ checkOnly?: bool } —— true 时只报告是否有更新，**不安装**（用于"检查更新"按钮）。
-        // 返回：{ checked, available, updated, current, remote, restartRequired, detail }
-        //   restartRequired=true 表示装了新内核，但正在跑的内核进程仍是旧的，需调用方重启。
-        "build.kernelUpdate" to MethodDef(listOf("kernel_update"), true) { p ->
-            val checkOnly = p.optBoolean("checkOnly", false)
-            val ota = KernelOtaUpdater.checkAndUpdate(this, KernelManager(this), checkOnly)
-            JSONObject().apply {
-                put("checked", ota.checked)
-                put("available", ota.available)
-                put("updated", ota.updated)
-                put("current", ota.current ?: JSONObject.NULL)
-                put("remote", ota.remote ?: JSONObject.NULL)
-                put("restartRequired", ota.updated)
-                put("detail", ota.detail)
             }
         },
         // 保留旧名以兼容存量调用方，但指向内核安装（语义已修正）。
