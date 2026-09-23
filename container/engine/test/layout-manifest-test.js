@@ -45,8 +45,9 @@ try {
     let cnt = '';
     if (m.expectFiles != null && m.kind === 'dir') {
       const c = countFiles(path.join(ROOT, m.to)) != null ? countFiles(path.join(ROOT, m.to)) : countFiles(path.join(ROOT, m.from));
-      cnt = ' files=' + c + '/' + m.expectFiles;
-      if (state === 'done' && c !== m.expectFiles) problems.push('count: ' + m.to + ' = ' + c + ' != ' + m.expectFiles);
+      // expectFiles = 迁移基线（下限）。少于基线 = 丢件；多于 = 正常演进（如新增测试）。
+      cnt = ' files=' + c + ' (floor ' + m.expectFiles + ')';
+      if (state === 'done' && c < m.expectFiles) problems.push('count: ' + m.to + ' = ' + c + ' < 迁移基线 ' + m.expectFiles + '（文件丢失）');
     }
     rows.push('  ' + state.padEnd(8) + ' ' + (m.from + ' -> ' + m.to).padEnd(58) + cnt);
   }
