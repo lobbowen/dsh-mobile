@@ -92,6 +92,15 @@
              必须自转前台：NodeRuntimeService 用 startForegroundService() 拉起它，Android 8+
              要求 5s 内 startForeground()，否则系统对**其宿主进程**（=主进程）抛
              RemoteServiceException —— 真机「初始化到一半 App 被关」的根因。 -->
+        <!-- Shizuku binder 投递通道（ADR-0003：Shizuku 是必备能力，默认集成） -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
         <service
             android:name=".HostBridgeService"
             android:exported="false"
