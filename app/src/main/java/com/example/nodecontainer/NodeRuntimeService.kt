@@ -12,6 +12,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.nodecontainer.native.AssetStatus
 import com.example.nodecontainer.native.NativeAssetRegistry
+import com.example.nodecontainer.native.ContainerRoot
 import com.example.nodecontainer.native.PrefixProvisioner
 import com.example.nodecontainer.native.NativePreparer
 import kotlinx.coroutines.CoroutineScope
