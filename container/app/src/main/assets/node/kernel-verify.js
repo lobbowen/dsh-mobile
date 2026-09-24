@@ -69,7 +69,7 @@ function parseArgs(argv) {
 // 它要能在「内核还没落地」时跑（首启验基线包）。依赖内核目录里的模块会
 // 制造循环依赖。所以这里自带一份最小实现。
 //
-// 注意：这份实现**必须**支持 Deflate。历史教训 —— container-engine/src/zip.js
+// 注意：这份实现**必须**支持 Deflate。历史教训 —— container/engine/src/zip.js
 // 最初只认 Stored，导致任何标准工具打的包都解不开（CRC 必失败）。
 // 校验器若也有同样缺陷，会把好包判成坏包，比漏判更糟（会阻断正常升级）。
 const CRC_TABLE = (() => {
@@ -152,7 +152,7 @@ function checkZipIntegrity(buf) {
   return entries;
 }
 
-// ---- 签名规范化：必须与 container-engine/src/sign.js 逐字节一致 ----
+// ---- 签名规范化：必须与 container/engine/src/sign.js 逐字节一致 ----
 //
 // 算法：剔除 signature 字段 → 按 key 排序 → JSON.stringify。
 // 两仓必须用同一算法，否则「签发端算的摘要」与「设备端算的摘要」不同，

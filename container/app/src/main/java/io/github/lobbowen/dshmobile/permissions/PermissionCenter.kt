@@ -2,20 +2,16 @@ package io.github.lobbowen.dshmobile.permissions
 
 import android.Manifest
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 
-data class PermissionStatus(val spec: PermissionSpec, val granted: Boolean)
-
 /**
  * 权限状态的**唯一查询入口** —— 免去各处散落的 `canDrawOverlays`/`isExternalStorageManager` 判断。
- * 只读查询 + 生成申请 Intent；不主动弹窗（弹窗归 UI 层）。
+ * 只做只读查询；申请入口归 UI 层（MainActivity 自建 Intent）。
  */
 class PermissionCenter(private val ctx: Context) {
 
@@ -58,19 +54,4 @@ class PermissionCenter(private val ctx: Context) {
         pm.isIgnoringBatteryOptimizations(ctx.packageName)
     }.getOrDefault(false)
 
-    /** 可引导用户授权的设置页 Intent；无对应设置页时返回 null。 */
-    fun requestIntent(spec: PermissionSpec): Intent? {
-        val action = spec.settingsAction ?: return null
-        return Intent(action).apply {
-            when (action) {
-                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS ->
-                    data = Uri.parse("package:" + ctx.packageName)
-            }
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-    }
-
-    fun snapshot(): List<PermissionStatus> = PermissionCatalog.ALL.map { PermissionStatus(it, isGranted(it)) }
 }

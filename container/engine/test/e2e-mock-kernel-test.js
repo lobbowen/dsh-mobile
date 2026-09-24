@@ -11,7 +11,7 @@ const makeRunner = require('./harness');
 const crypto = require('crypto');
 const { packBundle } = require('../src/kernel-bundle');
 const { OtaEngine } = require('../src/ota-engine');
-const { bootKernel, pollHealth } = require('../src/boot');
+const { bootKernel, pollHealth } = require('./boot-fixture');
 
 const { check, finish } = makeRunner('e2e-mock-kernel');
 
@@ -99,7 +99,6 @@ process.on('SIGINT', () => { clearInterval(keep); server.close(() => process.exi
     nodeBinDir: path.dirname(nodeBin),
     npmPath: process.execPath,
     npmEntry: npmEntryAbs,
-    apiPort: STATUS_PORT,
     extraEnv: { DSH_STATUS_PORT: String(STATUS_PORT) },
   });
   check('内核进程已 spawn', !!child && child.pid > 0);

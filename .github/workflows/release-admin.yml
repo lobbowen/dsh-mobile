@@ -687,10 +687,10 @@ jobs:
 
           if [ -z "$RUN_ID" ]; then
             echo "== 自动查找最近一次成功的构建运行 =="
-            # 优先找新的 build-node.yml（拆分后的 Node 专用构建）；
-            # 找不到就回退到旧的 build-apk.yml（拆分前的一体化构建，
-            # 它的产物同样是完好的，可直接固化 —— 这正是本次固化要做的事）。
-            for WF in build-node.yml build-apk.yml; do
+            # build-node.yml（Node 专用构建）是拆分计划里的名字，从未落地；
+            # 实际的一体化 Node 构建就是 build-apk.yml —— 它的产物同样是
+            # 完好的，可直接固化 —— 这正是本次固化要做的事。
+            for WF in build-apk.yml; do
               RUN_ID="$(gh run list \
                           --repo '${{ github.repository }}' \
                           --workflow "$WF" \
@@ -705,8 +705,8 @@ jobs:
             done
           fi
           if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
-            echo "[error] 找不到成功的 build-node 运行。"
-            echo "        先跑一次 Build Node runtime，再固化。"
+            echo "[error] 找不到成功的 build-apk 运行。"
+            echo "        先手动跑一次 'Build Android Node Container APK'，再固化。"
             exit 1
           fi
 

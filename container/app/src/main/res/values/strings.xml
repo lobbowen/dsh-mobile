@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">Android Node Container</string>
-    <!-- Node 运行时进程名（与 Manifest 中 android:process 对应） -->
-    <string name="node_process_name">:node</string>
+    <!-- :node 进程名由 Manifest android:process 字面量定义（二者必须逐字一致，
+         故不抽成本资源引用 —— 抽出来反而容易改一边漏一边）。 -->
     <string name="notification_title">Node.js 运行时</string>
     <string name="notification_text">Node.js 正在以原生方式运行</string>
     <string name="retry">重试</string>

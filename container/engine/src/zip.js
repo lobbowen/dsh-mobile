@@ -27,6 +27,15 @@ const zlib = require('zlib');
 const METHOD_STORED = 0;
 const METHOD_DEFLATE = 8;
 
+// 解压预算：内核包正常远小于这些值，超限即按恶意包（zip 炸弹）处理。
+// inflateRawSync 必须传 maxOutputLength —— 不传时一个小 deflate 条目能解出 GB 级内存把进程打爆。
+// 用对象而非裸常量：守卫在函数体内读属性（而非模块加载期快照），测试才能压低预算构造可红用例。
+const ZIP_BUDGET = {
+  entryInflated: 64 * 1024 * 1024,
+  totalInflated: 128 * 1024 * 1024,
+  entries: 5000,
+};
+
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
   for (let n = 0; n < 256; n += 1) {
@@ -146,18 +155,25 @@ function _readEocd(buf) {
  */
 function extractZip(buf, destDir) {
   const { cdOffset, count } = _readEocd(buf);
+  if (count > ZIP_BUDGET.entries) throw new Error('zip 条目数 ' + count + ' 超上限 ' + ZIP_BUDGET.entries + '（疑似恶意包）');
   const names = [];
+  let inflatedTotal = 0;
   let p = cdOffset;
   for (let n = 0; n < count; n += 1) {
     if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error('无效的 zip：中央目录损坏');
     const method = buf.readUInt16LE(p + 10);
     const crc = buf.readUInt32LE(p + 16);
     const compSize = buf.readUInt32LE(p + 20);
+    const uncompSize = buf.readUInt32LE(p + 24);
     const nameLen = buf.readUInt16LE(p + 28);
     const extraLen = buf.readUInt16LE(p + 30);
     const commentLen = buf.readUInt16LE(p + 32);
     const localOffset = buf.readUInt32LE(p + 42);
     const name = buf.toString('utf8', p + 46, p + 46 + nameLen);
+
+    // 名字防护提前到建目录之前：目录条目同样能带 ../ 逃逸（原实现只防文件分支，是漏半边）。
+    if (name.length > 512) throw new Error('zip 条目名过长（' + name.length + ' 字节）: ' + name.slice(0, 64));
+    if (name.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(name)) throw new Error('zip 条目名为绝对路径: ' + name);
 
     // 中央目录与局部头都记了 name/extra 长度，二者可能不同（局部头可带额外对齐 extra）。
     // 数据起点必须按**局部头**算，否则偏移出界。
@@ -170,18 +186,27 @@ function extractZip(buf, destDir) {
 
     // 目录条目：只建目录，不写文件、不校验 CRC。
     if (name.endsWith('/')) {
-      fs.mkdirSync(path.join(destDir, name), { recursive: true });
+      const dirOut = path.join(destDir, name);
+      const dirRel = path.relative(path.resolve(destDir), path.resolve(dirOut));
+      if (dirRel.startsWith('..') || path.isAbsolute(dirRel)) {
+        throw new Error('zip 目录条目路径越界（疑似目录穿越攻击）: ' + name);
+      }
+      fs.mkdirSync(dirOut, { recursive: true });
       p += 46 + nameLen + extraLen + commentLen;
       continue;
     }
 
+    if (uncompSize > ZIP_BUDGET.entryInflated) {
+      throw new Error('zip 条目声明解压超 ' + ZIP_BUDGET.entryInflated + ' 字节（疑似 zip 炸弹）: ' + name);
+    }
     // 这里就是历史缺陷所在：按 method 分派，而不是无条件当 Stored。
     let data;
     if (method === METHOD_STORED) {
       data = Buffer.from(raw);
     } else if (method === METHOD_DEFLATE) {
       try {
-        data = zlib.inflateRawSync(raw);
+        // maxOutputLength 是硬闸：声明值可以撒谎，解压中逐字节计数才拦得住炸弹。
+        data = zlib.inflateRawSync(raw, { maxOutputLength: ZIP_BUDGET.entryInflated });
       } catch (e) {
         throw new Error('zip 条目 Deflate 解压失败: ' + name + ' (' + e.message + ')');
       }
@@ -190,16 +215,21 @@ function extractZip(buf, destDir) {
         'zip 条目使用了不支持的压缩方式 method=' + method + '（只支持 0=Stored / 8=Deflate）: ' + name
       );
     }
+    inflatedTotal += data.length;
+    if (inflatedTotal > ZIP_BUDGET.totalInflated) {
+      throw new Error('zip 累计解压超预算 ' + ZIP_BUDGET.totalInflated + ' 字节（疑似 zip 炸弹）: ' + name);
+    }
 
-   const out = path.join(destDir, name);
+    const out = path.join(destDir, name);
     // 目录穿越防护：内核包来自外部（本地 feed / 网络），必须挡住 ../ 逃逸。
     const rel = path.relative(path.resolve(destDir), path.resolve(out));
     if (rel.startsWith('..') || path.isAbsolute(rel)) {
       throw new Error('zip 条目路径越界（疑似目录穿越攻击）: ' + name);
     }
+    // CRC 必须在写盘之前验：先写后验会把坏内容留在磁盘上（半途失败即污染目标树）。
+    if (crc32(data) !== crc) throw new Error('zip 条目 CRC 校验失败: ' + name);
     fs.mkdirSync(path.dirname(out), { recursive: true });
     fs.writeFileSync(out, data);
-    if (crc32(data) !== crc) throw new Error('zip 条目 CRC 校验失败: ' + name);
 
     p += 46 + nameLen + extraLen + commentLen;
   }
@@ -262,4 +292,5 @@ function readEntry(buf, wantName) {
 module.exports = {
   createZip, extractZip, crc32, listZip, readEntry,
   METHOD_STORED, METHOD_DEFLATE,
+  ZIP_BUDGET,
 };

@@ -15,13 +15,13 @@ name: Fast APK (no Node rebuild)
 #    → 直接 gradle assembleDebug → 审计 → 发布。
 #    全程分钟级。
 #
-#  什么时候该用 build-node.yml 而不是这条：
+#  什么时候该用 build-apk.yml（全量 Node 编译，手动触发）而不是这条：
 #    · 改了 scripts/build-node-android.sh
 #    · 要换 Node 版本
-#    这两类改动才需要真正重编，编完用 pin-node.yml 把新产物固化，
-#    之后本 workflow 自动用上新版本。
+#    这两类改动才需要真正重编，编完用 release-admin 的 pin 模式固化
+#    （tag: pin-node-*），之后本 workflow 自动用上新版本。
 #
-#  决策表见 docs/ARCHITECTURE.md 第 8 节。
+#  决策表见 ARCHITECTURE.md 第 8 节。
 # ============================================================================
 
 on:
@@ -32,7 +32,7 @@ on:
   push:
     branches: [main, master]
     # 只在【真正影响 APK 内容】的路径变更时触发。
-    # 用 paths 白名单（而非 build-node.yml 的 paths-ignore 黑名单）：
+    # 用 paths 白名单（而非 build-apk.yml 的 paths-ignore 黑名单）：
     # 白名单的默认语义是"不匹配就不跑"，对日常出包这条高频路径，
     # 宁可漏跑（可手动/ tag 触发）也不要因新增目录而莫名跑起来。
     paths:
@@ -49,8 +49,8 @@ on:
       # native/ 下的 C 源（flock/publish/ptyprobe 等）现场编译进 jniLibs ——
       # 改源码同样等于改 APK 内容（tag 触发不受 paths 限制，但 push 直出也要能触发）。
       - 'container/native/**'
-      # 内核垫片（守卫投放进 dsh 安装树的 JS）随基线包上机 —— 改它同样是改 APK。
-      - 'kernel/**'
+      # 注意【不】包含 kernel/**：ADR-0005 后内核不随 APK 分发（下面有专门断言），
+      # 内核改动走 kernel-ota.yml 出 OTA 包 —— 让 fast-apk 监听它只会白烧机时。
     # 额外的 tag 触发：推 fast-<任意> 即可手动跑一次，不必改代码。
     # 维护环境（沙箱）无法操作网页、workflow_dispatch 点不了，
     # tag 是最干净的显式触发手段。
@@ -185,10 +185,10 @@ jobs:
             echo "[error] 找不到 Release: $TAG"
             echo
             echo "说明预编译运行时尚未固化。请先执行一次："
-            echo "  Actions → 'Pin Node runtime' → Run workflow"
+            echo "  Actions → 'Admin (cancel / status)' → Run workflow，mode 选 pin"
             echo "  或推送 tag: pin-node-latest"
             echo
-            echo "（固化会从最近一次成功的 build-node 运行里提取并校验两个 .so）"
+            echo "（固化会从最近一次成功的 build-apk 运行里提取并校验两个 .so）"
             exit 1
           fi
 
@@ -689,6 +689,23 @@ jobs:
             echo "::error title=APK 无 npm::assets/npm/npm.zip 不在 APK 内 —— 面板无法安装任何 Agent。常见原因：Stage pinned npm 步骤被删/改名。"
             exit 1
           fi
+
+          # --- adb-client 资产审计（硬失败，权限通道的字节）---
+          # 这 8 个 JS 是 ADB 配对/shell 的唯一实现（ADR-0003），运行时由
+          # NodeProvisioner.ensureAdbClientScripts 整目录复制到 files/adb-client。
+          # 任何一个没被打进 APK，真机表现都是 adb.* 功能静默不可用。
+          # 文件集合以 src/main/assets 目录为事实源（不硬编码数量）：
+          # 加文件忘了被打包、或误删文件，都会在这里红。
+          echo
+          echo "--- adb-client 资产 ---"
+          for f in container/app/src/main/assets/node/adb-client/*.js; do
+            n="assets/node/adb-client/$(basename "$f")"
+            if unzip -l "$APK" | grep -q "$n"; then echo "[ok] $n"; else echo "[error] APK 缺 $n"; exit 1; fi
+          done
+          SRC_N=$(ls container/app/src/main/assets/node/adb-client/*.js 2>/dev/null | wc -l)
+          APK_N=$(unzip -l "$APK" | grep -c 'assets/node/adb-client/[^/]*\.js$' || true)
+          [ "$SRC_N" = "$APK_N" ] || { echo "[error] adb-client 件数不一致：源码 $SRC_N vs APK $APK_N"; exit 1; }
+          echo "[ok] adb-client 审计通过（$SRC_N 个文件）"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

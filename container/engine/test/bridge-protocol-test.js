@@ -22,9 +22,9 @@ const npMiss = methods.missingCaps('notif.post', ['base']);
 check('notif.post 仅需 base → 满足', npMiss !== null && npMiss.length === 0);
 check('未知方法 methodCaps = null', methods.methodCaps('nope.nope') === null);
 check('isAudited app.install = true', methods.isAudited('app.install') === true);
-check('notif.post 不审计', methods.isAudited('notif.post') === false);
+check('notif.post 审计（与 Kotlin MethodDef 第二参数一致）', methods.isAudited('notif.post') === true);
 check('BRIDGE_TOKENS 含 8 组', methods.BRIDGE_TOKENS.length === 8);
-check('DEVICE_CAPS 含 device_owner/accessibility/shizuku', ['device_owner', 'accessibility', 'shizuku'].every((c) => methods.DEVICE_CAPS.includes(c)));
+check('DEVICE_CAPS 含 device_owner/accessibility/adb_shell', ['device_owner', 'accessibility', 'adb_shell'].every((c) => methods.DEVICE_CAPS.includes(c)));
 
 const round = JSON.parse(JSON.stringify(proto.response(2, { ok: true })));
 check('response 往返 id 保持', round.id === 2 && round.result.ok === true);

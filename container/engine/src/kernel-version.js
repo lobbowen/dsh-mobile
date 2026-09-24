@@ -1,6 +1,7 @@
 'use strict';
 
-// 内核版本比较 —— **唯一规则**，与设备端 Kotlin 的 KernelManager.compareKernelVersions 同语义。
+// 内核版本比较 —— **唯一规则**，与设备端 Kotlin 的 kernel/KernelVersions.compare 同语义
+// （用例表由 kernel-version-crosslang-test.js 双向钉住）。
 //
 // 规则：按 \d+ 与 \D+ 切 token，数字段按数值比较，其余按字符串比较。
 //   · 0.1.0-android.10 > 0.1.0-android.2

@@ -3,11 +3,11 @@ package io.github.lobbowen.dshmobile.native
 import android.content.Context
 import android.util.Log
 import io.github.lobbowen.dshmobile.RuntimeDiagnostics
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.util.zip.ZipFile
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * 单个资产的验证结果。

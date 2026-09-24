@@ -178,7 +178,7 @@ jobs:
         uses: actions/checkout@v4
 
       # ---------------------------------------------------------------------------
-      # 校验 OTA 公钥锚点已焊接进 APK（设备端验签唯一信任源，见 BASE_SPEC §8）。
+      # 校验 OTA 公钥锚点已焊接进 APK（设备端验签唯一信任源，见 base-spec §8）。
       # 锚点 container/app/src/main/assets/ota-public.pem 应随仓库提交；若提供 OTA_PUBLIC_KEY
       # secret（PEM 文本）则以其为准覆盖，便于私钥轮换后重焊。
       # ---------------------------------------------------------------------------
@@ -227,12 +227,8 @@ jobs:
         #
         # 放在这里（gradle 之前、setup-java 之前）的理由：
         # · 只需 Node，秒级完成，有错立刻知道；
-        # · 不依赖任何构建产物（基线包是产物，生成它需要私钥 secret
-        # 且本 workflow 并不生成它）—— 所以只能跑 test:logic。
-        #
-        # 为什么不跑 test:baseline：本 workflow 不产出基线包，
-        # 强求它存在会在每次发布构建上都红一次，属于假红。
-        # 基线包由 fast-apk.yml 的 "Build kernel baseline bundle" 生成并验证。
+        # · 不依赖任何构建产物 —— test:logic 全部自带 fixture，
+        #   基线包那条测试路径已随 ADR-0005（本地 feed 与 APK 内置基线收敛删除）退役。
         #
         # 必须更新 /tmp/ci-stage。这是一个真实踩过的坑：
         # 失败诊断（第 25 步）读的是 /tmp/ci-stage 这个**由各步骤自行写入**的
@@ -240,7 +236,7 @@ jobs:
         # 于是"容器引擎测试失败"会被报成"validate-workflow 失败"，指向完全错误的方向。
         # 步骤 id 同理：诊断脚本按 id 列 outcomes，漏登记就看不到这一步的状态。
         run: |
-          echo "2.5/9 container-engine-tests" > /tmp/ci-stage
+          echo "2.5/9 container/engine-tests" > /tmp/ci-stage
           set -euo pipefail
           cd container/engine
           npm run test:logic 2>&1 | tee /tmp/engine-test.log
@@ -741,6 +737,21 @@ jobs:
           echo
           echo "[ok] APK 审计通过：清单内 ${ASSETS} 全部在包里。"
 
+          # --- adb-client 资产审计（与 fast-apk.yml 同款，硬失败）---
+          # 这 8 个 JS 是 ADB 配对/shell 的唯一实现（ADR-0003），运行时由
+          # NodeProvisioner.ensureAdbClientScripts 整目录复制到 files/adb-client。
+          # 文件集合以 src/main/assets 目录为事实源：加文件/误删都会在这里红。
+          echo
+          echo "--- adb-client 资产 ---"
+          for f in container/app/src/main/assets/node/adb-client/*.js; do
+            n="assets/node/adb-client/$(basename "$f")"
+            if unzip -l "$APK" | grep -q "$n"; then echo "[ok] $n"; else echo "[error] APK 缺 $n"; exit 1; fi
+          done
+          SRC_N=$(ls container/app/src/main/assets/node/adb-client/*.js 2>/dev/null | wc -l)
+          APK_N=$(unzip -l "$APK" | grep -c 'assets/node/adb-client/[^/]*\.js$' || true)
+          [ "$SRC_N" = "$APK_N" ] || { echo "[error] adb-client 件数不一致：源码 $SRC_N vs APK $APK_N"; exit 1; }
+          echo "[ok] adb-client 审计通过（$SRC_N 个文件）"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -874,7 +885,7 @@ jobs:
             # 容器引擎测试的日志：它是最可能"秒级失败"的一步，
             # 而失败原因（哪个套件、哪条断言）只在日志里。
             # 不转存的话，沙箱侧就只能看到一个 outcome=failure，无从下手。
-            echo "=== container-engine test log (tail 60) ==="
+            echo "=== container/engine test log (tail 60) ==="
             if [ -f /tmp/engine-test.log ]; then
               wc -c /tmp/engine-test.log
               grep -E '^FAIL|^结果' /tmp/engine-test.log | tail -20

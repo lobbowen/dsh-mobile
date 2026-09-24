@@ -13,7 +13,7 @@
 |---|---|
 | 主仓 | `lobbowen/dsh-mobile`（public） |
 | 远端 main | `453ceae`（2026-09-23 **重建**：单一根提交；含 P2 容器根清理） |
-| 形态 | **单仓双子项目（M）**：容器目录 + `dsh-android-kernel/` |
+| 形态 | **单仓双子项目（M）**：`container/`（L0）+ `kernel/`（L1）。2026-09 布局收敛前的旧名 `app/ + container-engine/ + native/ + dsh-android-kernel/` 均已不存在（映射见 `docs/contracts/layout.json`） |
 | 本工作副本 | 已建 `.git`；旧历史与全部旧 ref 备份于本机 `work/_backup/` |
 | 旧 ref 快照 | `work/_backup/dsh-mobile/BACKUP-REFS.txt`（3 分支 / 26 tag 的真实 SHA） |
 | 结论 | 基线已干净；后续改动一律走**分支 + PR**，`main` 不再 force-push |
@@ -24,11 +24,11 @@
 
 | 仓 | 角色 | 默认分支 | 冻结性 |
 |---|---|---|---|
-| `dsh-mobile` | **主仓**。`app/ + container-engine/ + native/ + scripts/` = **L0 容器**；`dsh-android-kernel/` = **L1 内核** | `main` | 容器冻结；内核热更 |
+| `dsh-mobile` | **主仓**。`container/{app,engine,native} + scripts/` = **L0 容器**；`kernel/` = **L1 内核** | `main` | 容器冻结；内核热更 |
 | `dsh-supervisor-core` | 内核的 **PC 起源仓**（历史）。**不再承载 Android 内核** | `master` | 只读 / 归档 |
 | `dsh-supervisor-launcher` | 桌面 Tauri 壳（PC） | `main` | 独立演进 |
 
-> **规则：内核只有一个正统家。** 当前 = `dsh-mobile/dsh-android-kernel/`。
+> **规则：内核只有一个正统家。** 当前 = `dsh-mobile/kernel/`。
 > 将来若迁到独立仓（S 子模块 / T 子树），必须一次性迁移并更新本表，不允许两处同时可写。
 
 ---
@@ -63,23 +63,24 @@
 ## 6. CI 触发（path 过滤 = 两个项目互不干扰）
 
 ```yaml
-# .github/workflows/kernel-ota.yml
-on:
-  push:
-    tags: ['kernel-v*']
-    paths: ['dsh-android-kernel/**']
+# .github/workflows/kernel-ota.yml —— 纯手动 workflow_dispatch（出 OTA 包需显式决策，
+# 不配 push 触发；版本号从单一事实源 kernel/package.json 解析，ADR-0004）
 
 # .github/workflows/fast-apk.yml
 on:
   push:
     paths:
-      - 'app/**'
-      - 'container-engine/**'
-      - 'native/**'
-      - '.github/workflows/fast-apk.yml'
+      - 'container/app/**'
+      - 'container/engine/**'      # 注意：单仓迁移后旧名 container-engine/ 已不存在
+      - 'container/native/**'
+      - '.github/native-assets.txt'
+      - 'gradle/**' 'gradlew' 'build.gradle.kts' 等
+    tags: ['fast-*']               # 沙箱点不了 dispatch 按钮，tag 即手动通道
 ```
 
-目的：**内核改动不触发 APK 重编；容器改动不触发内核发版。** 这是单仓实现"两套独立发布"的关键。
+目的：**内核改动不触发 APK 重编；容器改动不自动发内核包。** 这是单仓实现"两套独立发布"的关键。
+（历史上这里写的是 `app/**` + `container-engine/**` + kernel-ota 的 `tags: kernel-v*` push 触发——
+均与现行 workflow 实况不符，2026-09-25 按实际配置更正。）
 
 ---
 

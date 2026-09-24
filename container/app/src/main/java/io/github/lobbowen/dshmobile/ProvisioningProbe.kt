@@ -1,27 +1,23 @@
 package io.github.lobbowen.dshmobile
 
-import android.Manifest
 import android.app.admin.DevicePolicyManager
-import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import android.os.Environment
 import android.provider.Settings
-import androidx.core.content.ContextCompat
-import io.github.lobbowen.dshmobile.kernel.ShizukuState
+import io.github.lobbowen.dshmobile.bridge.ScreenCaptureService
+import io.github.lobbowen.dshmobile.kernelota.KernelManager
+import io.github.lobbowen.dshmobile.lifecycle.DeviceAdminReceiver
+import io.github.lobbowen.dshmobile.lifecycle.DshAccessibilityService
 import io.github.lobbowen.dshmobile.permissions.LifecycleChecks
 import io.github.lobbowen.dshmobile.permissions.PermissionCatalog
 import io.github.lobbowen.dshmobile.permissions.PermissionCenter
-import io.github.lobbowen.dshmobile.shizuku.ShizukuShell
 import java.io.File
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 
 /**
- * 预置自检探针（PROVISIONING.md §4）—— 「这台设备现在到底能干什么」的**唯一事实来源**。
+ * 预置自检探针（docs/runbook/provisioning.md §4）—— 「这台设备现在到底能干什么」的**唯一事实来源**。
  *
- * 为什么需要它：控制面能力（Device Owner / 无障碍 / Shizuku / MediaProjection / 特殊权限）
+ * 为什么需要它：控制面能力（Device Owner / 无障碍 / ADB 无线调试 / MediaProjection / 特殊权限）
  * 是**焊死在设备 + APK 里**的，无法经内核包热更新获得。设备换机、恢复出厂、`dpm remove-active-admin`
  * 之后，能力会**静默消失**——内核侧只会看到桥握手少了几组，却不知道是「没预置」还是「预置坏了」。
  * 探针把这件事变成开机可见的体检报告，落 files/diagnostics.txt，由 MainActivity 轮询渲染。
@@ -30,12 +26,10 @@ import java.util.concurrent.TimeUnit
  */
 object ProvisioningProbe {
 
-    private const val TAG = "ProvisioningProbe"
-
-    /** 检查项 id —— 与 PROVISIONING.md §4 逐条对齐。 */
+    /** 检查项 id —— 与 docs/runbook/provisioning.md §4 逐条对齐。 */
     const val DEVICE_OWNER = "device-owner"
     const val ACCESSIBILITY = "accessibility"
-    const val SHIZUKU = "shizuku"
+    const val ADB_SHELL = "adb-shell"
     const val MEDIAPROJECTION = "mediaprojection"
     const val SPECIAL_PERMS = "special-perms"
     const val LIFECYCLE = "lifecycle"
@@ -51,7 +45,7 @@ object ProvisioningProbe {
         val results = listOf(
             checkDeviceOwner(ctx),
             checkAccessibility(ctx),
-            checkShizuku(ctx),
+            checkAdbShell(ctx),
             checkMediaProjection(ctx),
             checkSpecialPerms(ctx),
             checkLifecycle(ctx)
@@ -101,7 +95,7 @@ object ProvisioningProbe {
         } catch (_: Throwable) { 0 }
         return ProbeResult(
             DEVICE_OWNER, "Device Owner (DPC)", true, "已激活",
-            "活动管理员数=$active；device_admin.xml 已声明 9 条 uses-policies"
+            "活动管理员数=$active；device_admin.xml 已声明 11 条 uses-policies"
         )
     }
 
@@ -137,35 +131,32 @@ object ProvisioningProbe {
     }
 
     /**
-     * Shizuku 三态探测：**未安装 / 已安装未授权 / 已授权可用**。
+     * ADB 无线调试通道探测：未配密钥 / 已配密钥未配对 / 已配对可用。
      *
-     * 为什么必须细分：这三种状态对内核的**处置方式完全不同**——
-     * · 未安装 → 引导用户去装（或改用无线调试路径）；
-     * · 未授权 → 只需在 Shizuku App 里点一次授权，成本极低，值得重试；
-     * · 已授权 → shell 能力理论上可用（但容器侧尚未接入 SDK，见下）。
-     * 只报「不可用」会让内核既不知道要不要重试，也不知道该提示用户做什么。
+     * 为什么必须细分：这三种状态对调用方的**处置方式完全不同**——
+     * · 未配密钥 → 什么都不用做，首次 pair 自动生成（这不是故障）；
+     * · 未配对 → 需用户在设备无线调试弹窗输入配对码，走 shell.pair；
+     * · 已配对 → adb_shell 能力置位，shell.exec 可用（host/端口存在 state.json 里）。
+     * 只报「不可用」会让内核既不知道该不该重试，也不知道该提示用户做什么。
      *
-     * 当前容器**未内置 Shizuku SDK**（P4 决策：先做 shell 兜底 + 探测增强，不引入
-     * 第三方 AAR 以免污染冻结容器的信任边界）。因此即使 Shizuku 完全就绪，
-     * `shell.exec` 仍以**应用 uid** 执行（privileged=false），不会冒充 shell uid(2000)。
-     * 真正的特权 shell 需要 Shizuku SDK 的 `Shell.newProcess(...)` 通道。
+     * 判定刻意用**文件存在性**而非 spawn `cli.js status`：探针在每次开机跑，
+     * 多 spawn 一次 Node 不值当；且门禁的判据本来就是这个文件
+     * （见 HostBridgeService.deviceCapabilities），两边必须同一把尺子。
      */
-    private fun checkShizuku(ctx: Context): ProbeResult {  // ADR-0003：Shizuku 为必备能力
-        // ① 是否安装（包存在性）—— 仅用于把"没装"与"装了没启动"分开
-        val installedVersion = try {
-            @Suppress("DEPRECATION")
-            val pi = ctx.packageManager.getPackageInfo("moe.shizuku.privileged.api", 0)
-            pi.versionName ?: "unknown"
-        } catch (_: Throwable) { null }
-
-        // ②/③ 走真实 SDK：binder 是否在 + 是否已授权本应用（不再反射 ServiceManager / 猜设置键名）
-        val binderAlive = ShizukuShell.binderAlive()
-        val granted = ShizukuShell.permissionGranted()
-        // 四态分类与处置文案是**纯逻辑**（见 ShizukuState，有单测）：
-        // 「装了没启动」与「没装」处置完全不同，而 ok 必须**同时**依赖 binder 与授权。
-        val c = ShizukuState.classify(installedVersion, binderAlive, granted)
-
-        return ProbeResult(SHIZUKU, "Shizuku / 无线调试", c.ok, c.status, c.hint)
+    private fun checkAdbShell(ctx: Context): ProbeResult {
+        val hasKey = File(ctx.filesDir, "adb/adbkey.pem").exists()
+        val paired = File(ctx.filesDir, "adb/state.json").exists()
+        val status = when {
+            paired -> "已配对（adb_shell 能力已置位，shell.exec 可用）"
+            hasKey -> "已有 ADB 身份密钥，但未配对"
+            else -> "尚无 ADB 身份密钥（首次配对时自动生成，无需预置）"
+        }
+        return ProbeResult(
+            ADB_SHELL, "ADB 无线调试（shell 通道）", paired, status,
+            if (paired) "端点与凭据在 files/adb/；设备重启后连接端口会变，需重新配对。"
+            else "设备开启 开发者选项 → 无线调试，在面板输入配对弹窗给的 6 位码（bridge shell.pair）。\n" +
+                "配对成功后 bridge:shell 整组解锁（shell.exec 以 shell uid(2000) 执行）"
+        )
     }
 
     private fun checkMediaProjection(ctx: Context): ProbeResult {

@@ -1,6 +1,7 @@
 package io.github.lobbowen.dshmobile.native
 
 import android.content.Context
+import io.github.lobbowen.dshmobile.runtime.NodeRuntimeService
 import java.io.File
 
 /**
@@ -12,7 +13,7 @@ import java.io.File
  *
  * ## 同步契约
  *
- * 注册表是源头，以下三处是它的**投影**，由 `container-engine/test/native-assets-test.js`
+ * 注册表是源头，以下三处是它的**投影**，由 `container/engine/test/native-assets-test.js`
  * 做双向一致性守护（任一方向漏项都会让测试失败）：
  *
  * | 投影 | 位置 | 内容 |
@@ -24,7 +25,7 @@ import java.io.File
  * ## 新增一个二进制资产要做什么
  *
  * 1. 在 [ALL] 里加一行；
- * 2. 跑 `node container-engine/test/native-assets-test.js`，按报错补齐三处投影；
+ * 2. 跑 `node container/engine/test/native-assets-test.js`，按报错补齐三处投影；
  * 3. 改 `scripts/build-node-android.sh` 让它把产物拷进 `jniLibs/<abi>/`。
  *
  * 就这些 —— 运行时启动链、诊断、exec-probe、`sys.nativeAssets` 全部自动跟上。

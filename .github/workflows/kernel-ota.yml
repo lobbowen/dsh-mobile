@@ -1,6 +1,6 @@
 name: Build & Sign Kernel OTA Bundle
 
-# 构建并签名「可热更新的内核（L1）」OTA 包：对齐 docs/BASE_SPEC.md §5 通道一（构建期签名）。
+# 构建并签名「可热更新的内核（L1）」OTA 包：对齐 docs/contracts/base-spec.md §5 通道一（构建期签名）。
 #
 # 双信任根：本工作流用 CI secret OTA_PRIVATE_KEY_PEM（ed25519 私钥）签名内核包；
 # 设备端用焊死在 APK 的 container/app/src/main/assets/ota-public.pem 验签 —— 私钥绝不进 APK。

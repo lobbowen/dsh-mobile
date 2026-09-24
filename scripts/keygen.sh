@@ -2,7 +2,7 @@
 # ============================================================================
 #  生成容器 OTA 开发期 ed25519 密钥对。
 #
-#  双信任根（见 docs/BASE_SPEC.md §8）：
+#  双信任根（见 docs/contracts/base-spec.md §8）：
 #   - 私钥（keys/ota-private.pem）仅用于「签名内核包」，绝不入库、仅本地/CI secret。
 #   - 公钥焊进 APK（app/src/main/assets/ota-public.pem）作只读锚点，
 #     设备端验签只用这把焊死的公钥 —— 私钥轮换需发新版 APK。

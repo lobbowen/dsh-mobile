@@ -24,9 +24,9 @@ function call(cli, id, method, params) {
 (async () => {
   const srv = new BridgeServer({
     socketPath: sock,
-    // 设备已预置：base / device_owner / accessibility / shizuku / build_chain
+    // 设备已预置：base / device_owner / accessibility / adb_shell / build_chain
     // 未预置：manage_external_storage（故 storage 组不可用）、mediaprojection、notification_access
-    deviceCapabilities: ['base', 'device_owner', 'accessibility', 'shizuku', 'build_chain'],
+    deviceCapabilities: ['base', 'device_owner', 'accessibility', 'adb_shell', 'build_chain'],
     auditLogPath: audit,
   });
   await srv.start();

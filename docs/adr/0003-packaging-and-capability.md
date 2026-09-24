@@ -78,3 +78,27 @@
 **保持不变（这些就是最大能力的正确取值）**：`targetSdk=28`（app-home `execve` 地基）、
 `minSdk=24`、仅 `arm64-v8a`、`specialUse` + `mediaProjection` 前台服务类型、
 DO 与无障碍留在同一包（一次预置拿到全部策略面）。
+
+---
+
+## 勘误（2026-09-24）：结论三**整体作废** —— shell 通道 = 壳自带 ADB 客户端
+
+上文（含 2026-09-23 修订）保留作决策轨迹，**不再生效**。作废理由按严重度排：
+
+1. **双特权通道必成冲突**：自带 ADB 客户端（阶段 3 落地）与 Shizuku 提供同一个
+   shell uid(2000)。两条通道意味着两份配对状态、两套故障模式，而能力矩阵只能
+   报告一个"有没有"—— 这正是本 ADR 自己反对的"让能力有没有变得不可判定"。
+2. **环境前提不成立**：目标设备事实是 **adb 关闭、未装 Shizuku**（见
+   `docs/runbook/handover-2026-09-24.md`）。"必备能力"的前提在目标机上永远不满
+   足，整组 `bridge:shell` 实际恒为 `-32001` —— 焊死了一条永远不通的路。
+3. **免 PC 悖论**：非 root 机型启动 Shizuku 本身需要一次 adb / 无线调试配对；
+   既然已经会做无线调试配对，**直连 adbd 即可**，Shizuku 成了纯多余中间层。
+4. **分层错位**：ADB 客户端属**权限通道（壳/L0）**，不得放内核（L1 热更层）——
+   OTA 可替换的代码若能读写 ADB 身份密钥，双信任根失效。实现落
+   `container/app/src/main/assets/node/adb-client/`，凭据 `files/adb/`，
+   经一次性 Node 进程调用（minSdk 24 无 TLS exporter，Kotlin 重写不可行）。
+
+**现行结论**：`shell.*` 四方法（pair/status/exec/forget）契约见
+`docs/contracts/bridge-protocol.md` §3.3；能力令牌 `adb_shell`（已配对才置位）；
+Shizuku 依赖/AIDL/Provider 已整体删除，engine 测试链有反向门禁（复活即红）。
+ADR-001「不引入第三方 AAR」对其原措辞**恢复有效**（本 ADR 曾为其开的例外随结论三一并作废）。

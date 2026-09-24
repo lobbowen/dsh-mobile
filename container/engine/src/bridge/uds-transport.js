@@ -1,17 +1,11 @@
 'use strict';
 
 // HostBridge 传输层：Unix 域套接字（UDS）+ 换行分隔 JSON 帧。
-// 权限绑定本 App UID（chmod 0600），仅本应用进程可连（对齐 BRIDGE_PROTOCOL §1）。
+// 权限绑定本 App UID（chmod 0600），仅本应用进程可连（对齐 docs/contracts/bridge-protocol.md §1）。
 // 真实安卓侧由 Kotlin HostBridgeService 提供同构 UDS 服务端；此处为可测参考实现 + 测试传输。
 
 const net = require('net');
 const fs = require('fs');
-const os = require('os');
-const path = require('path');
-
-function tmpSocketName(prefix) {
-  return path.join(os.tmpdir(), (prefix || 'bridge') + '-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.sock');
-}
 
 /** 创建 UDS 服务端。onMessage(sock, msg) 收到每帧解析后的对象。返回 { server, path, close() }。 */
 function createServer(socketPath, onMessage, opts) {
@@ -75,4 +69,4 @@ function connect(socketPath) {
   return api;
 }
 
-module.exports = { createServer, connect, tmpSocketName };
+module.exports = { createServer, connect };

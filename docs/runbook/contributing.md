@@ -10,13 +10,13 @@
 
 | 你改了什么 | 走哪条 | 耗时 | 说明 |
 |---|---|---|---|
-| `app/src/main/assets/**`（含 `server.js`） | `fast-apk.yml` | **分钟级** | 推 `main` 自动触发 |
-| `app/src/main/java/**`（Kotlin） | `fast-apk.yml` | **分钟级** | 推 `main` 自动触发 |
-| `app/src/main/res/**`（布局、字符串） | `fast-apk.yml` | **分钟级** | 推 `main` 自动触发 |
-| `app/build.gradle.kts`、`gradle.properties` | `fast-apk.yml` | **分钟级** | 推 `main` 自动触发 |
+| `container/app/src/main/assets/**`（含 `server.js`） | `fast-apk.yml` | **分钟级** | 推 `main` 自动触发 |
+| `container/app/src/main/java/**`（Kotlin） | `fast-apk.yml` | **分钟级** | 推 `main` 自动触发 |
+| `container/app/src/main/res/**`（布局、字符串） | `fast-apk.yml` | **分钟级** | 推 `main` 自动触发 |
+| `container/app/build.gradle.kts`、`gradle.properties` | `fast-apk.yml` | **分钟级** | 推 `main` 自动触发 |
 | `scripts/build-node-android.sh` | `build-apk.yml`（**手动 Run workflow**，push 自动触发已移除） | **2~3 小时** | 真的需要重编 Node 才会发生 |
-| 升级 Node 版本 | `build-apk.yml`（手动）+ `pin-node.yml` | **2~3 小时** | 编完必须固化，见第 3 节 |
-| `dsh-android-kernel/**`（内核） | `kernel-ci.yml`（回归 + 面板门禁）；签名内核包走 `kernel-ota.yml` | 分钟级 | **不重编 APK** —— 内核经 OTA/feed 分发；基线包要随内核刷新时手动跑一次 fast-apk |
+| 升级 Node 版本 | `build-apk.yml`（手动）+ release-admin 的 pin（tag `pin-node-*`） | **2~3 小时** | 编完必须固化，见第 3 节 |
+| `kernel/**`（内核） | `ci.yml` 的 kernel job（回归 + 面板门禁）；签名内核包走 `kernel-ota.yml` | 分钟级 | **不重编 APK** —— 内核经 OTA/feed 分发 |
 | `docs/**`、`*.md` | 不触发构建 | — | 纯文档 |
 | `.github/workflows/**` | 不触发构建 | — | 但会跑校验 |
 
@@ -33,7 +33,7 @@ W^X（targetSdk 29+）下 `filesDir` 里的一切**不可 execve**：`npm`/`dsh`
 - dsh 子命令：`NativeManager.dshCliInvocation()`（插件域经 `resolveDshCli` 注入，不许自己拼 `'dsh'`）。
 - 装机成功后 `config.command` 会被写回 `[node绝对, 入口绝对, 'web']` 并落盘 —— 新增消费方读它，不要再猜路径。
 
-行为门禁：`dsh-android-kernel/test/npm-contract-chain-test.js`（假 npm-cli/假 dsh 入口全链路，PATH 收缩保证结构上碰不到真 npm）。
+行为门禁：`kernel/test/npm-contract-chain-test.js`（假 npm-cli/假 dsh 入口全链路，PATH 收缩保证结构上碰不到真 npm）。
 
 ---
 
@@ -41,7 +41,7 @@ W^X（targetSdk 29+）下 `filesDir` 里的一切**不可 execve**：`npm`/`dsh`
 
 ```bash
 # 改代码
-vim app/src/main/assets/node/server.js
+vim container/app/src/main/assets/node/server.js
 
 # 提交推送 —— fast-apk 自动跑，分钟级出包
 git add -A && git commit -m "..." && git push origin main
@@ -62,7 +62,7 @@ git add -A && git commit -m "..." && git push origin main
 
 ```bash
 # ① 改清单里的默认版本
-vim app/src/main/assets/node-versions.json   # 改 default 字段
+vim container/app/src/main/assets/node-versions.json   # 改 default 字段
 
 # ② 触发重编（会改清单并编 Node，约 2~3 小时；push 不会自动触发，必须手动）
 #    Actions → "Build Android Node Container APK" → Run workflow
@@ -90,7 +90,7 @@ Release，不固化就会报"找不到 Release"并给出指引。
 git push origin refs/tags/fast-verify-1        # 手动跑一次 fast-apk
 
 # ---- 固化运行时 ----
-git push origin refs/tags/pin-node-latest      # 固化最近一次成功的 build-node 产物
+git push origin refs/tags/pin-node-latest      # 固化最近一次成功的 build-apk 产物
 git push origin refs/tags/pin-node-<run_id>    # 固化指定 run 的产物
 
 # ---- 管理（admin.yml）----
@@ -124,7 +124,7 @@ git push origin refs/tags/admin-cancelall         # 取消所有在跑的
 python3 scripts/validate-workflow.py
 
 # ② JS 语法检查（改过 server.js 时）
-node --check app/src/main/assets/node/server.js
+node --check container/app/src/main/assets/node/server.js
 ```
 
 `validate-workflow.py` 能抓到的问题，都是**曾经真实浪费过一整轮 CI 的**：

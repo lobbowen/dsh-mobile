@@ -165,9 +165,12 @@ UI 移动端 webview 适配 · 签名包 OTA 与 APK 公钥焊接。
 > - ✅ `storage` —— **P5 落地**：`fs.read/write/list/mkdir` 真实实现。范围全放开（有
 >   `MANAGE_EXTERNAL_STORAGE` 即通行），危险路径（`/dev`、`/proc`、`/sys`）**仅提示不拦截**。
 >   `fs.read` 的 `encoding:"auto"` 会做 UTF-8 无损校验，不无损自动退 base64。
-> - ⚠️ `shell` —— **P4 兜底**：`shell.exec` 以**应用 uid** 执行（返回体带 `privileged:false`），
->   不冒充 shell uid(2000)。特权 shell 需 Shizuku SDK，容器**未内置**（不引入第三方 AAR）。
->   设备未装 Shizuku 时调用仍返回 `-32001`（方法级 caps 为 `shizuku`）。
+> - ✅ `shell` —— **壳自带 ADB 客户端（无线调试），唯一特权 shell 通道**（ADR-0003 勘误
+>   2026-09-24）：`shell.pair/status/exec/forget`，exec 以 shell uid(2000) 执行
+>   （`privileged:true`；ADB shell v1 通道不回传退出码，故无 `exitCode` 字段）。
+>   客户端实现在壳（`assets/node/adb-client/`），凭据 `files/adb/`；未配对时
+>   `adb_shell` 能力不置位 → `shell.exec` 按契约返回 `-32001`（pair/status 仍可用）。
+>   Shizuku 已整体删除（第三方特权通道与自带 ADB 客户端冲突，且目标机 adb 关闭、从未满足前提）。
 > - ✅ `build` —— **P3 已收口（2026-09 决策：不做内置编译链）**。「内置构建链」已实测证伪
 >   （Google Maven 无 aarch64 版 aapt2，interp/架构/libc 三关装机后无法补救），
 >   原「全内置 / 首启下载 / 最小子集」三选一并撤销；方案论证以容器仓

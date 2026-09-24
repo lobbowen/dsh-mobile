@@ -1,22 +1,22 @@
 'use strict';
 
-// HostBridge 8 组方法表与能力声明（对齐 BRIDGE_PROTOCOL.md §3 + PROVISIONING.md）。
+// HostBridge 8 组方法表与能力声明（对齐 docs/contracts/bridge-protocol.md §3 + docs/runbook/provisioning.md）。
 //
 // 两层能力：
 // 1) bridgeGroup：内核 kernel.json 的 requires 使用的「组令牌」bridge:<group>。
-// 2) deviceCaps：方法实际依赖的「设备预置能力」（device_owner / accessibility / shizuku / …），
-// 由 PROVISIONING.md 决定设备是否具备。缺失 → 桥返回 ERR_CAPABILITY_MISSING。
-// audit=true 的方法属 BRIDGE_PROTOCOL §5 强制审计的特权操作。
+// 2) deviceCaps：方法实际依赖的「设备预置能力」（device_owner / accessibility / adb_shell / …），
+// 由 docs/runbook/provisioning.md 决定设备是否具备。缺失 → 桥返回 ERR_CAPABILITY_MISSING。
+// audit=true 的方法属 docs/contracts/bridge-protocol.md §5 强制审计的特权操作。
 
 const GROUPS = ['app_control', 'ui_automation', 'shell', 'device_policy', 'storage', 'build', 'notification', 'system'];
 const BRIDGE_TOKENS = GROUPS.map((g) => 'bridge:' + g);
 
-// 设备预置能力（PROVISIONING.md 权限栈）
+// 设备预置能力（docs/runbook/provisioning.md 权限栈）
 const DEVICE_CAPS = [
   'base',                     // 容器 App 基础能力（始终可用）
   'device_owner',             // Device Owner (DPC)
   'accessibility',            // AccessibilityService
-  'shizuku',                  // Shizuku / 无线调试
+  'adb_shell',                // 内置 ADB 客户端已配对（无线调试；ADR-0003 勘误 2026-09-24）
   'mediaprojection',          // MediaProjection
   'manage_external_storage',  // MANAGE_EXTERNAL_STORAGE
   'notification_access',      // 通知访问
@@ -52,14 +52,22 @@ const METHODS = {
   'app.uninstall':         { group: 'app_control', caps: ['device_owner'], audit: true },
   'app.grantPermission':   { group: 'app_control', caps: ['device_owner'], audit: true },
 
-  'ui.tap':               { group: 'ui_automation', caps: ['accessibility'] },
-  'ui.swipe':             { group: 'ui_automation', caps: ['accessibility'] },
-  'ui.inputText':         { group: 'ui_automation', caps: ['accessibility'] },
+  // audit 标志的基准 = Kotlin HostBridgeService 的 MethodDef 第二参数（真机上
+  // 唯一真正写 bridge-audit.log 的实现）；由 bridge-methods-crosslang-test.js 钉住。
+  'ui.tap':               { group: 'ui_automation', caps: ['accessibility'], audit: true },
+  'ui.swipe':             { group: 'ui_automation', caps: ['accessibility'], audit: true },
+  'ui.inputText':         { group: 'ui_automation', caps: ['accessibility'], audit: true },
   'ui.getUiTree':         { group: 'ui_automation', caps: ['accessibility'] },
   'ui.screenshot':        { group: 'ui_automation', caps: ['mediaprojection'], audit: true },
   'ui.waitFor':           { group: 'ui_automation', caps: ['accessibility'] },
 
-  'shell.exec':           { group: 'shell', caps: ['shizuku'], audit: true },
+  // shell 组 = 内置 ADB 客户端通道（一次性 Node 进程跑 assets/node/adb-client/）。
+  // pair/status/forget 只要求 base —— 否则未配对设备永远无法配对（能力先于配对的死锁）。
+  // exec 要求 adb_shell（= 已配对，files/adb/state.json 存在）。
+  'shell.status':         { group: 'shell', caps: ['base'] },
+  'shell.pair':           { group: 'shell', caps: ['base'], audit: true },
+  'shell.forget':         { group: 'shell', caps: ['base'], audit: true },
+  'shell.exec':           { group: 'shell', caps: ['adb_shell'], audit: true },
 
   'policy.setPassword':    { group: 'device_policy', caps: ['device_owner'], audit: true },
   'policy.lockNow':       { group: 'device_policy', caps: ['device_owner'], audit: true },
@@ -82,7 +90,7 @@ const METHODS = {
   'build.status':         { group: 'build', caps: ['kernel_update'] },
 
   'notif.read':           { group: 'notification', caps: ['notification_access'], audit: true },
-  'notif.post':           { group: 'notification', caps: ['base'] },
+  'notif.post':           { group: 'notification', caps: ['base'], audit: true },
 
   'sys.info':             { group: 'system', caps: ['base'] },
   // 原生资产自检：只读探测，无权限要求。
@@ -135,7 +143,7 @@ const GROUP_REQUIRED = {
   'system': 'base',
   'device_policy': 'device_owner',
   'ui_automation': 'accessibility',
-  'shell': 'shizuku',
+  'shell': 'adb_shell',
   'storage': 'manage_external_storage',
   // 组代表能力 = kernel_update，不是 build_chain。
   // 前者"任意设备具备"，后者"永不具备"（见 DEVICE_CAPS 处关于 aapt2 的论证）。
@@ -149,16 +157,7 @@ function groupCaps(group) {
   return rep ? [rep] : [];
 }
 
-/** 该组全部方法依赖的设备能力并集（供文档/诊断呈现；不用于握手判定）。 */
-function groupAllCaps(group) {
-  const out = new Set();
-  for (const [m, def] of Object.entries(METHODS)) {
-    if (def.group === group) def.caps.forEach((c) => out.add(c));
-  }
-  return [...out];
-}
-
 module.exports = {
   GROUPS, BRIDGE_TOKENS, DEVICE_CAPS, METHODS, GROUP_REQUIRED,
-  methodCaps, isAudited, missingCaps, groupCaps, groupAllCaps,
+  methodCaps, isAudited, missingCaps, groupCaps,
 };

@@ -26,11 +26,74 @@ WebView 访问的本地 HTTP 服务。
    /data/app/~~xxx/<pkg>-yyy/lib/arm64-v8a/    ← 唯一可 exec 的目录
                           │ exec
                           ▼
-   Node 进程（前台服务 :node）→ 监听 127.0.0.1:3080
-                          │ HTTP
-                          ▼
-   MainActivity 的 WebView
+   Node 进程（宿主服务 :node，由 :main 监督者持有）
+        │ 首启探针 127.0.0.1:3080 / 内核控制面 127.0.0.1:36360
+        ▼
+   MainActivity 的 WebView（加载内核同源托管的 /__host 宿主帧）
 ```
+
+### 1.1 分层模型：一个「系统」，五层各司其职
+
+容器不是"一个会拉起 Node 的 App"，而是一个**系统**；Node.js 只是可插拔的
+**运行时环境**（未来可并列 Python/Go）。分层的依据是生命周期归属与故障域：
+
+| 层 | 职责 | 所在进程 | 载体 |
+|---|---|---|---|
+| **L-A 容器生命周期** | 复活运行时宿主（binder 边 + 活性判定）、确保 L-B 在册 | :main | `ContainerSupervisor`、`BootReceiver`、`DshAccessibilityService`（解冻锚点）、判据 `lifecycle/NodeWatchdogPolicy` |
+| **L-B 能力桥** | 把安卓独有能力（安装/截屏/无障碍/adb shell…）经 UDS 供内核调用；**不兼任任何监督逻辑** | :main | `HostBridgeService` |
+| **L-C 运行时环境** | 实例宿主：spawn 并退避重启内核子进程、写进程记录、健康轮询 | :node | `NodeRuntimeService`（boot 循环 + `runtime/SupervisorPolicy`） |
+| **L-D 生态适配** | 补齐"guest 在安卓上缺的语境"：DSH_* 注入、flock/LD_PRELOAD 垫片、$PREFIX、权限模式 | 装配期 | `runtime/GuestAdapter`（**唯一装配点**）、`PrefixProvisioner` |
+| **L-E 内核工具箱** | Agent/工具箱逻辑；**不得实现任何保活假设**（ADR-0006 §2.3），只走 OTA 安装（ADR-0005） | node 子进程（可热更） | `kernel/` |
+
+**标签两维制**：L0/L1/L2 是**发布维**（base-spec §2：更新通道与冻结度），L-A..L-E
+是本表的**职责维**（生命周期归属与故障域），两维正交、不可混排编号。历史上
+HostBridge 被标为"L3"——与发布维撞号且暗示存在第四发布通道，已废止：它随 APK
+冻结，发布维属 L0，职责维属 L-B。分层文档此后不得再出现"L3"作为层名
+（注：kernel 源码注释里的"L3 进程解耦/L3 监督"是 router-daemon 脱耦的另一套
+内部代号，与本分层法无关）。
+
+两条由分层推出的铁律：
+
+1. **环境装配唯一权威 = `GuestAdapter`。** 「装配环境 → spawn 内核」曾有两份
+   孪生实现（Kotlin 内联 ProcessBuilder ⇄ engine 侧旧 `src/boot.js`），靠注释互指"对齐"，
+   实际 TMPDIR、socket 名、PATH（Kotlin 侧被写两次互相覆盖）全都漂转过 —— 漂移的
+   后果是只在真机复现的静默断链。现在旧 `boot.js` 已物理迁入
+   `container/engine/test/boot-fixture.js`（桌面 e2e 夹具，src 里不再有生产装配孪生），
+   `container/engine/test/boot-env-contract-test.js` 跨语言解析两侧键集与核心值：
+   **夹具发明一个 GuestAdapter 没有的键 = CI 红**。装配结果由
+   `GuestAdapterTest`（golden 向量）钉住。
+2. **新运行时 = 在 `ContainerSupervisor` 再注册一条 binder 边；禁止运行时进程
+   自己拉自己。** 不变式：**APK（:main + 无障碍锚）不死，运行时环境就不死。**
+   旧设计把"抢救"与"尸体"放同一进程（:node 自家的重拉循环与它同归于尽，
+   真机定罪见 ADR-0006 §1.2）—— 那是架构错误，不是 bug。
+
+### 1.2 正确的启动链路（顺序与边都有实测理由）
+
+```
+开机 / 覆盖安装（BOOT_COMPLETED · MY_PACKAGE_REPLACED）
+  └─ BootReceiver
+       ├─ startService ──────► ContainerSupervisor (:main, L-A)
+       └─ startForegroundService ► NodeRuntimeService (:node, L-C)   ← 开机兜底边：
+                                        :node 有通知 1001，O+ 要求 FGS 起点配对；
+                                        其余互保边（后台调用点）全是普通 startService
+
+ContainerSupervisor.onStartCommand（每次被戳）
+  ├─ ensureBridge() ──startService──► HostBridgeService (:main, L-B)   ← L-A 确保 L-B
+  └─ bindService(BIND_AUTO_CREATE) ──► NodeRuntimeService               ← 监督边
+       · onBind 必须返回真 binder（null = null-binding，既不保活也无断开回调）
+       · 死 → onServiceDisconnected → 立即 rebind（绝不在死亡路径 startForegroundService）
+       · 卡死（node.pid 记录连丢 3 拍 / 断开超 30s 自愈预算）→ stop+unbind+rebind，带冷却
+
+NodeRuntimeService.onCreate（:node）
+  ├─ 提升 FGS + 写 files/node.pid（早于任何 spawn：慢启动不得攒 strikes）
+  ├─ ContainerSupervisor.ensureRunning()      ← 互保边④
+  └─ bootLoop: GuestAdapter.probePlan/kernelPlan → spawn → 健康轮询 → SupervisorPolicy 退避
+       └─ 每次 boot 尝试再 ensureRunning()     ← 自纠"监督者先于 :node 死"的窗口
+
+互保闭环（任一侧活着，环就能转起来）：BootReceiver① · a11y onServiceConnected② ·
+HostBridge.onCreate③ → :node onCreate/boot 尝试④ → 监督者 → {桥, :node}
+```
+
 
 ---
 
@@ -171,7 +234,7 @@ val NODE = NativeExecutable(
 | ⑤ | `scripts/inject-libcxx-into-apk.py` | 注入锚点 |
 
 ② 直接读 ③（`nativeAssetNames`），所以实际只需同步 ③④⑤。
-**一致性由 `container-engine/test/native-assets-test.js` 双向守护**
+**一致性由 `container/engine/test/native-assets-test.js` 双向守护**
 （正向：注册表每项下游都有；反向：下游没有注册表未声明的项）。
 已用变异测试验证：改注册表名、删清单项、加幽灵项、在别处重新硬编码 ——
 四种漂移全部被捕获。
@@ -285,7 +348,8 @@ GET maven.aliyun.com/repository/google/com/android/tools/build/aapt2/<V>/
 
 关键洞察：**「DSH 改自己的内核」根本不需要碰 APK**。内核是
 `files/kernel/<version>/` 下的一个数据目录，容器本来就有权改它。
-唯一缺的是「设备上从哪拿到新内核包」—— 这就是 `LocalKernelFeed` 补的那一步。
+唯一缺的是「设备上从哪拿到新内核包」—— 这就是远端 OTA feed（`KernelOtaUpdater`，
+ADR-0005：曾经的 `LocalKernelFeed` 本地投放路径已删除）。
 
 ### 2.4 两把独立的信任根（极易混淆，必须辨析）
 

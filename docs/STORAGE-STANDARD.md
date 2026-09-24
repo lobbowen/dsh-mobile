@@ -15,7 +15,7 @@
 | **L0 容器** | `container/app`（Kotlin）· `container/engine`（纯 Node OTA）· `container/native`（C）· `container/_artifacts`（产物样本） | APK 冻结层 | 仅 Node/桥/权限变更才重编 |
 | **L1 内核** | `kernel/`（原 `dsh-android-kernel/`） | 独立单元，容器 OTA 热更新 | 不冻结 |
 | **L2 Agent** | 不入库（运行时 npm 拉取） | 内核管理 | — |
-| **L3 能力桥** | `container/app/src/main/java/<pkg>/bridge` | 随 APK | 冻结 |
+| **L0 内·L-B 能力桥** | `container/app/src/main/java/<pkg>/bridge` | 随 APK | 冻结 |
 | **Tier S** | `system/`（priv-app/sepolicy/init/kernel frag） | ROM 集成面 | 独立 |
 | **文档** | `docs/{adr,contracts,runbook,archive}` · 根 `README.md` `ARCHITECTURE.md` | — | — |
 | **CI** | `.github/`（GitHub 强制根位置）· `scripts/`（跨层构建/发布工具） | — | — |

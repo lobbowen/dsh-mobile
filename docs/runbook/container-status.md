@@ -1,7 +1,15 @@
 # 容器底座（L0）状态 — CONTAINER-STATUS
 
 > 对齐用户指令：「容器底座最关键，不做完内核跑不起来」。本文档记录 L0 容器底座的完成度、验证方式与剩余缺口。
-> 架构基线见 [`docs/BASE_SPEC.md`](docs/BASE_SPEC.md)（草案 v0.2）。
+> 架构基线见 [`docs/contracts/base-spec.md`](docs/BASE_SPEC.md)（草案 v0.2）。
+>
+> **⚠ 勘误（2026-09-24）**：本文中所有 Shizuku 相关条目（P3/P4 行、§关键闭环内的
+> "shell.exec 经 Shizuku UserService"）**已被整体作废** —— shell 通道现唯一实现为
+> 壳自带 ADB 客户端（`assets/node/adb-client/`，凭据 `files/adb/`，能力令牌
+> `adb_shell`）。Shizuku 依赖/AIDL/Provider/Kotlin 全栈已删除，engine 测试链有
+> 反向门禁。现行契约见 `docs/contracts/bridge-protocol.md` §3.3 与
+> `docs/adr/0003-packaging-and-capability.md` 的「勘误（2026-09-24）」。
+> 历史行保留作当时验证记录，勿照做。
 
 ---
 
@@ -17,7 +25,7 @@
 |---|---|---|
 | **M1 引擎核心** | `container-engine/src/`：zip / keys / sign / verify / kernel-bundle / ota-engine / runtime-json / boot | 35 passed |
 | **M2 HostBridge 协议库** | `bridge/{protocol,methods,uds-transport,server}.js`：JSON-RPC 2.0 + UDS + 握手协商 + 错误码 + 审计 | 23 passed（bridge-protocol 14 / bridge-e2e 9） |
-| **M2.5 内核↔容器桥互通** | 内核侧客户端（`dsh-android-kernel/src/platform/host-bridge/`）与容器参考桥**真实 UDS 互通**；`app.openUrl` 补齐（browser 承接方）；组级能力语义两侧收敛 | 14 passed（bridge-interop，跨仓） |
+| **M2.5 内核↔容器桥互通** | 内核侧客户端（现 `kernel/src/platform/host-bridge/`，当时名 dsh-android-kernel/）与容器参考桥**真实 UDS 互通**；`app.openUrl` 补齐（browser 承接方）；组级能力语义两侧收敛 | 14 passed（bridge-interop，跨仓） |
 | **M2.6 内核更新桥闭环** | 宿主帧由**内核同源托管** `/__host`（消除跨源 403）；容器 `MainActivity` 改加载该 URL + 回灌严格按内核契约（含 `v/ok/restartUncertain`）；控制面端口 3080→36360 修正 | 22 passed（kernel-update-bridge 契约） |
 | **M3 Kotlin 安卓应用** | `MainActivity/NodeRuntimeService/HostBridgeService/KernelManager/BootReceiver/DeviceAdminReceiver/DshAccessibilityService/ProvisioningProbe/PackageInstallReceiver/ScreenCaptureService` + Manifest 注册 + 加载内核同源宿主帧 `/__host` + `dsh:kernel-update` 桥 | **CI 真编译通过**（fast-apk `b47df7f`，14/14 步，APK 已发布） |
 | **P1 预置自检探针** | `ProvisioningProbe`：5 项体检（人读 `diagnostics.txt` + 机器读 `provisioning.json`）；Device Owner 13 个 API 修正 | 编译通过 + 逻辑自测 |
@@ -58,9 +66,9 @@
    - ✅ `ui_automation`：`ui.tap / ui.swipe / ui.inputText / ui.getUiTree / ui.waitFor / ui.screenshot` —— **P2 + P5 全部真实实现**。前五个需无障碍服务连接；`ui.screenshot` 需用户点一次屏幕捕获授权（**不可预置**，与 Device Owner 的本质区别）。
    - ✅ `device_policy` 全组：`policy.* / sys.setTime / sys.setTimeZone / sys.reboot / app.install / app.uninstall / app.grantPermission`（P1 修正 13 处 API 误用；`app.install/uninstall` 走 `PackageInstaller`）。
    - ✅ `storage`：`fs.read / fs.write / fs.list / fs.mkdir` 真实实现（P5）。需 `MANAGE_EXTERNAL_STORAGE`（Manifest 已声明，属 AppOps 特殊权限，需跳设置页或 Device Owner 静默授予）。
-   - ✅ `shell`：`shell.exec` 已按**必备能力**落定（ADR-0003）—— 内置 Shizuku SDK，经 UserService 以 **shell uid(2000)** 执行；未装/未启动/未授权时能力不可用（`-32001`），**不做应用 uid 兜底**。环境前提：非 root 机型需 adb / 无线调试启动一次 Shizuku 并授权本应用。
+   - ✅ `shell`：**现行实现 = 壳自带 ADB 客户端**（`assets/node/adb-client/`，无线调试配对，ADR-0003 勘误 2026-09-24）—— `shell.exec` 以 **shell uid(2000)** 执行；能力 `adb_shell`=已配对，未配对时 `-32001`，**不做应用 uid 兜底**。~~Shizuku SDK/UserService 路径已整体删除~~（本节原文见文首勘误）。
    - ✅ `build`：**P3 已收口（决策：不做内置编译链）**。设备编译工具链经实测证伪（无 aarch64 版 aapt2，见 `ARCHITECTURE.md` §2.3），「全内置 vs 首启下载 vs 最小子集」三选一并撤销。本组语义修正为「**从 OTA 源安装/升级已签名内核**」（ADR-0005，唯一入口）：`build.kernelInstall`（参数 `checkOnly?`；验签走 Node 一次性进程，失败不破坏现状，`restartRequired` 由调用方处理）、`build.kernelStatus`、`build.status`（旧名兼容）均已真实实现（能力 `kernel_update`，任意设备具备）；本地 feed 与 APK 内置基线已在 S1/S2 收敛删除；`build.apk` 已废弃，返回带迁移指引的 `-32602`。若未来出现「设备侧重打包修改 APK」的真实需求，另立方案（纯 Node 重打包 + 重签名，不引入原生工具链）。
-2. **OTA 下发编排**：`OtaEngine` 已具备验签/解包/原子指针能力；设备上“轮询 manifest→下载→apply→回滚”的调度器由内核侧 bootstrap（Node）承接，本仓未内置一个独立 Kotlin OTA 调度器（按 BASE_SPEC §5，OTA 引擎逻辑归于内核引导）。
+2. **OTA 下发编排**：**已由 Kotlin 侧 `KernelOtaUpdater` 承接**（启动链 autoCheck 默认开：查 feed→比对→断点续传下载→Node 验签→原子安装→健康检查提交/回滚，ADR-0005）。`OtaEngine`（JS）保留为构建/校验库。原文"本仓未内置独立 Kotlin OTA 调度器、由内核 bootstrap 承接"已作废（2026-09-25 更正）。
 3. ~~**基线内核 `assets/kernel/baseline.zip`**~~ **已于 ADR-0005 整体删除**：内核不再随 APK 分发，`ensureBaseline`/`BaselineResult` 一并与仓库里那个签入的 1.2MB 基线包一起移除。内核来源只剩 OTA。
 4. **Kotlin 已过 CI 编译，待真机验证**：fast-apk（`b47df7f`）14/14 步全绿、APK 审计通过、已发布到 `apk-latest`。
    编译过程暴露并修复了 6 处**存量 API 误用**（详见下方「编译修复」），说明此前「只评审不编译」确实藏了真 bug。
@@ -91,11 +99,10 @@
 ## 5. 如何复现验证
 
 ```bash
-# 容器引擎单测（无需 Android SDK）
-cd container-engine && npm test        # 107 passed, 0 failed（9 套件）
+# 容器引擎单测 —— 只跑在 CI（scripts/require-ci.js 拦截本地执行，退出码 86）
+cd container/engine && npm run test:logic   # 套件清单见 README §6
 
-# 单独跑内核↔容器桥互通（默认读同仓子目录 dsh-android-kernel/；DSH_KERNEL_REPO 可覆盖）
-node test/bridge-interop-test.js       # 14 passed, 0 failed
+# 内核↔容器桥互通在 CI 的 test:logic 内（默认读同仓 kernel/；DSH_KERNEL_REPO 可覆盖指向 fork）
 
 # 构建并签名一个内核 OTA 包（开发期需先 ./scripts/keygen.sh）
 ./scripts/build-kernel-bundle.sh <内核源码目录> 1.4.0 node24-arm64-android35 https://cdn.example.com/ota
@@ -113,6 +120,8 @@ git push origin HEAD:refs/tags/admin-logs-<run_id> && git fetch origin ci-admin
 git show origin/ci-admin:ci-admin.txt
 ```
 
-> **单仓联调提示**：内核（同仓 `dsh-android-kernel/` 子目录）在自己的目录内跑 `npm test`（含 `test/host-bridge-test.js`）；
+> **单仓联调提示**：内核（同仓 `kernel/` 子目录）在自己的目录内跑 `npm test`（含 `test/host-bridge-test.js`）；
 > 容器侧 `test:logic` 会**默认**对同仓内核执行桥互通测试（bridge-interop / kernel-update-bridge），无需再配跨仓路径。
-> 两侧协议须逐字段一致。抽象命名空间 UDS 名默认 `dsh_hostbridge`，容器 `boot.js` 经 `DSH_BRIDGE_SOCKET` 注入内核。
+> 两侧协议须逐字段一致。抽象命名空间 UDS 名默认 `dsh_hostbridge`，生产链路由容器侧
+> `GuestAdapter`（唯一装配点）经 `DSH_BRIDGE_SOCKET` 注入内核；engine `test/boot-fixture.js` 只是桌面测试夹具，
+> 同名事实由 `boot-env-contract-test.js` 钉死。

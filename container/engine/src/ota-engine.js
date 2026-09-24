@@ -1,6 +1,6 @@
 'use strict';
 
-// 内核 OTA 引擎（单写入者 = 容器）。对齐 docs/BASE_SPEC.md §5 通道一。
+// 内核 OTA 引擎（单写入者 = 容器）。对齐 docs/contracts/base-spec.md §5 通道一。
 //
 // 设备端流程：poll manifest → download zip → sha256 校验 → 解包取 kernel.json →
 //   验签(焊死公钥) → engines.node 比对固定运行时 → requires ⊆ 设备能力 →
@@ -46,11 +46,6 @@ class OtaEngine {
       return fs.readdirSync(this.kernelDir)
         .filter((d) => d !== 'CURRENT' && fs.statSync(path.join(this.kernelDir, d)).isDirectory());
     } catch (_e) { return []; }
-  }
-
-  async fetchManifest(url) {
-    const buf = await this.httpGet(url);
-    return JSON.parse(buf.toString('utf8'));
   }
 
   /**
@@ -118,11 +113,17 @@ class OtaEngine {
     const dest = path.join(this.kernelDir, version);
     const tmp = dest + '.tmp-' + process.pid + '-' + Date.now();
     fs.rmSync(tmp, { recursive: true, force: true });
-    extractZip(zipBuf, tmp);
-    const inner = path.join(tmp, 'kernel', version);
-    if (!fs.existsSync(inner)) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error('包内缺少 kernel/' + version + ' 目录'); }
-    fs.rmSync(dest, { recursive: true, force: true });
-    fs.renameSync(inner, dest);
+    try {
+      extractZip(zipBuf, tmp);
+      const inner = path.join(tmp, 'kernel', version);
+      if (!fs.existsSync(inner)) throw new Error('包内缺少 kernel/' + version + ' 目录');
+      fs.rmSync(dest, { recursive: true, force: true });
+      fs.renameSync(inner, dest);
+    } catch (e) {
+      // 半途失败必须收走临时树：否则每次坏包都在 files/kernel/ 里留一份永久残留。
+      fs.rmSync(tmp, { recursive: true, force: true });
+      throw e;
+    }
     fs.rmSync(tmp, { recursive: true, force: true });
     this._setPointer(version);
     this.log('ota: 已切换到内核 ' + version);
