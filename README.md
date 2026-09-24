@@ -40,7 +40,7 @@ dsh-mobile/                                  # 单仓双子项目（M）
 ├─ system/                                  # ── Tier S（ROM/priv-app 集成）──
 ├─ docs/
 │  ├─ adr/                                  # 决策记录 0001…
-│  ├─ contracts/                            # base-spec / bridge-protocol / layout.json / *.schema.json
+│  ├─ contracts/                            # base-spec / bridge-protocol / ui-onboarding-spec / layout.json / *.schema.json
 │  ├─ runbook/                              # git-repo / testing / versioning / kernel-ota / release-identity / handover / provisioning / contributing
 │  └─ STORAGE-STANDARD.md                   # 存储规范（位置 + 对账）
 ├─ scripts/                                 # 跨层构建/发布工具
@@ -63,6 +63,7 @@ dsh-mobile/                                  # 单仓双子项目（M）
 | **内核 OTA（怎么推 / 怎么下）** | [`docs/runbook/kernel-ota.md`](docs/runbook/kernel-ota.md) |
 | 决策记录（含已否决方案） | [`docs/adr/`](docs/adr/) |
 | 契约（内核包 / 运行时 / 桥协议） | [`docs/contracts/`](docs/contracts/) |
+| **L0 GUI 开场管线（S0–S4）/ S0 配对交互** | [`docs/contracts/ui-onboarding-spec.md`](docs/contracts/ui-onboarding-spec.md)、[ADR-0007](docs/adr/0007-l0-gui-onboarding-and-pairing-ux.md) |
 
 ### 2.1 ⚠️ 为什么 node 必须放在 jniLibs 而不是 assets
 

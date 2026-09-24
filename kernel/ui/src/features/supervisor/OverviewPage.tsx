@@ -7,7 +7,7 @@ import {
   Activity, ArrowUpRight, Power, RefreshCw, Rocket,
   ShieldCheck, TerminalSquare, Trash2, TriangleAlert,
 } from "lucide-react";
-import type { NodeLtsStatus } from "../../services/supervisor";
+import type { AdbStatus, NodeLtsStatus } from "../../services/supervisor";
 import { toast } from "sonner";
 import { Button } from "../../framework/ui";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../framework/ui/dialog";
@@ -182,9 +182,10 @@ export function OverviewPage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 px-6 py-3">
-          {/* 左：环境检测（Node 版本 + LTS 更新提示）——中屏以下(<980px 视口)隐藏, 位置让给右侧按钮 */}
-          <div className="hidden lg:block">
+          {/* 左：环境检测（Node 版本 + LTS 更新提示 + ADB 通道只读状态）——中屏以下(<980px 视口)隐藏, 位置让给右侧按钮 */}
+          <div className="hidden lg:flex lg:items-center lg:gap-3">
             <EnvDetect />
+            <AdbEnv />
           </div>
           {/* 右：安装/运行操作 + 分隔线 + 危险操作——ml-auto: 左信息隐藏(窄屏)时按钮组靠右对齐 */}
           <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -301,8 +302,36 @@ function EnvDetect() {
   );
 }
 
-/** 事件日志（懒加载）：先渲染 15 条；滚到列表底部哨兵出现 → 继续 +15，直到全部事件渲染完。 */
-function EventLogPanel({ events }: { events: SupervisorEvent[] }) {
+/**
+ * ADB 通道环境状态（只读瓦片）：配对操作在容器 GUI 完成（ADR-0007），
+ * 这里只呈现桥透传的结果。60s 轮询——配对态变化不频繁，太快是噪音。
+ */
+function AdbEnv() {
+  const [st, setSt] = useState<AdbStatus | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      const r = await supervisorApi.adbStatus().catch(() => null);
+      if (alive) setSt(r);
+    };
+    void load();
+    const iv = setInterval(load, 60 * 1000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+
+  if (!st) return <span className="text-xs text-muted-foreground">ADB 检测…</span>;
+  const tone: "ok" | "warn" | "off" = st.ok === false ? "off" : st.paired ? "ok" : "warn";
+  const label = st.ok === false ? "ADB 桥不可用" : st.paired ? "ADB 已配对" : "ADB 未配对（去 App 配对）";
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground" title={st.paired ? `${st.host ?? ""}:${st.connectPort ?? ""}` : undefined}>
+      <ToneDot tone={tone} />
+      {label}
+    </span>
+  );
+}
+
+/** 事件日志（懒加载）：先渲染 15 条；滚到列表底部哨兵出现 → 继续 +15，直到全部事件渲染完。 */function EventLogPanel({ events }: { events: SupervisorEvent[] }) {
   const PAGE = 12;
   const [visible, setVisible] = useState(PAGE);
   const total = events.length;

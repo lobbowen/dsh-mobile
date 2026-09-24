@@ -55,7 +55,7 @@ describe("supervisorApi http 客户端", () => {
   });
 });
 
-describe("ADB 配对客户端", () => {
+describe("ADB 状态客户端", () => {
   it("adbStatus GET /adb/status", async () => {
     const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
       Promise.resolve(jsonResponse(200, { ok: true, paired: false, pubkey: "k" })));
@@ -65,39 +65,6 @@ describe("ADB 配对客户端", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/adb/status");
     expect(init?.method).toBe("GET");
-  });
-
-  it("adbPair POST /adb/pair 携带 host/pairPort/code", async () => {
-    const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
-      Promise.resolve(jsonResponse(200, { ok: true, guid: "G", type: 1 })));
-    vi.stubGlobal("fetch", fetchMock);
-    const r = await supervisorApi.adbPair({ host: "1.2.3.4", pairPort: 42111, code: "123456", connectPort: 40595 });
-    expect(r.guid).toBe("G");
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("/adb/pair");
-    expect(init?.method).toBe("POST");
-    expect(JSON.parse(String(init?.body))).toEqual({ host: "1.2.3.4", pairPort: 42111, code: "123456", connectPort: 40595 });
-  });
-
-  it("adbShell POST /adb/shell 携带 cmd", async () => {
-    const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
-      Promise.resolve(jsonResponse(200, { ok: true, out: "uid=2000", logs: [] })));
-    vi.stubGlobal("fetch", fetchMock);
-    const r = await supervisorApi.adbShell({ cmd: "id" });
-    expect(r.out).toBe("uid=2000");
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("/adb/shell");
-    expect(JSON.parse(String(init?.body))).toEqual({ cmd: "id" });
-  });
-
-  it("adbForget POST /adb/forget", async () => {
-    const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
-      Promise.resolve(jsonResponse(200, { ok: true })));
-    vi.stubGlobal("fetch", fetchMock);
-    await supervisorApi.adbForget();
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("/adb/forget");
-    expect(init?.method).toBe("POST");
   });
 });
 

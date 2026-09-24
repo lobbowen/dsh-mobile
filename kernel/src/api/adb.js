@@ -1,54 +1,29 @@
 'use strict';
 
-// 域：ADB 无线调试（/adb/*）—— 状态 / 配对 / shell / 清除端点。
-// 真实逻辑在 src/adb/index.js（门面：密钥与端点落盘、pairing、transport）；
-// 本域只做 HTTP 包装与 CSRF 写保护（与其它域一致）。
-const adb = require('../adb');
+// 域：ADB 无线调试 —— **只读环境状态**（/adb/status）。
+//
+// 为什么这个域只剩透传（ADR-0007 §2.3）：ADB 配对/密钥/传输是权限通道，物理上必须留在
+// L0 容器（凭据与审计不得交给 OTA 可换的内核件）。操作入口在容器 GUI 与桥方法
+// （shell.pair / shell.exec / shell.forget，见 ADR-0003 勘误）；本端点仅把桥
+// shell.status 的结果作为「环境状态」呈现给面板，不承载任何配置写操作。
+
+const hostBridge = require('../platform/host-bridge/client');
 
 function owns(pathname) {
-  return pathname === '/adb/status' || pathname === '/adb/pair' || pathname === '/adb/shell' || pathname === '/adb/forget';
+  return pathname === '/adb/status';
 }
 
 function handle(ctx) {
-  const { sup, req, res, pathname, send, collectBody, originAllowed } = ctx;
+  const { req, res, pathname, send } = ctx;
 
   if (req.method === 'GET' && pathname === '/adb/status') {
-    return send(200, { ok: true, ...adb.status() });
-  }
-
-  if (req.method === 'POST' && pathname === '/adb/pair') {
-    if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
-    return collectBody(req, res, 8192, (body) => {
-      let j = {};
-      try { j = body ? JSON.parse(body) : {}; } catch { return send(400, { ok: false, error: 'bad json' }); }
-      const host = String(j.host || '').trim();
-      const pairPort = Number(j.pairPort);
-      const code = String(j.code || '').trim();
-      const connectPort = j.connectPort ? Number(j.connectPort) : undefined;
-      if (!host || !(pairPort > 0) || !code) return send(400, { ok: false, error: '需要 host / pairPort / code' });
-      Promise.resolve(adb.pair({ host, pairPort, code, connectPort, name: j.name }))
-        .then((r) => send(200, { ok: true, ...r }))
-        .catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) }));
-    });
-  }
-
-  if (req.method === 'POST' && pathname === '/adb/shell') {
-    if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
-    return collectBody(req, res, 8192, (body) => {
-      let j = {};
-      try { j = body ? JSON.parse(body) : {}; } catch { return send(400, { ok: false, error: 'bad json' }); }
-      const cmd = String(j.cmd || '').trim();
-      if (!cmd) return send(400, { ok: false, error: '需要 cmd' });
-      Promise.resolve(adb.shell({ cmd, host: j.host, connectPort: j.connectPort, timeoutMs: j.timeoutMs }))
-        .then((r) => send(200, { ok: true, ...r }))
-        .catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) }));
-    });
-  }
-
-  if (req.method === 'POST' && pathname === '/adb/forget') {
-    if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
-    adb.forget();
-    return send(200, { ok: true });
+    hostBridge.client().call('shell.status', {})
+      .then((r) => {
+        if (r && typeof r === 'object') return send(200, { ok: true, ...r });
+        return send(200, { ok: false, error: '桥不可用（非容器环境或 :main 未就绪）' });
+      })
+      .catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) }));
+    return undefined;
   }
 
   if (req.method === 'GET' || req.method === 'POST') return send(404, { error: 'not found', path: pathname });

@@ -9,7 +9,7 @@
  * ============================================================================
  */
 import type {
-  AccessKeyResult, AccessKeyStatus, AdbPairResult, AdbShellResult, AdbStatus,
+  AccessKeyResult, AccessKeyStatus, AdbStatus,
   EnvStatus, EventsPage, GenericOk,
   GuardVersion, InstalledPluginsResponse,
   LanPanelStatus, LifecycleModuleId, MarketResponse, NodeLtsStatus, PluginUpdatesResponse,
@@ -179,12 +179,7 @@ export const supervisorApi = {
   envStatus: () => get<EnvStatus>("/env/status"),
   nodeLts: () => get<NodeLtsStatus>("/env/node-lts"),
 
-  // ── ADB 无线调试自助配对（/adb/*）──
-  // 配对/连接是网络 I/O，显式放宽到 30s（默认 15s 偏紧）。
+  // ── ADB 环境状态（/adb/status，只读）──
+  // 配对/执行/清除是**写操作**，物理上归 L0 容器 GUI + 桥方法（ADR-0007）；面板只读状态。
   adbStatus: () => get<AdbStatus>("/adb/status"),
-  adbPair: (p: { host: string; pairPort: number; code: string; connectPort?: number; name?: string }) =>
-    post<AdbPairResult>("/adb/pair", p, { timeoutMs: 30_000 }),
-  adbShell: (p: { cmd: string; host?: string; connectPort?: number; timeoutMs?: number }) =>
-    post<AdbShellResult>("/adb/shell", p, { timeoutMs: 30_000 }),
-  adbForget: () => post<GenericOk>("/adb/forget"),
 };
