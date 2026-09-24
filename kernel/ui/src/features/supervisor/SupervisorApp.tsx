@@ -1,7 +1,7 @@
 /**
  * Supervisor App（Android 内核控制面板宿主）
  * ============================================================================
- * 以内核 HTTP API（同源 http://127.0.0.1:<apiPort>）为后端的 5 域管理面板：
+ * 以内核 HTTP API（同源 http://127.0.0.1:<apiPort>）为后端的 6 域管理面板：
  *   AppShell(web) → AppLayout(sidebar) → Toolbar(页标题) → ContentArea(页) → StatusBar
  * 数据：supervisorStore 统一 2s 轮询快照；页面只读消费 + 动作经 supervisorApi。
  * 说明：这是 dsh-supervisor 的"管家面板"；skiff 清理工具 App 是另一个独立宿主，
@@ -26,12 +26,14 @@ const OverviewPage = lazy(() => import("./OverviewPage").then((m) => ({ default:
 const PluginsPage = lazy(() => import("./PluginsPage").then((m) => ({ default: m.PluginsPage })));
 const RouterPage = lazy(() => import("./RouterPage").then((m) => ({ default: m.RouterPage })));
 const TasksPage = lazy(() => import("./TasksPage").then((m) => ({ default: m.TasksPage })));
+const PairingPage = lazy(() => import("./PairingPage").then((m) => ({ default: m.PairingPage })));
 const SettingsPage = lazy(() => import("./SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const PAGE_META: Record<SupervisorViewKey, { title: string; sub: string }> = {
   overview: { title: "控制面板", sub: "DeepSeek Harness 运行状态与升级" },
   plugins: { title: "插件商店", sub: "DeepSeek 生态插件商店与已装管理" },
   router: { title: "智能路由", sub: "多供应商 Key 轮换代理 · 按官方套餐规则自动判定额度" },
   tasks: { title: "任务中心", sub: "全部安装 / 升级 / 卸载 / 更新操作的任务状态与历史" },
+  pairing: { title: "ADB 配对", sub: "无线调试自助配对与 shell 自检" },
   settings: { title: "设置", sub: "访问方式与关于" },
 };
 
@@ -115,6 +117,7 @@ export function SupervisorApp() {
                   {view === "plugins" ? <PluginsPage /> : null}
                   {view === "router" ? <RouterPage onRegisterActions={setRouterActions} /> : null}
                   {view === "tasks" ? <TasksPage /> : null}
+                  {view === "pairing" ? <PairingPage /> : null}
                   {view === "settings" ? <SettingsPage /> : null}
                 </PageErrorBoundary>
               </Suspense>
