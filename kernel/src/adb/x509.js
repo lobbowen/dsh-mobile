@@ -33,7 +33,7 @@ function oid(hexStr) { return tlv(0x06, Buffer.from(hexStr, 'hex')); }
 function utf8(s) { return tlv(0x0c, Buffer.from(s, 'utf8')); }
 function utcTime(d) {
   // UTCTime：YYMMDDHHMMSSZ（**没有** 'T'；带 T 会被判 Bad time value）
-  const s = d.toISOString().replace(/[-:T]/g, '').slice(2).replace(/\\.\\d{3}/, '');
+  const s = d.toISOString().replace(/[-:T]/g, '').slice(2).replace(/\.\d{3}/, '');
   return tlv(0x17, Buffer.from(s, 'ascii'));
 }
 function rdn(cn) { return seq([setOf([seq([oid('550403'), utf8(cn)])])]); }
