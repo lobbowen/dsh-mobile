@@ -13,7 +13,7 @@ import androidx.core.app.RemoteInput
 import io.github.lobbowen.dshmobile.bridge.AdbClientRunner
 
 /**
- * S0 配对探针服务（ADR-0007 主路径的载体）：
+ * S0 配对的底座服务（ADR-0007 主路径的载体；UI 面在 OnboardingActivity 向导态）：
  *
  * · **全程不拉 Activity** —— 输码走通知栏 RemoteInput，用户盯着的系统配对对话框
  *   不会被夺焦销毁（这是整个设计成立的前提，禁改）。
@@ -36,7 +36,20 @@ class PairingProbeService : Service() {
     @Volatile private var connectPort: Int = 0
     @Volatile private var busy = false
 
+    // ---- 向导可见状态：首页 S0 向导态直接读这几个量（同进程 :main，跨进程不适用） ----
+    @Volatile var portFound = false; private set
+    @Volatile var portText = ""; private set
+    @Volatile var codeArrived = false; private set
+    @Volatile var pairingInFlight = false; private set
+    @Volatile var lastPairingError: String? = null; private set
+
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        // 向导读的是「当前实例」，不是布尔量：重启竞态下旧实例 onDestroy 不得清空新引用。
+        instance = this
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         ensureChannel()
@@ -56,7 +69,13 @@ class PairingProbeService : Service() {
     }
 
     private fun startProbe() {
+        // 「开始配对」可重复按：已拿到配对端口就不重抖 browse（stop/start 会丢记录）；
+        // 没有端口则照常往下重挂监听 —— 服务被系统重建后 running 残留为 true、
+        // watcher 却是新的，此时必须允许重入，否则向导永远停在「监听中」。
+        if (running && pairingPort > 0) { renderStatus(); return }
         running = true
+        portFound = false; portText = ""; codeArrived = false
+        pairingInFlight = false; lastPairingError = null
         val w = watcher ?: MdnsWatcher(applicationContext).also { watcher = it }
         lastBrowseAt = System.currentTimeMillis()
         ProbeJournal.browsePairingStartedAt = lastBrowseAt
@@ -67,6 +86,7 @@ class PairingProbeService : Service() {
                 val now = System.currentTimeMillis()
                 if (type == MdnsWatcher.TYPE_PAIRING) {
                     pairingHost = host; pairingPort = port
+                    portFound = true; portText = "$host:$port"
                     if (ProbeJournal.pairingRecordFirstSeenAt == 0L) ProbeJournal.pairingRecordFirstSeenAt = now
                     ProbeJournal.append(this@PairingProbeService, "mdns", "pairing 记录 $name host=${host ?: "?"} port=$port browse后 ${ageMs}ms")
                 } else {
@@ -88,6 +108,7 @@ class PairingProbeService : Service() {
 
     /** RemoteInput 取码 → 配对。取不到码（用户点了发送但空）也要记账——③ 的一部分。 */
     private fun handleCode(intent: Intent) {
+        codeArrived = true
         ProbeJournal.codeReceivedAt = System.currentTimeMillis()
         val code = extractCode(intent)
         ProbeJournal.append(this, "pair", "快捷回复送达：code=${code?.length ?: 0} 位")
@@ -105,6 +126,7 @@ class PairingProbeService : Service() {
             return
         }
         busy = true
+        pairingInFlight = true
         renderStatus("配对进行中（$host:${pport.takeIf { it > 0 } ?: "端口待发现"}）")
         Thread {
             val outcome = AdbClientRunner.pair(
@@ -112,6 +134,8 @@ class PairingProbeService : Service() {
                 connectPort.takeIf { it > 0 }, PAIR_TIMEOUT_MS,
             )
             busy = false
+            pairingInFlight = false
+            lastPairingError = if (outcome.ok) null else (outcome.error ?: outcome.raw.take(200))
             ProbeJournal.append(
                 this, "pair",
                 if (outcome.ok) "配对成功（${host}:${pport}）：${outcome.json?.optString("guid")?.take(16)}"
@@ -130,7 +154,7 @@ class PairingProbeService : Service() {
         val status = override ?: when {
             pairingPort > 0 -> "已发现配对端口 $pairingPort —— 下拉本通知「输入配对码」"
             connectPort > 0 -> "无线调试在线（连接端口 $connectPort），未见到配对对话框记录"
-            else -> "等待 mDNS 记录（先点「去开无线调试」，再开配对对话框）"
+            else -> "等待 mDNS 记录（回 App 点「去系统配对页」，让配对对话框保持打开）"
         }
         val builder = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
@@ -186,6 +210,7 @@ class PairingProbeService : Service() {
 
     override fun onDestroy() {
         running = false
+        if (instance === this) instance = null
         watcher?.stopAll()
         super.onDestroy()
     }
@@ -196,6 +221,8 @@ class PairingProbeService : Service() {
         const val EXTRA_CODE = "pair_code"
         /** 同进程（:main）的首页据此切换按钮文案；跨进程场景不适用（探针就在 :main）。 */
         @Volatile var running: Boolean = false
+        /** 当前活着的 service 实例；向导态读它的实况字段。 */
+        @Volatile var instance: PairingProbeService? = null
         private const val CHANNEL = "dsh_pairing_probe"
         private const val NOTIF = 3637
         private const val REQ_OPEN = 31
