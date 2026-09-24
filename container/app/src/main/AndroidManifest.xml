@@ -20,6 +20,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <!-- Android 13+ 通知授权 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- S0 配对探针的 mDNS 发现：NSD 底层组播在部分 ROM 不自动续持，必须显式申请
+         MulticastLock（见 ui/MdnsWatcher）。装机即得，无需用户操作。 -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
     <!--
       悬浮窗（bridge:ui_automation 的辅助能力，也是无障碍不可用时的降级路径）。
@@ -171,8 +174,16 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <!-- S0 配对探针（:main，ADR-0007）：RemoteInput 输码必须落 Service —— 落 Activity
+             会夺焦销毁系统配对对话框，整个主路径就失效。通知是常态通知，非 FGS。 -->
+        <service
+            android:name=".ui.PairingProbeService"
+            android:exported="false" />
+
+        <!-- 入口 = 开场管线首页（G1）。诊断页/工作台降级为页内可达（S3/S4 按钮跳转），
+             MainActivity 仍 exported：am start / 旧快捷方式直达不被切断。 -->
         <activity
-            android:name=".MainActivity"
+            android:name=".ui.OnboardingActivity"
             android:exported="true"
             android:label="@string/app_name">
             <intent-filter>
@@ -180,5 +191,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name" />
     </application>
 </manifest>
