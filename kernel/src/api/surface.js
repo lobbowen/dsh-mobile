@@ -96,6 +96,12 @@ const SURFACE = [
   // ── 任务（tasks.js）──
   { path: '/tasks', methods: ['GET'], domain: 'tasks', category: 'public', consumers: ['UI(TasksPage)'], note: '统一任务列表（+ /tasks/{id}）' },
 
+  // ── ADB 无线调试（adb.js）──
+  { path: '/adb/status', methods: ['GET'],  domain: 'adb', category: 'public', consumers: ['UI(配对页)'], note: 'ADB 配对/密钥状态' },
+  { path: '/adb/pair',   methods: ['POST'], domain: 'adb', category: 'public', consumers: ['UI(配对页)'], note: '输入 host/端口/配对码完成自助配对' },
+  { path: '/adb/shell',  methods: ['POST'], domain: 'adb', category: 'public', consumers: ['UI(配对页自检)'], note: '在已配对设备上执行 shell（如 id 自检）' },
+  { path: '/adb/forget', methods: ['POST'], domain: 'adb', category: 'public', consumers: ['UI(配对页)'], note: '清除已保存的连接端点' },
+
 ];
 
 /** 前缀路由（pathname.startsWith）。{prefix} 表示动态段。 */

@@ -22,6 +22,7 @@ const API_DOMAINS = [
   require('./router'),
   require('./plugins'),
   require('./dist'),
+  require('./adb'),
 ];
 
 // 前端静态资源目录解析（React UI 全面接管，同源托管）。
