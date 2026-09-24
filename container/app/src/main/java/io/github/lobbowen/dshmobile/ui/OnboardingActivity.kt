@@ -29,7 +29,9 @@ import io.github.lobbowen.dshmobile.permissions.PermTier
 import io.github.lobbowen.dshmobile.runtime.NodeRuntimeService
 
 /**
- * 管线首页（G1-1 探针版，spec §2/§5）：S0–S4 五行状态 + 每行的用户动作。
+ * 管线首页（G1-1，spec §2/§5）：S0–S4 五行状态 + 每行的用户动作。
+ * S0 是配对向导态：单一「开始配对」入口 → 三步实况（监听/去配对页/通知输码），
+ * 探针服务只是底座，不裸露开关给用户。
  *
  * 职责边界（spec §4）：这里**只取读数、渲染、发 intent** —— 状态机语义全在
  * [PipelineState]（JVM 单测钉死），采集全在 [PipelineProbe]。探针期额外义务：
@@ -42,7 +44,10 @@ class OnboardingActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private val stepTexts = mutableMapOf<String, TextView>()
     private val stepButtons = mutableMapOf<String, MutableList<Button>>()
-    private var s0ProbeBtn: Button? = null
+    private var s0StartBtn: Button? = null
+    private var s0GoBtn: Button? = null
+    private var s0CancelBtn: Button? = null
+    private var s0WizardText: TextView? = null
     private var s2Btn: Button? = null
     private var lastReadings: PipelineReadings? = null
     @Volatile private var refreshInFlight = false
@@ -89,6 +94,15 @@ class OnboardingActivity : AppCompatActivity() {
             val tv = TextView(this).apply { textSize = 15f; setPadding(0, pad / 2, 0, pad / 4) }
             stepTexts[id] = tv
             col.addView(tv)
+            if (id == PipelineState.S0) {
+                // 配对向导实况占位：三步进度单行滚动刷新，只在向导态可见。
+                s0WizardText = TextView(this).apply {
+                    textSize = 13f
+                    setPadding(pad / 2, 0, 0, pad / 4)
+                    visibility = View.GONE
+                }
+                col.addView(s0WizardText)
+            }
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val btns = mutableListOf<Button>()
             buttonsFor(id).forEach { b -> row.addView(b); btns += b }
@@ -116,13 +130,19 @@ class OnboardingActivity : AppCompatActivity() {
     private fun buttonsFor(id: String): List<Button> = when (id) {
         PipelineState.S0 -> listOf(
             Button(this).apply {
-                text = "配对探针 开/关"
-                setOnClickListener { toggleProbe() }
-                s0ProbeBtn = this
+                text = "开始配对"
+                setOnClickListener { startPairingWizard() }
+                s0StartBtn = this
             },
             Button(this).apply {
-                text = "去开无线调试"
-                setOnClickListener { openWirelessDebugging() }
+                text = "去系统配对页"
+                setOnClickListener { openPairingSettings() }
+                s0GoBtn = this
+            },
+            Button(this).apply {
+                text = "退出配对"
+                setOnClickListener { cancelPairingWizard() }
+                s0CancelBtn = this
             },
         )
         PipelineState.S1 -> listOf(
@@ -195,28 +215,47 @@ class OnboardingActivity : AppCompatActivity() {
             stepTexts[s.id]?.text = "${s.id} ${s.title} $mark ${s.detail}"
         }
         s2Btn?.isEnabled = r.missingPermissions.isNotEmpty()
-        // S0 按钮文案跟随服务状态；S4 未放行时按钮直接禁用（比点了没反应诚实）。
-        s0ProbeBtn?.text = if (PairingProbeService.running) "停止配对探针" else "启动配对探针"
+        // S0 向导态机：配对成功→整段收起；服务在线→实况三步；否则只留唯一入口按钮。
+        val wizardOn = !r.adbPaired && PairingProbeService.running
+        s0StartBtn?.visibility = if (r.adbPaired || wizardOn) View.GONE else View.VISIBLE
+        s0GoBtn?.visibility = if (wizardOn) View.VISIBLE else View.GONE
+        s0CancelBtn?.visibility = if (wizardOn) View.VISIBLE else View.GONE
+        s0WizardText?.apply {
+            visibility = if (wizardOn) View.VISIBLE else View.GONE
+            if (wizardOn) text = wizardStatusText()
+        }
+        // S4 未放行时按钮直接禁用（比点了没反应诚实）。
         stepButtons[PipelineState.S4]?.firstOrNull()?.isEnabled = PipelineState.workbenchOpen(steps)
     }
 
     // ---- 动作 ----
 
-    private fun toggleProbe() {
-        val svc = Intent(this, PairingProbeService::class.java)
-        if (PairingProbeService.running) {
-            svc.action = PairingProbeService.ACTION_STOP
-        }
-        startService(svc)
-        handler.postDelayed({ refreshSoon() }, 800)
+    /**
+     * S0 向导唯一入口：起底座（PairingProbeService = mDNS 监听 + 通知输码），
+     * 本页随即进入实况态。服务侧 startProbe 幂等自行处理重复启动。
+     */
+    private fun startPairingWizard() {
+        startService(Intent(this, PairingProbeService::class.java))
+        handler.postDelayed({ refreshSoon() }, 500)
     }
 
-    /** ③ 定罪动作：发深链 + 记账落点；ROM 不响应时逐级降级并如实写日志。 */
-    private fun openWirelessDebugging() {
+    private fun cancelPairingWizard() {
+        startService(Intent(this, PairingProbeService::class.java)
+            .setAction(PairingProbeService.ACTION_STOP))
+        ProbeJournal.append(this, "wizard", "用户退出配对向导")
+        handler.postDelayed({ refreshSoon() }, 500)
+    }
+
+    /**
+     * ③ 定罪动作：发深链 + 记账落点；ROM 不响应时逐级降级并如实写日志。
+     * 真机定罪（2026-09-25，PLP120）：第 1 级 AOSP intent 在 ColorOS 无 Activity 响应；
+     * 第 2 级必须是开发者选项页（可解析），应用信息页曾把用户带离配对路径。
+     */
+    private fun openPairingSettings() {
         ProbeJournal.deepLinkEmittedAt = System.currentTimeMillis()
         val attempts = listOf(
             Intent("android.settings.WIRELESS_DEBUGGING_SETTINGS"),
-            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).setData(Uri.parse("package:$packageName")),
+            Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS),
         )
         for ((i, intent) in attempts.withIndex()) {
             val ok = runCatching { startActivity(intent) }.isSuccess
@@ -224,6 +263,20 @@ class OnboardingActivity : AppCompatActivity() {
                 if (ok) "第 ${i + 1} 级 intent 已发出（${intent.action}）—— 需人工确认落在哪一页"
                 else "第 ${i + 1} 级 intent 无响应（${intent.action}）")
             if (ok) return
+        }
+    }
+
+    /** 向导三步实况 —— 只叙述 service 回报的事实，不做推断。 */
+    private fun wizardStatusText(): String {
+        val svc = PairingProbeService.instance
+            ?: return "底座未在线（重按「开始配对」）"
+        return when {
+            svc.pairingInFlight -> "③ 配对进行中…（${svc.portText}）"
+            svc.codeArrived && svc.lastPairingError != null ->
+                "③ 配对失败：${svc.lastPairingError?.take(80)} —— 重新输码可再试"
+            svc.codeArrived -> "③ 码已送达，等待结果…"
+            svc.portFound -> "② ✓ 已监听到配对端口 ${svc.portText} —— 下拉通知栏「输入配对码」"
+            else -> "① 监听中，暂未看到配对端口 —— 请让「使用配对码配对设备」对话框保持打开"
         }
     }
 
