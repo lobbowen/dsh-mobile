@@ -64,6 +64,13 @@ const server = tls.createServer({
 });
 
 (async () => {
+  // P0：自签证书的时间必须是**合法 UTCTime**。
+  // 回归背景（真机实测抓到）：移植时把毫秒剥离的正则过度转义，时间串带 "yyyy-mm-...T...000Z" →
+  // DER 非法 → BoringSSL 直接 alert 50（decode_error）拒收客户端证书；而 Node↔Node 的 mock 是宽松的，测不出来。
+  const parsed = new crypto.X509Certificate(cred.certPem);
+  check('P0 自签证书时间可解析（防 UTCTime 编码回归）',
+    parsed.validFrom !== 'Bad time value' && parsed.validTo !== 'Bad time value', parsed.validTo);
+
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const port = server.address().port;
   const key = adbkey.generate('selftest@host');
