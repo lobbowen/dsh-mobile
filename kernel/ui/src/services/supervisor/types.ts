@@ -414,3 +414,18 @@ export interface LifecycleModuleState {
   detail?: unknown;
 }
 
+// ── /adb（无线调试自助配对）────────────────────────────────────────────────
+export interface AdbStatus {
+  ok?: boolean;
+  keyPath: string;
+  pubkey: string | null;
+  paired: boolean;
+  host: string | null;
+  connectPort: number | null;
+  guid: string | null;
+  name: string | null;
+  pairedAt: string | null;
+}
+export interface AdbPairResult { ok?: boolean; guid: string; type: number; }
+export interface AdbShellResult { ok?: boolean; out: string; logs: string[]; }
+

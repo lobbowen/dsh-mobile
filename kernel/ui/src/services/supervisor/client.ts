@@ -9,7 +9,8 @@
  * ============================================================================
  */
 import type {
-  AccessKeyResult, AccessKeyStatus, EnvStatus, EventsPage, GenericOk,
+  AccessKeyResult, AccessKeyStatus, AdbPairResult, AdbShellResult, AdbStatus,
+  EnvStatus, EventsPage, GenericOk,
   GuardVersion, InstalledPluginsResponse,
   LanPanelStatus, LifecycleModuleId, MarketResponse, NodeLtsStatus, PluginUpdatesResponse,
   MainInstance, PortsResponse, ProvidersResponse, RegistryInfo, RouterStatus,
@@ -177,4 +178,13 @@ export const supervisorApi = {
   guardChangelog: () => getText("/guard/changelog"),
   envStatus: () => get<EnvStatus>("/env/status"),
   nodeLts: () => get<NodeLtsStatus>("/env/node-lts"),
+
+  // ── ADB 无线调试自助配对（/adb/*）──
+  // 配对/连接是网络 I/O，显式放宽到 30s（默认 15s 偏紧）。
+  adbStatus: () => get<AdbStatus>("/adb/status"),
+  adbPair: (p: { host: string; pairPort: number; code: string; connectPort?: number; name?: string }) =>
+    post<AdbPairResult>("/adb/pair", p, { timeoutMs: 30_000 }),
+  adbShell: (p: { cmd: string; host?: string; connectPort?: number; timeoutMs?: number }) =>
+    post<AdbShellResult>("/adb/shell", p, { timeoutMs: 30_000 }),
+  adbForget: () => post<GenericOk>("/adb/forget"),
 };
