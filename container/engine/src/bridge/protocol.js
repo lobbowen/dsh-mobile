@@ -1,11 +1,11 @@
 'use strict';
 
-// HostBridge 协议编解码（JSON-RPC 2.0 + 握手/能力协商）。对齐 docs/BRIDGE_PROTOCOL.md。
+// HostBridge 协议编解码（JSON-RPC 2.0 + 握手/能力协商）。对齐 docs/contracts/bridge-protocol.md。
 // 传输无关的纯函数：传输层负责「按行分割 + 写 JSON」的帧封装（见 uds-transport.js）。
 
 const PROTOCOL_VERSION = 1;
 
-// 错误码（BRIDGE_PROTOCOL §5）：标准 JSON-RPC 区间 + 桥自定义区间（-32000 起）。
+// 错误码（docs/contracts/bridge-protocol.md §5）：标准 JSON-RPC 区间 + 桥自定义区间（-32000 起）。
 const ERROR_CODES = {
   PARSE_ERROR: -32700,
   INVALID_REQUEST: -32600,

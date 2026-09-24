@@ -19,6 +19,13 @@ import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import io.github.lobbowen.dshmobile.bridge.ScreenCaptureService
+import io.github.lobbowen.dshmobile.kernelota.KernelManager
+import io.github.lobbowen.dshmobile.kernelota.KernelOtaUpdater
+import io.github.lobbowen.dshmobile.kernelota.KernelSelfCheck
+import io.github.lobbowen.dshmobile.lifecycle.ContainerSupervisor
+import io.github.lobbowen.dshmobile.runtime.GuestAdapter
+import io.github.lobbowen.dshmobile.runtime.NodeRuntimeService
 
 /**
  * 入口 Activity，也是“可观测”面板 + 内核 UI 宿主帧：
@@ -27,8 +34,9 @@ import androidx.core.content.ContextCompat
  * （http://127.0.0.1:<port>/__host）。宿主帧内以 iframe 嵌内核面板（同源）—— 这样面板既满足
  * `hasHostBridge()`（window.parent !== window），又满足内核 Origin 闸（同源→写操作不被 403）。
  * - 面板经 postMessage 发 dsh:kernel-update-request → 宿主帧转交本 Activity（DshNative.onRequest）
- * → 重启 :node 进程（重读 CURRENT / 触发 OTA）→ 回灌 dsh:kernel-update-result（**严格按内核契约**）。
- * - 提供“重试”按钮：清空诊断、重启 NodeRuntimeService 重新走全流程。
+ * → 经 ACTION_RESTART 重跑 :node 的 boot 流程（重读 CURRENT / 触发 OTA）→ 回灌 dsh:kernel-update-result（**严格按内核契约**）。
+ * - 提供“重试”按钮：清空诊断、经 ACTION_RESTART 让运行时重走全流程
+ *   （监督者 binder 边在册，stopService 已杀不死 :node —— 旧写法已随之删除）。
  * - 提供“授权屏幕捕获”按钮：MediaProjection 授权**无法预置**（不同于 Device Owner），
  * 必须由用户点系统弹窗。授权结果缓存到 files/screen-capture-grant.json，之后可后台复用，
  * 这是内核 ui.screenshot 能工作的前置条件。
@@ -59,7 +67,7 @@ class MainActivity : AppCompatActivity() {
      * MediaProjection 与 Device Owner 的本质区别：它**不能预置**，必须由用户在系统弹窗
      * 上点一次「开始录制」。所以这里必须有个 Activity 承接 startActivityForResult。
      * 拿到 resultCode + data 后：
-     * ① saveGrant() 落盘缓存（进程重启后可复用，避免每次截图都弹窗）；
+     * ① saveGrant() 落盘缓存（同进程复用；跨重启尽力复用，失效时回落重新授权）；
      * ② 拉起 ScreenCaptureService 建 projection。
      */
     private val requestCapture = registerForActivityResult(
@@ -105,7 +113,7 @@ class MainActivity : AppCompatActivity() {
         copyBtn.setOnClickListener { copySelfCheck() }
 
         setupWebView()
-        // 复用上次授权：进程/设备重启后若 grant 仍在，直接拉起服务，无需用户再点一次。
+        // 复用上次授权：若缓存 grant 仍有效直接拉起服务；Android 14+ 跨重启可能失效，届时回落弹窗。
         reuseExistingCaptureGrant()
         startRuntime()
         startPolling()
@@ -322,23 +330,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 读取内核只读版本端点（GET /guard/version）。失败返回 null（不阻断更新流程）。 */
-    private fun tryReadKernelVersion(): String? = try {
-        val c = java.net.URL("http://127.0.0.1:${NodeRuntimeService.KERNEL_CONTROL_PORT}/guard/version").openConnection() as java.net.HttpURLConnection
-        c.connectTimeout = 500
-        c.readTimeout = 500
-        c.requestMethod = "GET"
-        if (c.responseCode == 200) {
-            val body = c.inputStream.bufferedReader().use { it.readText() }
-            val v = org.json.JSONObject(body).optString("version", null)
-            if (v.isNullOrBlank()) null else v
-        } else null
-    } catch (_: Throwable) {
-        null
-    }
-
-    private fun startRuntime() {
+    private fun startRuntime(action: String? = null) {
+        // UI 是监督链的又一条边（用户打开界面的时刻补位）。
+        ContainerSupervisor.ensureRunning(this)
         val svc = Intent(this, NodeRuntimeService::class.java)
+        if (action != null) svc.action = action
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(svc)
         } else {
@@ -347,17 +343,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun restartRuntime() {
-        try {
-            stopService(Intent(this, NodeRuntimeService::class.java))
-        } catch (_: Throwable) {
-        }
+        // 旧实现先 stopService 再重启 —— 监督者引入 binder 边（BIND_AUTO_CREATE）后
+        // 该 stop 已**杀不动** :node（绑定在册），只剩"假装重启"的误导。
+        // 正确语义 = ACTION_RESTART：:node 自己终结当前实例，boot 循环重走全流程。
         uiMode = false
         webView.visibility = View.GONE
         scroll.visibility = View.VISIBLE
         retryBtn.visibility = View.VISIBLE
         RuntimeDiagnostics.clear(this)
         diagText.text = "正在重启运行时..."
-        startRuntime()
+        startRuntime(NodeRuntimeService.ACTION_RESTART)
     }
 
     private fun startPolling() {
@@ -385,11 +380,11 @@ class MainActivity : AppCompatActivity() {
         retryBtn.visibility = View.GONE
         webView.visibility = View.VISIBLE
         // 加载**内核同源托管**的宿主帧（非容器 assets）：宿主页与面板同源 → 面板写操作不被内核 403。
-        webView.loadUrl("http://127.0.0.1:${NodeRuntimeService.KERNEL_CONTROL_PORT}/__host")
+        webView.loadUrl("http://127.0.0.1:${GuestAdapter.KERNEL_CONTROL_PORT}/__host")
     }
 
     private fun isPortUp(): Boolean = try {
-        val c = java.net.URL("http://127.0.0.1:${NodeRuntimeService.KERNEL_CONTROL_PORT}/status").openConnection() as java.net.HttpURLConnection
+        val c = java.net.URL("http://127.0.0.1:${GuestAdapter.KERNEL_CONTROL_PORT}/status").openConnection() as java.net.HttpURLConnection
         c.connectTimeout = 300
         // 与容器侧 isStatusUp 同理：设备忙时 300ms 读超时会把「活着但忙」误判成死，
         // 表现为面板永远进不去、一直停在诊断页（真机 2026-09-22）。

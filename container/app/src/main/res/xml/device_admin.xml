@@ -8,6 +8,8 @@
         <wipe-data />
         <expire-password />
         <set-global-proxy />
+        <set-time />
+        <set-time-zone />
         <disable-camera />
         <disable-keyguard-features />
     </uses-policies>

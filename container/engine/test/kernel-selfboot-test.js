@@ -447,7 +447,7 @@ check('不存在第二个安装入口 build.kernelUpdate', methods.METHODS['buil
 // io.github.lobbowen.dshmobile 后，existsSync 变 false，下面的断言就被**静默跳过**了。
 // 所以现在把"文件必须存在"本身也作为一条断言：静默跳过 = 红。
 const KT_DIR = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'io', 'github', 'lobbowen', 'dshmobile');
-const KOTLIN_VERIFIER = path.join(KT_DIR, 'NodeKernelVerifier.kt');
+const KOTLIN_VERIFIER = path.join(KT_DIR, 'kernelota', 'NodeKernelVerifier.kt');
 check('Kotlin 校验器文件存在（路径必须与包名一致）', fs.existsSync(KOTLIN_VERIFIER));
 if (fs.existsSync(KOTLIN_VERIFIER)) {
   const kt = fs.readFileSync(KOTLIN_VERIFIER, 'utf8');
@@ -455,12 +455,13 @@ if (fs.existsSync(KOTLIN_VERIFIER)) {
   check('Kotlin 侧引用 kernel-verify.js 资产', kt.includes('kernel-verify.js'));
 }
 // ADR-0005：本地 feed 路径已删除，源码不得复现
-check('LocalKernelFeed 已删除', !fs.existsSync(path.join(KT_DIR, 'LocalKernelFeed.kt')));
+check('LocalKernelFeed 已删除', !fs.existsSync(path.join(KT_DIR, 'LocalKernelFeed.kt')) &&
+  !fs.existsSync(path.join(KT_DIR, 'kernelota', 'LocalKernelFeed.kt')));
 
 // KernelInstaller 必须复用 Node 校验器（不能自己验签）。
 // ⚠ 同上：这里的路径也是分段拼接的 —— 包名变更后曾失配，断言被静默跳过。
 // 因此把"文件存在"本身也断言出来：静默跳过 = 红。
-const INSTALLER_KT = path.join(KT_DIR, 'KernelInstaller.kt');
+const INSTALLER_KT = path.join(KT_DIR, 'kernelota', 'KernelInstaller.kt');
 check('KernelInstaller.kt 存在（包名与路径一致）', fs.existsSync(INSTALLER_KT));
 if (fs.existsSync(INSTALLER_KT)) {
   const ik = fs.readFileSync(INSTALLER_KT, 'utf8');

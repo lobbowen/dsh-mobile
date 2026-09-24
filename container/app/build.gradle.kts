@@ -153,10 +153,7 @@ android {
         jvmTarget = "17"
     }
     buildFeatures {
-        viewBinding = true
         buildConfig = true
-        // Shizuku UserService 需要自定义 AIDL（IRemoteShell.aidl）
-        aidl = true
     }
     packaging {
         jniLibs {
@@ -257,16 +254,7 @@ fun nativeAssetNames(): List<String> {
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
-    implementation("androidx.constraintlayout:constraintlayout:2.2.0")
-    implementation("androidx.webkit:webkit:1.12.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-
-    // ==== Shizuku：shell.exec 的**必备能力本体**（ADR-0003，不做可选/降级）====
-    // v13 起 newProcess 已 private/废弃，官方受支持路径 = 自定义 AIDL 的 UserService。
-    implementation("dev.rikka.shizuku:api:13.1.5")
-    implementation("dev.rikka.shizuku:provider:13.1.5")
-    // Android 9+ 隐藏 API 豁免（Shizuku API 内部需要）
-    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
 
     // ==== JVM 单元测试（`./gradlew :app:testDebugUnitTest`）====
     // 为什么必须有：内核下载器这类**纯 JVM 逻辑**过去完全没有夹具，只能靠真机碰运气。

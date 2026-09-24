@@ -27,7 +27,9 @@
 | **L0** | 容器（APK） | 仅 Node/桥能力变更才重编 | ✅ | Node 运行时 + **npm 客户端** + libc++_shared.so + HostBridge + OTA 引擎 + 生命周期 + 诊断 |
 | **L1** | 内核 = 控制面板 / Manager | 容器签名 OTA 热更新 | ❌ | 控制面板代码 + `kernel.json`；运行在 Node 运行时内；**运行时经 npm 安装/升级/启停 Agent** |
 | **L2** | Agent 产品 | 内核运行时 npm（公共源） | ❌ | Codex / Claude Code / DeepSeek Harness 等标准公共产品，由内核拉取管理 |
-| **L3** | 能力桥 HostBridge（Kotlin） | 随 APK | ✅ | 版本化 RPC 方法表，把安卓能力交给内核 |
+
+> **发布维只有 L0/L1/L2 三档，不存在 L3。** HostBridge 随 APK 冻结，属 L0；
+> 它在职责维的位置是 L-B（见 ARCHITECTURE §1.1）。旧文档中的"L3"即指此层，已废止。
 
 > "把手机变成工作台" = **Manager（控制面板，含工作台 UI）+ Agents（工作者）+ HostBridge（控制面）** 三者之和。Agent 是内核在运行时经 npm 拉取的，不随内核打包。
 
@@ -42,7 +44,7 @@
 | C++ 运行时 | 容器内 `libc++_shared.so`（native 模块必须链接它） |
 | **npm 客户端** | **运行时可用**（npm 11.19.0 纯 JS，随 APK `assets/npm/` 投放；W^X 下由 node 代跑 `npm-cli.js`，调用形态见 `runtime.json` 的 `npmEntry`）。边界：安装一律 `--ignore-scripts`（容器无 sh 可 spawn）；`git:`/需编译的 native 依赖不支持；全局前缀固定 `$HOME/.npm-global`（`npm_config_prefix` 显式注入） |
 | 运行时交接文件 | `<DSH_SUPERVISOR_HOME>/supervisor/runtime.json`（**容器写、内核读**，schema 2）：`nodePath`（libnode.so 绝对路径）、`nodeBinDir`、`npmPath`、`npmEntry`（npm-cli.js 绝对路径，**新增可选键**：缺失时内核退回 ambient npm）、`minNode`。内核侧解析入口唯一：`src/platform/runtime-contract.js`（`npmInvocation()`/`nodeBin()`/`npmEnv()`） |
-| 内置构建链 | **无**（已实测证伪：Google Maven 无 aarch64 版 aapt2，见 ARCHITECTURE §2.3）。`build` 组语义为「从本地 feed 安装已签名内核」（A''，见 BRIDGE_PROTOCOL §3.6） |
+| 内置构建链 | **无**（已实测证伪：Google Maven 无 aarch64 版 aapt2，见 ARCHITECTURE.md §2.3）。`build` 组语义为「从本地 feed 安装已签名内核」（A''，见本契约 §3.6） |
 | 进程模型 | `NodeRuntimeService`（前台 `START_STICKY`）spawn 独立 `:node` 进程加载内核入口 |
 
 容器在 `kernel.json` 中声明上述契约，内核可据此声明兼容性。

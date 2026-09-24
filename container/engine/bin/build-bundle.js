@@ -2,13 +2,13 @@
 'use strict';
 
 // 内核包构建 CLI（CI 用）：把内核源码目录打包成「签名内核 OTA 包」。
-// 对齐 docs/BASE_SPEC.md §5 通道一（构建期签名）。
+// 对齐 docs/contracts/base-spec.md §5 通道一（构建期签名）。
 //
 // 双信任根：ed25519 私钥（keys/ota-private.pem，gitignored / CI secret）仅在此签名用；
 // 验签公钥焊死在 APK（app/src/main/assets/ota-public.pem），设备端只用它验签。
 //
 // 产物：release/kernel-<version>.zip（= OTA 下发的包）
-//       release/kernel-manifest.json（版本/url/sha256/签名，供 OTA 引擎 fetchManifest）
+//       release/kernel-manifest.json（版本/url/sha256/签名，供设备侧 Kotlin KernelOtaUpdater 拉取）
 
 const fs = require('fs');
 const path = require('path');

@@ -2,7 +2,7 @@
 
 // HostBridge 参考服务端（Node 版，模拟 Kotlin HostBridgeService 侧）。
 // 真实暴露 UDS：JSON-RPC 2.0 调度 + 握手/能力协商 + 8 组方法 + 特权操作审计。
-// 真实安卓侧由 Kotlin 实现同构逻辑（见 HostBridgeService.kt），本实现供集成测试与引擎验证。
+// 真实安卓侧由 Kotlin 实现同构逻辑（见 bridge/HostBridgeService.kt），本实现供集成测试与引擎验证。
 // 默认 handler 用 Node mock 落地各方法语义，使端到端链路可验证；真实部署替换为 Android API 调用。
 
 const fs = require('fs');
@@ -64,7 +64,9 @@ class BridgeServer {
       result = await this.invoke(method, msg.params || {});
     } catch (e) {
       this.audit({ type: 'call', agent: 'kernel', method, ok: false, error: String(e && e.message) });
-      return proto.error(msg.id, proto.ERROR_CODES.ERR_RUNTIME, String(e && e.message));
+      // 运行期异常回 -32603：与 Kotlin dispatch 的 CODE_INTERNAL 一致（真机从不发 -32000，
+      // mock 发别的码会把内核侧错误分支训练到不存在的码上）。
+      return proto.error(msg.id, proto.ERROR_CODES.INTERNAL_ERROR, String(e && e.message));
     }
     if (methods.isAudited(method)) this.audit({ type: 'call', agent: 'kernel', method, ok: true });
     return proto.response(msg.id, result);
@@ -78,14 +80,15 @@ class BridgeServer {
 
   _defaultHandler(method, params) {
     switch (method) {
-      case 'app.listInstalled': return { packages: ['com.example.a', 'com.example.b'] };
+      // 返回形状逐字段对齐 Kotlin HostBridgeService（它是运行期真值），含 count。
+      case 'app.listInstalled': { const pk = ['com.example.a', 'com.example.b']; return { packages: pk, count: pk.length }; }
       case 'notif.post': return { posted: true, title: params.title, text: params.text };
-      case 'notif.read': return { notifications: [] };
-      case 'sys.info': return { device: 'mock-android', apiLevel: 35, arch: 'arm64' };
+      case 'notif.read': return { notifications: [], count: 0 };
+      case 'sys.info': return { manufacturer: 'mock', model: 'mock-android', androidApi: 35, platform: 'android', bridge: 'dsh_hostbridge' };
       // 原生资产自检（2026-09）。返回形状与 Kotlin NativePreparer.PrepareReport.toJson 对齐：
       //   { allRequiredReady, nativeLibraryDir, libSearchPath, assets: [...] }
       // 与注册表 NativeAssetRegistry（libcxx + node）保持一致 —— 改动注册表时同步这里，
-      // 否则 container-engine/test/native-assets-test.js 会失败。
+      // 否则 container/engine/test/native-assets-test.js 会失败。
       case 'sys.nativeAssets': return {
         allRequiredReady: true,
         nativeLibraryDir: '/data/app/~~mock/pkg-mock/lib/arm64-v8a',
@@ -166,12 +169,21 @@ class BridgeServer {
       case 'sys.setTime': return { ok: true };
       case 'sys.reboot': return { ok: true };
       case 'sys.setTimeZone': return { ok: true, timeZone: params.timeZone };
+      // shell 通道 mock = 内置 ADB 客户端的真实返回形状（Kotlin AdbClientRunner →
+      // assets/node/adb-client/cli.js）。ADB shell 通道不回传命令退出码，
+      // 故无 exitCode 字段 —— 与 Kotlin 侧契约一致（跨语言对齐以 Kotlin 为基准）。
+      case 'shell.status': return { ok: true, status: { hasKey: true, paired: true, mock: true } };
+      case 'shell.pair': return { ok: true, guid: 'mock-guid', status: { paired: true, mock: true } };
+      case 'shell.forget': return { ok: true };
       case 'shell.exec': return new Promise((resolve, reject) => {
-        // P4 兜底语义：以**应用 uid** 执行（非 shell uid 2000）。
-        // 真实部署需 Shizuku 才有特权；mock 保留可执行性验证。
+        // mock 用本机子进程演示「执行并取回 stdout」的可执行性；
+        // 真机路径是无线调试 TLS 连接，以 shell uid(2000) 执行。
         execFile(params.cmd || 'echo', params.args || ['ok'], { timeout: 5000 }, (err, stdout) => {
           if (err) reject(err);
-          else resolve({ ok: true, exitCode: 0, stdout: String(stdout), uid: -1, privileged: false });
+          else resolve({
+            ok: true, stdout: String(stdout), uid: 2000, privileged: true,
+            note: '以 shell uid(2000) 经内置 ADB 客户端（无线调试）执行。',
+          });
         });
       });
       default: return { echo: method };

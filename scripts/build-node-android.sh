@@ -63,7 +63,7 @@ mkdir -p "$OUT_DIR"
 # 也必须出现在 .github/native-assets.txt 里（CI 据此下载校验、审计 APK、
 # gradle 据此决定 keepDebugSymbols）。改名前先改注册表。
 #
-# 一致性由 container-engine/test/native-assets-test.js 双向守护。
+# 一致性由 container/engine/test/native-assets-test.js 双向守护。
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT

@@ -1,7 +1,7 @@
 'use strict';
 
-// 内核包契约（对齐 docs/BASE_SPEC.md §4）。
-// 整个内核是一个目录：kernel/<version>/kernel.json（清单）+ manager/（控制面板代码）。
+// 内核包契约（对齐 docs/contracts/base-spec.md §4）。
+// 整个内核是一个目录：kernel/<version>/kernel.json（清单）+ ui/dist（控制面板构建产物）。
 // 打包成 zip 后经 OTA 下发；设备端验签 + sha256 + 原子解包。
 
 const fs = require('fs');

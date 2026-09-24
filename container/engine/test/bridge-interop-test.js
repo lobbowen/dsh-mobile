@@ -85,7 +85,7 @@ async function main() {
 
   // 2) 调用 base 能力方法（应成功）
   const info = await c.call('sys.info', {});
-  check('call sys.info 成功返回结果', !!info && info.ok === true && info.result && info.result.device === 'mock-android');
+  check('call sys.info 成功返回结果', !!info && info.ok === true && info.result && info.result.model === 'mock-android');
 
   const launch = await c.call('app.launch', { pkg: 'com.example.a' });
   check('call app.launch 成功', !!launch && launch.ok && launch.result.launched === 'com.example.a');
@@ -111,11 +111,13 @@ async function main() {
   // 5) 单例与 inContainer 判定
   check('inContainer 由 DSH_ANDROID 判定', clientMod.inContainer() === (process.env.DSH_ANDROID === '1'));
 
-  // 6) 审计日志：握手必落盘；且非特权（base）调用不应污染审计（符合 spec §5「特权操作才审计」）
+  // 6) 审计日志：握手必落盘；notif.post 已升格为审计方法（Kotlin MethodDef 基准）；
+  //    非审计的 base 调用（app.launch）不得污染审计。
   let auditText = '';
   try { auditText = fs.readFileSync(auditLog, 'utf8'); } catch {}
   check('容器侧审计日志含 handshake', auditText.includes('handshake'));
-  check('非特权调用（app.launch/notif.post）未写入审计', !auditText.includes('"method":"app.launch"') && !auditText.includes('"method":"notif.post"'));
+  check('notif.post 写入审计', auditText.includes('"method":"notif.post"'));
+  check('非审计调用（app.launch）未写入审计', !auditText.includes('"method":"app.launch"'));
 
   c.close();
   await server.stop();

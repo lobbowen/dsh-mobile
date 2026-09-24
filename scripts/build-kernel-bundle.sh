@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  构建并签名内核 OTA 包（对齐 docs/BASE_SPEC.md §5 通道一）。
+#  构建并签名内核 OTA 包（对齐 docs/contracts/base-spec.md §5 通道一）。
 #
 #  用法：
 #    ./scripts/build-kernel-bundle.sh <kernel-src-dir> <version> [abi] [url-base]

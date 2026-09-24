@@ -15,7 +15,7 @@
 ## 2. 版本协商
 
 - 连接建立后，内核发送 `handshake`，携 `protocol` 版本与 `requires` 能力清单。
-- HostBridge 回 `capabilities`：设备实际已预置的能力集合（取决于 Device Owner / 无障碍 / Shizuku / 特殊权限的开启状态）。
+- HostBridge 回 `capabilities`：设备实际已预置的能力集合（取决于 Device Owner / 无障碍 / ADB 配对 / 特殊权限的开启状态）。
 - 内核 `requires` 超出 `capabilities` → 桥拒绝对应方法调用，其余正常。
 
 ## 3. 能力分组与方法表（第一版）
@@ -55,25 +55,28 @@
 > **`ui.getUiTree` 取的是全窗口**（`getWindows()` 优先），因此 IME / 悬浮窗的节点也能拿到 ——
 > 仅靠 `getRootInActiveWindow()` 会漏掉这两类。
 
-### 3.3 shell（Shell 级命令）
+### 3.3 shell（内置 ADB 客户端 / 无线调试）
 | 方法 | 参数 | 依赖 | 落地 |
 |---|---|---|---|
-| `shell.exec` | `cmd`, `args?`, `timeoutMs?` | **Shizuku / 无线调试**（shizuku） | ✅ Shizuku UserService（shell uid 2000） |
+| `shell.status` | — | `base` | ✅ 密钥/配对状态（`files/adb/`） |
+| `shell.pair` | `host`, `pairPort`, `code`, `connectPort?`, `timeoutMs?` | `base` | ✅ SPAKE2 配对（BoringSSL 兼容，TLS 1.3） |
+| `shell.forget` | — | `base` | ✅ 删除 ADB 身份密钥与配对状态 |
+| `shell.exec` | `cmd`, `args?`, `timeoutMs?` | **adb_shell**（已配对） | ✅ TLS 连接执行（shell uid 2000） |
 
-> **实现语义（ADR-0003：Shizuku 为必备能力）**：容器**内置 Shizuku SDK**
-> （`dev.rikka.shizuku:api/provider:13.1.5`；Shizuku 本体 Apache-2.0、API MIT）。
-> `shell.exec` 经 **Shizuku UserService**（自定义 AIDL `IRemoteShell`）在 **shell uid(2000)** 下执行，
-> 返回体带 `privileged:true` + 真实 `uid`。
+> **归属（ADR-0003 勘误 2026-09-24）**：ADB 客户端是**权限通道**，属壳（L0）——
+> 实现在 `container/app/src/main/assets/node/adb-client/`，由 `AdbClientRunner` 以
+> 一次性 Node 进程调用（minSdk 24 的 Kotlin 没有 TLS exporter / SPAKE2 原语）。
+> 凭据落 `files/adb/`（密钥 0600 / 目录 0700），与内核目录物理隔离 ——
+> OTA 下来的 L1 代码不得读写 ADB 身份。Shizuku 路线已整体删除
+> （第三方特权通道与自带 ADB 客户端语义冲突；复活即红：engine 测试链有反向门禁）。
 >
-> 为什么不是 `Shizuku.newProcess`：自 Shizuku **v13** 起该方法已 **private 且标记废弃**
-> （计划 API 14 移除）。官方受支持路径就是自定义 AIDL + UserService。
+> **`shell.exec` 返回体不含 `exitCode`**：ADB shell（v1 服务）通道不回传命令退出码，
+> 调用方以 `ok` 判成败、`stdout` 取输出（截断 256 KB）、`uid:2000` + `privileged:true`。
 >
-> **没有"应用 uid 兜底"**：设备未安装 / 未启动 / 未授权 Shizuku 时，`shizuku` 能力不可用，
-> 调用按契约返回 `-32001`。环境前提（与 Device Owner、Tier S 同级）：非 root 机型需用
-> adb 或**无线调试**启动一次 Shizuku，并在其中授权本应用。
->
-> 实现细节：UserService 侧读线程 pump 与 `waitFor` 并行（防管道写满死锁）；超时 `destroyForcibly()`
-> 并返回 `exitCode:-1`；输出截断 256 KB。
+> **pair/status/forget 只要求 `base`**：否则未配对设备永远无法发起配对（能力先于配对
+> 会形成死锁）；`exec` 要求 `adb_shell`（= 已配对，判据 `files/adb/state.json` 存在，
+> 与 ProvisioningProbe / KernelSelfCheck 同一把尺子）。连接失败属运行时错误按
+> `-32603` 原样带回，不冒充 `-32001`。
 
 ### 3.4 device_policy（系统策略，Device Owner）
 | 方法 | 参数 | 依赖 | 落地 |
@@ -117,7 +120,7 @@
 > **语义已修正**：本组不再是「内置编译工具链」。那个方案**已实测证伪**——
 > Google Maven 上没有 aarch64 版 aapt2（`linux-aarch64`/`linux-arm64` 均 404），
 > 解包实为 x86-64 + glibc，exec 四道关的后三关装机后无法补救。
-> 完整论证见 [ARCHITECTURE.md §2.2–2.3](ARCHITECTURE.md)。
+> 完整论证见 [ARCHITECTURE.md §2.2–2.3](../../ARCHITECTURE.md)。
 >
 > 现在的语义是「**从 OTA 源安装/升级已签名内核**」（ADR-0005）：设备不生产内核，只安装。
 > **来源只有一个**（远端 feed）—— 本地 feed 与 APK 内置基线已收敛删除：
@@ -232,10 +235,17 @@ W^X/exec 这条链的失败几乎全部发生在真机，而容器侧的诊断�
 
 - Agent 的 `requires` 声明所需能力分组；桥按设备实际 `capabilities` 放行。
 - 调用未授权方法 → 返回 `ERR_CAPABILITY_MISSING`，内核应优雅降级而非崩溃。
-- 同一能力可能由多种预置机制满足（如 `ui.tap` 可由 Accessibility 或 Shizuku 提供）；桥内部择可用者执行。
+- 每个能力分组只有**一个**预置来源（如 `ui.*` = Accessibility、`shell.*` = 内置 ADB 客户端）；
+  历史上"同一能力多机制并存"（Accessibility 与第三方特权通道同时提供 shell）已随
+  ADR-0003 勘误收敛为单源 —— 多源会让"能力有没有"变得不可判定。
 
 ## 5. 错误处理与审计
 
 - 标准错误码：`ERR_CAPABILITY_MISSING` / `ERR_INVALID_PARAM` / `ERR_RUNTIME` / `ERR_TIMEOUT`。
-- **所有特权操作（装卸应用、锁屏、shell、读屏、通知读取）必须写审计日志**：调用方 Agent、方法、参数摘要、结果、时间戳。
+- **所有特权操作必须写审计日志**：调用方 Agent、方法、参数摘要、结果、时间戳。
+  清单以 `container/engine/src/bridge/methods.js` 的 `audit: true` 为准（由
+  `bridge-methods-crosslang-test.js` 与 Kotlin `MethodDef` 双向钉住）：
+  `app.install/uninstall/grantPermission`、`ui.tap/swipe/inputText/screenshot`、
+  `shell.pair/exec/forget`、`policy.*`（setPassword/lockNow/wipe/setKiosk/addUserRestriction）、
+  `fs.write/mkdir`、`build.kernelInstall/apk`、`notif.read`、**`notif.post`**（外发内容可被用作伪装通道，故留痕）。
 - 审计日志对内核包更新保持持久（不随内核包切换而丢）。

@@ -45,6 +45,8 @@
     <!-- HostBridge：列举全部已装应用 -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
+    <!-- HostBridge：app.stop（ActivityManager.killBackgroundProcesses 是受保护调用，缺它必抛 SecurityException） -->
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <!-- 16KB 页对齐要求（Node 24 / 原生模块） -->
     <uses-feature android:name="android.hardware.ram.normal" android:required="false" />
 
@@ -76,10 +78,18 @@
           也不影响 minSdk/兼容性。
         -->
 
-        <!-- Node 运行时：独立进程 :node，与 UI 进程隔离；exported=false 防外部拉起。
-             specialUse = 无限期驻留的本地运行时（Play 才需要审核说明；本包侧载分发）。 -->
+        <!-- L-A 容器监督者（主进程，普通 started service，刻意不占通知位）：
+             唯一职责是监督 :node 实例宿主的死活（ADR-0006）。它住 :main、被无障碍
+             绑定托底，从而"重拉者"不再与被重拉者同进程 —— 旧设计的根病。 -->
         <service
-            android:name=".NodeRuntimeService"
+            android:name=".lifecycle.ContainerSupervisor"
+            android:exported="false" />
+
+        <!-- Node 运行时：独立进程 :node，与 UI 进程隔离；exported=false 防外部拉起。
+             specialUse = 无限期驻留的本地运行时（Play 才需要审核说明；本包侧载分发）。
+             onBind 必须返回真 binder（ContainerSupervisor 的 BIND_AUTO_CREATE 边依赖它）。 -->
+        <service
+            android:name=".runtime.NodeRuntimeService"
             android:exported="false"
             android:process=":node"
             android:foregroundServiceType="specialUse">
@@ -89,20 +99,11 @@
         </service>
 
         <!-- HostBridge（UDS 能力桥）：随 APK 冻结；exported=false，仅本应用 :node 进程连接。
-             必须自转前台：NodeRuntimeService 用 startForegroundService() 拉起它，Android 8+
-             要求 5s 内 startForeground()，否则系统对**其宿主进程**（=主进程）抛
-             RemoteServiceException —— 真机「初始化到一半 App 被关」的根因。 -->
-        <!-- Shizuku binder 投递通道（ADR-0003：Shizuku 是必备能力，默认集成） -->
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:multiprocess="false"
-            android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
-
+             由 ContainerSupervisor（L-A）startService 拉起并回戳互保；本服务自转前台
+             （bind/普通 start 路径无 FGS-start 契约，startForeground 被拒时吞异常 ——
+             抛出会炸掉 :main 宿主）。 -->
         <service
-            android:name=".HostBridgeService"
+            android:name=".bridge.HostBridgeService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
@@ -112,14 +113,14 @@
 
         <!-- 截屏（ui.screenshot）：Android 14+ 硬性要求 mediaProjection 类型前台服务 -->
         <service
-            android:name=".ScreenCaptureService"
+            android:name=".bridge.ScreenCaptureService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
 
         <!-- 开机自启 + 覆盖安装后自动复活（升级 APK 后系统杀进程但不重启服务，
              MY_PACKAGE_REPLACED 是唯一能在“更新完”这一刻拿到的回调） -->
         <receiver
-            android:name=".BootReceiver"
+            android:name=".lifecycle.BootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
@@ -130,12 +131,12 @@
 
         <!-- PackageInstaller 会话结果回传（exported=false：PendingIntent 定向投递） -->
         <receiver
-            android:name=".PackageInstallReceiver"
+            android:name=".lifecycle.PackageInstallReceiver"
             android:exported="false" />
 
         <!-- Device Owner 接收器（静默装卸/锁屏/密码/Kiosk/用户限制） -->
         <receiver
-            android:name=".DeviceAdminReceiver"
+            android:name=".lifecycle.DeviceAdminReceiver"
             android:exported="true"
             android:permission="android.permission.BIND_DEVICE_ADMIN">
             <meta-data
@@ -149,7 +150,7 @@
         <!-- 通知监听（bridge:notification → notif.read 能力的真实载体）。
              档位 T1：必须由用户在「设置 → 通知 → 通知使用权」手动开启，DO 无法静默授予。 -->
         <service
-            android:name=".DshNotificationListenerService"
+            android:name=".bridge.DshNotificationListenerService"
             android:exported="true"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
@@ -159,7 +160,7 @@
 
         <!-- 无障碍服务（bridge:ui_automation 能力） -->
         <service
-            android:name=".DshAccessibilityService"
+            android:name=".lifecycle.DshAccessibilityService"
             android:exported="true"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>

@@ -58,7 +58,7 @@
                  （manifest 里的 version 还会与**包内已签名的 kernel.json** 交叉校验）
       ⑤ 原子切 files/kernel/CURRENT
       → spawn :node（跑的就是刚装/刚升的内核）
-手动（等价）→ 面板按钮 / 桥方法 build.kernelUpdate
+手动（等价）→ 面板按钮 / 桥方法 build.kernelInstall
 ```
 
 ## 3.5 manifest 新鲜度与灰度放量（ADR-0005 C3/C4）

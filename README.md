@@ -7,13 +7,15 @@
 
 ---
 
-## 1. 三层架构（BASE_SPEC §2）
+## 1. 三层架构（base-spec §2）
 
 | 层 | 名称 | 更新方式 | 冻结？ | 职责 |
 |---|---|---|---|---|
 | **L0** | 容器（本仓库 APK） | 仅 Node/桥能力变更才重编 | ✅ | Node 运行时 + npm 客户端 + **HostBridge（UDS 能力桥）** + **OTA 引擎** + 生命周期 + 诊断 |
 | **L1** | 内核 = 控制面板 / Manager | 容器**签名 OTA** 热更新 | ❌ | 控制面板代码 + `kernel.json`；运行在 Node 运行时内；运行时经 npm 安装/管理 Agent |
 | **L2** | Agent 产品 | 内核运行时 **npm（公共源）** | ❌ | Codex / Claude Code / DeepSeek Harness 等标准公共产品，由内核拉取 |
+
+L0/L1/L2 是**发布维**（更新通道与冻结度）。容器内部的**职责维**分层（L-A 生命周期 / L-B 能力桥 / L-C 运行时环境 / L-D 生态适配 / L-E 内核工具箱）见 [`ARCHITECTURE.md` §1.1](ARCHITECTURE.md)；旧的"L3"编号已废止（它指 HostBridge，现归 L-B）。
 
 **两条热更新通道**（双信任根，互不替代）：
 - 容器 → 内核：**签名 OTA**（容器私钥签内核包，公钥焊进 APK 验签）。
@@ -102,32 +104,35 @@ IOException: Cannot run program ".../files/node/24.21.0/node": error=13, Permiss
 ---
 
 
-## 3. 内核启动流程（BASE_SPEC §9）
+## 3. 内核启动流程（base-spec §9）
 
-`NodeRuntimeService`（独立 `:node` 进程，`START_STICKY` 前台保活）在 App 启动或 `BootReceiver` 收到开机广播时：
+`NodeRuntimeService`（独立 `:node` 进程，`START_STICKY` 前台通知）由 `ContainerSupervisor`
+（:main，L-A 监督者）持有 binder 边并负责复活；App 启动 / `BootReceiver` / 互保边
+（§ARCHITECTURE 1.2）进入链路后，:node 的 boot 循环依次：
 
-1. **预置体检**（`ProvisioningProbe`，PROVISIONING §4）：device-owner / accessibility / shizuku / mediaprojection / special-perms 五项落 `diagnostics.txt` + `provisioning.json`，保证内核起不来时也能看清设备能力。
-2. 启动 **HostBridgeService**（UDS 监听，内核侧主动 connect）。
-3. 读 `files/kernel/CURRENT` 指针；若无内核则落地 `assets/kernel/baseline.zip`（首启离线可用）。
+1. **预置体检**（`ProvisioningProbe`，provisioning §4）：device-owner / accessibility / adb-shell / mediaprojection / special-perms 五项落 `diagnostics.txt` + `provisioning.json`，保证内核起不来时也能看清设备能力。
+2. 确保 **HostBridgeService**（UDS 监听，内核侧主动 connect）—— 拉起权在 L-A 监督者（每次被戳都 ensure），:node 只戳监督者、不再直接管桥（ADR-0006）。
+3. 读 `files/kernel/CURRENT` 指针；启动链 OTA（`autoCheck` 缺省 true）在 spawn **之前**查一次远端 feed，无内核/有更新即下载+校验+安装（ADR-0005：APK 不内置基线，本地 feed 已删除）。
 4. 确认内置 node 就位（`nativeLibraryDir/libnode.so`）→ 自检两个 `.so` → **exec-probe 真跑一次 `node -v`**。
 5. 取冻结的 Node 运行时（`files/node/CURRENT`）。
 6. 写 **runtime.json（schema 2，容器写内核读）** 到 `files/supervisor/runtime.json`。
-7. 注入安卓环境：`DSH_ANDROID=1` / `DSH_PLATFORM=android` / `DSH_SUPERVISOR_HOME` / `DSH_UI_DIR` / `PATH` / `HOME` / `TMPDIR` / `LD_LIBRARY_PATH`。
+7. 装配安卓环境（**唯一装配点 `runtime/GuestAdapter`**，§ARCHITECTURE 1.1）：`DSH_ANDROID=1` / `DSH_PLATFORM=android` / `DSH_SUPERVISOR_HOME` / `DSH_UI_DIR` / `DSH_BRIDGE_SOCKET` / `DSH_PERMISSION_MODE` / `PATH` / `HOME` / `TMPDIR`(=cacheDir) / `LD_LIBRARY_PATH` / `NODE_PATH`。
 8. `spawn node bin/dsh-supervisor daemon`（内核入口）；无内核包时回落到 `assets/node/server.js` 探针（:3080）。
-9. 轮询控制面（有内核看 `36360/status`；探针模式看 `3080`）；失败/进程退出 → **退避重启**（1s→…→30s 上限）。
+9. 轮询控制面（有内核看 `36360/status`；探针模式看 `3080`）；失败/进程退出 → **退避重启**（1s→…→30s 上限，存活 ≥15s 才清零）。
 
-> 一次内核升级 = 重启 `:node` 进程（用户侧“热”的，无 APK 重编）。
+> 一次内核升级 = 重启**内核子进程**（:node 宿主进程不重启）：面板发 `ACTION_RESTART`，
+> :node destroy 子进程后由自家 boot 循环按退避重拉 —— 用户侧"热"的，无 APK 重编。
 
 ---
 
-## 4. HostBridge（能力桥，L3）
+## 4. HostBridge（能力桥，职责维 L-B）
 
-- **传输**：Unix 域套接字（抽象命名空间 `dsh_hostbridge`）；内核（Node）经 `net.connect('\0dsh_hostbridge')` 主动连接（**前导 NUL 字节**，Node 22 原生支持）。**严禁 TCP 暴露控制面**（BASE_SPEC §8）。
+- **传输**：Unix 域套接字（抽象命名空间 `dsh_hostbridge`）；内核（Node）经 `net.connect('\0dsh_hostbridge')` 主动连接（**前导 NUL 字节**，Node 22 原生支持）。**严禁 TCP 暴露控制面**（base-spec §8）。
 - **协议**：JSON-RPC 2.0，换行分隔 JSON 帧；握手协商 `capabilities` / `groups`。
 - **8 组方法**：`app_control / ui_automation / shell / device_policy / storage / build / notification / system`。
 - **鉴权**：**两层门禁** —— 组级（握手按每组**代表能力**协商 `bridge:*`）+ 方法级（每次调用按 `caps` 精确拦截）。未授权 → `ERR_CAPABILITY_MISSING (-32001)`；未知方法 → `METHOD_NOT_FOUND (-32601)`。内核应优雅降级。
-- **审计**：所有特权操作（装卸应用/锁屏/shell/读屏/通知读取，见 BRIDGE_PROTOCOL §5）落 `files/bridge-audit.log`（持久，不随内核包切换丢失）。
-- **内核侧客户端**：内核仓 `src/platform/host-bridge/`（本次已互通）；`notify.post`/`app.openUrl` 分别承接内核的通知与「打开浏览器」。
+- **审计**：所有特权操作（`methods.js` 里 `audit: true` 的全集，见 bridge-protocol §5）落 `files/bridge-audit.log`（持久，不随内核包切换丢失）。
+- **内核侧客户端**：`kernel/src/platform/host-bridge/`（进程级单例，已互通）；`notif.post` / `app.openUrl` 分别承接通知与「打开浏览器」。
 
 **落地进度（2026-09）**：
 
@@ -137,15 +142,15 @@ IOException: Cannot run program ".../files/node/24.21.0/node": error=13, Permiss
 | `device_policy` | ✅ | 13 个 `dpm.*` 方法真实调用（需 Device Owner）；**P1 修正 6 处存量 API 误用** |
 | `ui_automation` | ✅ | **P2 落地**：手势/节点树/文本注入；**P5 补 `ui.screenshot`**（MediaProjection） |
 | `storage` | ✅ | **P5 落地**：`fs.read/write/list/mkdir` 真实实现（全放开 + 危险路径提示不拦截） |
-| `shell` | ⚠️ | **P4 兜底**：以应用 uid 执行（`privileged:false`）；特权 shell 需 Shizuku SDK（未内置） |
+| `shell` | ✅ | **壳自带 ADB 客户端（无线调试）**：`shell.pair/status/exec/forget`，exec 以 shell uid(2000) 执行（能力 `adb_shell`=已配对）。Shizuku 已删除（ADR-0003 勘误 2026-09-24） |
 | `build` | ✅ | **P3 已收口（不做内置编译链，已证伪）**：语义 = 从本地 feed 安装已签名内核（`build.kernelInstall/kernelStatus`）；`build.apk` 返回 `-32602` 迁移指引 |
 
 > **`ui.screenshot` 的前置**：MediaProjection 授权**不可预置**（与 Device Owner 本质区别）——
 > 需在 App 诊断面板点一次「授权屏幕捕获」，之后缓存于 `files/screen-capture-grant.json` 长期复用。
 >
-> 协议细节、方法表、错误码见 [`docs/BRIDGE_PROTOCOL.md`](docs/BRIDGE_PROTOCOL.md)；实现与 [`container-engine/src/bridge/*`](container-engine/src/bridge) 对齐。
-> 跨仓互通由 `container-engine/test/bridge-interop-test.js` 实测（内核真实客户端 ←→ 容器参考桥，真实 UDS）。
-> 权限预置与自检见 [`docs/PROVISIONING.md`](docs/PROVISIONING.md)；`Device Owner` 激活：`adb shell dpm set-device-owner io.github.lobbowen.dshmobile/.DeviceAdminReceiver`。
+> 协议细节、方法表、错误码见 [`docs/contracts/bridge-protocol.md`](docs/contracts/bridge-protocol.md)；实现与 [`container/engine/src/bridge/*`](container/engine/src/bridge) 对齐。
+> 互通由 `container/engine/test/bridge-interop-test.js` 实测（内核真实客户端 ←→ 容器参考桥，真实 UDS；默认打同仓 `kernel/`，`DSH_KERNEL_REPO` 可指向 fork）。
+> 权限预置与自检见 [`docs/runbook/provisioning.md`](docs/runbook/provisioning.md)；`Device Owner` 激活：`adb shell dpm set-device-owner io.github.lobbowen.dshmobile/.lifecycle.DeviceAdminReceiver`。
 
 ---
 
@@ -208,27 +213,27 @@ CI 等价流程见 `.github/workflows/kernel-ota.yml`（用 `OTA_PRIVATE_KEY_PEM
   → 回灌 `{v:1,type:'dsh:kernel-update-result',requestId,ok,stage,version,restartUncertain,error}`
   → 宿主帧 `dshDeliverResult(json)` → 面板 iframe。
 - ⚠ 回灌**必须含 `v` 与 `ok`**（内核 `kernelUpdateBridge.ts` 依此过滤，缺则丢弃 → 面板超时）。
-  契约由 `container-engine/test/kernel-update-bridge-test.js` 锁定。
+  契约由 `container/engine/test/kernel-update-bridge-test.js` 锁定。
 
 ---
 
-## 6. container-engine（可测 OTA 引擎）
+## 6. container/engine（可测 OTA 引擎）
 
-纯 Node、零外部依赖，可在本机 `node` 直接跑测试（无需 Android SDK）：
+纯 Node、零外部依赖。测试**只在 CI 跑**（`scripts/require-ci.js` 门禁拦截本地执行——
+本地无 Android/设备环境，测出的绿不可信），秒级完成：
 
 ```bash
-cd container-engine && npm test
-# native-assets 30 / sign-verify 6 / kernel-bundle 9 / kernel-selfboot 68 /
-# kernel-feed 23 / ota-engine 12 / runtime-json 8 / bridge-protocol 14 /
-# bridge-e2e 14 / bridge-interop 14 / kernel-update-bridge 22 / e2e-mock-kernel 8
-# ⇒ 228 passed, 0 failed（12 套件）
+# CI: cd container/engine && npm run test:logic
+# 套件：layout-manifest / dead-path / shizuku / bridge-methods-crosslang / native-assets /
+# dependency-rule / contract-schema / sign-verify / kernel-bundle / kernel-selfboot /
+# ota-engine / runtime-json / bridge-protocol / bridge-e2e / bridge-interop /
+# kernel-update-bridge / e2e-mock-kernel / kernel-version-crosslang / boot-env-contract / adb-client
 #
 # 说明（ADR-0005）：曾经另有 test:baseline（验 APK 内置基线产物），已随
 # "内核不随 APK 分发"整体删除 —— 内核只从 OTA 源安装，产物断言不再属于本仓逻辑测试。
-#   npm run test:logic   逻辑测试（不依赖任何产物，CI 上必跑、秒级）
 ```
 
-注：`bridge-interop` 读的是**同仓子目录** `dsh-android-kernel/`（单仓布局的默认路径，
+注：`bridge-interop` 读的是**同仓子目录** `kernel/`（单仓布局的默认路径，
 由测试文件位置推导）。用 `DSH_KERNEL_REPO=<路径>` 可指向 fork / 其他内核源码做跨仓试验。
 
 覆盖：ed25519 签名/验签、内核包打包、OTA 验签+解包+原子指针切换+坏包拦截、runtime.json 契约、HostBridge 协议编解码/握手/方法能力/审计、**内核↔容器桥真实 UDS 互通**、**更新桥协议契约**，以及**真实 spawn 内核 + 健康检查**的端到端。
@@ -240,4 +245,4 @@ cd container-engine && npm test
 - **最新 LTS = Node 24 Krypton**（24.21.0；Active LTS 到 2028-04-30）；Node 24 自带 OpenSSL 3.5，默认安全等级 2。
 - **16KB 页对齐**：NDK r27+ 编译满足安卓 15+ (API 35) `dlopen` 要求。
 - **双信任根**：容器 ed25519 私钥签内核、公钥焊进 APK；npm 标准 integrity 验 Agent。
-- **传输私有**：Agent↔HostBridge 走 UDS，不走 TCP（BASE_SPEC §8）。
+- **传输私有**：Agent↔HostBridge 走 UDS，不走 TCP（base-spec §8）。

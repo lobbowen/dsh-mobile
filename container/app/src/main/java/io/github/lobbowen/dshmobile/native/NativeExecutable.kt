@@ -6,7 +6,7 @@ package io.github.lobbowen.dshmobile.native
  * 这些事实曾硬编码在 8 处（构建脚本/CI/gradle/Kotlin 各一份），现收敛到
  * [NativeAssetRegistry] 一条声明，其余由其派生。
  *
- * nativeLibraryDir（exec_type）恒可 exec；app home 需 targetSdk<=28，见 docs/ADR-001。
+ * nativeLibraryDir（exec_type）恒可 exec；app home 需 targetSdk<=28，见 docs/adr/0001-android-execution-domain.md。
  * 另需 PT_INTERP=/system/bin/linker64、aarch64、DT_NEEDED 仅 bionic 或随包库；
  * 这些约束装机后无法补救，须在打包期校验。exec-probe 是唯一可信的运行期判定。
  */
