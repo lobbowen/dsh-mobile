@@ -96,11 +96,9 @@ const SURFACE = [
   // ── 任务（tasks.js）──
   { path: '/tasks', methods: ['GET'], domain: 'tasks', category: 'public', consumers: ['UI(TasksPage)'], note: '统一任务列表（+ /tasks/{id}）' },
 
-  // ── ADB 无线调试（adb.js）──
-  { path: '/adb/status', methods: ['GET'],  domain: 'adb', category: 'public', consumers: ['UI(配对页)'], note: 'ADB 配对/密钥状态' },
-  { path: '/adb/pair',   methods: ['POST'], domain: 'adb', category: 'public', consumers: ['UI(配对页)'], note: '输入 host/端口/配对码完成自助配对' },
-  { path: '/adb/shell',  methods: ['POST'], domain: 'adb', category: 'public', consumers: ['UI(配对页自检)'], note: '在已配对设备上执行 shell（如 id 自检）' },
-  { path: '/adb/forget', methods: ['POST'], domain: 'adb', category: 'public', consumers: ['UI(配对页)'], note: '清除已保存的连接端点' },
+  // ── ADB 环境状态（adb.js）：只读透传 L0 桥 shell.status；配对/执行/清除能力物理在 L0，
+  // 操作入口是容器 GUI（ADR-0007）。本域三个写端点已彻底删除、勿回潮（零残留门禁连注释一起扫）。
+  { path: '/adb/status', methods: ['GET'],  domain: 'adb', category: 'public', consumers: ['UI(环境状态面板)'], note: 'ADB 配对/密钥状态（桥只读透传）' },
 
 ];
 

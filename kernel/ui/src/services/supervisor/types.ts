@@ -414,7 +414,7 @@ export interface LifecycleModuleState {
   detail?: unknown;
 }
 
-// ── /adb（无线调试自助配对）────────────────────────────────────────────────
+// ── /adb（只读环境状态；配对/执行能力在 L0 容器，ADR-0007）──────────────────
 export interface AdbStatus {
   ok?: boolean;
   keyPath: string;
@@ -426,6 +426,4 @@ export interface AdbStatus {
   name: string | null;
   pairedAt: string | null;
 }
-export interface AdbPairResult { ok?: boolean; guid: string; type: number; }
-export interface AdbShellResult { ok?: boolean; out: string; logs: string[]; }
 

@@ -1,16 +1,18 @@
 /**
- * supervisor 功能域导航 — 6 域（Android 内核保留域）
+ * supervisor 功能域导航 — 5 域（Android 内核保留域）
  *
  * ⚠ 已删除的域（勿回潮）：实例管理（沙箱 instances）、远程控制（lan / relay / frpc）、
  *   桌面壳（Tauri shell）—— 对应端点与页面已整体删除，见 docs/ANDROID-PLAN.md §4。
+ *   ADB 配对域（pairing）：写操作物理归 L0 容器 GUI（ADR-0007），面板仅 OverviewPage
+ *   的只读环境状态瓦片。
  */
 import {
-  Activity, LayoutDashboard, ListChecks, Package, Settings, Smartphone,
+  Activity, LayoutDashboard, ListChecks, Package, Settings,
   type LucideIcon,
 } from "lucide-react";
 
 export type SupervisorViewKey =
-  | "overview" | "plugins" | "router" | "tasks" | "pairing" | "settings";
+  | "overview" | "plugins" | "router" | "tasks" | "settings";
 
 export const SUPERVISOR_NAV: Array<{
   key: SupervisorViewKey;
@@ -21,7 +23,6 @@ export const SUPERVISOR_NAV: Array<{
   { key: "plugins", label: "插件商店", icon: Package },
   { key: "router", label: "智能路由", icon: Activity },
   { key: "tasks", label: "任务中心", icon: ListChecks },
-  { key: "pairing", label: "ADB 配对", icon: Smartphone },
   { key: "settings", label: "设置", icon: Settings },
 ];
 
