@@ -200,8 +200,17 @@ class PairingProbeService : Service() {
     private fun submitIntent(): PendingIntent = PendingIntent.getService(
         this, REQ_SUBMIT,
         Intent(this, PairingProbeService::class.java).setAction(ACTION_SUBMIT),
-        PendingIntent.FLAG_UPDATE_CURRENT or immutability(),
+        // 系统铁律（Android 12+ 强制）：挂 RemoteInput 的动作 PendingIntent 必须 mutable ——
+        // SystemUI 要把用户输入回填进 intent。此前写死 FLAG_IMMUTABLE 让 nm.notify() 直接抛
+        // IllegalArgumentException，且被 runCatching 吞了整整一代（③从未成立的根因，真机案底
+        // 2026-09-25 16:31:57）。
+        PendingIntent.FLAG_UPDATE_CURRENT or mutableFlag(),
     )
+
+    private fun mutableFlag(): Int =
+        // = PendingIntent.FLAG_MUTABLE 的字面值：compileSdk 里没有这个常量（targetSdk 28 时代），
+        // 且低版本运行时读取该字段会 NoSuchFieldError，只能用 int。
+        if (Build.VERSION.SDK_INT >= 31) 1 shl 18 else 0
 
     /** targetSdk 28 不强制 immutable，但真机是 Android 17 —— 一律显式声明，杜绝 hijack 面。 */
     private fun immutability(): Int =
