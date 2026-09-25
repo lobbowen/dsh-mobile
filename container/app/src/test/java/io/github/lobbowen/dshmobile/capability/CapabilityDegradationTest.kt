@@ -9,13 +9,14 @@ import org.junit.Test
 /**
  * 能力模型 v2 的退化路径 golden（spec §8-2「假绿免疫」、§2.1 规则 2/3，R6）。
  *
- * 钉这四条而不是钉文案：v1 的事故全部发生在「拿不到某项事实时怎么渲染」这一支上 ——
- * 首次安装被当成待办、DO 不可得被当成门槛、通道过期读数被当成可用。三条都在真机咬过。
+ * 钉的是判据而不是文案：事故全部发生在「拿不到某项事实时怎么渲染」这一支上 ——
+ * 首次安装被当成待办、DO 不可得被当成门槛、通道过期读数被当成可用、通知权限放错段。
+ * 前四条都在真机咬过。顺序层面的免疫见 [OnboardingFlowTest]。
  */
 class CapabilityDegradationTest {
 
-    /** S2 全部权限档位的 id —— 表里加一档而这里没列，第 4 条测试会红。 */
-    private val ALL_S2_GRANTS = setOf(
+    /** 全部权限档位的 id —— 表里加一档而这里没列，最后一条测试会红。 */
+    private val ALL_GRANTS = setOf(
         PermissionCatalog.MANAGE_EXTERNAL_STORAGE,
         PermissionCatalog.REQUEST_INSTALL_PACKAGES,
         PermissionCatalog.SYSTEM_ALERT_WINDOW,
@@ -28,7 +29,7 @@ class CapabilityDegradationTest {
 
     private fun fresh(
         nowMs: Long = 1_000_000L,
-        grants: Set<String> = ALL_S2_GRANTS,
+        grants: Set<String> = ALL_GRANTS,
         deviceOwner: Boolean = false,
         ownerAttempt: OwnerAttempt? = null,
         channel: ChannelProbe = ChannelProbe(ProbeOutcome.LIVE, 1_000_000L, "uid=2000"),
@@ -100,7 +101,50 @@ class CapabilityDegradationTest {
     @Test fun 登记表每一段都有能力_新增档位漏登记会在这里变红() {
         val segs = CapabilityCatalog.ALL.map { it.segment }.toSet()
         assertEquals(setOf("S0", "S1", "S2", "S3"), segs)
+        // 通知权限登记在 S0（它是配对的物理前置），其余权限档仍在 S2
+        val s0 = CapabilityCatalog.ALL.filter { it.segment == CapabilityCatalog.S0 }.map { it.id }.toSet()
+        assertTrue("通知发送必须登记在 S0：S0 输码靠通知栏", s0.contains(PermissionCatalog.POST_NOTIFICATIONS))
         val s2 = CapabilityCatalog.ALL.filter { it.segment == CapabilityCatalog.S2 }.map { it.id }.toSet()
-        assertEquals("S2 权限能力须与 PermissionCatalog 的权限档一一对应", ALL_S2_GRANTS, s2)
+        assertEquals(
+            "S2 权限能力须与 PermissionCatalog 的权限档一一对应",
+            ALL_GRANTS - PermissionCatalog.POST_NOTIFICATIONS, s2,
+        )
+    }
+
+    @Test fun 没有通知权限时配对是等待_不能是让人点的待办() {
+        // 真机定罪的反事实：全新安装时「开始配对」把通知栏当唯一输码入口，而通知权限
+        // 当年登记在 S2 —— 于是 S0 永远走不下去（onboarding-flow-spec §0 表第 3 行）。
+        val e = Evidence(
+            nowMs = 1_000_000L,
+            devOptionsOn = true,
+            wirelessDebugOn = true,
+            grants = ALL_GRANTS - PermissionCatalog.POST_NOTIFICATIONS,
+        )
+        val v = CapabilityCatalog.evaluate(e)
+        assertEquals(CapStatus.BLOCKED, v.getValue(CapabilityCatalog.ADB_CREDENTIALS).status)
+        assertEquals(
+            "等待 " + CapabilityCatalog.titleOf(PermissionCatalog.POST_NOTIFICATIONS),
+            v.getValue(CapabilityCatalog.ADB_CREDENTIALS).detail,
+        )
+    }
+
+    @Test fun 老设备通道在线但通知被回收_实测优先不许降级成等待() {
+        // ROM 回收 post_notifications 是真机会发生的事（HANS/osense 案底）。此时凭据仍在册、探针仍 LIVE：
+        // 若 DAG 推断能推翻实测，S0/S3/S4 会整片变成「等待 通知发送」，面板再也进不去 —— 而正确的表现是
+        // 通道照旧绿、缺的那项授权出现在 F6 补齐清单（onboarding-flow-spec §2.2 认领规则）。
+        val e = fresh(grants = ALL_GRANTS - PermissionCatalog.POST_NOTIFICATIONS)
+        val v = CapabilityCatalog.evaluate(e)
+        assertEquals(CapStatus.GRANTED, v.getValue(CapabilityCatalog.ADB_CREDENTIALS).status)
+        assertEquals(CapStatus.GRANTED, v.getValue(CapabilityCatalog.ADB_CHANNEL).status)
+        assertEquals(StepStatus.DONE, steps(e).getValue("S4").status)
+        // 缺的那项也不许凭空消失：它自己的判据仍是 ACTION，等 F6 认领。
+        assertEquals(CapStatus.ACTION, v.getValue(PermissionCatalog.POST_NOTIFICATIONS).status)
+    }
+
+    @Test fun 入口只看三要素_权限缺失不挡门() {
+        val noOverlay = ALL_GRANTS - PermissionCatalog.SYSTEM_ALERT_WINDOW
+        val rows = steps(fresh(grants = noOverlay))
+        assertEquals(StepStatus.DONE, rows.getValue("S4").status)
+        assertEquals(StepStatus.ACTION, rows.getValue("S2").status)
     }
 }

@@ -24,12 +24,27 @@ data class PipelineStep(
 /**
  * 段投影（spec §2.3）：能力登记表按 `requires` 拓扑排序后的**呈现视图**。
  *
- * 五段不再是模型：S4 甚至不对应任何能力，它 = 「所有非 optional 能力都绿或都不可得」的
- * 派生结论。段内取 worst 的优先级写死在这里，便于单测钉死。
+ * 五段不再是模型：S4 甚至不对应任何能力，它是 [GATING] 三要素的派生结论（入口 ≠ 全绿）。
+ * 段内取 worst 的优先级写死在这里，便于单测钉死。首页驱动器是 `OnboardingFlow`，
+ * 这张表退为判据核对视图与探针报告的证据出口。
  */
 object PipelineProjection {
 
     const val S4 = "S4"
+
+    /**
+     * 放行三要素（onboarding-flow-spec §1 总则 6：入口 ≠ 全绿）。
+     * 这三项之外绿不绿都不挡门 —— 改动这张表等于改产品入口判据，必须同时改规范。
+     */
+    private val GATING = listOf(
+        CapabilityCatalog.ADB_CHANNEL,
+        CapabilityCatalog.RUNTIME,
+        CapabilityCatalog.KERNEL_BUNDLE,
+    )
+
+    /** 入口是否可进（[OnboardingFlow] 与首页自动跳转共用这一把尺子，UI 不得自己算）。 */
+    fun workbenchReady(verdicts: Map<String, CapVerdict>): Boolean =
+        GATING.all { verdicts[it]?.status == CapStatus.GRANTED }
 
     private val TITLES = mapOf(
         S0 to "ADB 通道",
@@ -92,10 +107,21 @@ object PipelineProjection {
         )
     }
 
-    /** S4 = 放行判定：非 optional 能力全部 GRANTED（UNREACHABLE 的加速器/旁路不计）。 */
+    /**
+     * S4 = 放行判定。口径（onboarding-flow-spec §1 总则 6）：**入口 ≠ 能力全绿**。
+     *
+     * 只要求「通道 + 控制面 + 内核包」三项 —— 这三项绿了面板就能干活。
+     * 其余权限是面板内各功能的**能力位**：缺了就在面板里降级并提示（F6 补齐），
+     * 不挡入口。旧口径「所有非 optional 能力 GRANTED 才放行」把 5 个授权页排在
+     * 用户能看到任何东西之前，是「配对之后跳不进去」的直接原因。
+     */
     private fun workbenchRow(e: Evidence, verdicts: Map<String, CapVerdict>): PipelineStep {
-        // 通道与权限之外，S0 的绿只看 adb-channel（凭据在册不等于可用，spec §2.2 注 1）。
-        val gaps = CapabilityCatalog.blockingGaps(verdicts)
+        val gating = GATING.mapNotNull { id ->
+            val c = CapabilityCatalog.byId(id) ?: return@mapNotNull null
+            val v = verdicts[id] ?: return@mapNotNull null
+            c to v
+        }
+        val gaps = gating.filter { it.second.status != CapStatus.GRANTED }
         if (gaps.isEmpty()) {
             return PipelineStep(S4, "工作台", StepStatus.DONE, "可进入控制面板")
         }
@@ -107,12 +133,8 @@ object PipelineProjection {
             status = if (blockedOnly) StepStatus.BLOCKED else StepStatus.ACTION,
             detail = "缺 " + gaps.joinToString("、") { it.first.title } +
                 "（共 " + gaps.size + " 项）",
-            pending = CapabilityCatalog.byId(worst.first.id)?.acquirer?.invoke(e)?.firstOrNull(),
+            pending = worst.first.acquirer.invoke(e).firstOrNull(),
             pendingCapId = worst.first.id,
         )
     }
-
-    /** 首页是否放行 S4 入口。 */
-    fun workbenchOpen(steps: List<PipelineStep>): Boolean =
-        steps.lastOrNull()?.status == StepStatus.DONE
 }

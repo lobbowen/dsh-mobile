@@ -17,6 +17,8 @@ import io.github.lobbowen.dshmobile.bridge.MdnsWatcher
 import io.github.lobbowen.dshmobile.capability.AdbChannelProbe
 import io.github.lobbowen.dshmobile.capability.AttemptStore
 import io.github.lobbowen.dshmobile.capability.PipelineRefresh
+import io.github.lobbowen.dshmobile.permissions.PermissionCatalog
+import io.github.lobbowen.dshmobile.permissions.PermissionCenter
 
 /**
  * S0 配对的底座服务（ADR-0007 主路径的载体；UI 面在 OnboardingActivity 向导态）：
@@ -47,6 +49,10 @@ class PairingProbeService : Service() {
     @Volatile var portText = ""; private set
     @Volatile var codeArrived = false; private set
     @Volatile var pairingInFlight = false; private set
+    /**
+     * 本轮被通知权限挡在门外（F1 的读数负责把它变成动作，这里只留事实，不猜状态）。
+     */
+    @Volatile var notificationBlocked = false; private set
     /**
      * 本轮探测起点（真正重挂 browse 时才刷新）。向导用它把**上一轮**的失败读数排除在
      * 实况之外 —— 否则用户重按「开始配对」后仍会看到旧失败文案。
@@ -80,6 +86,21 @@ class PairingProbeService : Service() {
     }
 
     private fun startProbe() {
+        // 输码入口是通知栏 —— 通知不可见时「开始配对」就是一个按钮形状的谎言：`nm.notify()`
+        // 在 Android 13+ 缺 POST_NOTIFICATIONS 时不抛异常、只是不显示（PermissionCatalog 给
+        // 它的 note 就是这句），runCatching 抓不到，用户只看到向导停在「监听中」。
+        // 所以挂通知之前先自证，缺了就交回流程的 F1（onboarding-flow-spec §3）。
+        if (!notificationsUsable()) {
+            notificationBlocked = true
+            ProbeJournal.append(
+                this, "svc",
+                "通知权限未授予 → 不起 browse：输码通知发不出去（Android 13+ 静默丢弃，notify 不抛异常）",
+            )
+            PipelineRefresh.notifyChanged()
+            stopSelf()
+            return
+        }
+        notificationBlocked = false
         // 「开始配对」可重复按：已拿到配对端口就不重抖 browse（stop/start 会丢记录）；
         // 没有端口则照常往下重挂监听 —— 服务被系统重建后 running 残留为 true、
         // watcher 却是新的，此时必须允许重入，否则向导永远停在「监听中」。
@@ -101,6 +122,15 @@ class PairingProbeService : Service() {
                     if (ProbeJournal.pairingRecordFirstSeenAt == 0L) ProbeJournal.pairingRecordFirstSeenAt = now
                     ProbeJournal.append(this@PairingProbeService, "mdns", "pairing 记录 $name host=${host ?: "?"} port=$port browse后 ${ageMs}ms")
                 } else {
+                    if (connectPort != port) {
+                        // 端口轮换是**现场事实**，不该等 TTL 到期才发现：看见新的 connect 端口就
+                        // 作废通道缓存，下一轮采集现探（onboarding-flow-spec §2.3 事件表）。
+                        AdbChannelProbe.invalidate()
+                        ProbeJournal.append(
+                            this@PairingProbeService, "mdns",
+                            "connect 端口变化 $connectPort→$port → 通道缓存作废",
+                        )
+                    }
                     connectPort = port
                     if (ProbeJournal.connectRecordFirstSeenAt == 0L) ProbeJournal.connectRecordFirstSeenAt = now
                     ProbeJournal.append(this@PairingProbeService, "mdns", "connect 记录 $name port=$port browse后 ${ageMs}ms")
@@ -166,6 +196,15 @@ class PairingProbeService : Service() {
             if (outcome.ok) AdbChannelProbe.invalidate()
             PipelineRefresh.notifyChanged()
         }.apply { isDaemon = true }.start()
+    }
+
+    /**
+     * 通知能不能真的显示。授权状态一律经 [PermissionCenter] 查（判据单一出口，spec §2.5），
+     * 这里只决定「这一步要不要往下走」，不自己判一遍。
+     */
+    private fun notificationsUsable(): Boolean {
+        val spec = PermissionCatalog.byId(PermissionCatalog.POST_NOTIFICATIONS) ?: return true
+        return PermissionCenter(applicationContext).isGranted(spec)
     }
 
     private fun renderStatus(override: String? = null, stickyError: Boolean = false) {
