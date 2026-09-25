@@ -34,8 +34,15 @@ object PipelineProbe {
             missingPermissions = missing,
             runtimeUp = controlPlaneUp(),
             lastPairError = if (paired) null else lastPairError(ctx),
+            // S0 前置检测：两个开关都是公开 Global 设置，读不到按 false 处理（宁缺勿误导）。
+            devOptionsOn = globalInt(ctx, "development_settings_enabled") == 1,
+            wirelessDebugOn = globalInt(ctx, "adb_wifi_enabled") == 1,
         )
     }
+
+    private fun globalInt(ctx: Context, name: String): Int = runCatching {
+        android.provider.Settings.Global.getInt(ctx.contentResolver, name, 0)
+    }.getOrDefault(0)
 
     /** S0 最近一次配对尝试的失败原因：扫探针日志最后一条 [pair] 结论行。 */
     private fun lastPairError(ctx: Context): String? {
