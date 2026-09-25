@@ -36,7 +36,8 @@ class NodeContainerApp : Application() {
 
     /**
      * 解锁/亮屏补位边：进程还活着但监督链被 ROM 掐掉时，这两下把它戳回来。
-     * 进程整体被回收时本边无效 —— 那条路归 JobScheduler 的周期戳（lifecycle/SelfHealJobService）。
+     * 进程整体被回收时本边无效，也**不做复活**（2026-09-26 拍板：复活回来的是壳，任务在
+     * 重启那一刻已被内核判 failed）—— 那种情况归 lifecycle/ResidencyAudit 定罪，把中断显示出来。
      *
      * 用两参重载而不是 RECEIVER_NOT_EXPORTED：那个标志位的强制只作用于 targetSdk 33+，
      * 本包 targetSdk=28（SELinux exec 域的决定，见 app/build.gradle），带上它只会多出
