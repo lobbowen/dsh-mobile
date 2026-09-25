@@ -14,6 +14,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
 import io.github.lobbowen.dshmobile.bridge.AdbClientRunner
 import io.github.lobbowen.dshmobile.bridge.MdnsWatcher
+import io.github.lobbowen.dshmobile.capability.AdbChannelProbe
+import io.github.lobbowen.dshmobile.capability.AttemptStore
+import io.github.lobbowen.dshmobile.capability.PipelineRefresh
 
 /**
  * S0 配对的底座服务（ADR-0007 主路径的载体；UI 面在 OnboardingActivity 向导态）：
@@ -22,8 +25,8 @@ import io.github.lobbowen.dshmobile.bridge.MdnsWatcher
  *   不会被夺焦销毁（这是整个设计成立的前提，禁改）。
  * · 端口来自本机 mDNS（pairing 记录给配对端口，connect 记录给连接端口），
  *   用户不手输 IP:Port；mDNS 拿不到时通知里的输码仍可用（回落 host=127.0.0.1）。
- * · 收到码后转调 [AdbClientRunner.pair]（一次性 Node 进程做 SPAKE2/TLS），
- *   结果写探针日志 + 更新通知。
+ * · 收到码后转调 [AdbClientRunner.pair]（一次性 Node 进程做 SPAKE2/TLS）：结论进
+ *   [AttemptStore] 类型化记账（判据层唯一的失败来源），通知与探针日志只是它的人读镜像。
  *
  * 普通 started service：通知是常态通知不是 FGS（探针跑完即 stop，不占常驻资源；
  * :main 的存活由无障碍+ContainerSupervisor 链托底，与保活主线一致）。
@@ -31,7 +34,6 @@ import io.github.lobbowen.dshmobile.bridge.MdnsWatcher
 class PairingProbeService : Service() {
 
     private var watcher: MdnsWatcher? = null
-    private var lastBrowseAt = 0L
 
     // mDNS 解析出的最新端点（②的产出，也是自动配对的地址来源）
     @Volatile private var pairingHost: String? = null
@@ -39,12 +41,17 @@ class PairingProbeService : Service() {
     @Volatile private var connectPort: Int = 0
     @Volatile private var busy = false
 
-    // ---- 向导可见状态：首页 S0 向导态直接读这几个量（同进程 :main，跨进程不适用） ----
+    // ---- 向导可见状态：仅**只有本服务知道**的事实（mDNS 回调、RemoteInput 送达）。
+    //      配对成败不在此列 —— 它进 AttemptStore 类型化记账，判据层读那份，不读文案。 ----
     @Volatile var portFound = false; private set
     @Volatile var portText = ""; private set
     @Volatile var codeArrived = false; private set
     @Volatile var pairingInFlight = false; private set
-    @Volatile var lastPairingError: String? = null; private set
+    /**
+     * 本轮探测起点（真正重挂 browse 时才刷新）。向导用它把**上一轮**的失败读数排除在
+     * 实况之外 —— 否则用户重按「开始配对」后仍会看到旧失败文案。
+     */
+    @Volatile var roundStartMs = 0L; private set
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -62,6 +69,7 @@ class PairingProbeService : Service() {
                 // 探针从未 startForeground（常态通知），撤通知直接 cancel —— 不碰
                 // 已废弃的 stopForeground(boolean)，也不依赖 onDestroy 时机。
                 (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIF)
+                PipelineRefresh.notifyChanged()
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -78,11 +86,11 @@ class PairingProbeService : Service() {
         if (running && pairingPort > 0) { renderStatus(); return }
         running = true
         portFound = false; portText = ""; codeArrived = false
-        pairingInFlight = false; lastPairingError = null
+        pairingInFlight = false
         val w = watcher ?: MdnsWatcher(applicationContext).also { watcher = it }
-        lastBrowseAt = System.currentTimeMillis()
-        ProbeJournal.browsePairingStartedAt = lastBrowseAt
-        ProbeJournal.browseConnectStartedAt = lastBrowseAt
+        roundStartMs = System.currentTimeMillis()
+        ProbeJournal.browsePairingStartedAt = roundStartMs
+        ProbeJournal.browseConnectStartedAt = roundStartMs
         ProbeJournal.append(this, "svc", "探针启动：开始 browse ${MdnsWatcher.TYPE_PAIRING} + ${MdnsWatcher.TYPE_CONNECT}")
         val sink = object : MdnsWatcher.Sink {
             override fun onRecord(type: String, host: String?, port: Int, name: String, ageMs: Long) {
@@ -104,8 +112,8 @@ class PairingProbeService : Service() {
                 ProbeJournal.append(this@PairingProbeService, "mdns", message)
             }
         }
-        w.start(MdnsWatcher.TYPE_PAIRING, lastBrowseAt, sink)
-        w.start(MdnsWatcher.TYPE_CONNECT, lastBrowseAt, sink)
+        w.start(MdnsWatcher.TYPE_PAIRING, roundStartMs, sink)
+        w.start(MdnsWatcher.TYPE_CONNECT, roundStartMs, sink)
         renderStatus()
         // ② 定罪素材：对话框开着却长时间无记录，也要在日志里留下「等多久没等到」。
         Handler(Looper.getMainLooper()).postDelayed({
@@ -143,17 +151,20 @@ class PairingProbeService : Service() {
             )
             busy = false
             pairingInFlight = false
-            lastPairingError = if (outcome.ok) null else (outcome.error ?: outcome.raw.take(200))
+            val reason = if (outcome.ok) "" else (outcome.error ?: outcome.raw.take(200))
+            AttemptStore.recordPair(System.currentTimeMillis(), outcome.ok, reason)
             ProbeJournal.append(
                 this, "pair",
                 if (outcome.ok) "配对成功（${host}:${pport}）：${outcome.json?.optString("guid")?.take(16)}"
-                else "配对失败：${outcome.error ?: outcome.raw.take(200)}",
+                else "配对失败：$reason",
             )
             renderStatus(
-                if (outcome.ok) "已配对 —— S0 变绿" else "失败：${outcome.error?.take(80) ?: "见日志"}",
+                if (outcome.ok) "已配对 —— S0 凭据在册" else "失败：${reason.take(80)}",
                 stickyError = !outcome.ok,
             )
-            PipelineProbe.notifyChanged(this)
+            // 成功即作废通道缓存：下一轮采集必须现探，不把配对前的 DEAD 读数续过来。
+            if (outcome.ok) AdbChannelProbe.invalidate()
+            PipelineRefresh.notifyChanged()
         }.apply { isDaemon = true }.start()
     }
 

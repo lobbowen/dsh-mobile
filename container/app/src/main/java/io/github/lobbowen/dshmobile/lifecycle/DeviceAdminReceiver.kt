@@ -10,8 +10,9 @@ import android.util.Log
  * 锁屏、设密码、Kiosk、用户限制等特权 —— 这些能力经 HostBridge 的方法门禁对外暴露
  * （见 HostBridgeService.kt 的 device_owner 方法组）。
  *
- * 激活方式（需 adb / 预置配置）：
- *   adb shell dpm set-device-owner io.github.lobbowen.dshmobile/.DeviceAdminReceiver
+ * 激活命令的**唯一**权威文本在 docs/runbook/provisioning.md（人读）与
+ * capability/CapabilityAcquisitionRunner（机器下发）两处；这里刻意不抄第三份 ——
+ * 组件名一改，抄来的命令就是假的（CI 的判据单一真值门禁会拦这种复写）。
  */
 class DeviceAdminReceiver : DeviceAdminReceiver() {
     override fun onEnabled(context: Context, intent: Intent) {

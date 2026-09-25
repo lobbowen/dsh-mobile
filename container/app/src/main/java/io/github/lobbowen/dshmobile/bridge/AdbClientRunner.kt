@@ -31,14 +31,6 @@ object AdbClientRunner {
         val exitCode: Int,
     )
 
-    /**
-     * S0 判据的唯一出口：已配对 = `files/adb/state.json` 在册。
-     * 与 HostBridgeService.deviceCapabilities / ProvisioningProbe 同一把尺子 —— 三处
-     * 各写各的会导致「首页说绿、桥说没能力」的错位；改动必须同步那两处的字面量。
-     */
-    fun isPaired(context: Context): Boolean =
-        File(context.filesDir, "adb/state.json").exists()
-
     fun status(context: Context): AdbOutcome =
         run(context, listOf("status"), DEFAULT_TIMEOUT_MS)
 

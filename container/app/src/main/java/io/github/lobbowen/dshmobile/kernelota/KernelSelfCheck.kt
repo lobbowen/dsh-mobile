@@ -151,18 +151,9 @@ object KernelSelfCheck {
             else "存在半包（会被续传，非错误）：" + parts.joinToString(", ") { it.name + "=" + it.length() + "B" },
         )
 
-        // ⑦ ADB 无线调试通道（shell.exec 的能力本体，ADR-0003 勘误 2026-09-24）。
-        // 与桥门禁同一把尺子：adb_shell 能力 = files/adb/state.json 存在（见 deviceCapabilities）。
-        // 刻意不 spawn cli.js —— 自检是只读的（设计要点③），且开机自检频繁。
-        val adbPaired = File(File(ctx.filesDir, "adb"), "state.json").isFile
-        out += SelfCheckReport.Item(
-            "adb-shell",
-            adbPaired,
-            "ADB 通道（shell.exec 必备）",
-            if (adbPaired) "已配对，adb_shell 能力已置位"
-            else "未配对：设备开无线调试 → 面板输入配对码（bridge shell.pair）",
-        )
-
+        // 原先这里还有第 ⑦ 项「ADB 通道」（手抄一份 state.json 存在性判断）。自检的职责是
+        // **内核包本身**是否健康，通道属设备能力事实 —— 两处各判一次正是「自检说绿、首页说红」
+        // 的错位来源，故整项删除，能力事实只在 CapabilityCatalog 里有一份。
         return out
     }
 

@@ -7,7 +7,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.PowerManager
 import android.provider.Settings
 import android.view.View
 import android.webkit.JavascriptInterface
@@ -18,12 +17,13 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import io.github.lobbowen.dshmobile.bridge.ScreenCaptureService
 import io.github.lobbowen.dshmobile.kernelota.KernelManager
 import io.github.lobbowen.dshmobile.kernelota.KernelOtaUpdater
 import io.github.lobbowen.dshmobile.kernelota.KernelSelfCheck
 import io.github.lobbowen.dshmobile.lifecycle.ContainerSupervisor
+import io.github.lobbowen.dshmobile.permissions.PermissionCatalog
+import io.github.lobbowen.dshmobile.permissions.PermissionCenter
 import io.github.lobbowen.dshmobile.runtime.GuestAdapter
 import io.github.lobbowen.dshmobile.runtime.NodeRuntimeService
 
@@ -99,13 +99,16 @@ class MainActivity : AppCompatActivity() {
         captureBtn = findViewById(R.id.captureBtn)
         copyBtn = findViewById(R.id.copyBtn)
 
+        // 授权状态一律经 PermissionCenter 查（判据不许在 UI 层复写一遍，spec §2.5）；
+        // 这里只决定「要不要发系统弹窗」这一步动作。
+        val center = PermissionCenter(this)
+        val notifSpec = PermissionCatalog.byId(PermissionCatalog.POST_NOTIFICATIONS)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-            != android.content.pm.PackageManager.PERMISSION_GRANTED
+            notifSpec != null && !center.isGranted(notifSpec)
         ) {
             requestNotif.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        requestBatteryExemption()
+        requestBatteryExemption(center)
 
         retryBtn.setOnClickListener { restartRuntime() }
         captureBtn.setOnClickListener { requestScreenCapture() }
@@ -178,11 +181,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 电池优化豁免引导：未入白名单时弹系统确认框；ROM 拒绝该 intent 时退到
-     * 电池优化设置列表页。常驻产品的稳定性前置——Doze/省电策略会冻结 :node 心跳。 */
-    private fun requestBatteryExemption() {
+     * 电池优化设置列表页。常驻产品的稳定性前置——Doze/省电策略会冻结 :node 心跳。
+     * 「是否已豁免」归 PermissionCenter（判据单一出口），这里只负责发 intent。 */
+    private fun requestBatteryExemption(center: PermissionCenter) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
-        val pm = getSystemService(POWER_SERVICE) as PowerManager
-        if (pm.isIgnoringBatteryOptimizations(packageName)) return
+        if (center.batteryExempt()) return
         try {
             startActivity(
                 Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
@@ -202,7 +205,10 @@ class MainActivity : AppCompatActivity() {
 
     /** 尝试用上次缓存的 MediaProjection 授权直接建 projection（失败则静默，等用户手动授权）。 */
     private fun reuseExistingCaptureGrant() {
-        if (ScreenCaptureService.isReady()) return
+        // 「已就绪」只认 PermissionCenter 那一把尺子（它读 ScreenCaptureService.isReady）——
+        // 这里再手写一次就会和首页 S2 / 桥令牌的口径漂移（spec §2.5）。
+        val captureSpec = PermissionCatalog.byId(PermissionCatalog.MEDIAPROJECTION)
+        if (captureSpec != null && PermissionCenter(this).isGranted(captureSpec)) return
         val grant = ScreenCaptureService.loadGrant(this) ?: return
         startCaptureService(grant.first, grant.second)
     }

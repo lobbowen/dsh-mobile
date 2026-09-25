@@ -20,6 +20,9 @@ import io.github.lobbowen.dshmobile.MainActivity
 import io.github.lobbowen.dshmobile.NodeContainerApp
 import io.github.lobbowen.dshmobile.R
 import io.github.lobbowen.dshmobile.RuntimeDiagnostics
+import io.github.lobbowen.dshmobile.capability.BridgeTokens
+import io.github.lobbowen.dshmobile.capability.CapabilityCriteria
+import io.github.lobbowen.dshmobile.capability.CapabilityEvidenceCollector
 import io.github.lobbowen.dshmobile.kernelota.KernelInstaller
 import io.github.lobbowen.dshmobile.kernelota.KernelManager
 import io.github.lobbowen.dshmobile.kernelota.KernelOtaUpdater
@@ -213,42 +216,16 @@ class HostBridgeService : Service() {
 
     // ---- 设备能力推断 ----
 
-    private fun deviceCapabilities(): Set<String> {
-        val caps = mutableSetOf("base")
-        try {
-            if (dpm.isDeviceOwnerApp(packageName)) caps.add("device_owner")
-        } catch (_: Throwable) {}
-        // accessibility 以**服务实例已连接**为准，而非仅看 Settings 字符串：
-        // 字符串可能在服务被系统回收后仍残留，会导致 ui.* 方法通过门禁却在执行时 NullPointer。
-        if (DshAccessibilityService.isReady()) caps.add("accessibility")
-        // mediaprojection：授权是每次会话的，以「截屏服务已连且 projection 非空」为准。
-        if (ScreenCaptureService.isReady()) caps.add("mediaprojection")
-        // shell 通道 = 内置 ADB 客户端，唯一特权来源（ADR-0003 勘误 2026-09-24；
-        // 第三方特权通道已整体删除，复活即红：见 engine 测试链里的同名反向门禁）。
-        // adb_shell 以「已完成配对、连接端点已持久化」为准：files/adb/state.json 存在。
-        // 配对动作本身不依赖此能力（shell.pair 的 caps 是 base），否则未配对设备无法配对。
-        if (File(filesDir, "adb/state.json").exists()) caps.add("adb_shell")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager())
-            caps.add("manage_external_storage")
-        if (notificationListenerEnabled()) caps.add("notification_access")
-        // 内核安装（A'' 自举）：**任意设备都具备** —— 它只做「从本地文件安装
-        // 已签名内核」，不需要任何特殊权限：读 /sdcard 走 fs.* 已有的
-        // MANAGE_EXTERNAL_STORAGE（未授权时回落 app 专属目录），写 filesDir
-        // 是应用自身的权限，验证走 Node 自带的 OpenSSL。
-        //
-        // 刻意与 build_chain 区分：后者表示「设备上有编译工具链」，而那个方案
-        // 已证伪（无 aarch64 aapt2）。把两者解耦，才能让 kernel_update 现在就可用，
-        // 而不必等一个可能永远不会出现的能力。
-        caps.add("kernel_update")
-        return caps
-    }
-
-    private fun notificationListenerEnabled(): Boolean {
-        val enabled = try {
-            Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: ""
-        } catch (_: Throwable) { "" }
-        return enabled.split(":").any { it.contains(packageName) }
-    }
+    /**
+     * 桥能力令牌 = 能力登记表的一次投影（[BridgeTokens]），这里**不写任何判据表达式**：
+     * 判据若在此复写一遍，就会出现「首页与桥各说各话」（spec §2.5 反向门禁负责让它变红）。
+     *
+     * 令牌语义提醒：`adb_shell` 表示「配对凭据在册、shell 通道具备」，**不保证此刻连得上** ——
+     * adbd 的端口随无线调试重启轮换，真正执行时由 [AdbClientRunner.shell] 现问 mDNS 端点，
+     * 连不上按运行时错误（-32603）返回，而不是冒充「能力缺失」（-32001 只表达前提未就绪）。
+     */
+    private fun deviceCapabilities(): Set<String> =
+        BridgeTokens.from(CapabilityEvidenceCollector.systemReads(this))
 
     /** 一个能力分组是否“满足”：分组映射到其代表能力，设备具备该能力即满足。 */
     private fun groupCapsSatisfied(group: String): Boolean {
@@ -286,7 +263,10 @@ class HostBridgeService : Service() {
     // ---- 方法实现 ----
 
     private fun requireDpm(): DevicePolicyManager {
-        if (!dpm.isDeviceOwnerApp(packageName)) throw BridgeError(CODE_CAPABILITY_MISSING, "需要 Device Owner")
+        // DO 在位与否只认 [CapabilityCriteria.isDeviceOwner] 这一把尺子（门禁禁止此处复写表达式）。
+        if (!CapabilityCriteria.isDeviceOwner(this)) {
+            throw BridgeError(CODE_CAPABILITY_MISSING, "需要 Device Owner")
+        }
         return dpm
     }
 
