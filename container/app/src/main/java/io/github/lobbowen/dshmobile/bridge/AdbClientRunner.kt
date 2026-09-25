@@ -59,6 +59,10 @@ object AdbClientRunner {
         return run(context, args, timeoutMs + SPAWN_SLACK_MS)
     }
 
+    /**
+     * 经已配对的通道跑一条 shell。端点来源优先级：调用方显式指定 > 现场 mDNS 记录 >
+     * （两者皆无）Node 侧 state.json 的历史值。
+     */
     fun shell(
         context: Context,
         cmd: String,
@@ -66,10 +70,12 @@ object AdbClientRunner {
         connectPort: Int?,
         timeoutMs: Long,
     ): AdbOutcome {
-        val args = mutableListOf("shell", "--cmd", cmd, "--timeout-ms", timeoutMs.toString())
-        if (host != null) args += listOf("--host", host)
-        if (connectPort != null) args += listOf("--connect-port", connectPort.toString())
-        return run(context, args, timeoutMs + SPAWN_SLACK_MS)
+        // 没显式指定端点时现问一次 mDNS：state.json 里的连接端口会随无线调试重启轮换，
+        // 直接吃旧值就是「首页说已配对、shell 却连不上」（真机 2026-09-25 17:36）。
+        val live = if (host == null && connectPort == null) ConnectEndpointResolver.resolve(context) else null
+        val endpoint = ConnectEndpointResolver.Endpoint(host ?: live?.host, connectPort ?: live?.port)
+        return run(context, ConnectEndpointResolver.shellArgs(cmd, timeoutMs, endpoint),
+            timeoutMs + SPAWN_SLACK_MS)
     }
 
     private fun run(context: Context, subArgs: List<String>, procTimeoutMs: Long): AdbOutcome {

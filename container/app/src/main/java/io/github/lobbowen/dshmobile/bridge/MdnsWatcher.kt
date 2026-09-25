@@ -1,4 +1,4 @@
-package io.github.lobbowen.dshmobile.ui
+package io.github.lobbowen.dshmobile.bridge
 
 import android.content.Context
 import android.net.nsd.NsdManager

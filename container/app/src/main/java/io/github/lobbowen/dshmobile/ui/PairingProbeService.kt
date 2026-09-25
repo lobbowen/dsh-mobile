@@ -13,6 +13,7 @@ import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
 import io.github.lobbowen.dshmobile.bridge.AdbClientRunner
+import io.github.lobbowen.dshmobile.bridge.MdnsWatcher
 
 /**
  * S0 配对的底座服务（ADR-0007 主路径的载体；UI 面在 OnboardingActivity 向导态）：
