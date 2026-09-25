@@ -256,6 +256,19 @@ if (sysDeps) {
 // ① → ⑤  scripts/build-node-android.sh / inject-libcxx-into-apk.py
 // ---------------------------------------------------------------------------
 
+/**
+ * 丢掉整行 `#` 注释（shell / yaml 同形）。
+ *
+ * 下面的门禁判的是「代码里到底有没有这件事」。注释里写一遍 `--enable-new-dtags`
+ * 就当通过了，等于把门禁交给抄写员 —— 先剥注释再匹配。
+ */
+function stripHashComments(src) {
+  return src
+    .split('\n')
+    .filter((l) => !/^\s*#/.test(l))
+    .join('\n');
+}
+
 const BUILD_SH = path.join(ROOT, 'scripts/build-node-android.sh');
 if (fs.existsSync(BUILD_SH)) {
   const sh = fs.readFileSync(BUILD_SH, 'utf8');
@@ -273,6 +286,58 @@ if (fs.existsSync(BUILD_SH)) {
     '⑤ 构建脚本不再有硬编码的 case 系统库列表',
     !/libc\.so\|libm\.so\|libdl\.so/.test(sh),
     '旧的 case "libc.so|libm.so|..." 应已移除'
+  );
+
+  // ---- 依赖自解析（RUNPATH）：三处共用判据的构建期那一处 ----
+  const shCode = stripHashComments(sh);
+  // 取所有对 LDFLAGS_target 的赋值行，合并后判语义要件 —— 删掉任一要件都会红。
+  // 这里只判「意图是否还在」；转义是否真的展开成 $ORIGIN 由构建脚本自己的
+  // `make -n` 断言把（静态正则判不出三层 $ 展开的对错）。
+  const ldAssigns = (shCode.match(/(?:export\s+)?LDFLAGS_target=[^\n]*/g) || []).join(' | ');
+  check('⑤ LDFLAGS_target 有赋值语句（零命中即红，别让正则空转）', ldAssigns !== '', ldAssigns);
+  check(
+    '⑤ 链接期带 --enable-new-dtags',
+    /--enable-new-dtags/.test(ldAssigns),
+    '少了它 -rpath 只写进 DT_RPATH，bionic 无条件忽略 → 真机 CANNOT LINK'
+  );
+  check(
+    '⑤ 链接期带 -rpath 且指向 $ORIGIN',
+    /-rpath/.test(ldAssigns) && /ORIGIN/.test(ldAssigns),
+    `实际赋值行: ${ldAssigns}`
+  );
+  check(
+    '⑤ 构建脚本调用 verify-runtime-elf.sh 校验产物',
+    /verify-runtime-elf\.sh/.test(shCode),
+    '产物级校验必须真跑，不能只靠 make -n 推断展开结果'
+  );
+}
+
+const VALIDATOR_SH = path.join(ROOT, 'scripts/verify-runtime-elf.sh');
+// 只断言校验器在场并被三处调用（下面那个循环）。它自己能不能红，不靠本文件
+// 的正则自证 —— 那又是一层「注释当证据」。真判据在 CI 里对真实产物跑一次。
+check('⑤ 共用校验器 scripts/verify-runtime-elf.sh 存在', fs.existsSync(VALIDATOR_SH));
+
+// 三处调用点（构建 / 固化 / 打包）都要接上同一判据，漏一处就留一个放行口子。
+for (const wf of [
+  '.github/workflows/fast-apk.yml',
+  '.github/workflows/release-admin.yml',
+]) {
+  const p = path.join(ROOT, wf);
+  if (!fs.existsSync(p)) continue;
+  check(`${wf} 调用 verify-runtime-elf.sh`, /verify-runtime-elf\.sh/.test(stripHashComments(fs.readFileSync(p, 'utf8'))));
+}
+
+// 运行期探针必须与 run_code 同形：裸环境。补 LD_LIBRARY_PATH = 给被测对象装脚手架。
+const PREPARER_KT = path.join(
+  ROOT, 'container/app/src/main/java/io/github/lobbowen/dshmobile/native/NativePreparer.kt'
+);
+if (fs.existsSync(PREPARER_KT)) {
+  const kt = stripKotlinComments(fs.readFileSync(PREPARER_KT, 'utf8'));
+  check('① 探针清空进程环境（environment().clear()）', /environment\(\)\s*\.\s*clear\(\)/.test(kt));
+  check(
+    '① 探针不再自行补 LD_LIBRARY_PATH（那会掩盖空环境下的链接失败）',
+    !/environment\(\)\s*\[\s*"LD_LIBRARY_PATH"/.test(kt),
+    'NativePreparer.probe 必须与 dsh run_code 的裸环境同形'
   );
 }
 

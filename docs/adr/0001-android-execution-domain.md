@@ -124,6 +124,14 @@ renameat2 NOREPLACE: available
 ### 已知降级（明确记录）
 
 - PTC 工具模式：`ptc-env-shim` 已删，`DSH_TOOLS_MODE=ptc` 下子进程可能缺 LD_LIBRARY_PATH；默认 native 不受影响。
+  - **2026-09-26 更正：这条判断错了。** 默认 native 模式一样受影响 —— `dsh` 的
+    `run_code` 从清空的环境起子进程（`dsh-ptc-runtime-node/lib/index.js` 里
+    `process.env` 被显式清掉），与工具模式无关。现网表现就是 `dsh run_code` 全灭。
+    正解不是把 shim 装回去，而是让依赖路径进二进制（`DT_RUNPATH=$ORIGIN`）：
+    见 ARCHITECTURE.md 第 3 节。根因与执行域选择无关，是**两件事叠加**：
+    随包的 `libnode.so` 从来不带 RUNPATH，而我们的 exec 探针自己补 `LD_LIBRARY_PATH`，
+    于是这道门禁恰好测不到 `run_code` 的真实形态。能力件（`$PREFIX` 下的 bash/rg）
+    按同一判据重编属后续工作。
 - 终端：node-pty 无 wasm/回退路径，必须 NDK 交叉编译。已在 fast-apk.yml 落地构建步骤（API 24 取 forkpty、去 `-lutil`、node-gyp + node 头），产物 `libdshpty.so` 经 `PrefixProvisioner` 落到 `$PREFIX/lib/pty.node`，再由内核投放到 `node-pty/prebuilds/android-arm64/pty.node`；上游配方失败只降级终端能力。
 - 图片：已按「补真实依赖」解决（见下），不再是降级项。
 

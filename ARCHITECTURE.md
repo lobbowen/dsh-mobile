@@ -400,7 +400,8 @@ secret 解码。三条路径的语义是刻意设计的：
 
 ## 3. 硬约束二：linker 找不到 `libc++_shared.so`
 
-**结论：必须显式设置 `LD_LIBRARY_PATH`。**
+**结论：依赖路径必须在链接期钉进二进制（`DT_RUNPATH=$ORIGIN`）。`LD_LIBRARY_PATH`
+只是给尚未钉好的东西用的过渡手段，不能当判据。**
 
 **真机失败现象：**
 ```
@@ -420,42 +421,71 @@ Android linker 查找依赖库的目录**只有三个**：
 > *"The DT_RPATH dynamic section attribute of the binary and the ld cache file
 > (/etc/ld.so.cache) ... is not used."*
 > 即 **`DT_RPATH` 在 Android 上被忽略，只有 `DT_RUNPATH` 有效**。
+> 所以链接时必须同时给 `-Wl,--enable-new-dtags`，否则 `-rpath` 只写进
+> `DT_RPATH`，看着有、真机上是死的。
 
 **`nativeLibraryDir` 不在这三者中的任何一个。** 它只在 Java 层
 `dlopen` / `System.loadLibrary` 时才进搜索路径；而我们是 **exec 一个可执行
 文件、由它自己拉起依赖**，完全是另一套规则。
 
-`readelf` 逐条核对 `libnode.so` 的动态段（29 个条目）确认：
-
-```
-NEEDED: libm.so / libdl.so / liblog.so / libc++_shared.so / libc.so
-无 DT_RUNPATH、无 DT_RPATH、无 DT_SONAME
-```
-
-于是它只能查系统默认路径，那里没有 `libc++_shared.so`
+历史版本的 `libnode.so`（官方 android 预编译件）**既无 `DT_RUNPATH` 也无
+`DT_RPATH`**，于是只能查系统默认路径，那里没有 `libc++_shared.so`
 （**它不是 bionic 的一部分**，安卓系统不提供）。
 
-### 解法
+### 为什么不能停在「调用方设 LD_LIBRARY_PATH」
 
-```kotlin
-pb.environment().put("LD_LIBRARY_PATH", applicationInfo.nativeLibraryDir)
+第三方内核 `dsh` 在 `run_code` 派生子进程时**清空 `process.env`**
+（`dsh-ptc-runtime-node/lib/index.js` 的 ptc 环境装配），主进程设的那个变量
+传不下去。靠调用方补环境 = 每个执行入口都要补一遍，漏一个就只在那条路上挂；
+而且真机上最先挂的恰好是产品主功能。**环境是别人的，二进制才是我们的。**
+
+### 解法（按落地位置）
+
+| 位置 | 做法 |
+|---|---|
+| 链接期 | `scripts/build-node-android.sh` 导出 `LDFLAGS_target`：`-Wl,--enable-new-dtags -Wl,-rpath,'$$ORIGIN'`（两层 `$$` 是 bash→make→sh 三段展开的必然写法） |
+| 构建期 | 同脚本用 `make -n` 断言展开结果真的是 `$ORIGIN`（三层 `$` 转义错了会静默变成 `RIGIN`），编完再调 `verify-runtime-elf.sh` 验产物 |
+| 固化期 / 打包期 | `scripts/verify-runtime-elf.sh`（同一份判据）被 `release-admin.yml` 的 pin 校验和 `fast-apk.yml` 的 Gate 各调一次；缺 `readelf` 时退出码 2，宁红不猜 |
+| 运行期 | `NativePreparer.probe` 在**清空环境**下 exec 探针 —— 与 `run_code` 同形，跑绿才是真绿 |
+
+`$ORIGIN` 的可靠性不是引来的说法，是 2026-09-26 在自己设备上验的：自造
+最小 ELF（`DT_NEEDED=libc++_shared.so` + 未定义符号强制 linker 真解析），
+四档对照 ——
+
+```
+RUNPATH=$ORIGIN        →  绝对路径 / 相对路径 ./ / 符号链接 / PATH 查找 四种 exec
+                          形态全部 rc=42（加载并链接成功）
+RUNPATH=<不存在的目录>  →  linker 拒绝，进程起不来
+RUNPATH 缺失           →  同上
+去掉 PT_INTERP 的对照档 →  内核直接 exec、不经 linker，rc=42（证明 ELF 与代码本身没问题）
 ```
 
-探针与正式启动**两处都必须设**，漏一处就挂。
+解析方是 `/apex/com.android.runtime/bin/linker64`（AOSP bionic，非厂商实现），
+所以这不是「我这一台恰好行」。此前流传的 *"$ORIGIN does not work on all
+devices"*（见本节末旧引文）在本机四档对照下**不成立**，据此下的"不要改链接参数"
+结论已作废。
 
-> 外部印证：[viliussutkus89.com — Distributing Android CLI programs in APKs](https://viliussutkus89.com/posts/distributing-android-cli-programs-in-apks)
-> 场景与本项目完全一致，连报错形状都一样。作者结论：
-> *"nativeLibraryDir is not among the directories which are searched for,
-> when loading libraries."*
-> *"Could be solved by linking executables with rpath=$ORIGIN flag, but
-> strangely it does not work on all devices."*
-> *"Use LD_LIBRARY_PATH environment variable, it just works."*
+`DT_RPATH` 那一档**没有单独上机测**（它相对 linker 等价于「RUNPATH 缺失」，
+已被上面第二档覆盖），依据是 bionic 的既有事实与本仓先前引的 Termux 说明。
+正因如此，构建脚本用的是 `--enable-new-dtags` **+ 产物级 `readelf` 断言**：
+不靠推理，直接看写进二进制的是哪个 tag。
 
-**不要改链接参数加 `$ORIGIN` rpath** —— 那要重编，且只在部分设备有效。
-`LD_LIBRARY_PATH` 是跨设备可靠的那个。
+产品侧仍保留 `LD_LIBRARY_PATH`（唯一装配点 `GuestAdapter`）：`$PREFIX/bin` 里
+由 `PrefixProvisioner` 投放的工具（bash/rg 等）**还没有** RUNPATH，它们的
+`$ORIGIN` 会指向 `$PREFIX/bin` 而非 `nativeLibraryDir`。等这些能力件按同一
+判据重编（PR2）后，这一行就该删。
 
 > 注：`ProcessBuilder` 是直接 exec、不经过 shell，所以环境变量的值就是
 > 路径原文，不涉及任何 shell 展开或引号处理。
+
+> 旧引文（保留以便看出结论是怎么翻的）：
+> [viliussutkus89.com — Distributing Android CLI programs in APKs](https://viliussutkus89.com/posts/distributing-android-cli-programs-in-apks)
+> *"Could be solved by linking executables with rpath=$ORIGIN flag, but
+> strangely it does not work on all devices." / "Use LD_LIBRARY_PATH
+> environment variable, it just works."*
+> —— 传闻不算证据。本机实测的是 `DT_RUNPATH=$ORIGIN` 那一档：它可靠。
+> 该引文里失效的那一档是 `DT_RPATH`（bionic 忽略它，见上），两者不是同一件事；
+> 本仓此前把它当成「`$ORIGIN` 整体不可靠」并据此禁止改链接参数，是读错了对象。
 
 ---
 
@@ -654,7 +684,7 @@ aarch64）在 GitHub 免费 runner 上要 **2~3 小时**。
 | `ready` | 全部通过 | — |
 | `missing_from_lib` + `inApk=true` | APK 里有但没解压落盘 | 查 `extractNativeLibs` / `useLegacyPackaging` |
 | `missing_from_lib` + `inApk=false` | 打包期就丢了 | 查构建脚本产物 + `.github/native-assets.txt` |
-| `missing_dependency` | **某个依赖 `.so` 不在同目录** | 补齐依赖；linker 不查 `nativeLibraryDir`，必须同目录 + 设 `LD_LIBRARY_PATH` |
+| `missing_dependency` | **某个依赖 `.so` 不在同目录** | 补齐依赖；linker 不查 `nativeLibraryDir`，必须同目录**且**本体带含 `$ORIGIN` 的 `DT_RUNPATH`（§3） |
 | `not_executable` | 存在、依赖齐，但 exec 被拒 | **依赖已确认完好 → 可确定归因 SELinux W^X**：确认该文件真在 `nativeLibraryDir` |
 | `probe_failed` | 进程起来了但退出码/输出不对 | 看 `output`；多半是拿错了二进制 |
 
@@ -673,7 +703,7 @@ aarch64）在 GitHub 免费 runner 上要 **2~3 小时**。
 | `error=13` Permission denied | SELinux 禁止 exec **或** 依赖库缺失 | 先看 `sys.nativeAssets` 的结论再定方向 |
 | `error=2` No such file | `.so` 没被解压落盘 | 检查 `extractNativeLibs` / `useLegacyPackaging` |
 | `error=8` Exec format error | ABI 不匹配或页对齐不满足 | 检查 `abiFilters` 与 16KB 对齐 |
-| `cannot locate symbol` | linker 找不到 `libc++_shared.so` | 检查 `LD_LIBRARY_PATH` 是否设置 |
+| `cannot locate symbol` | linker 没能定位到提供该符号的库（当前即 `libc++_shared.so`） | 查该二进制的 `DT_RUNPATH` 是否含 `$ORIGIN`：`bash scripts/verify-runtime-elf.sh <目录>` —— 不是查环境变量 |
 | `exitCode=1` 且瞬间退出 | 多半是 JS 层参数/逻辑错误 | 看 `node-stderr`（现在能拿到了） |
 
 ### 查看 CI 状态与日志

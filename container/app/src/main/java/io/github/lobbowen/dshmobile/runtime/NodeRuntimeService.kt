@@ -78,11 +78,12 @@ class NodeRuntimeService : Service() {
     private val keepAliveBinder = Binder()
 
     /**
-     * 让 linker 找到随包 `.so` 的搜索路径。
+     * 随包 `.so` 所在目录（= `nativeLibraryDir`）。
      *
-     * 唯一正确取值 = `nativeLibraryDir`，由 [NativePreparer.libSearchPath] 从
-     * [NativeAssetRegistry] 派生 —— 不要再各写一份。完整论证（为什么这个变量必需、
-     * 为什么不能省、为什么不用 `$ORIGIN` rpath）见 `NativePreparer.probe()` 的注释。
+     * 唯一正确取值由 [NativePreparer.libSearchPath] 从 [NativeAssetRegistry] 派生 ——
+     * 不要再各写一份。它现在只服务 `$PREFIX` 下尚未带 RUNPATH 的能力件；
+     * 依赖解析本身应当由二进制自己的 `DT_RUNPATH=$ORIGIN` 负责，
+     * 完整论证见 ARCHITECTURE.md 第 3 节。
      */
     private val libSearchPath: String get() = NativePreparer.libSearchPath(this)
 

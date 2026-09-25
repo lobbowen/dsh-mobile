@@ -499,6 +499,22 @@ export AR_host="${AR_host:-$(command -v ar || echo ar)}"
 export LDFLAGS_host="${LDFLAGS_host:-} -latomic"
 echo "==> 宿主工具链: CC_host=$CC_host  CXX_host=$CXX_host  AR_host=$AR_host  LDFLAGS_host=$LDFLAGS_host"
 
+# ---------------------------------------------------------------------------
+# 目标侧链接标志：把 DT_RUNPATH=$ORIGIN 写进 node 本体，让它自己找得到同目录的
+# libc++_shared.so。不能靠调用方补 LD_LIBRARY_PATH —— dsh 的 run_code 从空环境起
+# 子进程，补了也传不下去。论证与 2026-09-26 真机实测见 ARCHITECTURE.md 第 3 节。
+#
+# 两个 flag 缺一不可：bionic 忽略 DT_RPATH，不加 --enable-new-dtags 就只写进 RPATH，
+# 看着「有」、真机上仍是死的。
+#
+# '$$ORIGIN' 的两层展开是本脚本特有的坑：gyp 把它落到 out/Makefile 的
+# LDFLAGS.target（递归赋值），make 展开时 $$ 收成 $；只写一个 $ 时 make 会把 $O
+# 当变量吃掉，参数静默变成 RIGIN。下面「RUNPATH 落地断言」用 make -n 实测，不靠推理。
+# ---------------------------------------------------------------------------
+DOLLAR='$'
+export LDFLAGS_target="${LDFLAGS_target:-} -Wl,--enable-new-dtags -Wl,-rpath,'${DOLLAR}${DOLLAR}ORIGIN'"
+echo "==> 目标侧链接标志: LDFLAGS_target=$LDFLAGS_target"
+
 echo "==> 运行官方 android-configure (NDK ${ANDROID_NDK} + API ${ANDROID_API} + arch ${ARCH})"
 # Node 24 官方参数顺序: ./android-configure [patch] <path to the Android NDK> <Android SDK version> <target architecture>
 # 即 <ndk> <api> <arch>（注意：不是 <ndk> <arch> <api>）
@@ -552,6 +568,45 @@ if ! "$HOST_CXX_IN_MK" -m64 -std=gnu++20 -x c++ -c /dev/null -o /dev/null >/dev/
   exit 1
 fi
 echo "    [ok] 宿主编译器校验通过（非 android 工具链，且实测能编 C++ 头）"
+
+# ---------------------------------------------------------------------------
+# RUNPATH 落地断言（进编译【之前】）。
+#
+#   上面那串 $$ 转义横跨 gyp → Makefile → sh 三层，任何一层理解偏差都会让
+#   链接参数静默变成 RIGIN（$O 被 make 吃掉）。这种产物能编出来、能装进 APK、
+#   能骗过所有静态检查，只有真机起进程时才死 —— 而一轮构建要 2~3 小时。
+#   所以这里用 make -n 把配方真正展开一次，直接读最终交给 ld 的原文。
+#   判据取自实测输出，不是取自对本脚本的推理。
+# ---------------------------------------------------------------------------
+DRY_LOG="${TMPDIR:-/tmp}/dsh-node-make-n.log"
+# make -n 只展开不执行；node 的 Makefile 图大，退出码偶有非零（缺规则之类），
+# 那不影响我们判链接行 —— 真正执行时会由 make 本身报错。
+make -n > "$DRY_LOG" 2>&1 || true
+EXPECTED_RPATH="-Wl,-rpath,'${DOLLAR}ORIGIN'"
+RPATH_SEEN="$(grep -o -- '-Wl,-rpath,[^ ]*' "$DRY_LOG" | sort -u | tr '\n' ' ')"
+echo "==> 校验展开后的链接参数: LDFLAGS.target=$(sed -n 's/^LDFLAGS\.target[[:space:]]*?*=[[:space:]]*//p' out/Makefile | head -1)"
+echo "    make -n 里出现的 -rpath 实文: ${RPATH_SEEN:-<无>}"
+case " $RPATH_SEEN " in
+  *" $EXPECTED_RPATH "*)
+    echo "    [ok] 链接行含 $EXPECTED_RPATH"
+    grep -q -- '--enable-new-dtags' "$DRY_LOG" || {
+      echo "==> [error] 有 -rpath 但缺 --enable-new-dtags：bionic 忽略 DT_RPATH，产物会白编。"
+      exit 1
+    }
+    ;;
+  *RIGIN*)
+    echo "==> [error] -rpath 的参数没有展开成期望的 $EXPECTED_RPATH（出现 RIGIN 字样）。"
+    echo "            多半是 \$\$ 转义在 gyp → Makefile → sh 三层展开中某一层错位。"
+    echo "            实际链接行: $RPATH_SEEN"
+    exit 1
+    ;;
+  *)
+    echo "==> [error] make -n 展开结果里根本没有 -rpath —— LDFLAGS_target 未被 gyp 采纳。"
+    echo "            期望: $EXPECTED_RPATH"
+    echo "            可显式导出 LDFLAGS_target 后重跑本脚本定位。"
+    exit 1
+    ;;
+esac
 
 # ---------------------------------------------------------------------------
 # 构建生成器：坚持用 make，**不要切换到 ninja**（这是花了很久才确认的结论）。
@@ -898,6 +953,15 @@ if [ -n "$MISSING" ]; then
   echo "           否则真机启动会报 'cannot locate symbol'。"
   exit 1
 fi
+
+# ---- 产物级依赖自解析断言 ----
+# 判据只有一份实现：scripts/verify-runtime-elf.sh（构建/固化/打包三处共用）。
+# 上面「依赖闭环自检」证明 libc++_shared.so 就在本目录，所以这里对 libnode.so
+# 的 RUNPATH 判定不会是空转 —— 它一定命中「依赖同目录随包库」这一条。
+# 与进编译前的 make -n 断言配对：那一道保证「链接行里有」，这一道保证「产物里有」，
+# 中间任何一环（ld 版本、链接顺序、段裁剪）都可能丢。
+echo "==> 依赖自解析断言（DT_RUNPATH 含 \$ORIGIN）"
+READELF="$READELF" bash "$ROOT/scripts/verify-runtime-elf.sh" "$OUT_DIR"
 
 # ---- 自检：确认产物能满足「在 /data/app lib dir 里被执行」的全部前提 ----
 # 说明：这里的检查要分清「硬条件」和「提示信息」，不要误杀。

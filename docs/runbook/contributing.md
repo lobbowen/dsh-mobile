@@ -175,7 +175,7 @@ on:
 
 ### 注释只写"改这里必须知道什么"
 
-历史排查过程、外部依据、失败现象 —— **全部归 `docs/ARCHITECTURE.md`**，
+历史排查过程、外部依据、失败现象 —— **全部归 `ARCHITECTURE.md`**，
 代码里只在必要处给一行指引。
 
 ```kotlin
@@ -185,7 +185,8 @@ on:
 // （以下省略 40 行）
 
 // ✅ 只写约束和指引
-// LD_LIBRARY_PATH 必需，原因见 docs/ARCHITECTURE.md 第 3 节。删了真机必挂。
+// 只服务 $PREFIX 下尚无 RUNPATH 的工具；libnode 的依赖由二进制的 $ORIGIN 负责。
+// 完整原因见 ARCHITECTURE.md 第 3 节。
 put("LD_LIBRARY_PATH", libSearchPath)
 ```
 
@@ -214,10 +215,10 @@ put("LD_LIBRARY_PATH", libSearchPath)
 
 1. **看真机诊断面板**（App 打开即是）。逐阶段 `[OK]`/`[FAIL]`，
    哪一环挂了、node 报了什么，都在上面。对照表见
-   `docs/ARCHITECTURE.md` 第 9 节。
+   `ARCHITECTURE.md` 第 9 节。
 2. **CI 失败** → `admin-logs-<run_id>` 拉日志。
    不要猜，猜一轮就是几小时。
-3. **真机报错看不懂** → 查 `docs/ARCHITECTURE.md` 的"错误码速查"。
+3. **真机报错看不懂** → 查 `ARCHITECTURE.md` 的"错误码速查"。
 4. **改了没生效** → 先确认是不是运行了错误的那条 workflow；
    再确认 APK 是不是从 `apk-latest` 拿的（这个 tag 每轮覆盖）。
 

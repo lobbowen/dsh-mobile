@@ -93,7 +93,8 @@ object AdbClientRunner {
                 put("HOME", context.filesDir.absolutePath)
                 put("TMPDIR", context.cacheDir.absolutePath)
                 put("DSH_ADB_DIR", adbDir.absolutePath)
-                // linker 只查 LD_LIBRARY_PATH，与启动链/校验器同款（NativePreparer.probe）
+                // 本进程派生的后续子进程（$PREFIX 里的工具）无 RUNPATH，靠继承这个变量找库。
+                // NativePreparer.probe 刻意不设 —— 那才是 run_code 的真实形态。
                 put("LD_LIBRARY_PATH", NativePreparer.libSearchPath(context))
             }
             val proc = pb.start()

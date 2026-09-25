@@ -93,12 +93,13 @@ IOException: Cannot run program ".../files/node/24.21.0/node": error=13, Permiss
 2. `android:extractNativeLibs="true"`（本项目在 Manifest 与 gradle 两处都写了）—— 否则 AGP 3.6+ 默认把 `.so` 压缩在 APK 内不落盘，文件系统上根本没有可执行路径；
 3. 二进制解释器必须是 Android 的 `/system/bin/linker64`（交叉编译产物天然满足）。
 
-> **还有一个必设的环境变量**：`LD_LIBRARY_PATH = nativeLibraryDir`。Android linker 查找依赖库的目录只有 `$LD_LIBRARY_PATH` / DT_RUNPATH / 系统默认路径三者，`nativeLibraryDir` **不在其中**（它只在 Java 层 `dlopen` 时进搜索路径）。而 `libnode.so` 自身既无 DT_RPATH 也无 DT_RUNPATH，若不设这个变量，`libc++_shared.so` 的符号解析会直接失败：
+> **还有一个链接期条件**：二进制的 `DT_RUNPATH` 必须含 `$ORIGIN`。Android linker 查找依赖库的目录只有 `$LD_LIBRARY_PATH` / `DT_RUNPATH` / 系统默认路径三者，`nativeLibraryDir` **不在其中**（它只在 Java 层 `dlopen` 时进搜索路径）。所以依赖解析不能靠调用方补环境变量 —— 第三方内核 `dsh` 在 `run_code` 派生子进程时清空 `process.env`，补了也传不下去：
 > ```
 > CANNOT LINK EXECUTABLE ".../libnode.so": cannot locate symbol "_ZTVNSt6__ndk119basic_ostringstream..."
 > ```
+> 由 `scripts/build-node-android.sh` 在链接期注入（`-Wl,--enable-new-dtags` 少了它只会得到被 bionic 忽略的 `DT_RPATH`），并由 `scripts/verify-runtime-elf.sh` 在构建/固化/打包三处把住。完整论证见 ARCHITECTURE.md 第 3 节。
 
-> **一个隐蔽的陷阱**：`File.canExecute()` 对上述限制**完全无感** —— 它只查 stat 的 x 权限位，不知道 noexec 挂载、更不知道 SELinux 策略。所以它在不可 exec 的文件上照样返回 `true`，造成"诊断显示可执行、真 exec 却失败"的假阳性。**判断能否执行，唯一可靠的办法是真去执行一次**（本项目在启动前跑一次 `node -v` 来验证，见 `runExecProbe`）。
+> **一个隐蔽的陷阱**：`File.canExecute()` 对上述限制**完全无感** —— 它只查 stat 的 x 权限位，不知道 noexec 挂载、更不知道 SELinux 策略。所以它在不可 exec 的文件上照样返回 `true`，造成"诊断显示可执行、真 exec 却失败"的假阳性。**判断能否执行，唯一可靠的办法是真去执行一次**（本项目在启动前以**清空后的环境**跑一次 `node -v` 来验证，见 `NativePreparer.probe` —— 裸环境才与 `run_code` 同形，给自己补 `LD_LIBRARY_PATH` 的探针是在给被测对象装脚手架）。
 
 > **对 OTA 的影响**：`nativeLibraryDir` 是安装时固定、运行期只读的，且每次 APK 更新路径中的随机串都会变。这意味着"在沙箱放多个 Node 版本目录、切指针"的 Node OTA 方案在该路径上**不成立**。当前策略是以内置版本保证首启可用。**本文的 OTA 通道（签名验签/解包/原子指针）服务于内核包（L1）**——内核是 `filesDir` 下的 JS 代码，由 `node` 解释执行，不涉及 `execve`，因此不受 W^X 限制。
 
