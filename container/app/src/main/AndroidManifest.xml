@@ -151,7 +151,10 @@
         </receiver>
 
         <!-- 通知监听（bridge:notification → notif.read 能力的真实载体）。
-             档位 T1：必须由用户在「设置 → 通知 → 通知使用权」手动开启，DO 无法静默授予。 -->
+             Secure 设置类授权：用户可在「设置 → 通知 → 通知使用权」手点，S0 通道在位时
+             也可经 shell `settings put secure enabled_notification_listeners …` 静默开启
+             （Android 17 仍保留 WRITE_SECURE_SETTINGS；真机 2026-09-25 定罪）。
+             DO 反而**不能**静默授予这一档 —— 取法链见 capability/CapabilityCatalog。 -->
         <service
             android:name=".bridge.DshNotificationListenerService"
             android:exported="true"

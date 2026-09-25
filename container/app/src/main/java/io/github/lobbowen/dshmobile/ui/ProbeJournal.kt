@@ -12,6 +12,10 @@ import java.util.Locale
  * 为什么单独成文件而不是进 RuntimeDiagnostics：诊断页是给人读的流水，探针日志是
  * 要**复制导出回来做定罪结论**的结构化证据（设备 adb 关闭，剪贴板是唯一出口）。
  * 每行带毫秒时间戳 —— ④（mDNS 发布时序）的判据就是这里的时间差。
+ *
+ * ⚠ 这里的文本**不作为状态判据输入**：v1 曾扫 `[pair]` 行 substringAfter 猜成功失败，
+ * 于是「改一句提示语」就能改变状态机语义。事实走 capability/[io.github.lobbowen.dshmobile.capability.AttemptStore]
+ * 的类型化记录，本文件只留案底。
  */
 object ProbeJournal {
 
