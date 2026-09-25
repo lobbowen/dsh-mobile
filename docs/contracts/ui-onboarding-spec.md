@@ -5,8 +5,8 @@
 > 与本文 §2.0。本文件是 GUI 开工的契约：能力登记表、依赖图、配对交互时序、验收判据。
 >
 > **本文只回答「每项能力的判据是什么」，不回答「App 打开后按什么顺序做」** —— 后者见
-> [onboarding-flow-spec.md](onboarding-flow-spec.md)（F0–F6 状态机）。§2.3 的段投影在新规范里
-> 降级为首页底部的核对视图，不再是首页驱动器。
+> [onboarding-flow-spec.md](onboarding-flow-spec.md)（P0 静默冲刺 + F1–F4 阶段链）。§2.3 的段投影
+> 在新规范里降级为首页底部的核对视图，不再是首页驱动器。
 
 ---
 
@@ -15,8 +15,9 @@
 - 产品性质：**极客工作台**。不是仪表盘、不做信息聚合、不放运营内容。
 - **首页 = 流程 + 入口**，三块（驱动器是 [onboarding-flow-spec.md](onboarding-flow-spec.md) §2
   的阶段机，不是段表）：
-  1. F1–F6 六张阶段卡：每卡一行状态 + 一句话读数，**全页只有一个主行动按钮**（挂在当前阶段上），
-     不挡路的欠账（F1 剩余冲刺、F6 补齐）各带一个次要按钮；
+  1. F1–F4 四张阶段卡：每卡一行状态 + 一句话读数，**全页只有一个主行动按钮**（挂在当前阶段上），
+     只有未成立的 F4（补齐）带一个次要按钮；**开屏授权冲刺 P0 不占卡位**（静默弹窗，
+     见 [onboarding-flow-spec.md](onboarding-flow-spec.md) §2.2）；
   2. 「进入工作台」——判据是 §2.2 的入口三要素（通道 + 运行时 + 内核包），绿了即自动进入；
   3. 判据核对一行：段投影 S0–S4 的紧凑结论（探针期兼作证据出口，随报告一起复制）。
 - 一切「真正的操作」都发生在控制面板内。GUI 不与内核面板抢功能。
@@ -78,7 +79,7 @@ Capability(id, title, segment, optional, requires, judge, acquirer, bridgeToken)
 | id | 段 | 判据（绿） | 取法链（主 → 降级） | 硬前置 | optional |
 |---|---|---|---|---|---|
 | `dev_options` | S0 | `Settings.Global.development_settings_enabled == 1` | USER_TAP → 开发者选项页 | —— | |
-| `wireless_debug` | S0 | `Settings.Global.adb_wifi_enabled == 1` | USER_TAP → 开发者选项页（PLP120 定罪：无线调试深链无 Activity 响应，落点只有这一页） | —— | |
+| `wireless_debug` | S0 | `Settings.Global.adb_wifi_enabled == 1` | USER_TAP → 无线调试页（`NAV_WIRELESS_DEBUG`）。落点**由 `CapabilityNavigation.wirelessDebugIntent` 现场问系统**：`resolveActivity` 命中就直达，无响应（PLP120/ColorOS 已定罪，§7③）就退开发者选项页 —— 承诺「直达」是假话，承诺「一定跳到一个能拨开关的页」才是真话 | —— | |
 | `perm:post_notifications` | **S0** | `checkSelfPermission(POST_NOTIFICATIONS)` | RUNTIME_DIALOG：系统弹窗（shell 侧 `pm grant` 在 Android 17 不可用） | —— | |
 | `adb_credentials` | S0 | 凭据在册（`adbkey.pem` + `state.json`）**且**最近一次配对尝试非 FAILED | USER_CODE：通知栏 RemoteInput 输 6 位码（§3） | dev_options, wireless_debug, **post_notifications** | |
 | **`adb_channel`** | **S0** | **活探针为真：现问 mDNS 端点 → `id -u` 返回 `uid=2000`，且读数未过期（TTL 内）** | AUTO：`AdbChannelProbe`（LIVE 读数 10s 内复用、可信期 TTL 30s；DEAD 5s 冷却；事件可强制作废） | adb_credentials | |
@@ -104,7 +105,7 @@ Capability(id, title, segment, optional, requires, judge, acquirer, bridgeToken)
    就是 §3.4 反对的「顺序倒挂」的漏网一条 —— 而 `nm.notify()` 在缺权限时不抛异常、只是不显示，
    死锁连案底都不留。修法与状态机位置见 [onboarding-flow-spec.md](onboarding-flow-spec.md) §3。
 4. **S4 的绿 ≠ S2 全绿。** 进工作台的门槛只有「通道能跑 shell + 运行时在线 + 内核自检无失败项」
-   三要素；悬浮窗/全部文件/电池这些补齐项在 F6 里继续要，但不挡门（onboarding-flow-spec §5）。
+   三要素；悬浮窗/全部文件/电池这些补齐项在 F4 里继续要，但不挡门（onboarding-flow-spec §5）。
    反过来也不许把「三要素绿」写成「权限集全绿」。
 
 ### 2.3 依赖图与管线投影
@@ -147,13 +148,18 @@ post_notifications ┘                               ├─→ secure:notificati
 | `"uid=2000"`、`dpm set-device-owner` | `capability/`（通道断言在 AdbChannelProbe，取法命令在 CapabilityAcquisitionRunner） |
 | `canDrawOverlays(`、`isExternalStorageManager(`、`canRequestPackageInstalls(`、`isIgnoringBatteryOptimizations(`、`checkSelfPermission(` | `permissions/PermissionCenter.kt` |
 | `enabled_notification_listeners`、`enabled_accessibility_services`（**裸串**） | `permissions/PermissionCatalog.kt` 各声明一次（`SECURE_KEY_*`）；读侧 PermissionCenter 与下发侧 `CapabilityAcquisitionRunner` 都引用它 |
+| `"android.settings.WIRELESS_DEBUGGING_SETTINGS"`（带引号的字面量） | `capability/CapabilityNavigation.kt` 唯一（§7③ 的现场降级判定也只许住这一处；别处再抄 = 同一个 action 两套落点） |
+| `"_adb-tls-pairing._tcp"`、`"_adb-tls-connect._tcp"` | `bridge/MdnsWatcher.kt` 各一次（`TYPE_PAIRING` / `TYPE_CONNECT`）；消费者引常量，服务类型抄两份就会「一处 browse、另一处判」永不对齐 |
 | 日志文本反解状态（`substringAfter("[pair]")` 之类） | 禁止（零命中） |
+| `"127.0.0.1"`（引号内**不带端口**的裸回环字面量） | **零容忍**（`FORBIDDEN`）：配对端点只能来自此刻在册的 mDNS 记录，编造地址把「没发现」伪装成「配对失败」。真控制面写法一律带端口，故不误伤 |
 
 `SECURE_KEY_*` 用串而非平台常量：`Settings.Secure.ENABLED_NOTIFICATION_LISTENERS` 不在
 compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半统一走串才不会出现半常量半串。
 
 门禁必须自证非空转：报告每条规则的命中数，命中数为 0 的规则视为门禁失效并报错
 （防止我把规则写成永不匹配的空壳）。扫描到的 `.kt` 文件数也有地板值，低于地板值同样报错。
+零容忍类规则反过来不自证就会「永远零命中」地空转，所以每条自带一段**必然命中**的样本写法，
+正则连自己的样本都匹配不上 = 正则写坏了 = 门禁没装锁，同样报错。
 
 同一文件还静态钉住 §2.1 与 [onboarding-flow-spec.md](onboarding-flow-spec.md) §3 的**四条** DAG 不变式
 （纯层逻辑本机没有 JDK 跑不了，故用文本解析而非运行时断言；`CapabilityCatalog.init` 的
@@ -189,21 +195,27 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
   拿到 uid=2000）→ 推论：`files/adb/state.json` 只承载**身份/凭据**，连接端点必须
   每次 shell 前现问 mDNS（`bridge/ConnectEndpointResolver`），旧端口不得作为兜底之外的默认。
 
-### 3.2 主路径时序
+### 3.2 主路径时序（v2：探针与现场判定都由「点配对」那一下触发）
 
 ```
 用户                          我方 APK (:main)                     系统
 ────                          ─────────────                       ────
-点「去开无线调试」  ──intent──→ 拉起 开发者选项·无线调试
-                              （设置页深链；我方退后台，不残留界面）
-                              挂出常驻通知：「等待配对码」
-                              NsdManager browse _adb-tls-pairing._tcp
-打开「配对设备」对话框 ────────→ 对话框出现即有 mDNS 记录 ──→  显示 6 位配对码
-看到通知「输入配对码」         （若②未定罪：通知内已自动带出端口）
-下拉通知栏，快捷回复输码 ────→ RemoteInput 收码
+打开 App                ──→  P0 静默授权冲刺（通知排第一；界面不出卡）
+点「开始配对」          ──→  ① startService：browse pairing + connect（必须早于对话框）
+                              ② 现场重采一次 → PairingGate.decide：
+                                 缺开发者选项/无线调试 → 跳能拨开关的那一页
+                                 缺通知      → 系统弹窗（永久拒过 → 本应用详情页）
+                                 前置全齐    → 跳无线调试页
+                              挂出常驻通知：「等待 mDNS 记录」
+拨开无线调试、回到 App  ──→  onResume 作废通道缓存 + 全量重采
+再点「开始配对」        ──→  直达无线调试页（深链无响应时落开发者选项页）
+点「与配对设备配对」    ──→  pairing 记录出现 → 主机+端口进入读数        显示 6 位配对码
+看到通知「配对端口 N 在册」
+下拉通知栏，快捷回复输码 ───→ RemoteInput 收码
+                              端口不在册 → 立刻回「请让对话框保持打开」，不发起配对
                               SPAKE2 配对（用 mDNS 的 pairing 端口）
-                              对话框关闭后 browse _adb-tls-connect._tcp
-                              （无线调试常驻记录，端口稳定）
+关掉对话框              ──→  Sink.onLost → 端口读数作废（此后输码一律拒发）
+                              对话框之后靠 connect 记录（常驻，但端口仍会轮换）
                               adb connect 自动完成
                               活探针（现问端点 + id -u）→ adb_channel 变绿 → 通知收起
 ```
@@ -212,14 +224,20 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
   **不拉 Activity、不开对话框**。
 - 「自动捕捉」的正确形态 = 捕捉的是 **mDNS 端口**（机器可读），不是捕捉配对码（那必须
   人眼读、人手输——任何"自动读码"方案见 §3.4 否决清单）。
-- 整个流程用户动作 = 开设置页 → 看码 → 通知里输码，共三步；其余零输入。
+- **browse 由用户的配对意图触发**，不由 `render()` 自动起：v2 之前探针在后台常驻自动重挂，
+  用户点配对时看到的端口是上一轮留下的，而那条 pairing 记录早已随对话框销毁（§3.1 的推论）。
+- 整个流程用户动作 = 点两次配对入口（第一次被引导去开环境）→ 系统页里拨开关 → 看码 →
+  通知里输码；我方界面内**不要求**任何手输 IP:Port（降级链 §3.3 才要）。
 
 ### 3.3 降级链（按序回落，每级都失败才进下一级）
 
-1. **mDNS 发现失败**（§7②）→ 通知栏第二个快捷回复槽：手动输 `IP:Port`（配对页上显示的
-   那对地址），其余不变。
-2. **RemoteInput 不可用**（§7③）→ 输码改走常驻通知的「点按→浮层输码」；再不行走
-   S1 前的桌面小组件。
+1. **mDNS 发现失败**（§7② 已成立，故本机未触发）→ 现场行为是**拒发配对并说明原因**
+   （通知文案「配对端口不在册 —— 请让对话框保持打开」，`ui/PairingProbeService.kt:190-198`）。
+   **明确不做的**是回落一个编造地址：那会把「没发现」伪装成「配对失败」，用户对着不存在的端口重试。
+   若真机测出「对话框开着、45s 仍无 pairing 记录」（ROM 组播受限），再补通知栏第二个
+   RemoteInput 槽收手工 `IP:Port`（未实现，届时按 §3.1 的失焦约束做）。
+2. **RemoteInput 不可用**（§7① 的反事实；本机已成立，故未启用）→ 输码改走常驻通知的
+   「点按→浮层输码」；再不行走 S1 前的桌面小组件。
 3. **全部自动路径失败** → 手工页：完整走桥 `shell.pair(host, port, code)`
    （`container/engine/src/bridge/methods.js:67-70`，与现内核配对页删除前的能力等价，
    物理位置在 L0，不依赖面板）。
@@ -262,7 +280,7 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
 | 页面 | 内容 | 落点（现状） |
 |---|---|---|
 | 开场首页 | §1 三块：阶段卡驱动器在 [onboarding-flow-spec.md](onboarding-flow-spec.md) §2，段投影退为核对行 | `ui/OnboardingActivity.kt`（launcher Activity） |
-| 配对现场 | 输码通知（RemoteInput）+ mDNS 监听状态回显 | `ui/PairingProbeService.kt`；**无独立向导 Activity**，F3 卡显示现场 |
+| 配对现场 | 输码通知（RemoteInput）+ mDNS 在册读数回显 | `ui/PairingProbeService.kt`；**无独立向导 Activity**，F1 卡显示现场 |
 | 能力明细 | 登记表逐项 + 每项按其 `acquirer` 首项派发 | **无独立页面**：本期由「复制探针报告」逐项输出（`OnboardingActivity.copyReport`） |
 | 工作台宿主帧 / 灾难兜底页 | 内核面板；运行时起不来时是同帧的诊断文本（自检/复制/重试/授权截屏四按钮） | `MainActivity` |
 
@@ -293,7 +311,9 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
 |---|---|---|---|
 | ① | 下拉通知栏快捷回复时「无线调试/配对设备」对话框存活；RemoteInput intent 可达 Service | 输码后对话框仍在、码仍有效；intent 侧收到码 | **成立**。端到端已从零跑通一次配对（对话框不碎，SPAKE2 成功，`state.json` 落盘） |
 | ② | NsdManager 能否 browse 到 `_adb-tls-pairing._tcp` 与 `_adb-tls-connect._tcp` | 两条记录各至少一次解析出端口 | **成立**。且发现 connect 记录在配对**之后仍继续轮换**（→ §3.1 推论与 `adb_channel` 活探针判据） |
-| ③ | `android.settings.WIRELESS_DEBUGGING_SETTINGS` 深链在 ColorOS 是否响应 | intent 直达无线调试开关页 | **不成立**。无 Activity 响应 ⇒ 主路径落点只能是开发者选项页（登记表 `dev_options`/`wireless_debug` 两项的 USER_TAP 同一页） |
+| ③ | `android.settings.WIRELESS_DEBUGGING_SETTINGS` 深链在 ColorOS 是否响应 | intent 直达无线调试开关页 | **不成立**（PLP120/ColorOS 无 Activity 响应）。v2 的修法不是把落点写死成开发者选项页，而是**发之前现场 `resolveActivity`**：能解析就直达、不能就退开发者选项页，并把命中/退路写进探针日志（`CapabilityNavigation.wirelessDebugIntent`，deeplink 一行）。换台机器也许就能直达 —— 写死落点等于对本机以外说谎 |
+| ⑤ | pairing 记录是否只在「与配对设备配对」对话框开着期间在册 | 对话框关闭后 `onServiceLost` 是否回调 | **待定罪（v2 新立判据）**。代码已按「回调必来」写：记录消失即作废端口、输码一律拒发。若真机测出**关框不回调**，则 45s 看门狗是唯一防线，必须补 TTL 作废（`pairingLive` 加过期时刻），否则上一轮端口会被当成有效值 |
+| ⑥ | 点「开始配对」那一下的现场引导是否落到正确的页 | 缺开关→能拨开关的页；缺通知→系统弹窗；全齐→无线调试页 | **待定罪**。判据与动作同源由 `PairingGateTest` 钉；真机要核的是 ROM 会不会把 settings 页吞回主页（`launch` 的返回值只说明系统接了 intent） |
 | ④ | mDNS 发布时序 vs 配对码 10 分钟窗口 | browse→found 延迟 < 2s 且对话框开着期间记录在册 | **成立**，实测首记录 6~40ms。反向留案底要求：45s 内无 pairing 记录必须上屏归因（ROM 组播/对端未发布） |
 
 ## 8. 验收判据
@@ -306,6 +326,10 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
   2. **假绿免疫**：关掉无线调试（或改端口）后，S0 必须在探针 TTL（30s）内自动变红；
      探针未跑/证据过期时不得显示 DONE。
   3. 配对主路径三步内完成，全程用户手输内容 ≤ 一个 6 位码。
+  4. **端口对得上现场**：关掉「与配对设备配对」对话框后输码，必须立刻得到「端口不在册」的
+     归因而非 30s 超时（§3.3 第 1 条、flow-spec §6-2）。
+  5. **开屏无授权卡**：全新安装的首页第一眼里没有「请先授权」这类卡片，唯一的按钮是「开始配对」，
+     而系统通知弹窗已在此刻自动出现（flow-spec §2.1 P0、§6-1）。
 - **门禁反向自证**：把 `isDeviceOwnerApp(` 随手抄进任一业务层文件，§2.5 门禁必须让 CI 变红；
   抄回去仍然绿 = 门禁是空壳，本轮不算完成。
 - 首页无「状态+入口」之外的内容（人工评审一票否决制）。

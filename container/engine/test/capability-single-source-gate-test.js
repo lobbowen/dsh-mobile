@@ -13,7 +13,9 @@
 // 文档式提法（如不带引号的 files/adb/state.json）不会误伤。
 //
 // 双向自证（spec §8「门禁能红」要求）：
-//   反向：在任一业务层文件抄一句 `dpm.isDeviceOwnerApp(packageName)` → 本测试必须 FAIL。
+//   反向：在任一业务层文件抄一句 `dpm.isDeviceOwnerApp(packageName)` → 本测试必须 FAIL；
+//         在 ui/PairingProbeService.kt 写 `val h = host ?: "127.0.0.1"` → 必须 FAIL；
+//         在 ui/ 或 bridge/ 别处再写一遍 `"android.settings.WIRELESS_DEBUGGING_SETTINGS"` → 必须 FAIL。
 //   正向：某规则在其归属范围内命中数为 0（判据被改名/删掉而门禁没跟着改）→ 视为门禁空转，FAIL。
 const fs = require('fs');
 const path = require('path');
@@ -68,6 +70,37 @@ const RULES = [
     re: /Settings\.canDrawOverlays\(|Environment\.isExternalStorageManager\(|canRequestPackageInstalls\(|isIgnoringBatteryOptimizations\(|checkSelfPermission\(/,
     owners: [PERMISSION_CENTER],
     why: '权限/授权状态查询唯一入口 = PermissionCenter.isGranted',
+  },
+  {
+    // 真机案底（spec §7③）：这个 action 在 ColorOS/PLP120 上根本没有 Activity 响应，
+    // 于是「先问系统能不能解析、不能就退开发者选项页」这件事只许存在一处。别处再抄一遍
+    // 就是第二把尺子 —— 两处对同一个 action 做不同降级，跳页行为会随调用点漂移。
+    // pattern 取带引号的字面量形态：注释里提到 action 名（无反引号前缀）不算复写。
+    name: '无线调试深链 action',
+    re: /"android\.settings\.WIRELESS_DEBUGGING_SETTINGS"/,
+    owners: ['capability/CapabilityNavigation.kt'],
+    why: '深链落点与它的降级判定只在 CapabilityNavigation 声明一次',
+  },
+  {
+    // 端口读数的来源必须唯一：服务类型串抄两份，就会出现「一处 browse pairing、另一处
+    // 判 connect」这种永远对不上的在册判定。常量住 MdnsWatcher，消费者引它。
+    name: 'mDNS 服务类型字面量',
+    re: /"_adb-tls-(pairing|connect)\._tcp"/,
+    owners: ['bridge/MdnsWatcher.kt'],
+    why: '两个服务类型只在 MdnsWatcher 声明一次（TYPE_PAIRING / TYPE_CONNECT）',
+  },
+];
+
+// 零容忍写法：不是「v1 词汇」而是**已定罪的假动作**，在任何地方（含注释）出现即失败。
+// 裸回环字面量（引号里不带端口）在配对路径上只有一个用途 —— 伪造一个「看着像地址」的
+// 回落，把「mDNS 没发现」伪装成「配对失败」，用户于是对着一个从没存在过的端口重试。
+// 真内核控制面/探针的写法一律带端口（"http://127.0.0.1:<port>/..."），所以不会误伤。
+const FORBIDDEN = [
+  {
+    name: '伪造的配对端点',
+    re: /"127\.0\.0\.1"/,
+    why: '端口不在册就不发起配对（PairingProbeService.handleCode 直接返回并说明原因）',
+    sample: 'val host = (pairingHost ?: "127.0.0.1")!!',
   },
 ];
 
@@ -266,6 +299,7 @@ function checkDag(catalogText, permCatalogText) {
 
 const violations = [];
 const deadHits = [];
+const forbiddenHits = [];
 const ownedCount = new Map(RULES.map((r) => [r.name, 0]));
 let scannedFiles = 0;
 
@@ -283,6 +317,9 @@ function scanFile(abs, relPkg) {
     }
     for (const d of DEAD) {
       if (d.re.test(line)) deadHits.push(d.name + ' → ' + relPkg + ':' + (i + 1) + ' | ' + line.trim().slice(0, 120));
+    }
+    for (const f of FORBIDDEN) {
+      if (f.re.test(line)) forbiddenHits.push(f.name + ' → ' + relPkg + ':' + (i + 1) + ' | ' + line.trim().slice(0, 120));
     }
   });
 }
@@ -309,6 +346,11 @@ const dagMeta = dagNotes.filter((n) => !n.startsWith('FAIL'));
 const vacuous = RULES.filter((r) => ownedCount.get(r.name) === 0)
   .map((r) => r.name + '（归属范围内零命中 → ' + r.why + '）');
 
+// 零容忍规则反过来不自证一次就会「永远零命中」地空转：正则写坏了没人知道，等于没装锁。
+// 所以每条 FORBIDDEN 自带一段必然命中的样本写法，匹配不上就是正则错。
+const blank = FORBIDDEN.filter((f) => !f.re.test(f.sample))
+  .map((f) => f.name + ' 的正则连自身样本 "' + f.sample + '" 都匹配不上 → pattern 写坏了');
+
 let failed = false;
 // 扫描本身也不许空转：包根下的 .kt 数量低于地板值 = 目录结构变了而门禁还在"零违规"。
 const MIN_SCANNED_KT = 30;
@@ -327,10 +369,20 @@ if (deadHits.length) {
   console.log('FAIL 已删除的 v1 判据模型词汇复活（判据模型只允许 CapabilityCatalog 一套）：');
   deadHits.forEach((v) => console.log('  ' + v));
 }
+if (forbiddenHits.length) {
+  failed = true;
+  console.log('FAIL 零容忍写法（已定罪的假动作）重新出现：');
+  forbiddenHits.forEach((v) => console.log('  ' + v));
+}
 if (vacuous.length) {
   failed = true;
   console.log('FAIL 门禁规则空转（归属范围内一条都没命中 = 判据已被改名/删除而门禁没跟上，规则失去覆盖面）：');
   vacuous.forEach((v) => console.log('  ' + v));
+}
+if (blank.length) {
+  failed = true;
+  console.log('FAIL 零容忍规则形同虚设（正则连自己的样本都匹配不上）：');
+  blank.forEach((v) => console.log('  ' + v));
 }
 if (dagFails.length) {
   failed = true;

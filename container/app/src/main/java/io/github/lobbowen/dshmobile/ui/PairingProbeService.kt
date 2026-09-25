@@ -23,10 +23,13 @@ import io.github.lobbowen.dshmobile.permissions.PermissionCenter
 /**
  * S0 配对的底座服务（ADR-0007 主路径的载体；UI 面在 OnboardingActivity 向导态）：
  *
- * · **全程不拉 Activity** —— 输码走通知栏 RemoteInput，用户盯着的系统配对对话框
+ * · 全程不拉 Activity —— 输码走通知栏 RemoteInput，用户盯着的系统配对对话框
  *   不会被夺焦销毁（这是整个设计成立的前提，禁改）。
- * · 端口来自本机 mDNS（pairing 记录给配对端口，connect 记录给连接端口），
- *   用户不手输 IP:Port；mDNS 拿不到时通知里的输码仍可用（回落 host=127.0.0.1）。
+ * · 端口**只认在册的 mDNS 记录**：pairing 记录给配对端口、connect 记录给连接端口，
+ *   用户不手输 IP:Port。`_adb-tls-pairing._tcp` 只在配对对话框开着期间在册，记录一消失
+ *   端口立即作废（[MdnsWatcher.Sink.onLost]）—— 拿上一轮的端口去配对必然连不上，
+ *   这正是真机上「端口显示得出来却配不通」的成因。宁可说「没见到端口记录」，
+ *   也不伪造一个（历史上回落 127.0.0.1 就是这种假动作）。
  * · 收到码后转调 [AdbClientRunner.pair]（一次性 Node 进程做 SPAKE2/TLS）：结论进
  *   [AttemptStore] 类型化记账（判据层唯一的失败来源），通知与探针日志只是它的人读镜像。
  *
@@ -37,27 +40,27 @@ class PairingProbeService : Service() {
 
     private var watcher: MdnsWatcher? = null
 
-    // mDNS 解析出的最新端点（②的产出，也是自动配对的地址来源）
+    // mDNS 解析出的最新端点（②的产出，也是配对的地址来源）
     @Volatile private var pairingHost: String? = null
     @Volatile private var pairingPort: Int = 0
     @Volatile private var connectPort: Int = 0
     @Volatile private var busy = false
 
-    // ---- 向导可见状态：仅**只有本服务知道**的事实（mDNS 回调、RemoteInput 送达）。
-    //      配对成败不在此列 —— 它进 AttemptStore 类型化记账，判据层读那份，不读文案。 ----
-    @Volatile var portFound = false; private set
-    @Volatile var portText = ""; private set
-    @Volatile var codeArrived = false; private set
-    @Volatile var pairingInFlight = false; private set
+    // ---- 探针实况：仅**本服务自己**用（mDNS 回调驱动），上屏走通知文案。
+    //      配对成败不在这里 —— 它进 AttemptStore 类型化记账，判据层读那份，不读文案。 ----
     /**
-     * 本轮被通知权限挡在门外（F1 的读数负责把它变成动作，这里只留事实，不猜状态）。
+     * 配对端口**当前是否在册**。它不是「见过一次端口」：对话框关掉记录就消失，
+     * 此时任何端口都是废值，用它配对只会得到一条没有意义的失败归因。
+     */
+    @Volatile private var pairingLive = false
+    /**
+     * 本轮被通知权限挡在门外（F4 补齐行负责把它变成动作，这里只留事实，不猜状态）。
      */
     @Volatile var notificationBlocked = false; private set
     /**
-     * 本轮探测起点（真正重挂 browse 时才刷新）。向导用它把**上一轮**的失败读数排除在
-     * 实况之外 —— 否则用户重按「开始配对」后仍会看到旧失败文案。
+     * 本轮探测起点（真正重挂 browse 时才刷新）。④ 的 browse→首记录延迟以它为原点。
      */
-    @Volatile var roundStartMs = 0L; private set
+    @Volatile private var roundStartMs = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -89,7 +92,8 @@ class PairingProbeService : Service() {
         // 输码入口是通知栏 —— 通知不可见时「开始配对」就是一个按钮形状的谎言：`nm.notify()`
         // 在 Android 13+ 缺 POST_NOTIFICATIONS 时不抛异常、只是不显示（PermissionCatalog 给
         // 它的 note 就是这句），runCatching 抓不到，用户只看到向导停在「监听中」。
-        // 所以挂通知之前先自证，缺了就交回流程的 F1（onboarding-flow-spec §3）。
+        // 所以挂通知之前先自证，缺了就不起 browse（欠账由 P0 冲刺/F4 补齐行负责变成动作，
+        // onboarding-flow-spec §3）。
         if (!notificationsUsable()) {
             notificationBlocked = true
             ProbeJournal.append(
@@ -101,13 +105,13 @@ class PairingProbeService : Service() {
             return
         }
         notificationBlocked = false
-        // 「开始配对」可重复按：已拿到配对端口就不重抖 browse（stop/start 会丢记录）；
-        // 没有端口则照常往下重挂监听 —— 服务被系统重建后 running 残留为 true、
-        // watcher 却是新的，此时必须允许重入，否则向导永远停在「监听中」。
-        if (running && pairingPort > 0) { renderStatus(); return }
+        // 「开始配对」可重复按：**端口在册**时不重抖 browse（stop/start 会丢记录，
+        // 而记录一丢就是几秒钟的空白）；不在册（含从未出现、或对话框已关被作废）则照常
+        // 往下重挂监听 —— 服务被系统重建后 running 残留为 true、watcher 却是新的，
+        // 此时必须允许重入，否则向导永远停在「监听中」。
+        if (running && pairingLive) { renderStatus(); return }
         running = true
-        portFound = false; portText = ""; codeArrived = false
-        pairingInFlight = false
+        pairingHost = null; pairingPort = 0; pairingLive = false; connectPort = 0
         val w = watcher ?: MdnsWatcher(applicationContext).also { watcher = it }
         roundStartMs = System.currentTimeMillis()
         ProbeJournal.browsePairingStartedAt = roundStartMs
@@ -118,7 +122,7 @@ class PairingProbeService : Service() {
                 val now = System.currentTimeMillis()
                 if (type == MdnsWatcher.TYPE_PAIRING) {
                     pairingHost = host; pairingPort = port
-                    portFound = true; portText = "$host:$port"
+                    pairingLive = true
                     if (ProbeJournal.pairingRecordFirstSeenAt == 0L) ProbeJournal.pairingRecordFirstSeenAt = now
                     ProbeJournal.append(this@PairingProbeService, "mdns", "pairing 记录 $name host=${host ?: "?"} port=$port browse后 ${ageMs}ms")
                 } else {
@@ -138,6 +142,27 @@ class PairingProbeService : Service() {
                 renderStatus()
             }
 
+            override fun onLost(type: String, name: String) {
+                // 身份对不上也一律作废：部分协议栈的 onServiceLost 不带实例名，
+                // 「不确定是不是它」时的安全动作是重新等一条记录，而不是续用一个可能已死的端口。
+                if (type == MdnsWatcher.TYPE_PAIRING) {
+                    if (!pairingLive) return
+                    pairingLive = false; pairingHost = null; pairingPort = 0
+                    ProbeJournal.append(
+                        this@PairingProbeService, "mdns",
+                        "pairing 记录消失（${name.ifBlank { "无实例名" }}）→ 端口读数作废",
+                    )
+                } else if (connectPort > 0) {
+                    connectPort = 0
+                    AdbChannelProbe.invalidate()
+                    ProbeJournal.append(
+                        this@PairingProbeService, "mdns",
+                        "connect 记录消失（${name.ifBlank { "无实例名" }}）→ 端点作废、通道缓存作废",
+                    )
+                } else return
+                renderStatus()
+            }
+
             override fun onLog(message: String) {
                 ProbeJournal.append(this@PairingProbeService, "mdns", message)
             }
@@ -147,14 +172,13 @@ class PairingProbeService : Service() {
         renderStatus()
         // ② 定罪素材：对话框开着却长时间无记录，也要在日志里留下「等多久没等到」。
         Handler(Looper.getMainLooper()).postDelayed({
-            if (running && pairingPort <= 0)
+            if (running && !pairingLive)
                 ProbeJournal.append(this, "mdns", "45s 内未见 pairing 记录（对话框若已打开 = ②时序定罪样本）")
         }, 45_000L)
     }
 
     /** RemoteInput 取码 → 配对。取不到码（用户点了发送但空）也要记账——③ 的一部分。 */
     private fun handleCode(intent: Intent) {
-        codeArrived = true
         ProbeJournal.codeReceivedAt = System.currentTimeMillis()
         val code = extractCode(intent)
         ProbeJournal.append(this, "pair", "快捷回复送达：code=${code?.length ?: 0} 位")
@@ -163,24 +187,23 @@ class PairingProbeService : Service() {
             return
         }
         if (busy) { renderStatus("上一次配对仍在进行"); return }
-        // host 回落 127.0.0.1：同机无线调试 adbd 在回环同样接受配对（②未定罪前的安全垫）。
-        val host = pairingHost ?: "127.0.0.1"
+        // 端点必须**此刻在册**：没有 pairing 记录就是「对话框没开/已关」，此时发配对
+        // 只会拿到一条归因不明的超时失败（真机上那条假失败又会把 adb_credentials 判成 FAILED）。
+        val host = pairingHost
         val pport = pairingPort
-        if (pport <= 0 && host == "127.0.0.1") {
-            ProbeJournal.append(this, "pair", "无 mDNS 配对端口且无手输通道 —— 等待记录出现后重试")
-            renderStatus("等 mDNS 配对端口…")
+        if (!pairingLive || host == null || pport <= 0) {
+            ProbeJournal.append(this, "pair", "无在册 mDNS 配对端点 → 未发起配对（不伪造地址）")
+            renderStatus("配对端口不在册 —— 请在「无线调试」页点「与配对设备配对」，让对话框保持打开")
             return
         }
         busy = true
-        pairingInFlight = true
-        renderStatus("配对进行中（$host:${pport.takeIf { it > 0 } ?: "端口待发现"}）")
+        renderStatus("配对进行中（$host:$pport）")
         Thread {
             val outcome = AdbClientRunner.pair(
                 applicationContext, host, pport, code,
                 connectPort.takeIf { it > 0 }, PAIR_TIMEOUT_MS,
             )
             busy = false
-            pairingInFlight = false
             val reason = if (outcome.ok) "" else (outcome.error ?: outcome.raw.take(200))
             AttemptStore.recordPair(System.currentTimeMillis(), outcome.ok, reason)
             ProbeJournal.append(
@@ -209,10 +232,13 @@ class PairingProbeService : Service() {
 
     private fun renderStatus(override: String? = null, stickyError: Boolean = false) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        // 文案只描述**在册读数**：pairing 记录消失后这里必须退回「等记录」，
+        // 不许把上一轮的端口继续报成「已发现」（真机上端口对不上就是这么来的）。
         val status = override ?: when {
-            pairingPort > 0 -> "已发现配对端口 $pairingPort —— 下拉本通知「输入配对码」"
-            connectPort > 0 -> "无线调试在线（连接端口 $connectPort），未见到配对对话框记录"
-            else -> "等待 mDNS 记录（回 App 点「去开发者选项页」，让配对对话框保持打开）"
+            pairingLive -> "配对端口 $pairingPort 在册 —— 下拉本通知「输入配对码」"
+            connectPort > 0 ->
+                "无线调试在线（连接端口 $connectPort），未见到配对对话框记录 —— 点「与配对设备配对」后即出现"
+            else -> "等待 mDNS 记录：把「与配对设备配对」对话框开着，端口出现后这里就能输码"
         }
         val builder = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_notify_sync)

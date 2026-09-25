@@ -20,6 +20,17 @@ class MdnsWatcher(private val context: Context) {
     interface Sink {
         /** @param ageMs browse 发起→记录出现的毫秒差（④ 的原料） */
         fun onRecord(type: String, host: String?, port: Int, name: String, ageMs: Long)
+
+        /**
+         * 记录消失。**这是端口读数的另一半事实**：`_adb-tls-pairing._tcp` 只在配对对话框
+         * 开着期间在册，对话框一关端口就作废 —— 拿上一个端口去配对必然连不上
+         * （真机 2026-09-25：界面上显示的端口与对话框里的端口不一致即此因）。
+         *
+         * @param name 消失的服务实例名；**部分协议栈传 null/空**，那时调用方必须按
+         *   「这类记录已不可信」处理，不许拿旧值续命。
+         */
+        fun onLost(type: String, name: String)
+
         fun onLog(message: String)
     }
 
@@ -46,7 +57,10 @@ class MdnsWatcher(private val context: Context) {
             }
 
             override fun onServiceLost(service: NsdServiceInfo?) {
-                sink.onLog("记录消失 $type → ${service?.serviceName ?: "?"}")
+                // service 可能是 null（协议栈只报「没了」不给身份）—— 仍必须上抛，
+                // 让调用方把这一类的读数作废；这里吞掉就等于把旧端口留在界面上。
+                sink.onLost(type, service?.serviceName ?: "")
+                sink.onLog("记录消失 $type → ${service?.serviceName ?: "未知实例（整类作废）"}")
             }
 
             override fun onDiscoveryStopped(serviceType: String?) {
