@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.app.admin.DevicePolicyManager
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -299,13 +300,29 @@ class OnboardingActivity : AppCompatActivity() {
             val ctx = applicationContext
             val cmd = deviceOwnerCommand()
             val outcome = AdbClientRunner.shell(ctx, cmd, null, null, 20_000L)
-            ProbeJournal.append(ctx, "s1", "dpm 下发 ${if (outcome.ok) "成功" else "失败"}：${outcome.error ?: outcome.raw.take(200)}")
+            // dpm 报错（如 ColorOS 多用户拒绝 set-device-owner）时 exit 仍是 0，光看 outcome.ok
+            // 会假报成功（真机 2026-09-25 17:12:15）。唯一真值 = 系统侧 isDeviceOwnerApp 回读。
+            val ownerNow = runCatching {
+                (ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager)
+                    ?.isDeviceOwnerApp(ctx.packageName) == true
+            }.getOrDefault(false)
+            val verdict = when {
+                !outcome.ok -> "失败：${outcome.error ?: outcome.raw.take(200)}"
+                ownerNow -> "成功：DO 已生效"
+                else -> "未生效：${dpmErrorLine(outcome.raw).take(180)}"
+            }
+            ProbeJournal.append(ctx, "s1", "dpm 下发 $verdict")
             handler.post {
-                toast(if (outcome.ok) "命令已执行，回读确认中" else "失败：${outcome.error?.take(80) ?: "见探针日志"}")
+                toast(if (ownerNow) "DO 已生效" else verdict)
                 refreshSoon()
             }
         }.apply { isDaemon = true }.start()
     }
+
+    /** dpm 的拒绝理由藏在 stdout 的 Exception 行里，挑出来给人看的那一行。 */
+    private fun dpmErrorLine(raw: String): String =
+        raw.lineSequence().firstOrNull { "Exception" in it || "error" in it.lowercase() }
+            ?: raw.trim().ifBlank { "无输出" }
 
     private fun requestNextPermission() {
         val missing = lastReadings?.missingPermissions.orEmpty()
