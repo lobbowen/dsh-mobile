@@ -92,7 +92,7 @@ class MainActivity : AppCompatActivity() {
         captureBtn = findViewById(R.id.captureBtn)
         copyBtn = findViewById(R.id.copyBtn)
 
-        // 授权发起权只属于开场流程的 F1（OnboardingFlow/OnboardingActivity）。
+        // 授权发起权只属于开场流程：开屏的 P0 静默冲刺 + 首页的 F4 补齐行（PermissionSprint / OnboardingFlow）。
         // 这里过去自己发过一次通知弹窗与电池豁免跳转，等于把同一步做了两遍，
         // 而且做的是**门后那一遍** —— 全新安装的用户在到达本页之前就需要通知权限（用于
         // S0 输码），门后补发既救不了 S0，又让「谁负责发起授权」变成两处（spec §2.5 同源要求）。

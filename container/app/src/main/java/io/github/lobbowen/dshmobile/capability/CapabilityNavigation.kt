@@ -44,10 +44,35 @@ object CapabilityNavigation {
             .setData(Uri.fromParts("package", ctx.packageName, null))
 
     /**
+     * 无线调试页落点。**先问系统这个 action 到底有没有 Activity 响应**再决定跳哪：
+     * ColorOS/PLP120 上 `WIRELESS_DEBUGGING_SETTINGS` 无响应（spec §7③ 定罪），此时唯一
+     * 诚实的落点是开发者选项页。不带 `package:` data —— 那是本应用专属设置页，
+     * 我们要的是能拨「无线调试」总开关的那一页。
+     */
+    fun wirelessDebugIntent(ctx: Context): Pair<Intent, String> {
+        val deep = Intent(WIRELESS_DEBUG_SETTINGS_ACTION)
+        val resolved = runCatching { deep.resolveActivity(ctx.packageManager) }.getOrNull()
+        return if (resolved != null) {
+            deep to "深链命中 $WIRELESS_DEBUG_SETTINGS_ACTION"
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS) to
+                "深链无 Activity 响应（本机已知）→ 落开发者选项页"
+        }
+    }
+
+    /**
      * 发出跳转；返回值只说明「系统接了这个 intent」，**不代表用户完成了授权**
      * （完成与否由下一轮 [CapabilityEvidenceCollector] 的读数决定）。
      */
     fun launch(ctx: Context, acq: Acquisition, deepLinkEmitted: (String) -> Unit = {}): Boolean {
+        if (acq.kind == AcquireKind.USER_TAP && acq.target == CapabilityCatalog.NAV_WIRELESS_DEBUG) {
+            val (intent, note) = wirelessDebugIntent(ctx)
+            val ok = runCatching {
+                ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.isSuccess
+            deepLinkEmitted(note)
+            return ok
+        }
         val intent = intentFor(ctx, acq) ?: return false
         // 自家页面（截屏授权入口）不需要 package data，也不需要两级降级。
         if (intent.component != null) return runCatching {
@@ -69,4 +94,11 @@ object CapabilityNavigation {
             deepLinkEmitted("去 data 重发：$described")
         }.isSuccess
     }
+
+    /**
+     * AOSP 公开 action，字符串常量在 compileSdk 里**没有**对应字段（`Settings` 未导出），
+     * 只能裸写；因此它必须住在这里 —— CI 的单真值门禁（`capability-single-source-gate`）
+     * 不允许别处再出现同一个串。
+     */
+    const val WIRELESS_DEBUG_SETTINGS_ACTION = "android.settings.WIRELESS_DEBUGGING_SETTINGS"
 }

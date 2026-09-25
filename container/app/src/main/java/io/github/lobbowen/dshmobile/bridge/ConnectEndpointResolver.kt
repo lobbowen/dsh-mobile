@@ -39,6 +39,10 @@ object ConnectEndpointResolver {
                 latch.countDown()
             }
 
+            // 一次一问：拿到记录即收手，never 拿着它续命（调用方每次都重新问），
+            // 所以「记录消失」在这里没有可作废的缓存 —— 沉默即可。
+            override fun onLost(type: String, name: String) {}
+
             override fun onLog(message: String) {}
         }
         watcher.start(MdnsWatcher.TYPE_CONNECT, System.currentTimeMillis(), sink)

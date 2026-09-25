@@ -34,6 +34,7 @@ object CapabilityCatalog {
 
     /** USER_TAP 的非权限落点（[CapabilityNavigation] 解析成 Intent）。 */
     const val NAV_DEV_OPTIONS = "nav:dev-options"
+    const val NAV_WIRELESS_DEBUG = "nav:wireless-debug"
     const val NAV_SCREEN_CAPTURE = "nav:screen-capture"
 
     /** 权限能力走的是「哪一档由谁给」的四分类，与 [io.github.lobbowen.dshmobile.permissions.PermTier]（Manifest 声明档）不是一回事。 */
@@ -65,9 +66,10 @@ object CapabilityCatalog {
                 if (e.wirelessDebugOn) CapVerdict(CapStatus.GRANTED, "已开启")
                 else CapVerdict(CapStatus.ACTION, "未开启：同一页里的「无线调试」开关")
             },
-            // PLP120 定罪（spec §7③）：WIRELESS_DEBUGGING_SETTINGS 深链无 Activity 响应，
-            // 可解析落点只有开发者选项页 —— 文案与事实一致，不承诺直达。
-            acquirer = { listOf(Acquisition(AcquireKind.USER_TAP, "去开发者选项页", NAV_DEV_OPTIONS)) },
+            // 落点 = 无线调试页（NAV_WIRELESS_DEBUG）。深链在 ColorOS/PLP120 上无 Activity 响应
+            // （spec §7③ 定罪），所以 [CapabilityNavigation] 先问系统能不能解析、不能才退到
+            // 开发者选项页 —— 承诺「直达」是假话，承诺「一定跳到一个能拨开关的页」才是真话。
+            acquirer = { listOf(Acquisition(AcquireKind.USER_TAP, "打开无线调试页", NAV_WIRELESS_DEBUG)) },
         ),
         // 通知发送登记在 **S0**（不是 S2）：它是上面 ADB_CREDENTIALS 的硬前置，见那里的注释。
         // 无 requires —— 它自己必须在「拔掉 ADB、开发者选项还没开」时就能达成，
@@ -294,4 +296,14 @@ object CapabilityCatalog {
     fun byId(id: String): Capability? = ALL.firstOrNull { it.id == id }
 
     fun titleOf(id: String): String = byId(id)?.title ?: id
+
+    /**
+     * 某能力的硬前置，**按登记表声明序**返回。[Capability.requires] 是 Set，迭代序不保证稳定，
+     * 而这里出来的顺序会变成用户实际被引导的先后（P0 冲刺项、配对现场引导），所以必须归一。
+     * 推导只此一处：冲刺清单、配对闸门、流程认领集都走它，不许各自再 filter 一遍。
+     */
+    fun requiresInOrder(id: String): List<String> {
+        val req = byId(id)?.requires ?: return emptyList()
+        return ALL.filter { req.contains(it.id) }.map { it.id }
+    }
 }

@@ -29,14 +29,20 @@ import io.github.lobbowen.dshmobile.capability.CapabilityEvidenceCollector
 import io.github.lobbowen.dshmobile.capability.CapabilityNavigation
 import io.github.lobbowen.dshmobile.capability.Evidence
 import io.github.lobbowen.dshmobile.capability.OnboardingFlow
+import io.github.lobbowen.dshmobile.capability.PairingGate
+import io.github.lobbowen.dshmobile.capability.PermissionSprint
 import io.github.lobbowen.dshmobile.capability.PipelineProjection
 import io.github.lobbowen.dshmobile.capability.PipelineRefresh
 import io.github.lobbowen.dshmobile.capability.StageStatus
 import io.github.lobbowen.dshmobile.capability.StepStatus
 
 /**
- * 开场首页：渲染 [OnboardingFlow] 的六张阶段卡（**当前阶段 + 一个动作**），下面是 S0–S4
+ * 开场首页：渲染 [OnboardingFlow] 的四张阶段卡（**当前阶段 + 一个动作**），下面是 S0–S4
  * 判据核对（[PipelineProjection] 的段行，探针期兼作证据出口）。
+ *
+ * 开屏的**授权冲刺不在这里出现**：P0（[PermissionSprint]）在每次采集后静默把「还该要的
+ * 第一项」抛给系统弹窗/系统授权页，界面上没有一排「请先授权」的卡 —— 用户第一眼看到的
+ * 就是 F1「开始配对」（onboarding-flow-spec §2）。
  *
  * 职责边界（ui-onboarding-spec §4）：这里只渲染枚举、按 [Acquisition.kind] 把动作转交
  * capability 层。判据、命令、intent 目标、按钮文案全部来自登记表；「下一步是什么」来自
@@ -59,8 +65,12 @@ class OnboardingActivity : AppCompatActivity() {
     @Volatile private var actionInFlight = false
     /** 自动跳转只做一次；入口重新变红时才解锁（否则从面板回来会被再次弹走）。 */
     private var autoEntered = false
-    /** F3 的底座自动挂起也只试一次，避免被拒后每 2s 起一次服务。 */
-    private var wizardAutoStarted = false
+    /** 本次开屏已经抛过问题的授权项。见 [io.github.lobbowen.dshmobile.capability.PermissionSprint.pending]。 */
+    private val sprintAsked = mutableSetOf<String>()
+    /** 冲刺链一次只走一步：等系统把上一步的结果交回来再继续。 */
+    @Volatile private var sprintWaiting = false
+    /** 只有可见（resumed）时才允许冲刺继续抛系统页。 */
+    @Volatile private var resumed = false
 
     /** 本次 RUNTIME_DIALOG 申请的权限名；launcher 全页面共用，回调里靠它归因。 */
     private var pendingRuntimePerm: String? = null
@@ -71,6 +81,7 @@ class OnboardingActivity : AppCompatActivity() {
         val perm = pendingRuntimePerm
         pendingRuntimePerm = null
         if (!granted) openAppDetailsAfterDenial(perm)
+        sprintWaiting = false
         refreshSoon()
     }
 
@@ -86,12 +97,17 @@ class OnboardingActivity : AppCompatActivity() {
      */
     override fun onResume() {
         super.onResume()
+        resumed = true
+        // 用户刚在系统页里做完（或拒掉）一步 → 冲刺链可以继续走下一步了。
+        sprintWaiting = false
         AdbChannelProbe.invalidate()
         refreshSoon()
         handler.post(poller)
     }
 
     override fun onPause() {
+        // 暂停期间绝不再抛新的系统页：那会把用户刚打开的授权页压在下面。
+        resumed = false
         handler.removeCallbacks(poller)
         super.onPause()
     }
@@ -102,7 +118,7 @@ class OnboardingActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    // ---- 布局：阶段卡六行 + 判据核对 + 探针期导出通道 ----
+    // ---- 布局：阶段卡四行 + 判据核对 + 探针期导出通道 ----
 
     private fun buildLayout(): View {
         val pad = (16f * resources.displayMetrics.density).toInt()
@@ -129,8 +145,8 @@ class OnboardingActivity : AppCompatActivity() {
                 setPadding(pad / 2, 0, 0, pad / 4)
                 text = stage.why
             })
-            // 每行一律给一个动作按钮：F5 的动作可能是「重启运行时」（AUTO）。
-            // 次要按钮只挂在阶段机给出的那一行（冲刺欠账 / F6 补齐），主按钮全页至多一个。
+            // 每行一律给一个动作按钮：F3 的动作可能是「重启运行时」（AUTO）。
+            // 次要按钮只挂在阶段机给出的那一行（F4 补齐），主按钮全页至多一个。
             // 「进入工作台」是入口本身，另置一个按钮，未放行时禁用（比点了没反应诚实）。
             val btn = Button(this).apply { visibility = View.GONE }
             stageButtons[stage.id] = btn
@@ -138,7 +154,7 @@ class OnboardingActivity : AppCompatActivity() {
             val extra = Button(this).apply { visibility = View.GONE }
             stageExtraButtons[stage.id] = extra
             col.addView(extra)
-            if (stage.id == OnboardingFlow.F5) {
+            if (stage.id == OnboardingFlow.F3) {
                 enterBtn = Button(this).apply {
                     text = "进入工作台"
                     visibility = View.GONE
@@ -200,9 +216,9 @@ class OnboardingActivity : AppCompatActivity() {
         for (s in stages) {
             val tv = stageTexts[s.id] ?: continue
             val blocked = PairingProbeService.instance?.notificationBlocked == true &&
-                s.id == OnboardingFlow.F3
+                s.id == OnboardingFlow.F1
             tv.text = "${s.id} ${s.title} ${mark(s.status)}" +
-                (if (blocked) " 通知权限缺失 → 回到上一步" else "") +
+                (if (blocked) " 通知权限缺失 → 输码通知发不出去" else "") +
                 (if (s.detail.isBlank()) "" else "｜${s.detail}")
             val acq = s.action
             val btn = stageButtons[s.id] ?: continue
@@ -217,6 +233,8 @@ class OnboardingActivity : AppCompatActivity() {
             extra.isEnabled = true
             if (sec != null) extra.setOnClickListener { dispatch(s.extraCapId ?: "", sec, extra) }
         }
+        // P0 静默授权冲刺：界面上不出卡，每次采集后把「还该要且本轮没要过」的第一项要掉。
+        advanceSprint(e)
         val ready = OnboardingFlow.readyToEnter(verdicts)
         enterBtn?.visibility = if (ready) View.VISIBLE else View.GONE
         enterBtn?.isEnabled = ready
@@ -226,19 +244,29 @@ class OnboardingActivity : AppCompatActivity() {
         } else if (!ready) {
             autoEntered = false
         }
-        // 前置齐了就自动挂出输码通知（flow-spec §2.1 F3：不等人点「开始配对」）。
-        // 认「唯一可动作行」而不是某个状态：失败重试那一步同样是当前步。
-        val cur = stages.firstOrNull { it.action != null }
-        if (cur?.id == OnboardingFlow.F3 && cur.action?.kind == AcquireKind.USER_CODE &&
-            !PairingProbeService.running && !wizardAutoStarted
-        ) {
-            wizardAutoStarted = true
-            startPairingWizard()
-        }
         criteriaText?.text = "判据核对：" +
             PipelineProjection.project(e, verdicts).joinToString("  ") {
                 "${it.id}${segMark(it.status)}${it.detail}"
             }
+    }
+
+    /**
+     * 冲刺链**一次一步**：[io.github.lobbowen.dshmobile.capability.PermissionSprint.next] 给谁，
+     * 就直接把它的首项取法交给 [dispatch] —— 与阶段卡共用同一条动作通道，所以这里
+     * 不出现任何「自己拼的弹窗/自己拼的 intent」。
+     * 只在 resumed 时推进：暂停中再发 intent 会把用户正在看的系统页压在下面。
+     */
+    private fun advanceSprint(e: Evidence) {
+        if (!resumed || sprintWaiting) return
+        val step = PermissionSprint.next(e, sprintAsked) ?: return
+        val (capId, acq) = step
+        sprintAsked += capId
+        sprintWaiting = true
+        ProbeJournal.append(this, "perm", "P0 冲刺 $capId → ${acq.kind} ${acq.label}")
+        // 没发出去（系统页打不开 / 本机压根不要求这一步）就不许占住整条链：
+        // 占住的后果不是「少弹一个窗」，而是后面所有授权这一整轮都要不到。
+        // 记入 asked 是故意的 —— 失败也不在同一轮里重试，欠账归 F4 补齐行。
+        if (!dispatch(capId, acq, null)) sprintWaiting = false
     }
 
     private fun mark(s: StageStatus): String = when (s) {
@@ -261,30 +289,71 @@ class OnboardingActivity : AppCompatActivity() {
 
     // ---- 动作：一律转交 capability 层 ----
 
-    private fun dispatch(capId: String, acq: Acquisition, btn: Button) {
-        when (acq.kind) {
-            AcquireKind.USER_CODE -> startPairingWizard()
+    /**
+     * 把一条取法交出去。返回值只说明**有没有真的发出去**（系统接了 intent / 弹窗起了），
+     * 不代表用户完成了授权 —— 完成与否由下一轮采集的读数说话。
+     * [btn] 可为 null：P0 冲刺与配对入口的跳转都不是按钮触发的。
+     */
+    private fun dispatch(capId: String, acq: Acquisition, btn: Button?): Boolean {
+        val sent = when (acq.kind) {
+            AcquireKind.USER_CODE -> { startPairing(); true }
             AcquireKind.RUNTIME_DIALOG -> requestRuntimePermission(acq)
             AcquireKind.USER_TAP -> {
                 val jumped = CapabilityNavigation.launch(this, acq) { note ->
                     ProbeJournal.append(this, "deeplink", "$capId ${acq.label}：$note")
                 }
                 if (!jumped) toast("授权页打不开：${acq.label}")
+                jumped
             }
-            else -> runAcquisition(capId, acq, btn)
+            else -> { runAcquisition(capId, acq, btn); true }
         }
         // 发完动作立刻补一次采集：用户可能在设置页里已经把这一步做完了。
         handler.postDelayed({ refreshSoon() }, REFRESH_AFTER_TAP_MS)
+        return sent
     }
 
-    private fun requestRuntimePermission(acq: Acquisition) {
-        val perm = CapabilityNavigation.runtimePermission(acq)
-        if (perm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            pendingRuntimePerm = perm
-            requestRuntimePerm.launch(perm)
-        } else {
-            toast("本机系统不需要这一步")
+    /**
+     * F1「开始配对」那一下（flow-spec §2.1）：**同一瞬间**两件事 ——
+     * ① 起探针（browse 必须早于系统配对对话框，才接得住那条只活几分钟的 pairing 记录）；
+     * ② 现读环境，按缺项把用户送到能修它的页面（缺开关→设置页，缺通知→授权页）。
+     * 「差哪个开关」由 [PairingGate] 判，判据不住在首页。
+     */
+    private fun startPairing() {
+        AdbChannelProbe.invalidate()
+        startService(Intent(this, PairingProbeService::class.java))
+        ProbeJournal.append(this, "pair", "用户点「开始配对」→ 探针已起，现场核对开发者环境")
+        if (lastEvidence == null) {
+            toast("环境读数还没到位，稍等一下再点")
+            return
         }
+        Thread {
+            // 现场采一次：拿 2s 轮询的旧读数判「开关开没开」= 用户明明刚开了却被引导去开第二次。
+            val e = runCatching { CapabilityEvidenceCollector.collect(this) }.getOrNull()
+            val decision = e?.let { PairingGate.decide(it, CapabilityCatalog.evaluate(it)) }
+            handler.post {
+                if (decision == null) {
+                    toast("环境读数采集失败，请再点一次「开始配对」")
+                    return@post
+                }
+                toast(decision.notice)
+                ProbeJournal.append(this, "pair", "配对现场判定：${decision.notice}")
+                val acq = decision.jump ?: return@post
+                dispatch(decision.gapCapId ?: CapabilityCatalog.WIRELESS_DEBUG, acq, null)
+                refreshSoon()
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
+    /** 返回「弹窗真的起来了没」。API 32 及以下系统压根不要这个权限 → 链不许停在这一步（见 [advanceSprint]）。 */
+    private fun requestRuntimePermission(acq: Acquisition): Boolean {
+        val perm = CapabilityNavigation.runtimePermission(acq)
+        if (perm == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            toast("本机系统不需要这一步")
+            return false
+        }
+        pendingRuntimePerm = perm
+        requestRuntimePerm.launch(perm)
+        return true
     }
 
     /**
@@ -301,17 +370,19 @@ class OnboardingActivity : AppCompatActivity() {
         if (!jumped) toast("系统权限页打不开：$perm 需手动开启")
     }
 
-    private fun runAcquisition(capId: String, acq: Acquisition, btn: Button) {
+    private fun runAcquisition(capId: String, acq: Acquisition, btn: Button?) {
         if (actionInFlight) return
         actionInFlight = true
-        btn.isEnabled = false
+        btn?.isEnabled = false
         toast("${acq.label} 执行中…")
         Thread {
             val ctx = applicationContext
             val result = runCatching { CapabilityAcquisitionRunner.dispatch(ctx, acq) }.getOrNull()
             handler.post {
                 actionInFlight = false
-                btn.isEnabled = true
+                btn?.isEnabled = true
+                // 静默取法跑完 = 这一步有结论了，冲刺链可以继续（P0 也走这条通道）。
+                sprintWaiting = false
                 result?.detail?.let {
                     ProbeJournal.append(ctx, "acq", "$capId ${acq.label}：$it")
                     toast(if (result.verified) "已生效" else it)
@@ -319,12 +390,6 @@ class OnboardingActivity : AppCompatActivity() {
                 refreshSoon()
             }
         }.apply { isDaemon = true }.start()
-    }
-
-    /** F3 的底座：起 mDNS 监听 + 输码通知。缺通知权限时服务会自己退回 F1（PairingProbeService）。 */
-    private fun startPairingWizard() {
-        startService(Intent(this, PairingProbeService::class.java))
-        handler.postDelayed({ refreshSoon() }, REFRESH_AFTER_TAP_MS)
     }
 
     /** 控制面板 / 灾难兜底诊断页同帧（MainActivity）：入口绿是面板，S3 红时它是唯一证据出口。 */
@@ -351,6 +416,14 @@ class OnboardingActivity : AppCompatActivity() {
                     OnboardingFlow.stages(e, verdicts).forEach {
                         appendLine("${it.id} ${it.title} ${it.status} ${it.detail}")
                     }
+                    // P0 不在界面上出现，所以报告是它唯一的可核对出口：本轮要过哪些、还缺哪些。
+                    appendLine(
+                        "---- P0 授权冲刺（静默） ----" +
+                            "\n顺序 ${PermissionSprint.ORDER.joinToString()}" +
+                            "\n已抛问题 ${sprintAsked.joinToString().ifBlank { "无" }}" +
+                            "\n仍待要 ${PermissionSprint.pending(e, sprintAsked).joinToString().ifBlank { "无" }}" +
+                            "\n配对现场判定 " + PairingGate.decide(e, verdicts).notice,
+                    )
                     appendLine("---- 能力判据 ----")
                     CapabilityCatalog.ALL.forEach { c ->
                         val v = verdicts[c.id]
