@@ -7,7 +7,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
 import io.github.lobbowen.dshmobile.bridge.AdbClientRunner
@@ -104,6 +106,11 @@ class PairingProbeService : Service() {
         w.start(MdnsWatcher.TYPE_PAIRING, lastBrowseAt, sink)
         w.start(MdnsWatcher.TYPE_CONNECT, lastBrowseAt, sink)
         renderStatus()
+        // ② 定罪素材：对话框开着却长时间无记录，也要在日志里留下「等多久没等到」。
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (running && pairingPort <= 0)
+                ProbeJournal.append(this, "mdns", "45s 内未见 pairing 记录（对话框若已打开 = ②时序定罪样本）")
+        }, 45_000L)
     }
 
     /** RemoteInput 取码 → 配对。取不到码（用户点了发送但空）也要记账——③ 的一部分。 */
@@ -154,7 +161,7 @@ class PairingProbeService : Service() {
         val status = override ?: when {
             pairingPort > 0 -> "已发现配对端口 $pairingPort —— 下拉本通知「输入配对码」"
             connectPort > 0 -> "无线调试在线（连接端口 $connectPort），未见到配对对话框记录"
-            else -> "等待 mDNS 记录（回 App 点「去系统配对页」，让配对对话框保持打开）"
+            else -> "等待 mDNS 记录（回 App 点「去开发者选项页」，让配对对话框保持打开）"
         }
         val builder = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
@@ -171,7 +178,10 @@ class PairingProbeService : Service() {
             0, "输入配对码", submitIntent(),
         ).addRemoteInput(replyInput).setAllowGeneratedReplies(true).build()
         builder.addAction(replyAction)
+        // 通知是本设计的命门：POST_NOTIFICATIONS 被拒 / ROM 拦截等失败过去被 runCatching
+        // 静默吞掉，导致③从未成立却查不出来 —— 异常必须进探针日志留案底。
         runCatching { nm.notify(NOTIF, builder.build()) }
+            .onFailure { ProbeJournal.append(this, "svc", "通知发布失败：${it::class.java.simpleName}: ${it.message}") }
     }
 
     private fun extractCode(intent: Intent): String? {

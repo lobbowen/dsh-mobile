@@ -33,6 +33,10 @@ data class PipelineReadings(
     val runtimeUp: Boolean,
     /** S0 最近一次配对尝试的失败原因（成功或未尝试为 null）。 */
     val lastPairError: String? = null,
+    /** 开发者选项总开关（Settings.Global.DEVELOPMENT_SETTINGS_ENABLED）。S0 前置检测。 */
+    val devOptionsOn: Boolean = false,
+    /** 无线调试是否开着（Settings.Global.ADB_WIFI_ENABLED，=1 才算）。S0 前置检测。 */
+    val wirelessDebugOn: Boolean = false,
 )
 
 object PipelineState {
@@ -48,6 +52,8 @@ object PipelineState {
         val s0 = when {
             r.adbPaired -> PipelineStep(S0, "ADB 通道", StepStatus.DONE, "已配对")
             r.lastPairError != null -> PipelineStep(S0, "ADB 通道", StepStatus.FAILED, r.lastPairError)
+            !r.devOptionsOn -> PipelineStep(S0, "ADB 通道", StepStatus.ACTION, "先开启开发者选项")
+            !r.wirelessDebugOn -> PipelineStep(S0, "ADB 通道", StepStatus.ACTION, "先开启无线调试")
             else -> PipelineStep(S0, "ADB 通道", StepStatus.ACTION, "无线配对（一次 6 位码）")
         }
         val s1 = when {

@@ -135,7 +135,8 @@ class OnboardingActivity : AppCompatActivity() {
                 s0StartBtn = this
             },
             Button(this).apply {
-                text = "去系统配对页"
+                // PLP120 定罪：无线调试深链无 Activity 响应，可解析落点只有开发者选项页 —— 文案与事实一致。
+                text = "去开发者选项页"
                 setOnClickListener { openPairingSettings() }
                 s0GoBtn = this
             },
@@ -250,14 +251,17 @@ class OnboardingActivity : AppCompatActivity() {
      * ③ 定罪动作：发深链 + 记账落点；ROM 不响应时逐级降级并如实写日志。
      * 真机定罪（2026-09-25，PLP120）：第 1 级 AOSP intent 在 ColorOS 无 Activity 响应；
      * 第 2 级必须是开发者选项页（可解析），应用信息页曾把用户带离配对路径。
+     * 开发者选项未开时第 1 级必然无响应、且落点就该是开发者选项页 —— 直接走第 2 级。
      */
     private fun openPairingSettings() {
         ProbeJournal.deepLinkEmittedAt = System.currentTimeMillis()
+        val devOff = lastReadings?.devOptionsOn != true
         val attempts = listOf(
             Intent("android.settings.WIRELESS_DEBUGGING_SETTINGS"),
             Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS),
         )
         for ((i, intent) in attempts.withIndex()) {
+            if (devOff && i == 0) continue
             val ok = runCatching { startActivity(intent) }.isSuccess
             ProbeJournal.append(this, "deeplink",
                 if (ok) "第 ${i + 1} 级 intent 已发出（${intent.action}）—— 需人工确认落在哪一页"
@@ -266,8 +270,13 @@ class OnboardingActivity : AppCompatActivity() {
         }
     }
 
-    /** 向导三步实况 —— 只叙述 service 回报的事实，不做推断。 */
+    /** 向导实况 —— 只叙述 service 回报的事实，不做推断；前置（⓪）未就绪时先讲前置。 */
     private fun wizardStatusText(): String {
+        val r = lastReadings
+        if (r != null && !r.devOptionsOn)
+            return "⓪ 请先开启开发者选项 —— 点「去开发者选项页」，打开顶部开关后回来"
+        if (r != null && !r.wirelessDebugOn)
+            return "⓪ 请先开启无线调试 —— 点「去开发者选项页」→ 打开「无线调试」开关，然后重按「开始配对」"
         val svc = PairingProbeService.instance
             ?: return "底座未在线（重按「开始配对」）"
         return when {

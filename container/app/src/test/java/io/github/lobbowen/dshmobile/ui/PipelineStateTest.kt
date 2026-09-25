@@ -17,6 +17,8 @@ class PipelineStateTest {
         deviceOwner = true,
         missingPermissions = emptyList(),
         runtimeUp = true,
+        devOptionsOn = true,
+        wirelessDebugOn = true,
     )
 
     private fun List<PipelineStep>.statusOf(id: String) =
@@ -32,10 +34,39 @@ class PipelineStateTest {
     @Test fun S0未配对时后四段一律BLOCKED() {
         val steps = PipelineState.evaluate(allGreen().copy(adbPaired = false))
         assertEquals(StepStatus.ACTION, steps.statusOf(PipelineState.S0))
+        // 前置全绿时详情必须是配对本身而不是前置提示 —— 只测 status 会让前置分支写反也测不红。
+        assertEquals("无线配对（一次 6 位码）", steps.first { it.id == PipelineState.S0 }.detail)
         for (id in listOf(PipelineState.S1, PipelineState.S2, PipelineState.S3, PipelineState.S4)) {
             assertEquals("$id 必须被串行门挡住", StepStatus.BLOCKED, steps.statusOf(id))
         }
         assertFalse(PipelineState.workbenchOpen(steps))
+    }
+
+    @Test fun 开发者选项未开时S0引导开选项而非配对() {
+        val steps = PipelineState.evaluate(
+            allGreen().copy(adbPaired = false, devOptionsOn = false, wirelessDebugOn = false)
+        )
+        val s0 = steps.first { it.id == PipelineState.S0 }
+        assertEquals(StepStatus.ACTION, s0.status)
+        assertEquals("先开启开发者选项", s0.detail)
+    }
+
+    @Test fun 开发者选项已开但无线调试未开时引导开无线调试() {
+        val steps = PipelineState.evaluate(allGreen().copy(adbPaired = false, wirelessDebugOn = false))
+        val s0 = steps.first { it.id == PipelineState.S0 }
+        assertEquals(StepStatus.ACTION, s0.status)
+        assertEquals("先开启无线调试", s0.detail)
+    }
+
+    @Test fun 配对失败优先于前置引导() {
+        // 用户已试过配对并失败：即使读数是前置未开（失败后系统设置可能被 ROM 翻回 OFF），
+        // 也要如实展示失败原因，不能拿前置提示盖掉案底。
+        val steps = PipelineState.evaluate(
+            allGreen().copy(adbPaired = false, devOptionsOn = false, lastPairError = "连接被拒")
+        )
+        val s0 = steps.first { it.id == PipelineState.S0 }
+        assertEquals(StepStatus.FAILED, s0.status)
+        assertEquals("连接被拒", s0.detail)
     }
 
     @Test fun 降级恢复只重开断点段而非全链() {
