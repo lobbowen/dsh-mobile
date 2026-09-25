@@ -69,9 +69,21 @@ object CapabilityCatalog {
             // 可解析落点只有开发者选项页 —— 文案与事实一致，不承诺直达。
             acquirer = { listOf(Acquisition(AcquireKind.USER_TAP, "去开发者选项页", NAV_DEV_OPTIONS)) },
         ),
+        // 通知发送登记在 **S0**（不是 S2）：它是上面 ADB_CREDENTIALS 的硬前置，见那里的注释。
+        // 无 requires —— 它自己必须在「拔掉 ADB、开发者选项还没开」时就能达成，
+        // 否则首启授权冲刺会被自己的前置锁死（onboarding-flow-spec §2.2）。
+        perm(
+            PermissionCatalog.POST_NOTIFICATIONS, "通知发送", PermTierClass.RUNTIME,
+            segment = S0,
+        ),
         Capability(
             id = ADB_CREDENTIALS, title = "ADB 配对凭据", segment = S0,
-            requires = setOf(DEV_OPTIONS, WIRELESS_DEBUG),
+            // post_notifications 是**物理**前置，不是优先级偏好：主路径的输码交互走通知栏
+            // RemoteInput（ui-onboarding-spec §3.2），通知不可见时输码入口根本不存在 ——
+            // PermissionCatalog 给它的 note「notif.post 会被系统静默丢弃」就是这条的案底。
+            // 过去它登记在 S2，于是 S0 唯一动作「开始配对」在全新安装上永远走不通
+            // （onboarding-flow-spec §0 表第 3 行）。
+            requires = setOf(DEV_OPTIONS, WIRELESS_DEBUG, PermissionCatalog.POST_NOTIFICATIONS),
             judge = { e ->
                 when {
                     e.credentials == CredentialsState.PAIRED ->
@@ -130,7 +142,6 @@ object CapabilityCatalog {
         ),
         perm(PermissionCatalog.REQUEST_INSTALL_PACKAGES, "安装未知应用", PermTierClass.APPOP),
         perm(PermissionCatalog.SYSTEM_ALERT_WINDOW, "悬浮窗", PermTierClass.APPOP),
-        perm(PermissionCatalog.POST_NOTIFICATIONS, "通知发送", PermTierClass.RUNTIME),
         perm(PermissionCatalog.BATTERY_OPTIMIZATION, "电池优化豁免", PermTierClass.APPOP),
         perm(
             PermissionCatalog.NOTIFICATION_ACCESS, "通知读取", PermTierClass.SECURE_SETTINGS,
@@ -170,23 +181,33 @@ object CapabilityCatalog {
         ),
     )
 
-    /** 权限类能力：判据一律读 [Evidence.grants]，取法链按档位派生（表外的第二把尺子就此消灭）。 */
+    /**
+     * 权限类能力：判据一律读 [Evidence.grants]，取法链按档位派生（表外的第二把尺子就此消灭）。
+     *
+     * [segment] 默认 S2，但**不**由档位决定：通知发送虽然是个普通运行时权限，它在流程上是
+     * S0 配对的前置（见 [ADB_CREDENTIALS] 的 requires），所以登记在 S0。
+     */
     private fun perm(
         id: String,
         title: String,
         tier: PermTierClass,
+        segment: String = S2,
         optional: Boolean = false,
         note: String = "",
         bridgeToken: String? = null,
-    ): Capability = Capability(
-        id = id, title = title, segment = S2, optional = optional,
-        bridgeToken = bridgeToken,
-        judge = { e ->
-            if (e.granted(id)) CapVerdict(CapStatus.GRANTED, "已授权")
-            else CapVerdict(CapStatus.ACTION, if (note.isEmpty()) "未授权" else "未授权（$note）")
-        },
-        acquirer = { e -> permAcquirers(id, tier, e) },
-    )
+    ): Capability {
+        // id 必须真在 PermissionCatalog 里：查不到定义 = 采集器永远不会填这个读数 = 幽灵绿灯。
+        require(PermissionCatalog.byId(id) != null) { "$id 不在 PermissionCatalog.ALL 里，判据无从取数" }
+        return Capability(
+            id = id, title = title, segment = segment, optional = optional,
+            bridgeToken = bridgeToken,
+            judge = { e ->
+                if (e.granted(id)) CapVerdict(CapStatus.GRANTED, "已授权")
+                else CapVerdict(CapStatus.ACTION, if (note.isEmpty()) "未授权" else "未授权（$note）")
+            },
+            acquirer = { e -> permAcquirers(id, tier, e) },
+        )
+    }
 
     /** 取法链（主 → 降级）。核心不变式：DO/ADB **缺席**时链条只是变短，能力不会变成 BLOCKED。 */
     private fun permAcquirers(id: String, tier: PermTierClass, e: Evidence): List<Acquisition> {
@@ -233,11 +254,8 @@ object CapabilityCatalog {
                 require(o.id !in c.requires) { "optional 能力 ${o.id} 不得作为 ${c.id} 的前置" }
             }
         }
-        // 权限类能力的 id 必须真的在 PermissionCatalog 里（否则判据永远查不到 = 幽灵绿灯）
-        val known = PermissionCatalog.ALL.map { it.id }.toSet()
-        ALL.filter { it.segment == S2 }.forEach { c ->
-            require(c.id in known) { "${c.id} 不在 PermissionCatalog.ALL 里，判据无从取数" }
-        }
+        // 权限类能力的 id 必须真的在 PermissionCatalog 里 —— 这条校验住在 [perm] 的构造里
+        // （档位归属会影响段，S0 也有权限能力，按 segment 过滤会漏）。
         // 一个令牌挂在两项上 = 桥门禁会被其中一项的失败误伤；写重名直接崩。
         val tokens = ALL.mapNotNull { it.bridgeToken }
         require(tokens.size == tokens.toSet().size) {
@@ -245,19 +263,24 @@ object CapabilityCatalog {
         }
     }
 
-    /** 按声明（= 拓扑）序求值；[Capability.requires] 未达成才下 BLOCKED。 */
+    /**
+     * 按声明（= 拓扑）序求值；[Capability.requires] 未达成才下 BLOCKED。
+     *
+     * **实测优先于推断**：judge 直接读到「已经达成」（凭据在册、探针 LIVE、控制面在线）时不再被
+     * 前置的缺位改成 BLOCKED。否则 ROM 回收掉通知权限会把一台通道明明在线的老设备整页判红 ——
+     * 而 onboarding-flow-spec §2.2 的认领规则要求那些授权落回 F6 补齐清单，不是让 F3/F4 变红。
+     * BLOCKED 回答的是「前置没齐，现在还不该做」，不能回答「已经做完的事没做」。
+     */
     fun evaluate(e: Evidence): Map<String, CapVerdict> {
         val out = LinkedHashMap<String, CapVerdict>()
         for (c in ALL) {
+            val verdict = c.judge(e)
+            if (verdict.status == CapStatus.GRANTED) { out[c.id] = verdict; continue }
             val waiting = c.requires.firstOrNull { req ->
                 val v = out[req]
                 v != null && v.status != CapStatus.GRANTED && v.status != CapStatus.UNREACHABLE
             }
-            out[c.id] = if (waiting != null) {
-                CapVerdict(CapStatus.BLOCKED, "等待 " + titleOf(waiting))
-            } else {
-                c.judge(e)
-            }
+            out[c.id] = if (waiting != null) CapVerdict(CapStatus.BLOCKED, "等待 " + titleOf(waiting)) else verdict
         }
         return out
     }
@@ -267,13 +290,6 @@ object CapabilityCatalog {
      * 首页渲染一律走 [evaluate]；这里出现 BLOCKED 是不可能的 —— 门控只发生在 evaluate。
      */
     fun rawJudge(id: String, e: Evidence): CapVerdict? = byId(id)?.judge?.invoke(e)
-
-    /** 未达成且**阻塞放行**的能力（optional 与 UNREACHABLE 不计），按拓扑序。 */
-    fun blockingGaps(verdicts: Map<String, CapVerdict>): List<Pair<Capability, CapVerdict>> =
-        ALL.filter { !it.optional }.mapNotNull { c ->
-            val v = verdicts[c.id] ?: return@mapNotNull null
-            if (v.status == CapStatus.GRANTED) null else c to v
-        }
 
     fun byId(id: String): Capability? = ALL.firstOrNull { it.id == id }
 

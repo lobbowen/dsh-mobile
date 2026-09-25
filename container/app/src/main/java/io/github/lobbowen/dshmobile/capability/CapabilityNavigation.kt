@@ -35,6 +35,15 @@ object CapabilityNavigation {
     }
 
     /**
+     * RUNTIME 弹窗被拒后的出口：勾了「不再询问」之后系统弹窗永远不再出现，
+     * 只剩本应用详情页（flow-spec §3 降级链）。目标依然留在 capability 层，
+     * 首页不自己拼 intent（ui-onboarding-spec §4）。
+     */
+    fun appDetailsIntent(ctx: Context): Intent =
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            .setData(Uri.fromParts("package", ctx.packageName, null))
+
+    /**
      * 发出跳转；返回值只说明「系统接了这个 intent」，**不代表用户完成了授权**
      * （完成与否由下一轮 [CapabilityEvidenceCollector] 的读数决定）。
      */

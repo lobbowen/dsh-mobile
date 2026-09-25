@@ -1,13 +1,10 @@
 package io.github.lobbowen.dshmobile
 
-import android.Manifest
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
 import android.view.View
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -57,10 +54,6 @@ class MainActivity : AppCompatActivity() {
     /** 内核更新桥协议版本：必须与内核 kernelUpdateBridge.ts 的 BRIDGE_PROTOCOL_VERSION 一致。 */
     private val kernelUpdateProtocol = 1
 
-    private val requestNotif = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { /* 即使被拒也尽力启动服务 */ }
-
     /**
      * 截屏授权（ui.screenshot 的前置）。
      *
@@ -99,17 +92,10 @@ class MainActivity : AppCompatActivity() {
         captureBtn = findViewById(R.id.captureBtn)
         copyBtn = findViewById(R.id.copyBtn)
 
-        // 授权状态一律经 PermissionCenter 查（判据不许在 UI 层复写一遍，spec §2.5）；
-        // 这里只决定「要不要发系统弹窗」这一步动作。
-        val center = PermissionCenter(this)
-        val notifSpec = PermissionCatalog.byId(PermissionCatalog.POST_NOTIFICATIONS)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            notifSpec != null && !center.isGranted(notifSpec)
-        ) {
-            requestNotif.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        requestBatteryExemption(center)
-
+        // 授权发起权只属于开场流程的 F1（OnboardingFlow/OnboardingActivity）。
+        // 这里过去自己发过一次通知弹窗与电池豁免跳转，等于把同一步做了两遍，
+        // 而且做的是**门后那一遍** —— 全新安装的用户在到达本页之前就需要通知权限（用于
+        // S0 输码），门后补发既救不了 S0，又让「谁负责发起授权」变成两处（spec §2.5 同源要求）。
         retryBtn.setOnClickListener { restartRuntime() }
         captureBtn.setOnClickListener { requestScreenCapture() }
         // 一键把自检结果交出去：设备 adb 关闭，剪贴板是唯一可行的导出方式。
@@ -178,29 +164,6 @@ class MainActivity : AppCompatActivity() {
     private fun isAtBottom(): Boolean {
         val child = scroll.getChildAt(0) ?: return true
         return scroll.scrollY + scroll.height >= child.height - 8
-    }
-
-    /** 电池优化豁免引导：未入白名单时弹系统确认框；ROM 拒绝该 intent 时退到
-     * 电池优化设置列表页。常驻产品的稳定性前置——Doze/省电策略会冻结 :node 心跳。
-     * 「是否已豁免」归 PermissionCenter（判据单一出口），这里只负责发 intent。 */
-    private fun requestBatteryExemption(center: PermissionCenter) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
-        if (center.batteryExempt()) return
-        try {
-            startActivity(
-                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                    .setData(Uri.parse("package:$packageName"))
-            )
-        } catch (_: Throwable) {
-            try {
-                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-            } catch (e: Throwable) {
-                RuntimeDiagnostics.append(
-                    this, "battery", false, "电池优化豁免入口不可用",
-                    "${e::class.java.simpleName}: ${e.message}（需手动到系统设置放行）"
-                )
-            }
-        }
     }
 
     /** 尝试用上次缓存的 MediaProjection 授权直接建 projection（失败则静默，等用户手动授权）。 */

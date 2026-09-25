@@ -3,16 +3,22 @@
 > 状态：**v2 定稿（2026-09-25）**。v1 的串行五段模型经真机定罪证伪（§2.0），本版把
 > 「能力」立为一等对象。决策依据见 [ADR-0007](../adr/0007-l0-gui-onboarding-pairing-ux.md)
 > 与本文 §2.0。本文件是 GUI 开工的契约：能力登记表、依赖图、配对交互时序、验收判据。
+>
+> **本文只回答「每项能力的判据是什么」，不回答「App 打开后按什么顺序做」** —— 后者见
+> [onboarding-flow-spec.md](onboarding-flow-spec.md)（F0–F6 状态机）。§2.3 的段投影在新规范里
+> 降级为首页底部的核对视图，不再是首页驱动器。
 
 ---
 
 ## 1. 产品定位与首页边界
 
 - 产品性质：**极客工作台**。不是仪表盘、不做信息聚合、不放运营内容。
-- **首页 = 纯状态 + 入口**，只有两块：
-  1. S0–S3 四段管线状态摘要（每段一行：绿/黄/红 + 一句话 + 「去处理」）；
-  2. 一个大按钮「进入控制面板」——S3 绿后可点，打开现有 WebView 宿主帧
-     （`http://127.0.0.1:<KERNEL_CONTROL_PORT>/__host`，见 `MainActivity` 现实现）。
+- **首页 = 流程 + 入口**，三块（驱动器是 [onboarding-flow-spec.md](onboarding-flow-spec.md) §2
+  的阶段机，不是段表）：
+  1. F1–F6 六张阶段卡：每卡一行状态 + 一句话读数，**全页只有一个主行动按钮**（挂在当前阶段上），
+     不挡路的欠账（F1 剩余冲刺、F6 补齐）各带一个次要按钮；
+  2. 「进入工作台」——判据是 §2.2 的入口三要素（通道 + 运行时 + 内核包），绿了即自动进入；
+  3. 判据核对一行：段投影 S0–S4 的紧凑结论（探针期兼作证据出口，随报告一起复制）。
 - 一切「真正的操作」都发生在控制面板内。GUI 不与内核面板抢功能。
 - 现有诊断文本页**不删**，降级为灾难兜底页（运行时起不来时它是唯一可见证据；自检/复制/
   重试/授权截屏四按钮保留，ADB 关闭的设备上剪贴板是唯一导出通道）。
@@ -38,24 +44,30 @@ v1 §2 的「S2 静默授予主路径必须经 DO」不成立；`AndroidManifest
 
 ### 2.1 能力规格（Capability）
 
-一条能力的完整规格 = 下列八项，缺一项即视为规格不合格（评审否决）：
+一条能力的完整规格 = 下列八项，缺一项即视为规格不合格（评审否决）。签名与
+`capability/CapabilityModel.kt:50` 逐项同形（文档写过的 `evidence` / `failure` 两栏已并入
+`Evidence` 快照与 `CapVerdict.detail`，不再单列 —— 文档里的形状必须是真形状）：
 
 ```
-Capability(id, title, segment, judge, evidence, acquirableBy, requires, failure)
+Capability(id, title, segment, optional, requires, judge, acquirer, bridgeToken)
 ```
 
 - `judge`：**纯函数** `证据 -> 状态`，不住 GUI 层、不碰 Android 类型，JVM 单测钉死；
   判据表达式（`adb/state.json`、`isDeviceOwnerApp`、`canDrawOverlays` …）**只允许出现在
   `capability/` 层**（§2.5 门禁）。
-- `evidence`：**类型化**读数快照（含时间戳），禁止从日志文本反解状态（v1 的
-  `lastPairError = substringAfter("[pair]") + "失败" in it` 是反面教材）。
-- `acquirableBy`：**有序**取法链，第一项就是主路径，失败才落下一项；档位 ∈
+- `Evidence`：**类型化**读数快照（含时间戳），作为 `judge` / `acquirer` 唯一的入参；
+  禁止从日志文本反解状态（v1 的 `lastPairError = substringAfter("[pair]") + "失败" in it` 是反面教材）。
+- `acquirer`：**有序**取法链，第一项就是主路径，失败才落下一项；档位 ∈
   `AUTO / USER_TAP(intent) / USER_CODE(6位码) / SILENT_VIA_ADB / SILENT_VIA_DO`。
   `SILENT_VIA_DO` 一律排在降级位 —— DO 是**加速器**，不是前置。
-- `requires`：**硬**前置能力 id 集合。只有这里产生的未达成才允许显示 BLOCKED。
-- `optional`：加速器/旁路能力置 true（DO、截屏授权）。`optional` 能力**永不**下 BLOCKED、
-  **永不**参与 S4 放行判定。
-- `failure`：类型化归因枚举（不是字符串猜测），上屏时再渲染成人话。
+- `requires`：**硬**前置能力 id 集合。只有这里产生的未达成才允许显示 BLOCKED，且**实测优先**：
+  `judge` 直接读到为真（凭据在册 / 探针 LIVE / 控制面在线）时不再被前置缺位改成 BLOCKED ——
+  `evaluate` 里 BLOCKED 只回答「前置没齐，现在还不该做」，不能否认「已经做完的事」；
+  否则 ROM 回收一项授权就会把通道明明在线的老设备整页判红（golden：
+  `CapabilityDegradationTest.老设备通道在线但通知被回收_实测优先不许降级成等待`）。
+- `optional`：加速器/旁路能力置 true（DO、截屏授权）。`optional` 能力**永不**参与 S4 放行判定，
+  也**永不**作为他人的前置（规则 2）；它自己可以显示 BLOCKED/UNREACHABLE，但那只是灰字提示。
+- 没有独立的 `failure` 字段：归因是 `CapVerdict.detail` 的职责，证据缺失由 `Evidence` 的初值表达。
 
 状态枚举：`GRANTED`（判据为真）/ `ACTION`（前置就绪，差用户一步）/ `BLOCKED`（硬前置未达成）/
 `FAILED`（试过且失败，带归因）/ `UNREACHABLE`（平台拒绝且非用户可补救，例如多用户设备上的 DO ——
@@ -67,36 +79,43 @@ Capability(id, title, segment, judge, evidence, acquirableBy, requires, failure)
 |---|---|---|---|---|---|
 | `dev_options` | S0 | `Settings.Global.development_settings_enabled == 1` | USER_TAP → 开发者选项页 | —— | |
 | `wireless_debug` | S0 | `Settings.Global.adb_wifi_enabled == 1` | USER_TAP → 开发者选项页（PLP120 定罪：无线调试深链无 Activity 响应，落点只有这一页） | —— | |
-| `adb_credentials` | S0 | 凭据在册（`adbkey.pem` + `state.json`）**且**最近一次配对尝试非 FAILED | USER_CODE：通知栏 RemoteInput 输 6 位码（§3） | dev_options, wireless_debug | |
-| **`adb_channel`** | **S0** | **活探针为真：现问 mDNS 端点 → `id -u` 返回 `uid=2000`，且读数未过期（TTL 内）** | AUTO：`AdbChannelProbe`（缓存 TTL 30s；失败 5s 后允许重探） | adb_credentials | |
+| `perm:post_notifications` | **S0** | `checkSelfPermission(POST_NOTIFICATIONS)` | RUNTIME_DIALOG：系统弹窗（shell 侧 `pm grant` 在 Android 17 不可用） | —— | |
+| `adb_credentials` | S0 | 凭据在册（`adbkey.pem` + `state.json`）**且**最近一次配对尝试非 FAILED | USER_CODE：通知栏 RemoteInput 输 6 位码（§3） | dev_options, wireless_debug, **post_notifications** | |
+| **`adb_channel`** | **S0** | **活探针为真：现问 mDNS 端点 → `id -u` 返回 `uid=2000`，且读数未过期（TTL 内）** | AUTO：`AdbChannelProbe`（LIVE 读数 10s 内复用、可信期 TTL 30s；DEAD 5s 冷却；事件可强制作废） | adb_credentials | |
 | `device_owner` | S1 | `isDeviceOwnerApp(packageName)`（系统侧回读；`dpm` 命令 exit 0 不算数，真机 2026-09-25 17:12） | SILENT_VIA_ADB：`dpm set-device-owner` → 输出含 `several users` 归因 UNREACHABLE | adb_channel | **是（加速器）** |
 | `perm:manage_external_storage` | S2 | `Environment.isExternalStorageManager()` | USER_TAP（AppOps 档：Android 17 shell 已无 `MANAGE_APP_OPS_MODES`，实测只能人点）→ SILENT_VIA_DO | —— | |
 | `perm:request_install_packages` | S2 | `canRequestPackageInstalls()` | USER_TAP → SILENT_VIA_DO | —— | |
 | `perm:system_alert_window` | S2 | `Settings.canDrawOverlays()` | USER_TAP → SILENT_VIA_DO | —— | |
-| `perm:post_notifications` | S2 | `checkSelfPermission(POST_NOTIFICATIONS)` | USER_TAP：系统弹窗（shell 侧 `pm grant` 在 Android 17 不可用） | —— | |
 | `perm:battery_optimization` | S2 | `isIgnoringBatteryOptimizations()` | USER_TAP：`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | —— | |
 | `secure:notification_listener` | S2 | `Secure.enabled_notification_listeners` 含本包 | **SILENT_VIA_ADB**：`settings put secure`（§2.0 实测）→ USER_TAP 通知使用权页 | —— | |
 | `accessibility` | S2 | 服务实例已连（`DshAccessibilityService.isReady()`，与桥 caps 同一把尺子；设置串残留不作数） | **SILENT_VIA_ADB**：`settings put secure enabled_accessibility_services` → USER_TAP 无障碍页 | —— | |
 | `mediaprojection` | S2 | `ScreenCaptureService.isReady()` | USER_TAP：App 内「授权屏幕捕获」（每次会话，物理不可预置） | —— | 是 |
 | `runtime` | S3 | 控制面 `/status` 200 | AUTO：`ContainerSupervisor` 重拉 → 手动重试 | —— | |
 | `kernel_bundle` | S3 | `KernelSelfCheck` 无失败项 | AUTO → 灾难兜底诊断页 | runtime | |
-| `workbench` | S4 | 全部非 optional 能力为 GRANTED 或 UNREACHABLE | USER_TAP：进入控制面板 | adb_channel, runtime, kernel_bundle | |
+| `workbench` | S4 | **入口三要素**（`adb_channel` + `runtime` + `kernel_bundle`）全为 GRANTED | USER_TAP：进入控制面板 | adb_channel, runtime, kernel_bundle | |
 
-两点必须钉住：
+必须钉住的四点：
 
 1. **S0 的绿 = `adb_channel`，不是 `adb_credentials`。** 凭据在册只回答「密钥与配对记录在不在」，
    通道通不通必须靠活探针 —— 这条区分是 §2.0-1 的唯一解。
 2. **`device_owner` 不在任何能力的 `requires` 里。** 它只出现在取法链的降级位。
+3. **`perm:post_notifications` 属 S0，不属 S2**（2026-09-25 真机定罪后补）：S0 主路径的输码交互
+   走通知栏 RemoteInput（§3.2），通知权限被拒 = 输码入口根本不存在 = S0 死锁。把它登记在 S2
+   就是 §3.4 反对的「顺序倒挂」的漏网一条 —— 而 `nm.notify()` 在缺权限时不抛异常、只是不显示，
+   死锁连案底都不留。修法与状态机位置见 [onboarding-flow-spec.md](onboarding-flow-spec.md) §3。
+4. **S4 的绿 ≠ S2 全绿。** 进工作台的门槛只有「通道能跑 shell + 运行时在线 + 内核自检无失败项」
+   三要素；悬浮窗/全部文件/电池这些补齐项在 F6 里继续要，但不挡门（onboarding-flow-spec §5）。
+   反过来也不许把「三要素绿」写成「权限集全绿」。
 
 ### 2.3 依赖图与管线投影
 
 ```
 dev_options ┐
-            ├─→ adb_credentials ─→ adb_channel ─┬─→ device_owner (optional，加速器)
-wireless_debug ┘                                ├─→ secure:notification_listener
-                                                └─→ accessibility
-        perm:*（USER_TAP，与 DO 无关）   runtime ─→ kernel_bundle
-                       └──────────────────────────────────────→ workbench
+wireless_debug ├─→ adb_credentials ─→ adb_channel ─┬─→ device_owner (optional，加速器)
+post_notifications ┘                               ├─→ secure:notification_listener
+                                                   └─→ accessibility
+        其余 perm:*（USER_TAP / RUNTIME_DIALOG，与 DO 无关）   runtime ─→ kernel_bundle
+                       └──────────────────────────────────────────────→ workbench
 ```
 
 - S0–S4 五段是能力按 `requires` **拓扑排序后的呈现视图**（用户要的简单），不再是模型本身。
@@ -122,29 +141,34 @@ wireless_debug ┘                                ├─→ secure:notification_
 
 | 表达式 | 唯一合法宿主 |
 |---|---|
-| `adb/state.json`、`adbkey.pem` 的存在性判定 | `capability/`（凭据判据）+ `assets/node/adb-client/`（写方） |
+| `"state.json"`、`"adbkey.pem"` 的存在性判定 | `capability/`（凭据判据）+ `assets/node/adb-client/`（写方，不在本表扫描范围） |
 | `isDeviceOwnerApp(` | `capability/CapabilityCriteria.kt` |
-| `canDrawOverlays(`、`isExternalStorageManager(`、`canRequestPackageInstalls(`、`isIgnoringBatteryOptimizations(` | `permissions/PermissionCenter.kt` |
+| `"development_settings_enabled"`、`"adb_wifi_enabled"` | `capability/`（S0 前置开关只在 CapabilityCriteria 读） |
+| `"uid=2000"`、`dpm set-device-owner` | `capability/`（通道断言在 AdbChannelProbe，取法命令在 CapabilityAcquisitionRunner） |
+| `canDrawOverlays(`、`isExternalStorageManager(`、`canRequestPackageInstalls(`、`isIgnoringBatteryOptimizations(`、`checkSelfPermission(` | `permissions/PermissionCenter.kt` |
 | `enabled_notification_listeners`、`enabled_accessibility_services`（**裸串**） | `permissions/PermissionCatalog.kt` 各声明一次（`SECURE_KEY_*`）；读侧 PermissionCenter 与下发侧 `CapabilityAcquisitionRunner` 都引用它 |
+| 日志文本反解状态（`substringAfter("[pair]")` 之类） | 禁止（零命中） |
 
 `SECURE_KEY_*` 用串而非平台常量：`Settings.Secure.ENABLED_NOTIFICATION_LISTENERS` 不在
 compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半统一走串才不会出现半常量半串。
-| 日志文本反解状态（`substringAfter("[pair]")` 之类） | 禁止（零命中） |
 
 门禁必须自证非空转：报告每条规则的命中数，命中数为 0 的规则视为门禁失效并报错
 （防止我把规则写成永不匹配的空壳）。扫描到的 `.kt` 文件数也有地板值，低于地板值同样报错。
 
-同一文件还静态钉住 §2.1 的三条 DAG 不变式（纯层逻辑本机没有 JDK 跑不了，故用文本解析而非
-运行时断言；`CapabilityCatalog.init` 的运行时校验是第二道，两者同向）：
+同一文件还静态钉住 §2.1 与 [onboarding-flow-spec.md](onboarding-flow-spec.md) §3 的**四条** DAG 不变式
+（纯层逻辑本机没有 JDK 跑不了，故用文本解析而非运行时断言；`CapabilityCatalog.init` 的
+运行时校验是第二道，两者同向）：
 
 | 不变式 | 违规形态 |
 |---|---|
 | `optional` 能力不得出现在任何 `requires` 里 | `runtime.requires(device-owner)` —— v1 锁死 S2/S3/S4 的根因 |
 | 非 optional 能力的 `requires` 闭包不得含 `adb-channel` | 无 ADB 的机器上永久走不到绿 |
 | `perm(PermissionCatalog.X)` 引用的 id 必须在 PermissionCatalog 有定义 | 表与登记表漂移，judge 永远拿不到读数 |
+| `adb-credentials` 的 `requires` 必含 `dev-options`、`wireless-debug`、`post-notifications`，且 `post-notifications` 自身不得带 `requires` | S0 死锁复发（flow-spec §0 表第 3 行）；或首启冲刺被自己的前置锁死 |
 
-解析器自身也要能红：`requires = setOf(` 的声明次数与解析出的边数不等即失败（写法漂移），
-登记表里没有 `perm()` 能力同样失败。
+解析器自身也要能红：先定位 `val ALL … listOf(` 的**区间**再按条目锚点切段（`requires` 落在条目
+区间之外、或声明次数与解析出的边数不等，都直接失败 = 写法漂移）；`requires` 里的
+`PermissionCatalog.X` 与本地常量两形都要能解析；登记表里没有 `perm()` 能力同样失败。
 
 该门禁已接入 `container/engine/package.json` 的 `test:logic` 序列，由 `ci.yml` 的
 `container` job 执行；纯层退化路径 golden 在
@@ -224,20 +248,23 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
 | `ui/`（Activity/Adapter） | 渲染枚举 + 发 intent + 起采集 | 出现判据表达式、`dpm`/`settings` 命令拼装、日志文本反解 |
 | `bridge/HostBridgeService`、`ProvisioningProbe`、`KernelSelfCheck` | **调用** capability 层拿结论 | 自己重写一份判据（v1 的四处复制即此处失守） |
 
-- 状态刷新：管线页可见时轮询采集（复用现有 handler 轮询模式），不可见即停；`adb_channel`
-  的探针按 §2.2 的 TTL 缓存节流，其余读数每轮现取。
-- 动作派发也从 capability 层派生（`acquirableBy` 的 intent / 命令模板），GUI 只负责「按第一项
+- 状态刷新：一律按 [onboarding-flow-spec.md](onboarding-flow-spec.md) §2.3 的事件表 + §4 的
+  新鲜度分层（可见 10s 重探 / 可信期 30s / 回前台作废），本节不再自定一套轮询口径。
+- 动作派发也从 capability 层派生（`acquirer` 的 intent / 命令模板），GUI 只负责「按第一项
   可用取法发出去」。v1 的 `buttonsFor(stepId)` 硬编码 + `requestNextPermission()` 按字符串
   缺项猜动作，属违规。
+- 运行时弹窗**被拒后的降级出口**同样留在 capability 层（`CapabilityNavigation.appDetailsIntent`）：
+  `RUNTIME_DIALOG` 的回调拿到 `false` 时，首页只做「记账 + 把那个 intent 发出去」，
+  不自己拼详情页 target、也不留下一个再按也不会弹窗的死按钮（flow-spec §3 第 2 段）。
 
 ## 5. 首页之外的页面集合（本期范围）
 
-| 页面 | 内容 | 备注 |
+| 页面 | 内容 | 落点（现状） |
 |---|---|---|
-| 管线首页 | §1 两块（段投影 = §2.3 的拓扑视图） | 入口 Activity |
-| S0 配对引导页 | 三步指引 + 状态回显（等码/已收到/配对中/成功/失败原因） | 打开即挂输码通知；离开即销毁（不常驻） |
-| 能力明细页 | §2.2 登记表逐项 + 每项按其 `acquirableBy` 首项派发 | 段行「去处理」直达；DO 缺席时静默项自动落到 USER_TAP |
-| 灾难兜底页 | 现有诊断文本页原样 | 仅 S3 红且有异常证据时可达 |
+| 开场首页 | §1 三块：阶段卡驱动器在 [onboarding-flow-spec.md](onboarding-flow-spec.md) §2，段投影退为核对行 | `ui/OnboardingActivity.kt`（launcher Activity） |
+| 配对现场 | 输码通知（RemoteInput）+ mDNS 监听状态回显 | `ui/PairingProbeService.kt`；**无独立向导 Activity**，F3 卡显示现场 |
+| 能力明细 | 登记表逐项 + 每项按其 `acquirer` 首项派发 | **无独立页面**：本期由「复制探针报告」逐项输出（`OnboardingActivity.copyReport`） |
+| 工作台宿主帧 / 灾难兜底页 | 内核面板；运行时起不来时是同帧的诊断文本（自检/复制/重试/授权截屏四按钮） | `MainActivity` |
 
 **不做**：设置页（内核面板有）、主题、多语言（中文单语）、引导动画。
 

@@ -21,52 +21,79 @@ import io.github.lobbowen.dshmobile.BuildConfig
 import io.github.lobbowen.dshmobile.MainActivity
 import io.github.lobbowen.dshmobile.capability.AcquireKind
 import io.github.lobbowen.dshmobile.capability.Acquisition
+import io.github.lobbowen.dshmobile.capability.AdbChannelProbe
 import io.github.lobbowen.dshmobile.capability.BridgeTokens
 import io.github.lobbowen.dshmobile.capability.CapabilityAcquisitionRunner
 import io.github.lobbowen.dshmobile.capability.CapabilityCatalog
 import io.github.lobbowen.dshmobile.capability.CapabilityEvidenceCollector
 import io.github.lobbowen.dshmobile.capability.CapabilityNavigation
-import io.github.lobbowen.dshmobile.capability.CapStatus
-import io.github.lobbowen.dshmobile.capability.CredentialsState
 import io.github.lobbowen.dshmobile.capability.Evidence
+import io.github.lobbowen.dshmobile.capability.OnboardingFlow
 import io.github.lobbowen.dshmobile.capability.PipelineProjection
 import io.github.lobbowen.dshmobile.capability.PipelineRefresh
-import io.github.lobbowen.dshmobile.capability.PipelineStep
+import io.github.lobbowen.dshmobile.capability.StageStatus
 import io.github.lobbowen.dshmobile.capability.StepStatus
 
 /**
- * 开场管线首页（spec §1/§5）：段投影五行 + 每行**一个**动作 + 一个工作台入口。
+ * 开场首页：渲染 [OnboardingFlow] 的六张阶段卡（**当前阶段 + 一个动作**），下面是 S0–S4
+ * 判据核对（[PipelineProjection] 的段行，探针期兼作证据出口）。
  *
- * 职责边界（spec §4 分层表）：这里只渲染 [PipelineProjection] 给出的枚举，并按
- * [Acquisition.kind] 把动作转交 capability 层 —— 判据、命令、intent 目标、按钮文案
- * 全部来自登记表。v1 在此处硬编码 `buttonsFor(stepId)` 并就地拼 `dpm` 命令，
- * 是「GUI 只管跑通、不管逻辑归属」的直接产物。
+ * 职责边界（ui-onboarding-spec §4）：这里只渲染枚举、按 [Acquisition.kind] 把动作转交
+ * capability 层。判据、命令、intent 目标、按钮文案全部来自登记表；「下一步是什么」来自
+ * 阶段机 —— 首页不再自己推断顺序（v1 的 `buttonsFor(stepId)` 与「每段一个随机待办按钮」
+ * 就是自己推断的产物，真机上从 S0 就走不下去）。
  *
- * 纯代码布局（无 XML）：行结构由段投影动态生成，写死 layout 反而两头维护。
+ * 纯代码布局（无 XML）：行结构由阶段机动态生成，写死 layout 反而两头维护。
  */
 class OnboardingActivity : AppCompatActivity() {
 
     private val handler = Handler(Looper.getMainLooper())
-    private val rowTexts = mutableMapOf<String, TextView>()
-    private val rowButtons = mutableMapOf<String, Button>()
-    private var wizardText: TextView? = null
-    private var diagnosticsBtn: Button? = null
-    private var steps: List<PipelineStep> = emptyList()
+    private val stageTexts = mutableMapOf<String, TextView>()
+    private val stageButtons = mutableMapOf<String, Button>()
+    private val stageExtraButtons = mutableMapOf<String, Button>()
+    private var criteriaText: TextView? = null
+    private var enterBtn: Button? = null
     private var lastEvidence: Evidence? = null
 
     @Volatile private var refreshInFlight = false
     @Volatile private var actionInFlight = false
+    /** 自动跳转只做一次；入口重新变红时才解锁（否则从面板回来会被再次弹走）。 */
+    private var autoEntered = false
+    /** F3 的底座自动挂起也只试一次，避免被拒后每 2s 起一次服务。 */
+    private var wizardAutoStarted = false
+
+    /** 本次 RUNTIME_DIALOG 申请的权限名；launcher 全页面共用，回调里靠它归因。 */
+    private var pendingRuntimePerm: String? = null
 
     private val requestRuntimePerm = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { refreshSoon() }
+    ) { granted ->
+        val perm = pendingRuntimePerm
+        pendingRuntimePerm = null
+        if (!granted) openAppDetailsAfterDenial(perm)
+        refreshSoon()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(buildLayout())
         PipelineRefresh.subscribe(onChange)
+    }
+
+    /**
+     * 回前台是**最强的新鲜度事件**：用户可能刚在设置页把开关拨了、刚给完权限，
+     * 也可能端口已经轮换过一轮。作废通道缓存并立即重采，不等 TTL（flow-spec §2.3）。
+     */
+    override fun onResume() {
+        super.onResume()
+        AdbChannelProbe.invalidate()
         refreshSoon()
         handler.post(poller)
+    }
+
+    override fun onPause() {
+        handler.removeCallbacks(poller)
+        super.onPause()
     }
 
     override fun onDestroy() {
@@ -75,7 +102,7 @@ class OnboardingActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    // ---- 布局：一段一行，一行一个动作 ----
+    // ---- 布局：阶段卡六行 + 判据核对 + 探针期导出通道 ----
 
     private fun buildLayout(): View {
         val pad = (16f * resources.displayMetrics.density).toInt()
@@ -89,37 +116,45 @@ class OnboardingActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, pad / 2)
         })
-        for (seg in listOf(
-            CapabilityCatalog.S0, CapabilityCatalog.S1, CapabilityCatalog.S2,
-            CapabilityCatalog.S3, PipelineProjection.S4,
-        )) {
-            val tv = TextView(this).apply { textSize = 15f; setPadding(0, pad / 2, 0, pad / 4) }
-            rowTexts[seg] = tv
-            col.addView(tv)
-            if (seg == CapabilityCatalog.S0) {
-                // 向导实况：只叙述 service 回报的事实，不在此推断（推断归判据层）。
-                wizardText = TextView(this).apply {
-                    textSize = 13f
-                    setPadding(pad / 2, 0, 0, pad / 4)
-                    visibility = View.GONE
-                }
-                col.addView(wizardText)
+        for (stage in OnboardingFlow.SKELETON) {
+            val tv = TextView(this).apply {
+                textSize = 15f
+                setPadding(0, pad / 2, 0, 0)
+                text = "${stage.id} ${stage.title}"
             }
+            stageTexts[stage.id] = tv
+            col.addView(tv)
+            col.addView(TextView(this).apply {
+                textSize = 12f
+                setPadding(pad / 2, 0, 0, pad / 4)
+                text = stage.why
+            })
+            // 每行一律给一个动作按钮：F5 的动作可能是「重启运行时」（AUTO）。
+            // 次要按钮只挂在阶段机给出的那一行（冲刺欠账 / F6 补齐），主按钮全页至多一个。
+            // 「进入工作台」是入口本身，另置一个按钮，未放行时禁用（比点了没反应诚实）。
             val btn = Button(this).apply { visibility = View.GONE }
-            rowButtons[seg] = btn
+            stageButtons[stage.id] = btn
             col.addView(btn)
-            if (seg == CapabilityCatalog.S3) {
-                // 灾难兜底页只在 S3 未绿时可达（spec §1：其余时刻首页只讲状态与入口）。
-                diagnosticsBtn = Button(this).apply {
-                    text = "诊断页"
+            val extra = Button(this).apply { visibility = View.GONE }
+            stageExtraButtons[stage.id] = extra
+            col.addView(extra)
+            if (stage.id == OnboardingFlow.F5) {
+                enterBtn = Button(this).apply {
+                    text = "进入工作台"
                     visibility = View.GONE
+                    isEnabled = false
                     setOnClickListener { openWorkbench() }
                 }
-                col.addView(diagnosticsBtn)
+                col.addView(enterBtn)
             }
         }
-        // 探针期义务：设备侧 adb 已关，剪贴板是唯一证据出口。定罪靠文件里的时间戳，
-        // 不靠记忆 —— 报告同时带判据结论，便于核对「首页说的」与「日志做的」是否一致。
+        criteriaText = TextView(this).apply {
+            textSize = 11f
+            setPadding(0, pad, 0, 0)
+        }
+        col.addView(criteriaText)
+        // 探针期义务：设备侧 adb 已关，剪贴板是唯一证据出口。报告同时带判据结论与配对案底，
+        // 便于核对「首页说的」与「日志做的」是否一致。
         col.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, pad, 0, 0)
@@ -160,105 +195,113 @@ class OnboardingActivity : AppCompatActivity() {
 
     private fun render(e: Evidence) {
         lastEvidence = e
-        steps = PipelineProjection.project(e, CapabilityCatalog.evaluate(e))
-        for (s in steps) {
-            rowTexts[s.id]?.text = "${s.id} ${s.title} ${mark(s.status)} ${s.detail}"
-            val btn = rowButtons[s.id] ?: continue
-            btn.setOnClickListener { onAction(s, btn) }
-            if (s.id == PipelineProjection.S4) {
-                // S4 是入口本身：文案固定，未放行就禁用（比点了没反应诚实）。
-                btn.visibility = View.VISIBLE
-                btn.text = "进入工作台"
-                btn.isEnabled = s.status == StepStatus.DONE
-            } else {
-                btn.visibility = if (s.pending == null) View.GONE else View.VISIBLE
-                btn.text = s.pending?.label ?: ""
-                btn.isEnabled = true
-            }
+        val verdicts = CapabilityCatalog.evaluate(e)
+        val stages = OnboardingFlow.stages(e, verdicts)
+        for (s in stages) {
+            val tv = stageTexts[s.id] ?: continue
+            val blocked = PairingProbeService.instance?.notificationBlocked == true &&
+                s.id == OnboardingFlow.F3
+            tv.text = "${s.id} ${s.title} ${mark(s.status)}" +
+                (if (blocked) " 通知权限缺失 → 回到上一步" else "") +
+                (if (s.detail.isBlank()) "" else "｜${s.detail}")
+            val acq = s.action
+            val btn = stageButtons[s.id] ?: continue
+            btn.visibility = if (acq == null) View.GONE else View.VISIBLE
+            btn.text = acq?.label ?: ""
+            btn.isEnabled = true
+            if (acq != null) btn.setOnClickListener { dispatch(s.actionCapId ?: "", acq, btn) }
+            val sec = s.extra
+            val extra = stageExtraButtons[s.id] ?: continue
+            extra.visibility = if (sec == null) View.GONE else View.VISIBLE
+            extra.text = sec?.let { "补：${it.label}" } ?: ""
+            extra.isEnabled = true
+            if (sec != null) extra.setOnClickListener { dispatch(s.extraCapId ?: "", sec, extra) }
         }
-        diagnosticsBtn?.visibility =
-            if (stepOf(CapabilityCatalog.S3)?.status == StepStatus.DONE) View.GONE else View.VISIBLE
-        renderWizard(e)
+        val ready = OnboardingFlow.readyToEnter(verdicts)
+        enterBtn?.visibility = if (ready) View.VISIBLE else View.GONE
+        enterBtn?.isEnabled = ready
+        if (ready && !autoEntered) {
+            autoEntered = true
+            openWorkbench()
+        } else if (!ready) {
+            autoEntered = false
+        }
+        // 前置齐了就自动挂出输码通知（flow-spec §2.1 F3：不等人点「开始配对」）。
+        // 认「唯一可动作行」而不是某个状态：失败重试那一步同样是当前步。
+        val cur = stages.firstOrNull { it.action != null }
+        if (cur?.id == OnboardingFlow.F3 && cur.action?.kind == AcquireKind.USER_CODE &&
+            !PairingProbeService.running && !wizardAutoStarted
+        ) {
+            wizardAutoStarted = true
+            startPairingWizard()
+        }
+        criteriaText?.text = "判据核对：" +
+            PipelineProjection.project(e, verdicts).joinToString("  ") {
+                "${it.id}${segMark(it.status)}${it.detail}"
+            }
     }
 
-    private fun mark(s: StepStatus): String = when (s) {
+    private fun mark(s: StageStatus): String = when (s) {
+        StageStatus.DONE -> "[完成]"
+        StageStatus.CURRENT -> "[下一步]"
+        StageStatus.NEXT -> "[待办]"
+        StageStatus.BLOCKED -> "[等待]"
+        StageStatus.FAILED -> "[失败]"
+        StageStatus.UNREACHABLE -> "[不可得]"
+    }
+
+    /** 判据核对行（段投影）的标记：与阶段卡的词分开，两处口径不同不要混用。 */
+    private fun segMark(s: StepStatus): String = when (s) {
         StepStatus.DONE -> "[完成]"
-        StepStatus.ACTION -> "[待操作]"
+        StepStatus.ACTION -> "[待办]"
         StepStatus.BLOCKED -> "[等待]"
         StepStatus.FAILED -> "[失败]"
         StepStatus.UNREACHABLE -> "[不可得]"
     }
 
-    private fun stepOf(id: String): PipelineStep? = steps.firstOrNull { it.id == id }
-
-    /**
-     * S0 向导只在「凭据未在册且底座在线」时占屏；前置未就绪时先讲前置 —— 文案直接取
-     * 登记表里那两项的 detail，不在这里重判一遍条件（v1 在此复制过一遍前置判断）。
-     */
-    private fun renderWizard(e: Evidence) {
-        val tv = wizardText ?: return
-        if (e.credentials == CredentialsState.PAIRED || !PairingProbeService.running) {
-            tv.visibility = View.GONE
-            return
-        }
-        tv.visibility = View.VISIBLE
-        val verdicts = CapabilityCatalog.evaluate(e)
-        val gap = listOf(CapabilityCatalog.DEV_OPTIONS, CapabilityCatalog.WIRELESS_DEBUG)
-            .firstOrNull { verdicts[it]?.status != CapStatus.GRANTED }
-        if (gap != null) {
-            tv.text = "前置未就绪：" + CapabilityCatalog.titleOf(gap) + " —— " +
-                (verdicts[gap]?.detail ?: "")
-            return
-        }
-        val svc = PairingProbeService.instance
-        // 失败读数只认**本轮**的（AttemptStore 是类型化事实，不是文案猜测）。
-        val failed = e.pairAttempt?.takeIf { !it.ok && it.atMs >= (svc?.roundStartMs ?: 0L) }
-        tv.text = when {
-            svc == null -> "底座未在线（重按「开始配对」）"
-            svc.pairingInFlight -> "③ 配对进行中…（${svc.portText}）"
-            failed != null -> "③ 配对失败：" + failed.reason.take(80) + " —— 重新输码可再试"
-            svc.codeArrived -> "③ 码已送达，等待结果…"
-            svc.portFound -> "② ✓ 已监听到配对端口 ${svc.portText} —— 下拉通知栏「输入配对码」"
-            else -> "① 监听中，暂未看到配对端口 —— 请让「使用配对码配对设备」对话框保持打开"
-        }
-    }
-
     // ---- 动作：一律转交 capability 层 ----
 
-    private fun onAction(step: PipelineStep, btn: Button) {
-        if (step.id == PipelineProjection.S4) {
-            if (step.status == StepStatus.DONE) openWorkbench()
-            // 未放行时按钮已禁用；此分支不落 else，避免「点了没反应」。
-            return
-        }
-        val acq = step.pending ?: return
+    private fun dispatch(capId: String, acq: Acquisition, btn: Button) {
         when (acq.kind) {
             AcquireKind.USER_CODE -> startPairingWizard()
             AcquireKind.RUNTIME_DIALOG -> requestRuntimePermission(acq)
             AcquireKind.USER_TAP -> {
                 val jumped = CapabilityNavigation.launch(this, acq) { note ->
-                    ProbeJournal.append(this, "deeplink",
-                        "${step.pendingCapId} ${acq.label}：$note")
+                    ProbeJournal.append(this, "deeplink", "$capId ${acq.label}：$note")
                 }
-                ProbeJournal.append(this, "deeplink",
-                    "${step.pendingCapId} ${acq.label}：${if (jumped) "intent 已发出" else "无响应"}")
                 if (!jumped) toast("授权页打不开：${acq.label}")
-                handler.postDelayed({ refreshSoon() }, REFRESH_AFTER_TAP_MS)
             }
-            else -> runAcquisition(step, acq, btn)
+            else -> runAcquisition(capId, acq, btn)
         }
+        // 发完动作立刻补一次采集：用户可能在设置页里已经把这一步做完了。
+        handler.postDelayed({ refreshSoon() }, REFRESH_AFTER_TAP_MS)
     }
 
     private fun requestRuntimePermission(acq: Acquisition) {
         val perm = CapabilityNavigation.runtimePermission(acq)
         if (perm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pendingRuntimePerm = perm
             requestRuntimePerm.launch(perm)
         } else {
             toast("本机系统不需要这一步")
         }
     }
 
-    private fun runAcquisition(step: PipelineStep, acq: Acquisition, btn: Button) {
+    /**
+     * 拒绝之后弹窗不会再来：这里若不跳详情页，F1 的主按钮就成了按了没反应的谎言
+     * （与 `PairingProbeService.startProbe` 对 `notify()` 的自证同一条理由）。
+     */
+    private fun openAppDetailsAfterDenial(perm: String?) {
+        if (perm == null) return
+        ProbeJournal.append(
+            this, "perm",
+            "$perm 弹窗结果=未授予（多半勾了「不再询问」）→ 跳本应用详情页，给一条能走的路",
+        )
+        val jumped = runCatching { startActivity(CapabilityNavigation.appDetailsIntent(this)) }.isSuccess
+        if (!jumped) toast("系统权限页打不开：$perm 需手动开启")
+    }
+
+    private fun runAcquisition(capId: String, acq: Acquisition, btn: Button) {
         if (actionInFlight) return
         actionInFlight = true
         btn.isEnabled = false
@@ -270,7 +313,7 @@ class OnboardingActivity : AppCompatActivity() {
                 actionInFlight = false
                 btn.isEnabled = true
                 result?.detail?.let {
-                    ProbeJournal.append(ctx, "acq", "${step.pendingCapId} ${acq.label}：$it")
+                    ProbeJournal.append(ctx, "acq", "$capId ${acq.label}：$it")
                     toast(if (result.verified) "已生效" else it)
                 }
                 refreshSoon()
@@ -278,13 +321,13 @@ class OnboardingActivity : AppCompatActivity() {
         }.apply { isDaemon = true }.start()
     }
 
-    /** S0 向导唯一入口：起底座（mDNS 监听 + 通知输码），配对结果经 AttemptStore 类型化回流。 */
+    /** F3 的底座：起 mDNS 监听 + 输码通知。缺通知权限时服务会自己退回 F1（PairingProbeService）。 */
     private fun startPairingWizard() {
         startService(Intent(this, PairingProbeService::class.java))
         handler.postDelayed({ refreshSoon() }, REFRESH_AFTER_TAP_MS)
     }
 
-    /** 控制面板 / 灾难兜底诊断页同帧（MainActivity）：S4 绿是面板，S3 红时它是唯一证据出口。 */
+    /** 控制面板 / 灾难兜底诊断页同帧（MainActivity）：入口绿是面板，S3 红时它是唯一证据出口。 */
     private fun openWorkbench() {
         startActivity(Intent(this, MainActivity::class.java))
     }
@@ -303,8 +346,12 @@ class OnboardingActivity : AppCompatActivity() {
                 appendLine("${Build.MANUFACTURER} ${Build.MODEL} · API ${Build.VERSION.SDK_INT} · " +
                     "APK ${BuildConfig.VERSION_NAME}#${BuildConfig.VERSION_CODE}")
                 if (e != null) {
-                    appendLine("---- 能力判据 ----")
                     val verdicts = CapabilityCatalog.evaluate(e)
+                    appendLine("---- 流程阶段 ----")
+                    OnboardingFlow.stages(e, verdicts).forEach {
+                        appendLine("${it.id} ${it.title} ${it.status} ${it.detail}")
+                    }
+                    appendLine("---- 能力判据 ----")
                     CapabilityCatalog.ALL.forEach { c ->
                         val v = verdicts[c.id]
                         appendLine(
@@ -335,7 +382,7 @@ class OnboardingActivity : AppCompatActivity() {
     companion object {
         private const val POLL_MS = 2_000L
 
-        /** 发完 intent 后补一次采集：用户可能在设置页里已经把这一步做完了。 */
-        private const val REFRESH_AFTER_TAP_MS = 600L
+        /** 发完动作后的补采时刻（真正的实时性由 onResume / PipelineRefresh / 探针事件保证）。 */
+        private const val REFRESH_AFTER_TAP_MS = 800L
     }
 }

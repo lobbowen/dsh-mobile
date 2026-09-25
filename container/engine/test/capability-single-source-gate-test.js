@@ -78,9 +78,10 @@ const DEAD = [
   { name: 'v1 凭据判据出口', re: /\bisPaired\s*\(/ },
 ];
 
-// ---- DAG 不变式（spec §2.1 规则 2/3：`device-owner` 不进任何 requires；DO/ADB 缺席
-// 时 S1 以外的能力仍能达成）。这段用**文本级**判据（剥注释后数 `requires = setOf(`
-// 的出现次数），不受上面「整文件含注释」口径影响。----
+// ---- DAG 不变式（spec §2.1 规则 2/3 + onboarding-flow-spec §3 规则 4）。这段用**文本级**
+// 判据：剥注释 → 定位登记表区间 → 按条目锚点切段 → 解析 requires 符号表。
+// 区间与切段都是自证的一部分：整文件计数会把 init 校验块里的 `c.requires` 引用
+// 和 perm() 条目的边错归到别的 capability 上，那样门禁会「带着错归属」通过。----
 const CATALOG_REL = 'capability/CapabilityCatalog.kt';
 const PERM_CATALOG_REL = 'permissions/PermissionCatalog.kt';
 
@@ -95,43 +96,107 @@ function permValue(sym, permCatalogText) {
   return m ? m[1] : null;
 }
 
-function parseDag(catalogText) {
+// 登记表正文区间：`val ALL … = listOf(` 到与之配对的右括号（逐字符数深度，字符串字面量整体跳过）。
+// 为什么要限定区间：剥注释后 `perm()` 取法链与 init 校验块里也带 `requires` 字样，
+// 把整文件当登记表会把不属于自己的边错归到最后一条能力上（区间切分因此必须先定边界）。
+function catalogSpan(code) {
+  const head = code.indexOf('val ALL');
+  if (head < 0) return null;
+  const open = code.indexOf('listOf(', head);
+  if (open < 0) return null;
+  let depth = 0;
+  let inStr = false;
+  for (let i = open; i < code.length; i++) {
+    const c = code[i];
+    if (inStr) {
+      if (c === '\\') i++;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '(') depth++;
+    else if (c === ')') {
+      depth--;
+      if (depth === 0) return { from: open, to: i };
+      if (depth < 0) return null;
+    }
+  }
+  return null;
+}
+
+// requires 里的符号可以是本表常量，也可以是 `PermissionCatalog.X`（权限 id 的事实源在权限表）。
+function resolveToken(tok, consts, permCatalogText, from, unresolved) {
+  let m = tok.match(/^PermissionCatalog\.([A-Z][A-Z_0-9]*)$/);
+  if (m) {
+    const v = permValue(m[1], permCatalogText);
+    if (v === null) unresolved.push(from + ' 的 requires 符号 PermissionCatalog.' + m[1] + ' 在 PermissionCatalog 无定义');
+    return v;
+  }
+  m = tok.match(/^([A-Z][A-Z_0-9]*)$/);
+  if (!m) { unresolved.push(from + ' 的 requires 项写法漂移：' + JSON.stringify(tok) + '（既非常量也非 PermissionCatalog.X）'); return null; }
+  if (consts[m[1]] === undefined) { unresolved.push(from + ' 的 requires 符号 ' + m[1] + ' 无常量定义'); return null; }
+  return consts[m[1]];
+}
+
+// 按锚点切段：Capability(id = X, …) 与 perm(PermissionCatalog.Y, …) 各算一条。
+// 用「就近上一条 id =」归属会漏 —— perm() 条目没有 `id =` 行，它的 requires 会落到上一条。
+function parseDag(catalogText, permCatalogText) {
   const code = stripKotlinComments(catalogText);
   const consts = {};
   for (const m of code.matchAll(/const val ([A-Z_]+)\s*=\s*"([^"]+)"/g)) consts[m[1]] = m[2];
+  const span = catalogSpan(code);
   const edges = [];
   const unresolved = [];
-  let cur = null;
-  for (const line of code.split('\n')) {
-    const mi = line.match(/\bid\s*=\s*([A-Z_]+)\b/);
-    if (mi) {
-      if (consts[mi[1]] === undefined) unresolved.push('id 符号 ' + mi[1] + ' 无常量定义');
-      cur = consts[mi[1]] || null;
-    }
-    const mr = line.match(/requires\s*=\s*setOf\(([^)]*)\)/);
-    if (mr && cur) {
+  const anchors = [];
+  if (!span) return { consts, edges, unresolved, anchors, optionalIds: new Set(), declared: 0, outside: 0, spanOk: false };
+  const inSpan = (i) => i >= span.from && i < span.to;
+  for (const m of code.matchAll(/\bid\s*=\s*([A-Z][A-Z_0-9]*)\b/g)) {
+    if (inSpan(m.index) && consts[m[1]] !== undefined) anchors.push({ at: m.index, id: consts[m[1]] });
+  }
+  for (const m of code.matchAll(/\bperm\(\s*PermissionCatalog\.([A-Z][A-Z_0-9]*)/g)) {
+    if (!inSpan(m.index)) continue;
+    const v = permValue(m[1], permCatalogText);
+    anchors.push({ at: m.index, id: v || 'UNRESOLVED:' + m[1], permSym: m[1] });
+  }
+  anchors.sort((a, b) => a.at - b.at);
+  const reqRe = /\brequires\s*=\s*setOf\(([^)]*)\)/g;
+  let used = 0;
+  const optionalIds = new Set();
+  for (let i = 0; i < anchors.length; i++) {
+    const start = anchors[i].at;
+    const end = i + 1 < anchors.length ? anchors[i + 1].at : span.to;
+    const body = code.slice(start, end);
+    const cur = anchors[i].id;
+    if (/\boptional\s*=\s*true/.test(body)) optionalIds.add(cur);
+    for (const mr of body.matchAll(reqRe)) {
+      used++;
       const rs = [];
-      for (const s of mr[1].matchAll(/([A-Z_]+)/g)) {
-        if (consts[s[1]] === undefined) unresolved.push(cur + ' 的 requires 符号 ' + s[1] + ' 无法解析');
-        else rs.push(consts[s[1]]);
+      for (const raw of mr[1].split(',')) {
+        const tok = raw.trim();
+        if (tok === '') continue;
+        const v = resolveToken(tok, consts, permCatalogText, cur, unresolved);
+        if (v !== null) rs.push(v);
       }
       edges.push({ from: cur, to: rs });
     }
   }
-  return { consts, edges, unresolved };
+  const declaredAll = (code.match(/\brequires\s*=\s*setOf\(/g) || []).length;
+  return { consts, edges, unresolved, anchors, optionalIds, declared: declaredAll, outside: declaredAll - used, spanOk: true };
 }
 
 // requires 出现次数必须在解析结果里全额复现 —— 少一条 = 写法变了而解析器漏了，
 // 门禁会「带着零违规」通过，那是最坏情况，所以按 FAIL 处理。
 function checkDag(catalogText, permCatalogText) {
   const notes = [];
-  const code = stripKotlinComments(catalogText);
-  const declared = (code.match(/\brequires\s*=\s*setOf\(/g) || []).length;
-  const { consts, edges, unresolved } = parseDag(catalogText);
+  const { consts, edges, unresolved, anchors, optionalIds, declared, outside, spanOk } = parseDag(catalogText, permCatalogText);
   notes.push('requires 声明 ' + declared + ' 处 / 解析出边 ' + edges.length + ' 条');
+  if (!spanOk) notes.push('FAIL 定位不到登记表区间（val ALL … listOf( 或其右括号）—— 下面所有 DAG 判据失去覆盖面');
   if (declared === 0) notes.push('FAIL 登记表里一条 requires 都没有 —— DAG 约束不存在，门禁无覆盖');
   if (edges.length !== declared) notes.push('FAIL 解析漏边（声明 ' + declared + ' ≠ 解析 ' + edges.length + '）：写法漂移，门禁需跟进');
+  if (outside > 0) notes.push('FAIL 有 ' + outside + ' 处 requires 写在登记表条目区间之外（取法链/init 里的引用不是边）');
   if (unresolved.length) notes.push('FAIL requires/id 符号解析失败：\n  ' + unresolved.join('\n  '));
+  const ghostPerms = anchors.filter((a) => a.permSym && a.id.startsWith('UNRESOLVED:'));
+  for (const a of ghostPerms) notes.push('FAIL perm() 引用 PermissionCatalog.' + a.permSym + ' 但在 PermissionCatalog 无定义');
 
   const owner = consts.DEVICE_OWNER;
   const channel = consts.ADB_CHANNEL;
@@ -149,22 +214,6 @@ function checkDag(catalogText, permCatalogText) {
   // 等价说法：拔掉 ADB，S2/S3 的绿仍可达成。optional=true 的加速器（device-owner、
   // mediaprojection）本就经 ADB 达成，不在此列（v1 的错是把加速器放进了硬前置链，不是它自己有 ADB 依赖）。
   const byFrom = new Map(edges.map((e) => [e.from, e.to]));
-  // 条目区间：Capability(id = X, …) 与 perm(PermissionCatalog.Y, …) 各算一条。
-  // 必须按锚点切段 —— 用 [^;] 之类的"就近边界"会越到下一条（Kotlin 参数表没有 ;）。
-  const anchors = [];
-  for (const m of code.matchAll(/\bid\s*=\s*([A-Z_]+)\b/g)) {
-    if (consts[m[1]] !== undefined) anchors.push({ at: m.index, id: consts[m[1]] });
-  }
-  for (const m of code.matchAll(/\bperm\(\s*PermissionCatalog\.([A-Z_]+)/g)) {
-    const v = permValue(m[1], permCatalogText);
-    anchors.push({ at: m.index, id: v || 'UNRESOLVED:' + m[1], permSym: m[1] });
-  }
-  anchors.sort((a, b) => a.at - b.at);
-  const optionalIds = new Set();
-  for (let i = 0; i < anchors.length; i++) {
-    const end = i + 1 < anchors.length ? anchors[i + 1].at : code.length;
-    if (/\boptional\s*=\s*true/.test(code.slice(anchors[i].at, end))) optionalIds.add(anchors[i].id);
-  }
   const ADB_SIDE = new Set([consts.DEV_OPTIONS, consts.WIRELESS_DEBUG, consts.ADB_CREDENTIALS, channel]);
   function closure(id, seen) {
     if (seen.has(id)) return seen;
@@ -189,13 +238,29 @@ function checkDag(catalogText, permCatalogText) {
       stack.push(...(byFrom.get(n) || []));
     }
   }
-  // S2 的权限能力必须能在 PermissionCatalog 里查到（查不到 = judge 永远拿不到读数）。
-  const badPerms = anchors.filter((a) => a.permSym && a.id.startsWith('UNRESOLVED:'));
-  for (const a of badPerms) notes.push('FAIL perm() 引用 PermissionCatalog.' + a.permSym + ' 但在 PermissionCatalog 无定义');
+  // 规则 4（onboarding-flow-spec §3）：S0 死锁的复发病根是「通知权限登记在 S2，
+  // 而配对入口在 S0」。配对没有通知栏输码就根本没有入口 —— 所以 adb-credentials 的
+  // 硬前置里必须实名带着 post_notifications。写回 S2 或整条删掉，本门禁必须红。
+  const notif = permValue('POST_NOTIFICATIONS', permCatalogText);
+  const cred = consts.ADB_CREDENTIALS;
+  if (!notif || !cred) {
+    notes.push('FAIL 解析不到 post-notifications / adb-credentials 的 id，规则 4 失去对象');
+  } else {
+    const req = (byFrom.get(cred) || []);
+    if (!req.includes(notif)) notes.push('FAIL ' + cred + ' 的 requires 不含 ' + notif + '（无通知 = 无输码入口 = S0 死锁复发）');
+    for (const must of [consts.DEV_OPTIONS, consts.WIRELESS_DEBUG]) {
+      if (!req.includes(must)) notes.push('FAIL ' + cred + ' 的 requires 不含 ' + must + '（配对前必须先开开发者环境）');
+    }
+    const notifEdge = byFrom.get(notif);
+    if (notifEdge && notifEdge.length) {
+      notes.push('FAIL ' + notif + ' 自带 requires（' + notifEdge.join(',') + '）：首启授权冲刺不能被自己的前置锁死');
+    }
+  }
   const permCount = anchors.filter((a) => a.permSym).length;
   if (permCount === 0) notes.push('FAIL 登记表里没有任何 perm() 能力 —— 解析失效');
   notes.push('能力条目 ' + anchors.length + ' 条（含 perm 权限 ' + permCount + ' 项），optional ' + optionalIds.size + ' 项：' +
     [...optionalIds].sort().join(','));
+  notes.push('配对前置实名为 ' + notif + '：' + ((byFrom.get(consts.ADB_CREDENTIALS) || []).join(',')));
   return notes;
 }
 

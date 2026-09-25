@@ -25,6 +25,13 @@ object AdbChannelProbe {
     /** 上次为 DEAD/NEVER_RUN 时的重试冷却：轮询是 2s 一次，不能每次都 spawn Node。 */
     private const val RETRY_COOLDOWN_MS = 5_000L
 
+    /**
+     * 页面可见时的重探间隔。刻意**小于** [Evidence.CHANNEL_TTL_MS]（判据可信期 30s）：
+     * 两个数字是一个意思的两半 —— 「多久愿意再花一次 spawn」与「多旧的读数还许说成绿」。
+     * 过去用同一个 TTL 同时充当两者，端口轮换后首页最长 30s 还挂着绿（onboarding-flow-spec §4）。
+     */
+    private const val REPROBE_MS = 10_000L
+
     @Volatile
     private var cached: ChannelProbe = ChannelProbe(ProbeOutcome.NEVER_RUN)
 
@@ -44,7 +51,7 @@ object AdbChannelProbe {
     fun probe(ctx: Context, nowMs: Long = System.currentTimeMillis()): ChannelProbe {
         val prev = cached
         val age = nowMs - prev.atMs
-        val reusable = (prev.outcome == ProbeOutcome.LIVE && age >= 0 && age < Evidence.CHANNEL_TTL_MS) ||
+        val reusable = (prev.outcome == ProbeOutcome.LIVE && age >= 0 && age < REPROBE_MS) ||
             (prev.outcome == ProbeOutcome.DEAD && age >= 0 && age < RETRY_COOLDOWN_MS)
         if (reusable) return prev
 
