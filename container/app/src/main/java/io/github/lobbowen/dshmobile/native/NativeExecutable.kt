@@ -7,7 +7,8 @@ package io.github.lobbowen.dshmobile.native
  * [NativeAssetRegistry] 一条声明，其余由其派生。
  *
  * nativeLibraryDir（exec_type）恒可 exec；app home 需 targetSdk<=28，见 docs/adr/0001-android-execution-domain.md。
- * 另需 PT_INTERP=/system/bin/linker64、aarch64、DT_NEEDED 仅 bionic 或随包库；
+ * 另需 PT_INTERP=/system/bin/linker64、aarch64、DT_NEEDED 仅 bionic 或随包库，
+ * 且依赖随包库时本体须带含 $ORIGIN 的 DT_RUNPATH；
  * 这些约束装机后无法补救，须在打包期校验。exec-probe 是唯一可信的运行期判定。
  */
 data class NativeExecutable(
@@ -42,9 +43,10 @@ data class NativeExecutable(
     /**
      * 必须**同目录**存在的依赖 `.so`。
      *
-     * 这些是 linker 在运行期要找的库。`nativeLibraryDir` 不在 linker 的搜索路径里
-     * （它只查 `$LD_LIBRARY_PATH` / `DT_RUNPATH` / 系统默认路径；`DT_RPATH` 在 Android 被忽略），
-     * 所以启动时必须显式把 `nativeLibraryDir` 塞进 `LD_LIBRARY_PATH`，且这些库必须真在那儿。
+     * 两件事缺一不可：这些库真在同目录，**且本体自带含 `$ORIGIN` 的 `DT_RUNPATH`**
+     * 指向该目录（链接期注入，`scripts/verify-runtime-elf.sh` 在构建/固化/打包三处校验）。
+     * 不能靠调用方补 `LD_LIBRARY_PATH` —— `dsh` 的 `run_code` 清空环境。
+     * 完整论证见 ARCHITECTURE.md 第 3 节。
      *
      * 依赖缺失时 linker 报 `error=13` —— 与「SELinux 拒绝 exec」的 errno 完全相同，
      * 极易误导排查。本字段的存在就是为了让 [NativePreparer] 能**先查依赖再归因**。

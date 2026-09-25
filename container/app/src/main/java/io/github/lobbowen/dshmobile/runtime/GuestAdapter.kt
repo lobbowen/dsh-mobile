@@ -120,7 +120,9 @@ object GuestAdapter {
         // 否则"tmp 写入被 SELinux 拒"这类故障只在一侧复现。
         "HOME" to base.filesDir.absolutePath,
         "TMPDIR" to base.cacheDir.absolutePath,
-        // 必需项，理由见 NativePreparer.probe() 注释；漏了 node 在动态链接期直接失败。
+        // 只服务 $PREFIX 下尚无 RUNPATH 的工具；libnode 的依赖由二进制的
+        // DT_RUNPATH=$ORIGIN 负责（见 ARCHITECTURE.md 第 3 节），这些工具按同一判据
+        // 重编之后本键即可删除。
         "LD_LIBRARY_PATH" to base.nativeLibDir,
         "NODE_BIN" to base.nodeBin.absolutePath,
         "PATH" to joinPath(base.nodeBin.parentFile!!.absolutePath, inheritedPath),

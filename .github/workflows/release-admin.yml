@@ -661,6 +661,13 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      # 校验器脚本来自仓库，不在下载的 artifact 里。取 main 那份而非触发 ref：
+      # pin-node-* tag 上没有这些脚本，而且「什么算合格产物」的判据应当随 main 演进。
+      - name: Checkout validator scripts
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
       - name: Resolve source run and inputs
         id: resolve
         env:
@@ -884,7 +891,15 @@ jobs:
           echo "[ok] 依赖闭环完整"
 
           echo
-          echo "=== 5) 记录指纹 ==="
+          echo "=== 5) 同目录依赖能否自解析（DT_RUNPATH 含 \$ORIGIN）==="
+          # 依赖闭环只回答「库在不在」，这一问回答「linker 找不找得到它」。
+          # dsh run_code 从空环境起子进程，继承不到我们主进程设的 LD_LIBRARY_PATH，
+          # 所以没有 $ORIGIN RUNPATH 的产物在真机上是死的 —— 而它在 CI 里看起来完全正常。
+          # 装机后无法补救，只能在固化前拦住。判据实现在脚本里，三处（构建/固化/打包）共用。
+          bash "$GITHUB_WORKSPACE/scripts/verify-runtime-elf.sh" .
+
+          echo
+          echo "=== 6) 记录指纹 ==="
           sha256sum libnode.so libc++_shared.so | tee /tmp/pin/out/SHA256SUMS
 
       - name: Publish as immutable release

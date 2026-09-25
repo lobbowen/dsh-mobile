@@ -124,8 +124,8 @@ data class PrepareReport(val entries: List<Pair<NativeExecutable, AssetStatus>>)
                     o.put("status", "missing_dependency")
                     o.put("missingDep", st.dep)
                     o.put("libListing", st.libListing)
-                    o.put("hint", "依赖放在同一 nativeLibraryDir 内才找得到；" +
-                        "linker 不查 nativeLibraryDir，须显式设 LD_LIBRARY_PATH")
+                    o.put("hint", "依赖必须与本体同目录，且本体要自带含 \$ORIGIN 的 DT_RUNPATH：" +
+                        "linker 不查 nativeLibraryDir，LD_LIBRARY_PATH 只在进程环境里才有效")
                 }
                 is AssetStatus.NotExecutable -> {
                     o.put("status", "not_executable")
@@ -239,7 +239,7 @@ object NativePreparer {
             if (report.allRequiredReady) "原生资产全部就位（${entries.size} 项）"
             else "原生资产校验失败：${report.failedRequired.joinToString(", ") { it.first.libName }}",
             "nativeLibraryDir=${libDir.absolutePath}\n" +
-                "LD_LIBRARY_PATH 必需值=${libDir.absolutePath}\n" +
+                "依赖解析方式=二进制自带 \$ORIGIN RUNPATH；探针裸环境跑，不设 LD_LIBRARY_PATH\n" +
                 "lib 目录内容（${listing.lines().size - 3} 项）:\n" +
                 listing.lineSequence().drop(2).joinToString("\n") { "  $it" } + "\n" +
                 report.toDiagnosticLines().joinToString("\n")
@@ -269,10 +269,10 @@ object NativePreparer {
     }
 
     /**
-     * linker 搜索路径。
+     * 随包依赖库所在目录（= `nativeLibraryDir`）。
      *
-     * **必须是 `nativeLibraryDir`**，理由见 [probe] 的注释。所有启动 native 子进程的
-     * 地方都应从这里取值，不要再各写一份。
+     * 供装配产品环境的路径取值（`GuestAdapter`），不是探针判据的一部分 ——
+     * [probe] 刻意在裸环境下跑，依赖解析由二进制的 `DT_RUNPATH` 自己负责。
      */
     fun libSearchPath(ctx: Context): String = ctx.applicationInfo.nativeLibraryDir
 
@@ -312,7 +312,7 @@ object NativePreparer {
             }
         }
 
-        return probe(exe, f, libDir)
+        return probe(exe, f)
     }
 
     /**
@@ -322,41 +322,16 @@ object NativePreparer {
      * / `OutOfMemoryError`），把不该归为「exec 失败」的情况也引向这个结论。
      * 只精确捕获 `IOException` —— 那正是「进程无法创建」的形态。
      *
-     * ------------------------------------------------------------------
-     * LD_LIBRARY_PATH 为什么是必需的（改这里之前务必读完）
-     * ------------------------------------------------------------------
-     * 现象（真机实测）：
-     * ```
-     * CANNOT LINK EXECUTABLE ".../lib/arm64-v8a/libnode.so":
-     * cannot locate symbol "_ZTVNSt6__ndk119basic_ostringstream..."
-     * ```
-     *
-     * 根因：Android linker 查找依赖库的目录**只有三个**：
-     * ① `$LD_LIBRARY_PATH` 里的目录
-     * ② 二进制 `DT_RUNPATH` 动态段列出的目录
-     * ③ 系统默认路径 `/system/lib64`、`/system/lib`
-     * （`DT_RPATH` 在 Android 上被忽略，只有 `DT_RUNPATH` 有效。）
-     *
-     * `nativeLibraryDir` **不在这三者中的任何一个** —— 它只在 Java 层
-     * `dlopen` / `System.loadLibrary` 时才进搜索路径。而我们是 exec 一个可执行
-     * 文件、由它自己拉起依赖，完全是另一套规则。`libnode.so` 自身既无
-     * `DT_RPATH` 也无 `DT_RUNPATH`（readelf 逐个核对过动态段 29 个条目），
-     * 于是它只能查系统默认路径，那里没有 `libc++_shared.so`（它不是 bionic
-     * 的一部分），符号解析失败。
-     *
-     * 解法：显式设 `LD_LIBRARY_PATH = nativeLibraryDir`。两个 `.so` 都在该目录，
-     * 一举解决。注意 `ProcessBuilder` 是直接 exec、不经过 shell，所以值就是
-     * 路径原文，不涉及任何展开或引号处理。
-     *
-     * 为什么不改用 `$ORIGIN` rpath：那需要重编并改链接参数，且有资料指出它
-     * 只在部分设备上有效。`LD_LIBRARY_PATH` 是跨设备可靠的那一个。
+     * 环境必须清空，不能补 `LD_LIBRARY_PATH`：`dsh` 的 `run_code` 就是这样起子进程的，
+     * 补了就是给被测对象装脚手架（门禁绿、真机全灭）。依赖路径属于二进制的
+     * `DT_RUNPATH=$ORIGIN`，判据与实测见 ARCHITECTURE.md 第 3 节。
      */
-    private fun probe(exe: NativeExecutable, f: File, libDir: File): AssetStatus {
+    private fun probe(exe: NativeExecutable, f: File): AssetStatus {
         try {
             val cmd = mutableListOf(f.absolutePath).apply { addAll(exe.probeArgs) }
             val p = ProcessBuilder(cmd)
                 .redirectErrorStream(true)
-                .apply { environment()["LD_LIBRARY_PATH"] = libDir.absolutePath }
+                .apply { environment().clear() }
                 .start()
             val out = p.inputStream.bufferedReader().readText().trim()
             val exit = p.waitFor()
