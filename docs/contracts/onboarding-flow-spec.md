@@ -154,12 +154,12 @@ F1/F2 之所以在通知权限被回收后仍算成立，靠的是判据层的**
 | mDNS connect 记录变化（端口轮换）/ 消失 | 作废通道缓存并写案底，不等 TTL | `ui/PairingProbeService.kt:129-137`（变化）、`:155-161`（消失） | ✅ |
 | RemoteInput 配对回执 | 记账 + 作废通道缓存 + 广播重采；成功即由阶段机把 F2 顶成当前步。**每一次送达都落一条结论**（含空码 / 端口不在册 / 仍在进行），结论行顶到探针通知第一行并响一次 heads-up | `ui/PairingProbeService.kt`（`handleCode` → `conclude` / `notifyConclusion`） | ✅ |
 | 结论停留 | `onLost`（对话框关了）只作废**端口读数**，不许把结论行刷回「等待记录」—— 否则用户以为什么都没发生（2026-09-26 定罪） | `PairingProbeService.renderStatus` 的 `history.firstOrNull()` 顶行 + 首页「最近动作」同源 | ✅ |
-| 权限弹窗结果 | 立即重采 + 放开冲刺链走下一步 | `OnboardingActivity.kt:78-86`（`RequestPermission` 回调）＋ `:310-311`（任何动作发完 800ms 补采） | ✅ |
-| 运行时权限**被拒**（含「不再询问」） | 弹窗不会再来 → 必须给一条能走的替代路径 | `OnboardingActivity.kt:83` → `:363-371`（跳 `CapabilityNavigation.appDetailsIntent`） | ✅ |
-| 页面不可见 | 停轮询、冲刺不再抛新系统页；缓存读数不得靠 TTL 续绿（过期即降级，见 §4） | `OnboardingActivity.kt:108-113` + `AdbChannelProbe.kt:33` | ✅ |
+| 权限弹窗结果 | 立即重采 + 放开冲刺链走下一步 | `OnboardingActivity.requestRuntimePerm`（`RequestPermission` 回调）＋ `REFRESH_AFTER_TAP_MS`（任何动作发完补采） | ✅ |
+| 运行时权限**被拒**（含「不再询问」） | 弹窗不会再来 → 必须给一条能走的替代路径 | `OnboardingActivity.requestRuntimePerm` → `openAppDetailsAfterDenial`（跳 `CapabilityNavigation.appDetailsIntent`） | ✅ |
+| 页面不可见 | 停轮询、冲刺不再抛新系统页；缓存读数不得靠 TTL 续绿（过期即降级，见 §4） | `OnboardingActivity.onResume` / `onPause` + `AdbChannelProbe.kt:33` | ✅ |
 | `Settings.Global.adb_wifi_enabled` / `development_settings_enabled` 变化 | 用户从设置页回来即判定 | 靠 `onResume` 立即重采 + 可见期 2s 轮询 + 动作后 800ms 补采承担；**未注册 `ContentObserver`** | ⚠ 已知取舍 |
 | 解锁 / 亮屏 | 常驻链被重新戳一次（运行时与桥随之回来），界面不必在场 | `NodeContainerApp.registerWakeupEdges()` 动态注册 `ACTION_USER_PRESENT` / `ACTION_SCREEN_ON` → `ContainerSupervisor.ensureRunning` | ✅ |
-| 进程被整体杀掉 | 15 分钟内一定再点一次火（不等用户回到界面） | `lifecycle/SelfHealJobService.kt`（JobScheduler `setPeriodic`） | ✅ |
+| 进程被整体杀掉 | **不复活，只定罪**：被杀之后把壳点回来没有意义（内核重启即把 running/pending 判 failed，`kernel/src/platform/tasks.js` 的 `_load`），且复活后的「运行时在线」是假信息。要做的是让打断**一定看得见** | `lifecycle/ResidencyAudit.kt`（每拍心跳落盘 / 只有 onDestroy 留 clean 戳 / 开机基准区分设备重启）→ 结论单一文案源，消费方 `ContainerSupervisor.statusLine()`、`OnboardingActivity.recentActions()`、导出报告 | ✅ |
 
 > 最后一条是**明写的取舍**，不是遗漏：`ContentObserver` 需要跨生命周期注册/注销与 Handler 配对，
 > 而本仓唯一编译器在 CI（`docs/runbook/testing-standard.md` §2），未在本仓出现过、未经真机验证的
@@ -262,15 +262,21 @@ F1/F2 之所以在通知权限被回收后仍算成立，靠的是判据层的**
    - 冲刺清单由登记表推导（手写第二张锚清单 / 把锚从 `ORDER` 里摘掉 → `PermissionSprintTest.保活锚从登记表推导_不是手写第二张清单` 红）；
    - 深链 action 与 mDNS 服务类型串只许住一处（`capability/CapabilityNavigation.kt`、`bridge/MdnsWatcher.kt`）；
    - 编造端点 `"127.0.0.1"` 零容忍（`FORBIDDEN`，且该规则自带样本自证，正则写坏就红）；
-   - 运行时的「重启」动作不得回到开场界面（`ACTION_RESTART` 归属规则）；常驻链的边（Application 戳监督者 / 解锁广播 / `startForeground` / `setPeriodic`）与 manifest `specialUse` 必须同时在场（`KEEP_ALIVE_EDGES`，缺一条即红）；通知 id 全仓唯一（撞号即红，真机案底：1002 曾被两处抢）。
+   - 运行时的「重启」动作不得回到开场界面（`ACTION_RESTART` 归属规则）；常驻链的边（Application 戳监督者 / 解锁广播 / `startForeground` / 定罪的 `auditPreviousExit`+`heartbeat`+`markCleanStop`+`interruption` 上屏）与 manifest `specialUse` 必须同时在场（`KEEP_ALIVE_EDGES`，缺一条即红）；**被用户否决的进程外复活边词汇（`SelfHeal` / `JobScheduler` / `JobService` / `setPeriodic` / `BIND_JOB_SERVICE`）列入 DEAD，连注释再出现即红**；通知 id 全仓唯一（撞号即红，真机案底：1002 曾被两处抢）。
 7. **主行动唯一性**：任意读数下 `OnboardingFlow.stages()` 至多一行带 `action`；
    带 `extra` 的行只可能是未成立的 F4；F1 若给动作，它必是 `USER_CODE`（点了必然起探针）。
 8. **运行时是常驻底座（真机可判红，§1 总则 8）**：全新安装后**不进任何界面**、只解锁屏幕，
-   ≤15min 内 :node 与控制面复活；锁屏 5 分钟后解锁，常驻状态通知仍在且点按进首页；
-   开场界面上**找不到**任何「启动/重启运行时」按钮（F3 只有「看运行时启动日志」）。
+   :node 与控制面就该在线（常驻边拉起，**不依赖任何"复活"机制**）；锁屏 5 分钟后解锁，
+   常驻状态通知仍在且点按进首页；开场界面上**找不到**任何「启动/重启运行时」按钮
+   （F3 只有「看运行时启动日志」）。
 9. **配对有声（§1 总则 9，真机可判红）**：在通知栏每按一次「输入配对码」发送，
    探针通知的第一行立刻变成「第 N 次 HH:mm:ss 成功/失败：<归因>」并响一次 heads-up；
    关掉配对对话框（`onLost`）之后该结论行仍在；回到开场页，标题下的「最近动作」
    与通知说的是**同一句话**（同源 `AttemptStore.humanPairTimeline`）。
 10. **冲刺不抢前台（§2.1 F1 的 ③）**：点「开始配对」后 5 分钟内，从系统页回到本界面
     不得被自动抛进下一个授权页；到期后冲刺自动续走（无需任何人解锁）。
+11. **打断必须可见（§2.3 最后一行，ADR-0006 §2.1「不做复活」）**：设置里「强行停止」后重开
+    → 常驻通知首行、首页第一块、导出报告三处都写同一句定罪文案（同源
+    `ResidencyAudit.interruption()`）；`am stop-service` 之后重开**不该**出现该句
+    （`markCleanStop` 的 clean 戳生效）；整机重启后首启文案是"结束于设备重启"而不是"被回收"。
+    本条存在的理由：复活边已被否决，若被杀还静默显示「运行时在线」，判据层就自己在造假绿。

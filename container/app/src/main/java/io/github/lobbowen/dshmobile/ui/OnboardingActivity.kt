@@ -37,6 +37,7 @@ import io.github.lobbowen.dshmobile.capability.PipelineProjection
 import io.github.lobbowen.dshmobile.capability.PipelineRefresh
 import io.github.lobbowen.dshmobile.capability.StageStatus
 import io.github.lobbowen.dshmobile.capability.StepStatus
+import io.github.lobbowen.dshmobile.lifecycle.ResidencyAudit
 
 /**
  * 开场首页：渲染 [OnboardingFlow] 的四张阶段卡（**当前阶段 + 一个动作**），下面是 S0–S4
@@ -287,13 +288,21 @@ class OnboardingActivity : AppCompatActivity() {
     }
 
     /**
-     * 「刚刚」区块：最近三次配对尝试的结论，逐字取自 [AttemptStore.humanPairTimeline]
-     * （与通知同一份文案）。空账本时说清「下一步从哪开始」，而不是留一片空白。
+     * 「刚刚」区块：先说**这条常驻有没有断过**（[ResidencyAudit.interruption]，与常驻通知
+     * 首行同一份文案源），再说最近三次配对尝试的结论（[AttemptStore.humanPairTimeline]，
+     * 与配对通知同一份文案源）。空账本时说清「下一步从哪开始」，而不是留一片空白。
      */
     private fun recentActions(): String {
         val lines = AttemptStore.humanPairTimeline().take(3)
-        if (lines.isEmpty()) return "最近动作：还没有过一次配对尝试 —— 点下面标着「下一步」的那个按钮"
-        return "最近动作：\n" + lines.joinToString("\n")
+        val recent = if (lines.isEmpty()) {
+            "最近动作：还没有过一次配对尝试 —— 点下面标着「下一步」的那个按钮"
+        } else {
+            "最近动作：\n" + lines.joinToString("\n")
+        }
+        // 定罪行排在最前：它讲的是「上次常驻是被回收的」，比任何一次配对尝试都更早上发生、
+        // 也更该被看见 —— 这条常驻断过却只显示「运行时在线」，就是假绿。
+        val audit = ResidencyAudit.interruption()
+        return if (audit == null) recent else "$audit\n$recent"
     }
 
     private fun mark(s: StageStatus): String = when (s) {
@@ -442,6 +451,9 @@ class OnboardingActivity : AppCompatActivity() {
                 appendLine("== DSH 开场管线报告 ==")
                 appendLine("${Build.MANUFACTURER} ${Build.MODEL} · API ${Build.VERSION.SDK_INT} · " +
                     "APK ${BuildConfig.VERSION_NAME}#${BuildConfig.VERSION_CODE}")
+                // 定罪结论与常驻通知首行同源；没有它，报告读起来就像这条常驻从来没断过。
+                appendLine("---- 常驻定罪 ----")
+                appendLine(ResidencyAudit.interruption() ?: "上次收尾是正常退出（或本机首次装），无可定罪的中断")
                 if (e != null) {
                     val verdicts = CapabilityCatalog.evaluate(e)
                     appendLine("---- 流程阶段 ----")

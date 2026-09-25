@@ -53,17 +53,24 @@
        判据 = lifecycle/NodeWatchdogPolicy（纯逻辑，CI 钉死）
 ```
 
-**互保闭环（2026-09-26 起六条边，任一存活者都能把环转起来）**：监督者不能只靠 :node 拉起（:node
-若死在拉监督者之前即成自锁），反之亦然。落地的六条边：① BootReceiver 开机拉
+**互保闭环（2026-09-26 起五条拉起边，任一存活者都能把环转起来）**：监督者不能只靠 :node 拉起（:node
+若死在拉监督者之前即成自锁），反之亦然。落地的五条边：① BootReceiver 开机拉
 ContainerSupervisor + NodeRuntimeService；② DshAccessibilityService.onServiceConnected
 → ensureRunning；③ HostBridgeService.onCreate → ensureRunning；④ :node onCreate 及
 每次内核 boot 尝试 → ensureRunning；⑤ Application.onCreate + 解锁/亮屏动态广播
-（`ACTION_USER_PRESENT` / `ACTION_SCREEN_ON`）→ ensureRunning；⑥ `SelfHealJobService`
-（JobScheduler 15min）→ ensureRunning —— ①–④ 的前提是"某条边的宿主进程还活着"，
-⑤ 补"用户回到设备"这个时机，⑥ 补"进程被整体杀掉"这个最坏情况。监督者自己经
-①–⑥ 之外还以 bindService 边持有 :node。全部是普通 startService/bindService ——
-**绝不在死亡路径上调 startForegroundService**（:main 刚从 HANS 解冻时满足不了 5s FGS
-契约，真机 ANR 栈实锤）。监督者的 `startForeground` 只发生在 onStartCommand 里。
+（`ACTION_USER_PRESENT` / `ACTION_SCREEN_ON`）→ ensureRunning。①–④ 的前提是"某条边的宿主
+进程还活着"，⑤ 补"用户回到设备"这个时机 —— ⑤ 与已否决的"进程外复活"不是一类：⑤ 的宿主
+进程**还活着、任务还活着**，它只是把被 HANS 掐断的监督链戳回来。全部是普通
+startService/bindService —— **绝不在死亡路径上调 startForegroundService**（:main 刚从 HANS
+解冻时满足不了 5s FGS 契约，真机 ANR 栈实锤）。监督者的 `startForeground` 只发生在 onStartCommand 里。
+
+**进程被整体杀掉后不做复活（2026-09-26 用户拍板，撤掉曾短暂落地的周期戳）**：复活回来的只是壳。
+内核在重启时把所有 running/pending 任务一律判 failed（`kernel/src/platform/tasks.js` 的 `_load`，
+注释原文「进程已死」），agent 的工作不会因为进程被点回来而继续；更坏的是复活后的常驻通知会写
+「运行时在线」，把打断伪装成没打断 —— 与判据层「实测优先、不许假绿」正面冲突。本产品的形态是
+类音乐播放器的**单链路系统服务**：力气全放在「不许被杀」，被杀之后唯一的诚实动作是**让打断可见**
+（`lifecycle/ResidencyAudit`：每拍盖心跳戳、只有 `onDestroy` 才留 clean 戳；下次启动没有 clean 戳
+即如实定罪，写在常驻通知首行 + 首页「最近动作」+ 导出报告，同一份文案源）。
 
 **语义变化（明确接受）**：自 :main 的 bindService(BIND_AUTO_CREATE) 落地起，:node 的
 存续由监督者保证，App 的语义从"用户显式启动内核"变为"容器活着内核就在"。本产品定位
@@ -106,17 +113,20 @@ MDM/设备管理员工作台（provisioning.md §1），这是目标行为而非
    监督者 → 安装后不进界面就没有运行时。→ 补边：`NodeContainerApp.onCreate` 直接
    `ContainerSupervisor.ensureRunning()`，并动态注册 `ACTION_USER_PRESENT` /
    `ACTION_SCREEN_ON`（解锁是比闹钟更干净的唤醒时机：它是真实用户事件，不产生周期性自扰）。
-3. **进程整体被杀后零自愈**：四条互保边的前提是"至少一条边的宿主进程还活着"。→
-   加 `SelfHealJobService`（JobScheduler，15min 周期，只做一次幂等 `ensureRunning`）。
-   它与 §2.2 否掉的"闹钟心跳"不是同一件事：否掉的是**周期性叫醒内核干活**（叠加机制、
-   叠加风险）；这条只是"被杀之后 15 分钟内一定有人再点一次火"，不改变任何运行时机。
+3. **进程被整体杀掉后无证据**：五条拉起边的前提都是"至少一条边的宿主进程还活着"，进程真死
+   了就没人记得它死过 —— 用户看到的是"莫名从头来"。→ 加 `lifecycle/ResidencyAudit`（心跳落盘 +
+   clean 戳 + 开机基准区分设备重启），把"上次常驻是被回收的、断了多久"如实显示。
+   这里刻意**不**加进程外复活边：复活只把壳点回来，任务早已判死（见 §2.1「不做复活」）。
+   本节此前落过一条 JobScheduler 周期戳，2026-09-26 经用户否决并整体删除，门禁把这套词汇
+   列入 DEAD 防回潮。
 4. **界面上有个会拆运行时的按钮**：F3 的"重启运行时"= 运行时服务的 destroy 语义，
    点开界面就可能亲手把正在跑的内核拆掉。→ 判据层删除该取法，运行时只给"看启动日志"；
    死活归监督链。门禁把 `ACTION_RESTART` 的归属钉在实现文件与诊断兜底页两处。
 
-**代价**：常驻通知一条（用户已拍板接受）；JobScheduler 边与"不加第二唤醒机制"的
-2026-09-25 拍板存在张力，本 ADR 认定它属于同一条拉起链的补位而非第二机制 ——
-若真机证明它多余，应删的是它，不是无障碍锚。
+**代价**：常驻通知一条（用户已拍板接受）。纯预防路线的上限要说清：无 root / 无 Device Owner
+的条件下，ROM 的二次回收（osense 一类）确实杀得掉前台服务，本产品因此**不承诺 100% 不被杀**，
+承诺的是「被杀一定能看见」。**如果真机证明前台化 + 三锚仍不足以驻留，正确的问题是"怎么不被杀"
+和"任务态怎么跨重启续上"，不是"要不要再加一条复活边"。**
 
 ## 3. 后果
 
@@ -139,6 +149,10 @@ MDM/设备管理员工作台（provisioning.md §1），这是目标行为而非
      `files/node.pid` 重写、控制面 36360 复活；
   3. 后台 10 分钟 :node 存活率 100%（含被杀-复活循环）；
   4. 锁屏 5 分钟后解锁：常驻状态通知仍在、点开它即进首页（§2.4-1）；
-  5. 全新安装后**不进任何界面**、只解锁屏幕：≤15min 内 :node 与桥都被拉起
-     （⑤⑥ 两条边各自可独立达成 —— 逐条验，别把两条边混成一次观测）；
+  5. 全新安装后**不进任何界面**、只解锁屏幕：:node 与桥被 ⑤ 这条边拉起（开机边与解锁边
+     逐条各验一次，别把两条边混成一次观测）；
   6. 开屏 P0 冲刺依次问到无障碍与通知读取（它们是锚，不再推给"通道通了再静默办"）。
+  7. 定罪边（`ResidencyAudit`）唯一验收口：设置里「强行停止」→ 重新打开首页，常驻通知首行
+     与首页第一行都必须写「常驻被打断：上次存活到 HH:mm:ss，中断 …」；而 `am stop-service`
+     之后重开**不该**出现这一行（说明 clean 戳真的在写）。设备重启后首启应写"结束于设备重启"
+     而不是"App 被回收"。

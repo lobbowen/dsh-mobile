@@ -94,13 +94,6 @@
                 android:value="resident supervisor keeping the local runtime alive across screen-off" />
         </service>
 
-        <!-- 进程级自愈边：其余拉起边都要求进程活着，只有 JobScheduler 能在 :main 被整体
-             回收后把它重新创建（15 分钟一次，只做「戳监督者」这一件事）。 -->
-        <service
-            android:name=".lifecycle.SelfHealJobService"
-            android:exported="false"
-            android:permission="android.permission.BIND_JOB_SERVICE" />
-
         <!-- Node 运行时：独立进程 :node，与 UI 进程隔离；exported=false 防外部拉起。
              specialUse = 无限期驻留的本地运行时（Play 才需要审核说明；本包侧载分发）。
              onBind 必须返回真 binder（ContainerSupervisor 的 BIND_AUTO_CREATE 边依赖它）。 -->

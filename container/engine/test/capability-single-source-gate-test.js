@@ -122,11 +122,17 @@ const DEAD = [
   // 那是循环依赖：没有锚 → :main 被冻结清理 → 那条静默通道永远等不到（真机 2026-09-26
   // 「锁屏之后 App 被清理掉」）。锚现在由登记表的 keepAliveAnchor 位推导，函数不许复活。
   { name: 'v1 冲刺排除逻辑', re: /\bsilentLater\s*\(/ },
+  // 进程外复活边（周期任务）在 2026-09-26 被用户拍板否决：复活回来的只是壳 ——
+  // 内核重启时把 running/pending 一律判 failed（kernel/src/platform/tasks.js 的 _load），
+  // 而复活后的通知还会写「运行时在线」，等于把打断伪装成没打断。本产品是单链路
+  // 「不许被杀」，被杀后的正解是定罪（ResidencyAudit），不是再拽一次。
+  // 这套词汇（含注释）任何地方再出现即失败：想回到多链路兜底，先改这条判据并给出理由。
+  { name: '被否决的进程外复活边', re: /\bSelfHeal\b|SelfHealJobService|JobScheduler|JobService|JobInfo|BIND_JOB_SERVICE|setPeriodic\s*\(/ },
 ];
 
 // ---- 常驻链的边（真机 2026-09-26 定罪：锁屏后 App 被清 = 这些边一条都不存在）----
 // 每条都是「机制存在」的判据：缺一条 = 那条保活边被"顺手重构"掉了，而单测与编译都不会红。
-// 因此逐条实名钉死（Kotlin 四条 + manifest 声明一条）：改名/搬家要连同这里一起改，改动即暴露。
+// 因此逐条实名钉死（Kotlin 侧各条边 + manifest 声明一条）：改名/搬家要连同这里一起改，改动即暴露。
 const KEEP_ALIVE_EDGES = [
   {
     name: '开屏戳监督者（Application 边）',
@@ -138,7 +144,7 @@ const KEEP_ALIVE_EDGES = [
     name: '解锁/亮屏唤醒边',
     rel: 'NodeContainerApp.kt',
     re: /ACTION_USER_PRESENT/,
-    why: 'HANS 冻结后的第一条补位：用户解锁 = 立刻重戳监督者',
+    why: 'HANS 冻结后的第一条补位：用户解锁 = 立刻重戳监督者（宿主进程还活着，任务还活着）',
   },
   {
     name: '监督者升前台',
@@ -147,10 +153,28 @@ const KEEP_ALIVE_EDGES = [
     why: 'specialUse 前台服务 + 常驻状态通知，是「锁屏不许被清」的正式形态',
   },
   {
-    name: '进程级自愈 Job',
-    rel: 'lifecycle/SelfHealJobService.kt',
-    re: /setPeriodic\(/,
-    why: 'JobScheduler 周期戳：进程被整体杀掉之后的最后一条拉起边',
+    name: '被杀即定罪：启动先翻旧账',
+    rel: 'lifecycle/ContainerSupervisor.kt',
+    re: /ResidencyAudit\.auditPreviousExit\(/,
+    why: '进程一起来就读上次的收尾情况，不等用户回到界面才发现断了',
+  },
+  {
+    name: '被杀即定罪：活着就盖心跳戳',
+    rel: 'lifecycle/ContainerSupervisor.kt',
+    re: /ResidencyAudit\.heartbeat\(/,
+    why: '没有在册心跳，下次启动无从知道上次活到几点、中断了多久',
+  },
+  {
+    name: '被杀即定罪：正常收尾留 clean 戳',
+    rel: 'lifecycle/ContainerSupervisor.kt',
+    re: /ResidencyAudit\.markCleanStop\(/,
+    why: '缺了它每次重启都会被定罪成「被杀」—— 定罪本身就会变成假信息',
+  },
+  {
+    name: '被杀即定罪：结论上屏（与通知同源）',
+    rel: 'ui/OnboardingActivity.kt',
+    re: /ResidencyAudit\.interruption\(/,
+    why: '打断必须可见：首页与常驻通知读同一份文案，两处不许各说各话',
   },
   {
     name: 'manifest 声明 specialUse 前台类型',

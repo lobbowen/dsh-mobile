@@ -47,9 +47,10 @@ import java.io.File
  *    父监子进程是正常职责，不需要跨进程发号施令。
  *
  * 存活链（全在 L0，随 APK 冻结）：常驻前台 + 无障碍绑定（HANS 拒冻本 uid 的实证锚）
- * + 解锁/亮屏补位边（[NodeContainerApp]）+ 周期自愈任务（[SelfHealJobService]，进程被
- * 整体回收后由系统重新拉起）。互保闭环：BootReceiver / Application / 桥 onCreate /
- * :node 启动路径都会拉起本服务，任一侧活着环就能转起来。
+ * + 解锁/亮屏补位边（[NodeContainerApp]）。**没有进程外复活边**（2026-09-26 拍板）：复活只
+ * 把壳点回来，而内核在重启时已把 running/pending 一律判 failed，复活后的「运行时在线」
+ * 反而是假信息。进程真被回收时归 [ResidencyAudit] 定罪 —— 让打断可见，不是再拽一次。
+ * 互保闭环：BootReceiver / Application / 桥 onCreate / :node 启动路径都会拉起本服务。
  *
  * 不变式：**APK（:main 前台 + 无障碍锚）不死，运行时环境就不死。**
  */
@@ -86,11 +87,11 @@ class ContainerSupervisor : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 先翻旧账再转前台：定罪结论必须在第一条状态出来之前就位（幂等，只有首次读盘）。
+        ResidencyAudit.auditPreviousExit(this)
         // 每一次投递都重新自转前台：bind/普通 start 路径没有 FGS-start 特权，
         // 被拒时吞 —— 抛出会炸掉 :main，那等于把要被保活的东西亲手杀掉。
         promoteToForeground()
-        // 周期自愈边：进程被整体回收后，只有 JobScheduler 还能把它拉起来。
-        SelfHeal.schedule(this)
         ensureBridge()
         // 幂等：监督者只许一个循环（与旧双循环风暴同款防线，真机 2026-09-22 实锤
         // 双循环共享状态把活内核误判成死 → 紧循环重启 → 闪屏）。
@@ -110,7 +111,8 @@ class ContainerSupervisor : Service() {
 
     private fun promoteToForeground() {
         try {
-            startForeground(NOTIF_ID, buildNotification("状态采集中…"))
+            // 第一拍读数还没采，正文先用「此刻已经确定」的东西：有定罪结论就写在最前面。
+            startForeground(NOTIF_ID, buildNotification(ResidencyAudit.interruption() ?: "状态采集中…"))
         } catch (t: Throwable) {
             RuntimeDiagnostics.append(
                 this, "supervisor", false, "转前台失败（不影响 binder 监督边）",
@@ -192,6 +194,9 @@ class ContainerSupervisor : Service() {
     private fun refreshStatusNotice(now: Long) {
         if (now - lastNotifyMs < NOTIFY_MS) return
         lastNotifyMs = now
+        // 心跳与状态通知同拍：这一拍的落盘就是「这一时刻进程还活着」的证据，
+        // 下次启动的定罪时长以它为准，精度即 NOTIFY_MS。
+        ResidencyAudit.heartbeat(this)
         controlPlaneUp = try {
             CapabilityEvidenceCollector.controlPlaneUp()
         } catch (_: Throwable) {
@@ -212,7 +217,9 @@ class ContainerSupervisor : Service() {
             ProbeOutcome.DEAD -> "通道不通"
             ProbeOutcome.NEVER_RUN -> "通道未验"
         }
-        return "$runtime · $channel · ${if (bound) ":node 已绑定" else ":node 未绑定，重拉中"}"
+        // 定罪结论排在最前：它是「这条常驻断过」的唯一可见出口，不许被状态读数盖掉。
+        val interrupted = ResidencyAudit.interruption()?.let { "$it · " } ?: ""
+        return "$interrupted$runtime · $channel · ${if (bound) ":node 已绑定" else ":node 未绑定，重拉中"}"
     }
 
     /** 读 :node 写的进程记录：pid 在 /proc 存在**且** cmdline 与落盘一致才算活
@@ -228,6 +235,8 @@ class ContainerSupervisor : Service() {
     }
 
     override fun onDestroy() {
+        // 走到这里 = 系统给了正常收尾的机会，留 clean 戳；强杀不会走到这里，于是下次启动定罪。
+        ResidencyAudit.markCleanStop(this)
         handler?.removeCallbacksAndMessages(null)
         thread?.quitSafely()
         thread = null
