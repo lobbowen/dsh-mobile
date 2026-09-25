@@ -43,6 +43,10 @@
    「无 ADB 也能拿到」的权限**依次静默**抛给系统弹窗/系统授权页（§2.2 的 P0），
    界面上**不出现**任何「请先授权」的卡片或按钮。理由不是体验偏好，是物理依赖 ——
    配对交互本身要发通知，而通知必须在用户第一次点「配对」之前就位。
+   **保活锚（无障碍 / 通知读取 / 电池豁免）同样属于这一档**：它们不需要 ADB 就能拿，
+   而缺了它们就没有「持续在线的运行时」可谈（2026-09-26 真机定罪「锁屏之后 App 被清理掉」，
+   见 [ADR-0006 §2.4](../adr/0006-background-lifecycle-keepalive.md)）。旧版本按「能静默办就不打扰」
+   把它们推到 F4，正是那条循环依赖的成因 —— 没有锚就没有通道，没有通道就永远静默不了。
 3. **检测先于引导，引导先于操作**：任何步骤在要求用户动手之前，必须已经**读过**该项的当前状态；
    已满足就直接跳过，不许让用户白走一趟设置页。用户点「配对」那一下尤其如此：
    那一刻现场重采一次，按缺项把用户送到**能修那个缺项**的那一页（§2.1 F1 的 `PairingGate`），
@@ -58,6 +62,15 @@
    打开期间存在。因此「端口」不是一个记住的整数，而是**此刻有没有这条记录**：记录消失即作废读数
    （§2.3），无在册端点时**不发起配对**、不伪造地址（§4）。这一条是 v2 的立论核心 ——
    它决定「后面的流程对不对」有没有意义。
+8. **运行时是底座，不是流程中间的一步**：权限给足之后它就应该持续在线（安装即由常驻链拉起，
+   见 [ADR-0006 §2.4](../adr/0006-background-lifecycle-keepalive.md)）。因此开场流程里
+   **不存在**「启动/重启运行时」这个动作 —— 该动作的实现是 destroy 正在跑的内核，
+   把它交给界面等于让用户"点开界面就崩"（2026-09-26 定罪）。F3 只给一条「看启动日志」的观测路，
+   运行时死活归监督链。这条边界由门禁 `运行时重启动作的归属` 钉住（`ACTION_RESTART` 只许住在
+   实现它的服务与诊断兜底页）。
+9. **每一次用户输入都要落一条结论**：配对输码的每一次送达（含空码、端口不在册、上一次仍在进行）
+   都进 `AttemptStore` 时间线，并顶到探针通知与首页「最近动作」的第一行；成功另发一条 heads-up。
+   「在无数次输入里莫名其妙地成功」是 2026-09-26 的定罪原话 —— 沉默的失败与沉默的成功同样是黑盒。
 
 ---
 
@@ -68,9 +81,9 @@
 | 阶段 | 名称 | 上屏？ | 进入条件 | 判据（唯一事实源） | 动作（当且仅当判据未满足才发） | 出口转移 |
 |---|---|---|---|---|---|---|
 | **P0** | 首启授权冲刺 | **否**，静默 | 每次采集完成且冲刺清单（§2.2）仍有未授予项 | `PermissionSprint.ORDER`（由登记表推导，不手写第二张清单） | 链首项的**取法链首项**（`RUNTIME_DIALOG` / `USER_TAP`），一次一步、等系统把结果交回来才继续；仅 resumed 时推进 | 清单走完 → 界面上只剩 F1–F4 的四行 |
-| **F1** | 无线配对 | 是 | `credentials != PAIRED` | `adb_credentials`（PAIRED / `PairAttempt` 失败归因 / ACTION） | 「开始配对」= `USER_CODE`。按下的**同一瞬间**做两件事：① 起 `PairingProbeService`（browse 必须早于系统配对对话框，才接得住那条记录）；② 现场重采一次 → `PairingGate.decide` → **缺哪个前置就送去那个前置自己的取法链首项**，前置全齐则跳无线调试页 | 通知栏输码 → `AttemptStore.ok == true` → **F2** |
+| **F1** | 无线配对 | 是 | `credentials != PAIRED` | `adb_credentials`（PAIRED / `PairAttempt` 失败归因 / ACTION） | 「开始配对」= `USER_CODE`。按下的**同一瞬间**做三件事：① 起 `PairingProbeService`（browse 必须早于系统配对对话框，才接得住那条记录）；② 现场重采一次 → `PairingGate.decide` → **缺哪个前置就送去那个前置自己的取法链首项**，前置全齐则跳无线调试页；③ **冻结 P0 冲刺 5 分钟**（到期自动解冻）—— 用户此刻在系统页输码，从那里回到本界面的那一帧再把他抛进下一个授权页，就是「回到界面一堆乱七八糟」的原型 | 通知栏输码 → `AttemptStore.ok == true` → **F2** |
 | **F2** | 通道校验 | 是 | 凭据在册 | `AdbChannelProbe`：现问 mDNS connect 记录 → `id` 输出含 `uid=2000` | AUTO「重测通道」；DEAD 且归因为端口轮换 → 回 **F1** 提示重开对话框 | LIVE → **F3** |
-| **F3** | 进入工作台 | 是 | 通道 LIVE | `runtime`（/status 200）+ `kernel_bundle`（自检无失败项），即 `PipelineProjection.GATING` 三要素 | AUTO 拉起 `ContainerSupervisor`；三要素齐 → **自动跳转**（另置「进入工作台」按钮，未放行时禁用，比点了没反应诚实） | 进面板；S3 未绿则停在「运行时未就绪」并给重试 |
+| **F3** | 进入工作台 | 是 | 通道 LIVE | `runtime`（/status 200）+ `kernel_bundle`（自检无失败项），即 `PipelineProjection.GATING` 三要素 | **只观测、不拉起也不重启**：未绿的运行时给「看运行时启动日志」（`USER_TAP` → 诊断页），内核自检给 AUTO「重跑」。拉起责任在常驻链（`Application.onCreate` 戳 `ContainerSupervisor`，总则 8），不在这一行。三要素齐 → **自动跳转**（另置「进入工作台」按钮，未放行时禁用，比点了没反应诚实） | 进面板；S3 未绿则停在「运行时未就绪」并给一条看日志的路 |
 | **F4** | 补齐不挡门的能力 | 是 | 主链（F1–F3）已成立但仍有非 optional 能力未达成 | 登记表内其余项逐项（`secure:notification_listener` / `accessibility` 在通道在册时主路径为 `SILENT_VIA_ADB`） | 该行的**一个次要**动作：按该项 `acquirer` 首项派发（能静默就静默，不能就跳页） | 逐项变绿；清单空 → 「全部就位」。**面板内不做任何补齐 UI** |
 
 **P0 与「环境自检」都不上屏**：P0 是 `OnboardingActivity.advanceSprint()`（每次 `render` 后推进一步），
@@ -82,31 +95,38 @@
 而且这一行和 F1 冲刺谁先上屏说不清（v1 真机上就是靠轮询顺序随机挑的）。现在它们只在**用户表达
 配对意图的那一瞬间**被现场核对、按缺项引导 —— 判据住在 `PairingGate`，UI 不自己 `if (devOptionsOn)`。
 
-**F3 与 F4 的顺序不能反**：通道一通就静默能办的两项（通知读取、无障碍）不必挡在入口前 ——
-它们留在开场页的 **F4 行**上，用户先把主链走通、先看到面板能干什么，回来再补剩下的权限。
+**F3 与 F4 的顺序不能反**：F3 是「入口」，F4 是「不挡门的欠账」。旧版本把保活锚
+（通知读取、无障碍）留在 F4，理由是「通道一通就能静默办」—— 那是循环依赖（总则 2）：
+锚不在 → :main 被冻结清理 → 通道与运行时一起死 → 那条静默通道永远等不到。现在锚在 P0
+就要掉，F4 只兜「P0 被拒 / 后来被 ROM 回收」的欠账。
 补齐 UI 只在开场页：面板是产品界面，不是第二个向导（§5 无流程分支红线）。
 
 ### 2.2 P0 首启授权冲刺（静默，顺序由登记表推导）
 
-冲刺清单**不是手写的第二张表**：`PermissionSprint` 从能力登记表推导出两项，
-`ORDER = REQUIRED + OPTIONAL`（`capability/PermissionSprint.kt:19-34`）。
+冲刺清单**不是手写的第二张表**：`PermissionSprint` 从能力登记表推导出三段，
+`ORDER = REQUIRED + ANCHORS + OPTIONAL`（`capability/PermissionSprint.kt`）。
 
 | 段 | 来源 | 当前推导结果（改登记表 → 本列自动变） | 挡主链？ |
 |---|---|---|---|
 | `REQUIRED` | `requiresInOrder(adb_credentials)` ∩ 权限档 | `post_notifications` | **是**：它是 F1 输码的物理前置（§1 总则 2、§3） |
-| `OPTIONAL` | 权限档 ∧ 无 requires ∧ 非 optional ∧ **取法链无 `SILENT_VIA_ADB`** | `manage_external_storage` → `request_install_packages` → `system_alert_window` → `battery_optimization` | 否，纯「现在拿最便宜」 |
+| `ANCHORS` | 登记表 `keepAliveAnchor = true` ∧ 不在 `REQUIRED` | `battery_optimization` → `notification_access` → `accessibility` | **是（长期）**：缺了就「锁屏被清」，运行时与通道一起没了（总则 2、ADR-0006 §2.4） |
+| `OPTIONAL` | 权限档 ∧ 无 requires ∧ 非 optional ∧ 非锚 | `manage_external_storage` → `request_install_packages` → `system_alert_window` | 否，纯「现在拿最便宜」 |
 
 「必要项在前」是硬事实：通知排在最前不是审美，是没通知就没有输码入口。
+锚紧随其后：它们要的是系统页（无障碍）或一次性豁免（电池），闹一次就永久有效。
 `OPTIONAL` 内部顺序 = 登记表声明序（`requires` 是 Set，迭代序不确定，不许流到用户动作序列上 ——
 唯一允许的归一是 [CapabilityCatalog.requiresInOrder]，要把某项提前就挪它的声明位置）。
+`ANCHORS` 同理取声明序；**新增锚只许改登记表的 `anchor` 位，手写第二张清单即违反总则 2**。
 
 **不进冲刺**（每条都是判据，不是偏好）：
-- `notification_listener`、`accessibility`（SECURE_SETTINGS 档）—— 通道一开 `settings put secure`
-  静默办，落在 F4；开屏把人送进系统无障碍页是「用户多点一次、我们一点没省」。
-  这条由 `PermissionSprintTest.通道一通就能静默办的项不进冲刺` 钉住。
 - `mediaprojection` —— 每次会话授权，物理不可预置。
 - `device_owner` —— 加速器，且多用户设备不可得（`several users`，真机 2026-09-25）。
 - `dev_options` / `wireless_debug` —— 环境开关不是「授权」，由 F1 的现场判定引导（§2.1）。
+
+SECURE_SETTINGS 档的两项锚（`notification_access`、`accessibility`）**双轨**：它们在取法链里
+仍保留 `SILENT_VIA_ADB` 主位（通道在册时先静默办，`permAcquirers` 决定），P0 拿到的是链首项 ——
+于是「通道已通的老实设备」不会被人点一次无障碍页，「全新设备」也不会等到永远不来的通道。
+这条由 `PermissionSprintTest.保活锚从登记表推导_不是手写第二张清单` 钉住。
 
 容错规则：链**一次一步**，抛给系统后就等这一页的结果（`sprintWaiting`），回前台才续下一步；
 `pending(e, asked)` 保证**一次开屏只闹一回** —— 用户在某项上拒了，不再把他推回同一个系统页，
@@ -132,11 +152,14 @@ F1/F2 之所以在通知权限被回收后仍算成立，靠的是判据层的**
 | mDNS **pairing 记录出现** | 端口/主机进读数，通知文案切成「可输码」 | `ui/PairingProbeService.kt:123-127` | ✅ |
 | mDNS **pairing 记录消失**（对话框关了） | **立即作废端口读数**，通知退回「等记录」；此后任何输码都不发起配对 | `bridge/MdnsWatcher.kt:32`（`Sink.onLost`）→ `ui/PairingProbeService.kt:145-164` | ✅ |
 | mDNS connect 记录变化（端口轮换）/ 消失 | 作废通道缓存并写案底，不等 TTL | `ui/PairingProbeService.kt:129-137`（变化）、`:155-161`（消失） | ✅ |
-| RemoteInput 配对回执 | 记账 + 作废通道缓存 + 广播重采；成功即由阶段机把 F2 顶成当前步 | `ui/PairingProbeService.kt:199-221` | ✅ |
+| RemoteInput 配对回执 | 记账 + 作废通道缓存 + 广播重采；成功即由阶段机把 F2 顶成当前步。**每一次送达都落一条结论**（含空码 / 端口不在册 / 仍在进行），结论行顶到探针通知第一行并响一次 heads-up | `ui/PairingProbeService.kt`（`handleCode` → `conclude` / `notifyConclusion`） | ✅ |
+| 结论停留 | `onLost`（对话框关了）只作废**端口读数**，不许把结论行刷回「等待记录」—— 否则用户以为什么都没发生（2026-09-26 定罪） | `PairingProbeService.renderStatus` 的 `history.firstOrNull()` 顶行 + 首页「最近动作」同源 | ✅ |
 | 权限弹窗结果 | 立即重采 + 放开冲刺链走下一步 | `OnboardingActivity.kt:78-86`（`RequestPermission` 回调）＋ `:310-311`（任何动作发完 800ms 补采） | ✅ |
 | 运行时权限**被拒**（含「不再询问」） | 弹窗不会再来 → 必须给一条能走的替代路径 | `OnboardingActivity.kt:83` → `:363-371`（跳 `CapabilityNavigation.appDetailsIntent`） | ✅ |
 | 页面不可见 | 停轮询、冲刺不再抛新系统页；缓存读数不得靠 TTL 续绿（过期即降级，见 §4） | `OnboardingActivity.kt:108-113` + `AdbChannelProbe.kt:33` | ✅ |
 | `Settings.Global.adb_wifi_enabled` / `development_settings_enabled` 变化 | 用户从设置页回来即判定 | 靠 `onResume` 立即重采 + 可见期 2s 轮询 + 动作后 800ms 补采承担；**未注册 `ContentObserver`** | ⚠ 已知取舍 |
+| 解锁 / 亮屏 | 常驻链被重新戳一次（运行时与桥随之回来），界面不必在场 | `NodeContainerApp.registerWakeupEdges()` 动态注册 `ACTION_USER_PRESENT` / `ACTION_SCREEN_ON` → `ContainerSupervisor.ensureRunning` | ✅ |
+| 进程被整体杀掉 | 15 分钟内一定再点一次火（不等用户回到界面） | `lifecycle/SelfHealJobService.kt`（JobScheduler `setPeriodic`） | ✅ |
 
 > 最后一条是**明写的取舍**，不是遗漏：`ContentObserver` 需要跨生命周期注册/注销与 Handler 配对，
 > 而本仓唯一编译器在 CI（`docs/runbook/testing-standard.md` §2），未在本仓出现过、未经真机验证的
@@ -236,8 +259,18 @@ F1/F2 之所以在通知权限被回收后仍算成立，靠的是判据层的**
 5. **配对即跳转**：配对回执成功且通道 LIVE、三要素齐后，不需要用户再点任何按钮就到达面板（F3 自动化）。
 6. **门禁与 golden 同步**（每条都要能红，红在 CI 而不是靠人记住）：
    - §3 的 `perm:post_notifications` 归属、§5 的放行判据 → DAG 规则 4 + golden；
-   - 冲刺清单由登记表推导（把 `accessibility` 塞进冲刺 → `PermissionSprintTest.通道一通就能静默办的项不进冲刺` 红）；
+   - 冲刺清单由登记表推导（手写第二张锚清单 / 把锚从 `ORDER` 里摘掉 → `PermissionSprintTest.保活锚从登记表推导_不是手写第二张清单` 红）；
    - 深链 action 与 mDNS 服务类型串只许住一处（`capability/CapabilityNavigation.kt`、`bridge/MdnsWatcher.kt`）；
-   - 编造端点 `"127.0.0.1"` 零容忍（`FORBIDDEN`，且该规则自带样本自证，正则写坏就红）。
+   - 编造端点 `"127.0.0.1"` 零容忍（`FORBIDDEN`，且该规则自带样本自证，正则写坏就红）；
+   - 运行时的「重启」动作不得回到开场界面（`ACTION_RESTART` 归属规则）；常驻链的边（Application 戳监督者 / 解锁广播 / `startForeground` / `setPeriodic`）与 manifest `specialUse` 必须同时在场（`KEEP_ALIVE_EDGES`，缺一条即红）；通知 id 全仓唯一（撞号即红，真机案底：1002 曾被两处抢）。
 7. **主行动唯一性**：任意读数下 `OnboardingFlow.stages()` 至多一行带 `action`；
    带 `extra` 的行只可能是未成立的 F4；F1 若给动作，它必是 `USER_CODE`（点了必然起探针）。
+8. **运行时是常驻底座（真机可判红，§1 总则 8）**：全新安装后**不进任何界面**、只解锁屏幕，
+   ≤15min 内 :node 与控制面复活；锁屏 5 分钟后解锁，常驻状态通知仍在且点按进首页；
+   开场界面上**找不到**任何「启动/重启运行时」按钮（F3 只有「看运行时启动日志」）。
+9. **配对有声（§1 总则 9，真机可判红）**：在通知栏每按一次「输入配对码」发送，
+   探针通知的第一行立刻变成「第 N 次 HH:mm:ss 成功/失败：<归因>」并响一次 heads-up；
+   关掉配对对话框（`onLost`）之后该结论行仍在；回到开场页，标题下的「最近动作」
+   与通知说的是**同一句话**（同源 `AttemptStore.humanPairTimeline`）。
+10. **冲刺不抢前台（§2.1 F1 的 ③）**：点「开始配对」后 5 分钟内，从系统页回到本界面
+    不得被自动抛进下一个授权页；到期后冲刺自动续走（无需任何人解锁）。

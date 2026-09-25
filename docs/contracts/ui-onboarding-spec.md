@@ -45,12 +45,12 @@ v1 §2 的「S2 静默授予主路径必须经 DO」不成立；`AndroidManifest
 
 ### 2.1 能力规格（Capability）
 
-一条能力的完整规格 = 下列八项，缺一项即视为规格不合格（评审否决）。签名与
-`capability/CapabilityModel.kt:50` 逐项同形（文档写过的 `evidence` / `failure` 两栏已并入
+一条能力的完整规格 = 下列九项，缺一项即视为规格不合格（评审否决）。签名与
+`capability/CapabilityModel.kt` 逐项同形（文档写过的 `evidence` / `failure` 两栏已并入
 `Evidence` 快照与 `CapVerdict.detail`，不再单列 —— 文档里的形状必须是真形状）：
 
 ```
-Capability(id, title, segment, optional, requires, judge, acquirer, bridgeToken)
+Capability(id, title, segment, optional, requires, judge, acquirer, bridgeToken, keepAliveAnchor)
 ```
 
 - `judge`：**纯函数** `证据 -> 状态`，不住 GUI 层、不碰 Android 类型，JVM 单测钉死；
@@ -68,6 +68,10 @@ Capability(id, title, segment, optional, requires, judge, acquirer, bridgeToken)
   `CapabilityDegradationTest.老设备通道在线但通知被回收_实测优先不许降级成等待`）。
 - `optional`：加速器/旁路能力置 true（DO、截屏授权）。`optional` 能力**永不**参与 S4 放行判定，
   也**永不**作为他人的前置（规则 2）；它自己可以显示 BLOCKED/UNREACHABLE，但那只是灰字提示。
+- `keepAliveAnchor`：这一项是**后台存活的锚**（电池豁免 / 通知读取 / 无障碍）。它必须是字段而不是
+  冲刺层手写的清单 —— 清单必然与登记表漂移。开屏授权冲刺（onboarding-flow-spec §2.2 的 `ANCHORS`）
+  与 F4 欠账都从这一位推导。定罪依据：ColorOS HANS 只认无障碍绑定这一票实证锚
+  （[ADR-0006](../adr/0006-background-lifecycle-keepalive.md) §2.1/§2.4），缺锚 = 锁屏整个 App 被清。
 - 没有独立的 `failure` 字段：归因是 `CapVerdict.detail` 的职责，证据缺失由 `Evidence` 的初值表达。
 
 状态枚举：`GRANTED`（判据为真）/ `ACTION`（前置就绪，差用户一步）/ `BLOCKED`（硬前置未达成）/
@@ -87,15 +91,15 @@ Capability(id, title, segment, optional, requires, judge, acquirer, bridgeToken)
 | `perm:manage_external_storage` | S2 | `Environment.isExternalStorageManager()` | USER_TAP（AppOps 档：Android 17 shell 已无 `MANAGE_APP_OPS_MODES`，实测只能人点）→ SILENT_VIA_DO | —— | |
 | `perm:request_install_packages` | S2 | `canRequestPackageInstalls()` | USER_TAP → SILENT_VIA_DO | —— | |
 | `perm:system_alert_window` | S2 | `Settings.canDrawOverlays()` | USER_TAP → SILENT_VIA_DO | —— | |
-| `perm:battery_optimization` | S2 | `isIgnoringBatteryOptimizations()` | USER_TAP：`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | —— | |
-| `secure:notification_listener` | S2 | `Secure.enabled_notification_listeners` 含本包 | **SILENT_VIA_ADB**：`settings put secure`（§2.0 实测）→ USER_TAP 通知使用权页 | —— | |
-| `accessibility` | S2 | 服务实例已连（`DshAccessibilityService.isReady()`，与桥 caps 同一把尺子；设置串残留不作数） | **SILENT_VIA_ADB**：`settings put secure enabled_accessibility_services` → USER_TAP 无障碍页 | —— | |
+| `perm:battery_optimization` | S2（**锚**） | `isIgnoringBatteryOptimizations()` | USER_TAP：`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | —— | |
+| `secure:notification_listener` | S2（**锚**） | `Secure.enabled_notification_listeners` 含本包 | **SILENT_VIA_ADB**：`settings put secure`（§2.0 实测）→ USER_TAP 通知使用权页 | —— | |
+| `accessibility` | S2（**锚**） | 服务实例已连（`DshAccessibilityService.isReady()`，与桥 caps 同一把尺子；设置串残留不作数） | **SILENT_VIA_ADB**：`settings put secure enabled_accessibility_services` → USER_TAP 无障碍页 | —— | |
 | `mediaprojection` | S2 | `ScreenCaptureService.isReady()` | USER_TAP：App 内「授权屏幕捕获」（每次会话，物理不可预置） | —— | 是 |
-| `runtime` | S3 | 控制面 `/status` 200 | AUTO：`ContainerSupervisor` 重拉 → 手动重试 | —— | |
+| `runtime` | S3 | 控制面 `/status` 200 | USER_TAP：「看运行时启动日志」→ 诊断页。**没有「重启运行时」动作**：它的实现是 destroy 正在跑的内核，运行时死活归常驻监督链（onboarding-flow-spec §1 总则 8） | —— | |
 | `kernel_bundle` | S3 | `KernelSelfCheck` 无失败项 | AUTO → 灾难兜底诊断页 | runtime | |
 | `workbench` | S4 | **入口三要素**（`adb_channel` + `runtime` + `kernel_bundle`）全为 GRANTED | USER_TAP：进入控制面板 | adb_channel, runtime, kernel_bundle | |
 
-必须钉住的四点：
+必须钉住的五点：
 
 1. **S0 的绿 = `adb_channel`，不是 `adb_credentials`。** 凭据在册只回答「密钥与配对记录在不在」，
    通道通不通必须靠活探针 —— 这条区分是 §2.0-1 的唯一解。
@@ -107,6 +111,11 @@ Capability(id, title, segment, optional, requires, judge, acquirer, bridgeToken)
 4. **S4 的绿 ≠ S2 全绿。** 进工作台的门槛只有「通道能跑 shell + 运行时在线 + 内核自检无失败项」
    三要素；悬浮窗/全部文件/电池这些补齐项在 F4 里继续要，但不挡门（onboarding-flow-spec §5）。
    反过来也不许把「三要素绿」写成「权限集全绿」。
+5. **三项「锚」不是 S2 的普通待办**。`battery_optimization` / `secure:notification_listener` /
+   `accessibility` 段上写 S2（它们确实不挡入口），但 `keepAliveAnchor` 让它们在**开屏 P0** 就被要掉。
+   2026-09-26 真机定罪的因果链是：没锚 → :main 被 HANS 冻结清理 → 通道与运行时一起死 →
+   那段「通道通了再静默办」的降级链永远等不来。判据层里谁把锚的 `anchor` 位摘掉，
+   `PermissionSprintTest` 与门禁 `KEEP_ALIVE_EDGES` 一起红。
 
 ### 2.3 依赖图与管线投影
 
@@ -200,24 +209,34 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
 ```
 用户                          我方 APK (:main)                     系统
 ────                          ─────────────                       ────
-打开 App                ──→  P0 静默授权冲刺（通知排第一；界面不出卡）
+打开 App                ──→  Application.onCreate 戳常驻链（ContainerSupervisor 升前台 + 状态通知）
+                              P0 静默授权冲刺（通知排第一、三项锚紧随；界面不出卡）
 点「开始配对」          ──→  ① startService：browse pairing + connect（必须早于对话框）
                               ② 现场重采一次 → PairingGate.decide：
                                  缺开发者选项/无线调试 → 跳能拨开关的那一页
                                  缺通知      → 系统弹窗（永久拒过 → 本应用详情页）
                                  前置全齐    → 跳无线调试页
+                              ③ 冻结 P0 冲刺 5 分钟（自动解冻）：别在用户从系统页回来的那一帧
+                                 把他抛进下一个授权页
                               挂出常驻通知：「等待 mDNS 记录」
 拨开无线调试、回到 App  ──→  onResume 作废通道缓存 + 全量重采
 再点「开始配对」        ──→  直达无线调试页（深链无响应时落开发者选项页）
 点「与配对设备配对」    ──→  pairing 记录出现 → 主机+端口进入读数        显示 6 位配对码
 看到通知「配对端口 N 在册」
 下拉通知栏，快捷回复输码 ───→ RemoteInput 收码
+                              **每一次送达都落一条结论**（AttemptStore 时间线 → 通知第一行 +
+                              一次 heads-up）：空码 / 端口不在册 / 上一次仍在进行都算一次尝试
+                              —— 「在无数次输入里莫名其妙地成功」是 2026-09-26 的定罪原话
                               端口不在册 → 立刻回「请让对话框保持打开」，不发起配对
                               SPAKE2 配对（用 mDNS 的 pairing 端口）
 关掉对话框              ──→  Sink.onLost → 端口读数作废（此后输码一律拒发）
+                              但**结论行留在通知第一行**：onLost 只作废端口，不许把「已配对」刷回
+                              「等待 mDNS 记录」—— 那是用户判断「成没成」的唯一依据
                               对话框之后靠 connect 记录（常驻，但端口仍会轮换）
                               adb connect 自动完成
                               活探针（现问端点 + id -u）→ adb_channel 变绿 → 通知收起
+回到 App                ──→  标题下「最近动作」与通知**同一句话**（同读 AttemptStore 时间线）；
+                              配对冻结期内 P0 冲刺不抢前台（onboarding-flow-spec §2.1 F1 的 ③）
 ```
 
 - 输码通知的 PendingIntent 目标是 `:main` 的 Service（RemoteInput 回 intent），
@@ -232,7 +251,8 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
 ### 3.3 降级链（按序回落，每级都失败才进下一级）
 
 1. **mDNS 发现失败**（§7② 已成立，故本机未触发）→ 现场行为是**拒发配对并说明原因**
-   （通知文案「配对端口不在册 —— 请让对话框保持打开」，`ui/PairingProbeService.kt:190-198`）。
+   （通知文案「配对端口不在册 —— 请让对话框保持打开」，`ui/PairingProbeService.handleCode` 的
+   在册校验分支 → `conclude` 记一次失败尝试）。
    **明确不做的**是回落一个编造地址：那会把「没发现」伪装成「配对失败」，用户对着不存在的端口重试。
    若真机测出「对话框开着、45s 仍无 pairing 记录」（ROM 组播受限），再补通知栏第二个
    RemoteInput 槽收手工 `IP:Port`（未实现，届时按 §3.1 的失焦约束做）。
@@ -315,12 +335,16 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
 | ⑤ | pairing 记录是否只在「与配对设备配对」对话框开着期间在册 | 对话框关闭后 `onServiceLost` 是否回调 | **待定罪（v2 新立判据）**。代码已按「回调必来」写：记录消失即作废端口、输码一律拒发。若真机测出**关框不回调**，则 45s 看门狗是唯一防线，必须补 TTL 作废（`pairingLive` 加过期时刻），否则上一轮端口会被当成有效值 |
 | ⑥ | 点「开始配对」那一下的现场引导是否落到正确的页 | 缺开关→能拨开关的页；缺通知→系统弹窗；全齐→无线调试页 | **待定罪**。判据与动作同源由 `PairingGateTest` 钉；真机要核的是 ROM 会不会把 settings 页吞回主页（`launch` 的返回值只说明系统接了 intent） |
 | ④ | mDNS 发布时序 vs 配对码 10 分钟窗口 | browse→found 延迟 < 2s 且对话框开着期间记录在册 | **成立**，实测首记录 6~40ms。反向留案底要求：45s 内无 pairing 记录必须上屏归因（ROM 组播/对端未发布） |
+| ⑦ | 常驻形态（2026-09-26 新立，用户拍板「升前台占一条通知」）：锁屏 5 分钟后解锁 | 监督者的状态通知（id 1004）仍在、内容含「运行时/通道/:node」三要素，点按进首页；期间 :node 未被清 | **待定罪**。代码侧四条边 + manifest `specialUse` 由门禁 `KEEP_ALIVE_EDGES` 钉；ROM 是否允许 specialUse 长期驻留只能真机验 |
+| ⑧ | 配对有声：每次输码送达都有结论 | 连按 3 次发送（含空码）→ 通知第一行依次变成「第 N 次 HH:mm:ss 失败：<归因>」且每次都响；成功那一次文案带「回首页继续下一步」；关框后结论行不消失 | **待定罪**（v2 新立，正是用户定罪「莫名其妙的成功」的那一条） |
+| ⑨ | 冲刺不抢前台：点「开始配对」后从系统页回 App | 回来那一帧不被抛进下一个授权页；5 分钟后（或再次点界面动作后）冲刺自动续走 | **待定罪** |
+| ⑩ | 界面不再持有拆运行时的动作 | 开场页与诊断页兜底按钮里找不到「重启运行时」；F3 只给「看运行时启动日志」；把 App 退后台再回来，运行时**没有**被重新拉起流程打断 | **待定罪**（门禁 `ACTION_RESTART` 归属规则先在 CI 钉住） |
 
 ## 8. 验收判据
 
 - G0：§6 门禁 grep 0 命中；内核 CI 双绿；OTA 推到 canary 后设备面板不再出现 ADB 页，
   `/adb/status` 返回只读状态。
-- G1（v2 修订，三条缺一不可）：
+- G1（v2 修订，缺一不可）：
   1. **零 DO 全绿路径**：一台 DO 不可得的真机（装有应用分身即可）必须能从零走到 `workbench`
      放行。任何「等 S1」的 BLOCKED 都算架构缺陷 —— 这条正是 v1 的死穴。
   2. **假绿免疫**：关掉无线调试（或改端口）后，S0 必须在探针 TTL（30s）内自动变红；
@@ -330,6 +354,10 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
      归因而非 30s 超时（§3.3 第 1 条、flow-spec §6-2）。
   5. **开屏无授权卡**：全新安装的首页第一眼里没有「请先授权」这类卡片，唯一的按钮是「开始配对」，
      而系统通知弹窗已在此刻自动出现（flow-spec §2.1 P0、§6-1）。
+  6. **运行时是底座不是步骤**（2026-09-26 新增）：不进任何界面、只解锁屏幕，≤15min 内控制面复活；
+     锁屏 5 分钟不丢常驻通知；界面上没有拆运行时的按钮（§7⑦⑩、flow-spec §6-8）。
+  7. **配对不是黑盒**（2026-09-26 新增）：每一次输码送达都在通知与首页「最近动作」留下同句式结论
+     （§7⑧、flow-spec §6-9）。「试了很多次突然成功」= 本条判据未满足，不算交付。
 - **门禁反向自证**：把 `isDeviceOwnerApp(` 随手抄进任一业务层文件，§2.5 门禁必须让 CI 变红；
   抄回去仍然绿 = 门禁是空壳，本轮不算完成。
 - 首页无「状态+入口」之外的内容（人工评审一票否决制）。

@@ -32,6 +32,9 @@ import io.github.lobbowen.dshmobile.permissions.PermissionCenter
  *   也不伪造一个（历史上回落 127.0.0.1 就是这种假动作）。
  * · 收到码后转调 [AdbClientRunner.pair]（一次性 Node 进程做 SPAKE2/TLS）：结论进
  *   [AttemptStore] 类型化记账（判据层唯一的失败来源），通知与探针日志只是它的人读镜像。
+ * · **每一次送达的输入都必须留下一行结论**（真机定罪 2026-09-26：用户在无数次输入里
+ *   「莫名其妙地成功」）。所以连「空码」「端口不在册」「上一次仍在进行」这类没发出
+ *   配对的输入也进时间线，并顶到通知第一行；成功另发一条 heads-up。
  *
  * 普通 started service：通知是常态通知不是 FGS（探针跑完即 stop，不占常驻资源；
  * :main 的存活由无障碍+ContainerSupervisor 链托底，与保活主线一致）。
@@ -77,7 +80,11 @@ class PairingProbeService : Service() {
                 running = false
                 // 探针从未 startForeground（常态通知），撤通知直接 cancel —— 不碰
                 // 已废弃的 stopForeground(boolean)，也不依赖 onDestroy 时机。
-                (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIF)
+                // 结论通知（heads-up）同样要撤：它是用户唯一看得见的成败反馈，留在栏里
+                // 却指向一个已经死掉的探针实例会误导。
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.cancel(NOTIF)
+                nm.cancel(RESULT_NOTIF)
                 PipelineRefresh.notifyChanged()
                 stopSelf()
                 return START_NOT_STICKY
@@ -182,21 +189,26 @@ class PairingProbeService : Service() {
         ProbeJournal.codeReceivedAt = System.currentTimeMillis()
         val code = extractCode(intent)
         ProbeJournal.append(this, "pair", "快捷回复送达：code=${code?.length ?: 0} 位")
+        // 每次送达都要落一条结论，否则用户只知道自己「又按了一次发送」。
         if (code.isNullOrBlank()) {
-            renderStatus("配对码为空")
+            conclude("配对码为空（本次未提交任何数字）")
             return
         }
-        if (busy) { renderStatus("上一次配对仍在进行"); return }
+        if (busy) {
+            conclude("上一次配对仍在进行，本次未提交")
+            return
+        }
         // 端点必须**此刻在册**：没有 pairing 记录就是「对话框没开/已关」，此时发配对
         // 只会拿到一条归因不明的超时失败（真机上那条假失败又会把 adb_credentials 判成 FAILED）。
         val host = pairingHost
         val pport = pairingPort
         if (!pairingLive || host == null || pport <= 0) {
             ProbeJournal.append(this, "pair", "无在册 mDNS 配对端点 → 未发起配对（不伪造地址）")
-            renderStatus("配对端口不在册 —— 请在「无线调试」页点「与配对设备配对」，让对话框保持打开")
+            conclude("配对端口不在册：请在「无线调试」页点「与配对设备配对」并把对话框保持打开")
             return
         }
         busy = true
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(RESULT_NOTIF)
         renderStatus("配对进行中（$host:$pport）")
         Thread {
             val outcome = AdbClientRunner.pair(
@@ -205,21 +217,41 @@ class PairingProbeService : Service() {
             )
             busy = false
             val reason = if (outcome.ok) "" else (outcome.error ?: outcome.raw.take(200))
-            AttemptStore.recordPair(System.currentTimeMillis(), outcome.ok, reason)
+            val now = System.currentTimeMillis()
+            AttemptStore.recordPair(now, outcome.ok, reason)
             ProbeJournal.append(
                 this, "pair",
                 if (outcome.ok) "配对成功（${host}:${pport}）：${outcome.json?.optString("guid")?.take(16)}"
                 else "配对失败：$reason",
             )
-            renderStatus(
-                if (outcome.ok) "已配对 —— S0 凭据在册" else "失败：${reason.take(80)}",
-                stickyError = !outcome.ok,
-            )
+            val head = latestConclusion() + if (outcome.ok) " —— 回首页继续下一步" else ""
+            notifyConclusion(head, ok = outcome.ok)
+            renderStatus(head, stickyError = !outcome.ok)
             // 成功即作废通道缓存：下一轮采集必须现探，不把配对前的 DEAD 读数续过来。
             if (outcome.ok) AdbChannelProbe.invalidate()
             PipelineRefresh.notifyChanged()
         }.apply { isDaemon = true }.start()
     }
+
+    /**
+     * 记一条**未发出配对**的输入结论（空码 / 端口不在册 / 仍在忙）：判据层与通知看的是同一份
+     * [AttemptStore]，界面上不再出现「按了发送却什么都没发生」。
+     */
+    private fun conclude(reason: String) {
+        AttemptStore.recordPair(System.currentTimeMillis(), ok = false, reason)
+        ProbeJournal.append(this, "pair", "输入送达但未发起配对：$reason")
+        val head = latestConclusion()
+        notifyConclusion(head, ok = false)
+        renderStatus(head, stickyError = true)
+        PipelineRefresh.notifyChanged()
+    }
+
+    /**
+     * 结论行 = 时间线最新一条（[AttemptStore.humanPairTimeline]，含「第 N 次 · 时刻 · 归因」）。
+     * 通知、heads-up、首页三处**必须说同一句话**，所以措辞只由那一处生成，这里不自己拼。
+     */
+    private fun latestConclusion(): String =
+        AttemptStore.humanPairTimeline().firstOrNull() ?: "本次输入未产生结论"
 
     /**
      * 通知能不能真的显示。授权状态一律经 [PermissionCenter] 查（判据单一出口，spec §2.5），
@@ -234,17 +266,26 @@ class PairingProbeService : Service() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         // 文案只描述**在册读数**：pairing 记录消失后这里必须退回「等记录」，
         // 不许把上一轮的端口继续报成「已发现」（真机上端口对不上就是这么来的）。
-        val status = override ?: when {
+        val live = override ?: when {
             pairingLive -> "配对端口 $pairingPort 在册 —— 下拉本通知「输入配对码」"
             connectPort > 0 ->
                 "无线调试在线（连接端口 $connectPort），未见到配对对话框记录 —— 点「与配对设备配对」后即出现"
             else -> "等待 mDNS 记录：把「与配对设备配对」对话框开着，端口出现后这里就能输码"
         }
+        // 结论行永远在最上方，并且**不随 onLost 消失**：真机定罪（2026-09-26）配对其实已经
+        // 成功，对话框一关通知就被刷回「等待 mDNS 记录」，用户以为什么都没发生。
+        val history = AttemptStore.humanPairTimeline()
+        val head = if (override == null) history.firstOrNull() else override
+        val body = buildString {
+            if (head != null) appendLine(head)
+            if (head != live) appendLine(live)
+            history.drop(1).forEach { appendLine(it) }
+        }.trimEnd()
         val builder = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentTitle("DSH · S0 配对探针")
-            .setContentText(status)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(status))
+            .setContentText(head ?: live)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setOngoing(true)
             .setContentIntent(openAppIntent())
         if (stickyError) builder.color = 0xFFD64545.toInt()
@@ -259,6 +300,29 @@ class PairingProbeService : Service() {
         // 静默吞掉，导致③从未成立却查不出来 —— 异常必须进探针日志留案底。
         runCatching { nm.notify(NOTIF, builder.build()) }
             .onFailure { ProbeJournal.append(this, "svc", "通知发布失败：${it::class.java.simpleName}: ${it.message}") }
+    }
+
+    /**
+     * 结论单独响一次（heads-up）：用户此刻人在系统「无线调试」页、通知栏收起，
+     * 只改常态通知的文案等于没有反馈。走**新通知 id** —— 同 id 重发不播提醒是系统铁律，
+     * 复用 [NOTIF] 拿不到 heads-up。点按落到首页，让「刚刚发生了什么」在回到界面后仍在。
+     */
+    private fun notifyConclusion(head: String, ok: Boolean) {
+        val body = (listOf(head) + AttemptStore.humanPairTimeline().drop(1)).joinToString("\n")
+        val builder = NotificationCompat.Builder(this, CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setContentTitle(if (ok) "配对成功" else "配对未成功")
+            .setContentText(head)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setAutoCancel(true)
+            .setContentIntent(openAppIntent())
+        builder.color = if (ok) 0xFF2E7D32.toInt() else 0xFFD64545.toInt()
+        runCatching {
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .notify(RESULT_NOTIF, builder.build())
+        }.onFailure {
+            ProbeJournal.append(this, "svc", "结论通知发布失败：${it::class.java.simpleName}: ${it.message}")
+        }
     }
 
     private fun extractCode(intent: Intent): String? {
@@ -321,6 +385,9 @@ class PairingProbeService : Service() {
         @Volatile var instance: PairingProbeService? = null
         private const val CHANNEL = "dsh_pairing_probe"
         private const val NOTIF = 3637
+
+        /** 结论通知（heads-up）另占一个 id：同 id 重发不播提醒；且 3637 是常驻探针通知。 */
+        private const val RESULT_NOTIF = 3638
         private const val REQ_OPEN = 31
         private const val REQ_SUBMIT = 32
         private const val PAIR_TIMEOUT_MS = 30_000L

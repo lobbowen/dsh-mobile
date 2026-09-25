@@ -81,12 +81,25 @@
           也不影响 minSdk/兼容性。
         -->
 
-        <!-- L-A 容器监督者（主进程，普通 started service，刻意不占通知位）：
-             唯一职责是监督 :node 实例宿主的死活（ADR-0006）。它住 :main、被无障碍
-             绑定托底，从而"重拉者"不再与被重拉者同进程 —— 旧设计的根病。 -->
+        <!-- L-A 容器监督者（主进程，**常驻前台**）：唯一职责是监督 :node 实例宿主的死活
+             （ADR-0006）。它住 :main、被无障碍绑定托底，从而"重拉者"不再与被重拉者同进程
+             —— 旧设计的根病。前台化是 2026-09-26 真机定罪的结论：不占通知位 = 锁屏被 ROM
+             合法清掉，整条重拉链随 :main 一起归零。 -->
         <service
             android:name=".lifecycle.ContainerSupervisor"
-            android:exported="false" />
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="resident supervisor keeping the local runtime alive across screen-off" />
+        </service>
+
+        <!-- 进程级自愈边：其余拉起边都要求进程活着，只有 JobScheduler 能在 :main 被整体
+             回收后把它重新创建（15 分钟一次，只做「戳监督者」这一件事）。 -->
+        <service
+            android:name=".lifecycle.SelfHealJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
 
         <!-- Node 运行时：独立进程 :node，与 UI 进程隔离；exported=false 防外部拉起。
              specialUse = 无限期驻留的本地运行时（Play 才需要审核说明；本包侧载分发）。

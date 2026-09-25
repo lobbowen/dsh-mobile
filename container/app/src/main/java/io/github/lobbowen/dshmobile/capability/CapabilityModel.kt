@@ -61,4 +61,10 @@ data class Capability(
      * 才不会出现「首页绿了、桥门禁却放行/拦错」。
      */
     val bridgeToken: String? = null,
+    /**
+     * 保活锚：缺了它整个进程在锁屏后会被 ROM 清掉（电池豁免 / 无障碍绑定 / 通知使用权）。
+     * 单独成立一个事实而不是让冲刺层手写一份清单 —— 冲刺的提问顺序、F4 欠账归谁，
+     * 都从这一位推导；手写清单必然与登记表漂移（v1 的「第二张权限表」就是这么烂掉的）。
+     */
+    val keepAliveAnchor: Boolean = false,
 )

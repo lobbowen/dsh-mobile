@@ -1,13 +1,9 @@
 package io.github.lobbowen.dshmobile.capability
 
 import android.content.Context
-import android.content.Intent
-import android.os.Build
 import io.github.lobbowen.dshmobile.bridge.AdbClientRunner
-import io.github.lobbowen.dshmobile.lifecycle.ContainerSupervisor
 import io.github.lobbowen.dshmobile.permissions.PermissionCatalog
 import io.github.lobbowen.dshmobile.permissions.PermissionCenter
-import io.github.lobbowen.dshmobile.runtime.NodeRuntimeService
 
 /** 一次静默取法的结果。[verified] 单独成列：**下发成功不等于生效**（DO 的真机教训）。 */
 data class AcquisitionResult(val ok: Boolean, val verified: Boolean, val detail: String)
@@ -36,7 +32,6 @@ object CapabilityAcquisitionRunner {
             CapabilityCatalog.EXEC_ACCESSIBILITY ->
                 enableSecureService(ctx, SecureService.ACCESSIBILITY, timeoutMs)
             CapabilityCatalog.EXEC_REPROBE -> reprobeChannel(ctx)
-            CapabilityCatalog.EXEC_RETRY_RUNTIME -> restartRuntime(ctx)
             CapabilityCatalog.EXEC_RERUN_SELFCHECK -> rerunSelfCheck(ctx)
             else -> AcquisitionResult(false, false, "未知执行器：$executor")
         }
@@ -63,18 +58,6 @@ object CapabilityAcquisitionRunner {
             verified = p.outcome == ProbeOutcome.LIVE,
             detail = p.detail.ifBlank { p.outcome.name },
         )
-    }
-
-    private fun restartRuntime(ctx: Context): AcquisitionResult {
-        ContainerSupervisor.ensureRunning(ctx)
-        val svc = Intent(ctx, NodeRuntimeService::class.java).setAction(NodeRuntimeService.ACTION_RESTART)
-        return runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(svc)
-            else ctx.startService(svc)
-            AcquisitionResult(true, false, "已请求重启运行时（在线与否由下一轮探针定）")
-        }.getOrElse {
-            AcquisitionResult(false, false, "重启请求失败：${it::class.java.simpleName}: ${it.message}")
-        }
     }
 
     private fun rerunSelfCheck(ctx: Context): AcquisitionResult {

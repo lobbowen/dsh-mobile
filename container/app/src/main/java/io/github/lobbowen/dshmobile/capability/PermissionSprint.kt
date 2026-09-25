@@ -21,30 +21,27 @@ object PermissionSprint {
         .filter { PermissionCatalog.byId(it) != null }
 
     /**
-     * 待选项 = 现在拿最便宜、但**不挡配对**的授权：权限档、无前置、非可选加速器，
-     * 且**没有静默通道**。最后那半条是刻意的 —— `settings put secure` 一档（通知读取、无障碍）
-     * 在通道打通后由 F4 静默办（flow-spec §2.2「不进冲刺」），开屏把人一路送进系统的
-     * 无障碍设置页，是「用户点两次、我们省零次」的负收益。
-     * `mediaprojection` 因 optional 天然不在链上（每次会话授权，物理不可预置）；
-     * `device-owner` 不是权限档、要通道才能拿，也不进冲刺。
+     * 保活锚（[Capability.keepAliveAnchor]）：电池豁免 / 无障碍 / 通知读取。
+     *
+     * 它们**必须**在开屏就问，不许推给「等通道通了静默办」—— 那是循环依赖：
+     * 无障碍绑定是 :main 不被 ColorOS HANS 冻结的唯一实证锚（ContainerSupervisor 顶部），
+     * 没有锚 → 锁屏清掉 :main → 通道与运行时一起死 → 那条「静默办」的通道永远等不到。
+     * 真机 2026-09-26 定罪：上一版按「能静默办就先不打扰用户」把它们排除出冲刺，
+     * 用户看到的现象就是「锁屏之后 App 被清理掉」。
+     * 静默通道（SILENT_VIA_ADB）依然留在取法链里，但只是**降级位**：通道先通就少闹一次，
+     * 不通就由 P0 现场要。
      */
+    val ANCHORS: List<String> = CapabilityCatalog.ALL
+        .filter { it.keepAliveAnchor && it.id !in REQUIRED }.map { it.id }
+
+    /** 其余待选项：权限档、无前置、非可选加速器，且不属于上面两档。 */
     val OPTIONAL: List<String> = CapabilityCatalog.ALL.filter {
-        PermissionCatalog.byId(it.id) != null && it.id !in REQUIRED &&
-            it.requires.isEmpty() && !it.optional && !silentLater(it)
+        PermissionCatalog.byId(it.id) != null && it.id !in REQUIRED && it.id !in ANCHORS &&
+            it.requires.isEmpty() && !it.optional
     }.map { it.id }
 
-    /**
-     * 「通道在册的最优情况」下，这项的取法链里有没有静默通道。有的话开屏就不该问用户：
-     * 判据问的是能力**能不能**静默拿到，所以喂一份最好的读数而不是当前读数 ——
-     * 拿当前读数会把「现在还没有通道」当成结论，于是这些项永远留在冲刺里。
-     */
-    private fun silentLater(c: Capability): Boolean {
-        val bestCase = Evidence(nowMs = 1L, channel = ChannelProbe(ProbeOutcome.LIVE, 1L))
-        return c.acquirer(bestCase).any { it.kind == AcquireKind.SILENT_VIA_ADB }
-    }
-
-    /** 冲刺顺序：必要项在前（它挡配对的输码入口），其余按登记表声明序。 */
-    val ORDER: List<String> = REQUIRED + OPTIONAL
+    /** 冲刺顺序：配对前置 → 保活锚 → 其余（挡路的先要，同一件事只做一次）。 */
+    val ORDER: List<String> = REQUIRED + ANCHORS + OPTIONAL
 
     /**
      * 本轮还该要哪些。[asked] = 本次开屏已经抛过问题的项：**一次开屏只闹一回**，
