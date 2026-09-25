@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -22,6 +23,7 @@ import io.github.lobbowen.dshmobile.MainActivity
 import io.github.lobbowen.dshmobile.capability.AcquireKind
 import io.github.lobbowen.dshmobile.capability.Acquisition
 import io.github.lobbowen.dshmobile.capability.AdbChannelProbe
+import io.github.lobbowen.dshmobile.capability.AttemptStore
 import io.github.lobbowen.dshmobile.capability.BridgeTokens
 import io.github.lobbowen.dshmobile.capability.CapabilityAcquisitionRunner
 import io.github.lobbowen.dshmobile.capability.CapabilityCatalog
@@ -58,6 +60,7 @@ class OnboardingActivity : AppCompatActivity() {
     private val stageButtons = mutableMapOf<String, Button>()
     private val stageExtraButtons = mutableMapOf<String, Button>()
     private var criteriaText: TextView? = null
+    private var recentText: TextView? = null
     private var enterBtn: Button? = null
     private var lastEvidence: Evidence? = null
 
@@ -71,6 +74,8 @@ class OnboardingActivity : AppCompatActivity() {
     @Volatile private var sprintWaiting = false
     /** 只有可见（resumed）时才允许冲刺继续抛系统页。 */
     @Volatile private var resumed = false
+    /** 配对冻结到期时刻（单调钟）；见 [startPairing] 的 R6 说明。 */
+    @Volatile private var sprintFrozenUntilMs = 0L
 
     /** 本次 RUNTIME_DIALOG 申请的权限名；launcher 全页面共用，回调里靠它归因。 */
     private var pendingRuntimePerm: String? = null
@@ -132,6 +137,15 @@ class OnboardingActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, pad / 2)
         })
+        // 「刚刚发生了什么」常驻在标题下面：配对发生在系统页 + 通知栏里，用户回到本界面时
+        // 第一眼必须看到上一次尝试的结论，而不是从四张阶段卡里自己反推（真机定罪 2026-09-26
+        // 「回到界面又不知道点什么」）。文案与通知共用 AttemptStore 那一份，两处不许各说各话。
+        recentText = TextView(this).apply {
+            textSize = 13f
+            setPadding(0, 0, 0, pad / 2)
+            text = recentActions()
+        }
+        col.addView(recentText)
         for (stage in OnboardingFlow.SKELETON) {
             val tv = TextView(this).apply {
                 textSize = 15f
@@ -145,7 +159,7 @@ class OnboardingActivity : AppCompatActivity() {
                 setPadding(pad / 2, 0, 0, pad / 4)
                 text = stage.why
             })
-            // 每行一律给一个动作按钮：F3 的动作可能是「重启运行时」（AUTO）。
+            // 每行一律给一个动作按钮；动作内容由阶段机给，这里不猜（F3 现在只有「看启动日志」）。
             // 次要按钮只挂在阶段机给出的那一行（F4 补齐），主按钮全页至多一个。
             // 「进入工作台」是入口本身，另置一个按钮，未放行时禁用（比点了没反应诚实）。
             val btn = Button(this).apply { visibility = View.GONE }
@@ -211,6 +225,7 @@ class OnboardingActivity : AppCompatActivity() {
 
     private fun render(e: Evidence) {
         lastEvidence = e
+        recentText?.text = recentActions()
         val verdicts = CapabilityCatalog.evaluate(e)
         val stages = OnboardingFlow.stages(e, verdicts)
         for (s in stages) {
@@ -255,9 +270,11 @@ class OnboardingActivity : AppCompatActivity() {
      * 就直接把它的首项取法交给 [dispatch] —— 与阶段卡共用同一条动作通道，所以这里
      * 不出现任何「自己拼的弹窗/自己拼的 intent」。
      * 只在 resumed 时推进：暂停中再发 intent 会把用户正在看的系统页压在下面。
+     * 配对冻结期内同样不推进：见 [startPairing]。
      */
     private fun advanceSprint(e: Evidence) {
         if (!resumed || sprintWaiting) return
+        if (SystemClock.elapsedRealtime() < sprintFrozenUntilMs) return
         val step = PermissionSprint.next(e, sprintAsked) ?: return
         val (capId, acq) = step
         sprintAsked += capId
@@ -267,6 +284,16 @@ class OnboardingActivity : AppCompatActivity() {
         // 占住的后果不是「少弹一个窗」，而是后面所有授权这一整轮都要不到。
         // 记入 asked 是故意的 —— 失败也不在同一轮里重试，欠账归 F4 补齐行。
         if (!dispatch(capId, acq, null)) sprintWaiting = false
+    }
+
+    /**
+     * 「刚刚」区块：最近三次配对尝试的结论，逐字取自 [AttemptStore.humanPairTimeline]
+     * （与通知同一份文案）。空账本时说清「下一步从哪开始」，而不是留一片空白。
+     */
+    private fun recentActions(): String {
+        val lines = AttemptStore.humanPairTimeline().take(3)
+        if (lines.isEmpty()) return "最近动作：还没有过一次配对尝试 —— 点下面标着「下一步」的那个按钮"
+        return "最近动作：\n" + lines.joinToString("\n")
     }
 
     private fun mark(s: StageStatus): String = when (s) {
@@ -317,9 +344,14 @@ class OnboardingActivity : AppCompatActivity() {
      * ① 起探针（browse 必须早于系统配对对话框，才接得住那条只活几分钟的 pairing 记录）；
      * ② 现读环境，按缺项把用户送到能修它的页面（缺开关→设置页，缺通知→授权页）。
      * 「差哪个开关」由 [PairingGate] 判，判据不住在首页。
+     *
+     * ③ 冻结 P0 冲刺一段时间：用户此刻在系统的「无线调试」页里输码，从他手上那个页面回到
+     * 本界面的那一帧，旧实现会立刻把下一个授权页甩到他脸上（真机定罪「回到界面一堆乱七八糟」）。
+     * 冻结是有上限的（到期自动解冻），不是一条需要谁来解的锁 —— 配对期间的欠账由 F4 补齐行接着要。
      */
     private fun startPairing() {
         AdbChannelProbe.invalidate()
+        sprintFrozenUntilMs = SystemClock.elapsedRealtime() + SPRINT_FREEZE_MS
         startService(Intent(this, PairingProbeService::class.java))
         ProbeJournal.append(this, "pair", "用户点「开始配对」→ 探针已起，现场核对开发者环境")
         if (lastEvidence == null) {
@@ -424,6 +456,8 @@ class OnboardingActivity : AppCompatActivity() {
                             "\n仍待要 ${PermissionSprint.pending(e, sprintAsked).joinToString().ifBlank { "无" }}" +
                             "\n配对现场判定 " + PairingGate.decide(e, verdicts).notice,
                     )
+                    appendLine("---- 配对尝试（与通知同源） ----")
+                    appendLine(AttemptStore.humanPairTimeline().joinToString("\n").ifBlank { "无" })
                     appendLine("---- 能力判据 ----")
                     CapabilityCatalog.ALL.forEach { c ->
                         val v = verdicts[c.id]
@@ -457,5 +491,8 @@ class OnboardingActivity : AppCompatActivity() {
 
         /** 发完动作后的补采时刻（真正的实时性由 onResume / PipelineRefresh / 探针事件保证）。 */
         private const val REFRESH_AFTER_TAP_MS = 800L
+
+        /** 点「开始配对」后冻结 P0 冲刺的时长；到期自动解冻，不需要谁来解锁。 */
+        private const val SPRINT_FREEZE_MS = 5 * 60_000L
     }
 }

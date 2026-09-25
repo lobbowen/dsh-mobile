@@ -35,15 +35,15 @@ object CapabilityCatalog {
     /** USER_TAP 的非权限落点（[CapabilityNavigation] 解析成 Intent）。 */
     const val NAV_DEV_OPTIONS = "nav:dev-options"
     const val NAV_WIRELESS_DEBUG = "nav:wireless-debug"
-    const val NAV_SCREEN_CAPTURE = "nav:screen-capture"
+    /** 诊断页与工作台是同一帧（MainActivity），所以落点只有一个名字。 */
+    const val NAV_DIAGNOSTICS = "nav:diagnostics"
 
     /** 权限能力走的是「哪一档由谁给」的四分类，与 [io.github.lobbowen.dshmobile.permissions.PermTier]（Manifest 声明档）不是一回事。 */
     enum class PermTierClass { APPOP, RUNTIME, SECURE_SETTINGS, IN_APP }
 
-    /** SILENT_* 的执行器 id，由 [CapabilityAcquisitionRunner] 映射成真实命令。 */
+    /** SILENT_* 与 AUTO 的执行器 id，由 [CapabilityAcquisitionRunner] 映射成真实命令。 */
     const val EXEC_DEVICE_OWNER = "dpm-set-device-owner"
     const val EXEC_REPROBE = "adb-channel-reprobe"
-    const val EXEC_RETRY_RUNTIME = "runtime-restart"
     const val EXEC_RERUN_SELFCHECK = "kernel-selfcheck-rerun"
     const val EXEC_NOTIFICATION_LISTENER = "settings-put-notification-listener"
     const val EXEC_ACCESSIBILITY = "settings-put-accessibility-service"
@@ -144,13 +144,19 @@ object CapabilityCatalog {
         ),
         perm(PermissionCatalog.REQUEST_INSTALL_PACKAGES, "安装未知应用", PermTierClass.APPOP),
         perm(PermissionCatalog.SYSTEM_ALERT_WINDOW, "悬浮窗", PermTierClass.APPOP),
-        perm(PermissionCatalog.BATTERY_OPTIMIZATION, "电池优化豁免", PermTierClass.APPOP),
+        perm(
+            PermissionCatalog.BATTERY_OPTIMIZATION, "电池优化豁免", PermTierClass.APPOP,
+            anchor = true, note = "不豁免则 Doze 下整机被冻结",
+        ),
         perm(
             PermissionCatalog.NOTIFICATION_ACCESS, "通知读取", PermTierClass.SECURE_SETTINGS,
+            anchor = true, note = "既是面板的通知能力，也是后台存活的一票",
             bridgeToken = "notification_access",
         ),
         perm(
             PermissionCatalog.ACCESSIBILITY, "无障碍服务", PermTierClass.SECURE_SETTINGS,
+            anchor = true,
+            note = "实证唯一挡得住 ColorOS HANS 冻整个 uid 的锚（ContainerSupervisor 的托底边）",
             bridgeToken = "accessibility",
         ),
         perm(
@@ -164,7 +170,11 @@ object CapabilityCatalog {
                 if (e.controlPlaneUp) CapVerdict(CapStatus.GRANTED, "控制面在线")
                 else CapVerdict(CapStatus.ACTION, "控制面未响应")
             },
-            acquirer = { listOf(Acquisition(AcquireKind.AUTO, "重启运行时", EXEC_RETRY_RUNTIME)) },
+            // **不给「重启运行时」按钮**：它的实现是 destroy 当前实例（运行时服务的重启动作
+            // 语义），首页一度把它当 F3 的主行动 —— 用户点开界面就可能把正在跑的
+            // 内核拆掉再等 30s（真机 2026-09-26 定罪「打开 App 就崩」）。运行时的死活归监督者
+            // （ContainerSupervisor + :node 自家退避循环），界面只给一条看启动日志的路。
+            acquirer = { listOf(Acquisition(AcquireKind.USER_TAP, "看运行时启动日志", NAV_DIAGNOSTICS)) },
         ),
         Capability(
             id = KERNEL_BUNDLE, title = "内核包", segment = S3, requires = setOf(RUNTIME),
@@ -197,12 +207,13 @@ object CapabilityCatalog {
         optional: Boolean = false,
         note: String = "",
         bridgeToken: String? = null,
+        anchor: Boolean = false,
     ): Capability {
         // id 必须真在 PermissionCatalog 里：查不到定义 = 采集器永远不会填这个读数 = 幽灵绿灯。
         require(PermissionCatalog.byId(id) != null) { "$id 不在 PermissionCatalog.ALL 里，判据无从取数" }
         return Capability(
             id = id, title = title, segment = segment, optional = optional,
-            bridgeToken = bridgeToken,
+            bridgeToken = bridgeToken, keepAliveAnchor = anchor,
             judge = { e ->
                 if (e.granted(id)) CapVerdict(CapStatus.GRANTED, "已授权")
                 else CapVerdict(CapStatus.ACTION, if (note.isEmpty()) "未授权" else "未授权（$note）")
@@ -215,7 +226,7 @@ object CapabilityCatalog {
     private fun permAcquirers(id: String, tier: PermTierClass, e: Evidence): List<Acquisition> {
         val tap = when (tier) {
             PermTierClass.RUNTIME -> Acquisition(AcquireKind.RUNTIME_DIALOG, "系统弹窗授权", id)
-            PermTierClass.IN_APP -> Acquisition(AcquireKind.USER_TAP, "去诊断页授权", NAV_SCREEN_CAPTURE)
+            PermTierClass.IN_APP -> Acquisition(AcquireKind.USER_TAP, "去诊断页授权", NAV_DIAGNOSTICS)
             PermTierClass.SECURE_SETTINGS -> Acquisition(AcquireKind.USER_TAP, "去系统授权页", id)
             PermTierClass.APPOP -> Acquisition(AcquireKind.USER_TAP, "去系统授权页", id)
         }

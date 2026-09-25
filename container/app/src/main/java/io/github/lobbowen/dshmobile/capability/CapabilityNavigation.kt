@@ -22,7 +22,8 @@ object CapabilityNavigation {
         if (acq.kind != AcquireKind.USER_TAP) return null
         return when (acq.target) {
             CapabilityCatalog.NAV_DEV_OPTIONS -> Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
-            CapabilityCatalog.NAV_SCREEN_CAPTURE -> Intent(ctx, MainActivity::class.java)
+            // 诊断页与工作台同帧：内核起不来时这一帧是唯一能回答「卡在哪一环」的地方。
+            CapabilityCatalog.NAV_DIAGNOSTICS -> Intent(ctx, MainActivity::class.java)
             else -> Intent(PermissionCatalog.byId(acq.target ?: "")?.settingsAction ?: return null)
         }
     }

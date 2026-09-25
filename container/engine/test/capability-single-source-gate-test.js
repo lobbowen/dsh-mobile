@@ -89,6 +89,15 @@ const RULES = [
     owners: ['bridge/MdnsWatcher.kt'],
     why: '两个服务类型只在 MdnsWatcher 声明一次（TYPE_PAIRING / TYPE_CONNECT）',
   },
+  {
+    // 真机定罪（2026-09-26「我把这个 APP 打开了就崩了」）：运行时的「重启」动作实现是
+    // destroy 当前实例。它一旦被开场/能力层的取法链引用，用户点开界面就可能亲手拆掉正在
+    // 跑的内核再等 30s。死活动作只许住在实现它的服务与诊断页兜底按钮里，判据层不得引用。
+    name: '运行时重启动作的归属',
+    re: /\bACTION_RESTART\b/,
+    owners: ['runtime/NodeRuntimeService.kt', 'MainActivity.kt'],
+    why: '运行时的死活归监督链（ContainerSupervisor + :node 自家 boot 循环）；开场界面只给「看启动日志」，不给拆内核的按钮',
+  },
 ];
 
 // 零容忍写法：不是「v1 词汇」而是**已定罪的假动作**，在任何地方（含注释）出现即失败。
@@ -109,7 +118,48 @@ const DEAD = [
   { name: 'v1 段状态机类型', re: /\bPipelineState\b|\bPipelineProbe\b|\bPipelineReadings\b/ },
   { name: 'v1 读数字段名', re: /\badbPaired\b|\blastPairError\b/ },
   { name: 'v1 凭据判据出口', re: /\bisPaired\s*\(/ },
+  // 「能静默办就不问用户」曾被用来把保活锚（无障碍 / 通知读取）排除出开屏冲刺。
+  // 那是循环依赖：没有锚 → :main 被冻结清理 → 那条静默通道永远等不到（真机 2026-09-26
+  // 「锁屏之后 App 被清理掉」）。锚现在由登记表的 keepAliveAnchor 位推导，函数不许复活。
+  { name: 'v1 冲刺排除逻辑', re: /\bsilentLater\s*\(/ },
 ];
+
+// ---- 常驻链的边（真机 2026-09-26 定罪：锁屏后 App 被清 = 这些边一条都不存在）----
+// 每条都是「机制存在」的判据：缺一条 = 那条保活边被"顺手重构"掉了，而单测与编译都不会红。
+// 因此逐条实名钉死（Kotlin 四条 + manifest 声明一条）：改名/搬家要连同这里一起改，改动即暴露。
+const KEEP_ALIVE_EDGES = [
+  {
+    name: '开屏戳监督者（Application 边）',
+    rel: 'NodeContainerApp.kt',
+    re: /ContainerSupervisor\.ensureRunning\(/,
+    why: '进程一起来就要把常驻链点着，不等用户点开某个页面',
+  },
+  {
+    name: '解锁/亮屏唤醒边',
+    rel: 'NodeContainerApp.kt',
+    re: /ACTION_USER_PRESENT/,
+    why: 'HANS 冻结后的第一条补位：用户解锁 = 立刻重戳监督者',
+  },
+  {
+    name: '监督者升前台',
+    rel: 'lifecycle/ContainerSupervisor.kt',
+    re: /startForeground\(/,
+    why: 'specialUse 前台服务 + 常驻状态通知，是「锁屏不许被清」的正式形态',
+  },
+  {
+    name: '进程级自愈 Job',
+    rel: 'lifecycle/SelfHealJobService.kt',
+    re: /setPeriodic\(/,
+    why: 'JobScheduler 周期戳：进程被整体杀掉之后的最后一条拉起边',
+  },
+  {
+    name: 'manifest 声明 specialUse 前台类型',
+    relPath: 'container/app/src/main/AndroidManifest.xml',
+    re: /foregroundServiceType="specialUse"/,
+    why: 'Kotlin 侧 startForeground 与 manifest 类型必须同时存在，缺一边运行时直接抛异常',
+  },
+];
+
 
 // ---- DAG 不变式（spec §2.1 规则 2/3 + onboarding-flow-spec §3 规则 4）。这段用**文本级**
 // 判据：剥注释 → 定位登记表区间 → 按条目锚点切段 → 解析 requires 符号表。
@@ -301,12 +351,21 @@ const violations = [];
 const deadHits = [];
 const forbiddenHits = [];
 const ownedCount = new Map(RULES.map((r) => [r.name, 0]));
+// 通知 id → 声明它的地方。多进程同属一个包，通知命名空间是**共享**的：两处用同一个 id，
+// 后 notify 的那条会把前一条顶掉（真机案底：监督者一度选到桥的 1002，症状「桥活着但通知不见了」）。
+const notifIds = new Map();
 let scannedFiles = 0;
 
 function scanFile(abs, relPkg) {
   let text;
   try { text = fs.readFileSync(abs, 'utf8'); } catch { return; }
   scannedFiles++;
+  // 只认「通知 id 常量」：名字以 NOTIF / NOTIF_ID 结尾（NOTIFY_MS 这类时长常量不算，
+  // 否则会拿 20_000L 的前缀 20 冒充 id 参与撞号判断）。
+  for (const mm of text.matchAll(/\b([A-Z0-9_]*NOTIF(?:_ID)?)\s*=\s*(\d+)(?![\d_])/g)) {
+    if (!notifIds.has(mm[2])) notifIds.set(mm[2], []);
+    notifIds.get(mm[2]).push(relPkg + ':' + mm[1] + '=' + mm[2]);
+  }
   const lines = text.split('\n');
   lines.forEach((line, i) => {
     for (const rule of RULES) {
@@ -335,6 +394,21 @@ function walk(dir, prefix) {
   }
 }
 walk(PKG, '');
+
+// 常驻链四条边：逐条读文件验「机制还在」。文件读不到 = 边被删了，直接 FAIL。
+const edgeFails = [];
+for (const edge of KEEP_ALIVE_EDGES) {
+  const where = edge.relPath || edge.rel;
+  const abs = edge.relPath ? path.join(ROOT, edge.relPath) : path.join(PKG, edge.rel);
+  let text = null;
+  try { text = fs.readFileSync(abs, 'utf8'); } catch { /* 缺失由下面报 FAIL */ }
+  if (text === null) edgeFails.push(edge.name + ' → 读不到 ' + where + '（' + edge.why + '）');
+  else if (!edge.re.test(text)) edgeFails.push(edge.name + ' → ' + where + ' 里找不到 ' + edge.re + '（' + edge.why + '）');
+}
+// 自证：边表本身不许空转（一条都没有 = 判据被删干净而门禁还在「零违规」）。
+if (KEEP_ALIVE_EDGES.length < 4) edgeFails.push('常驻链边表只剩 ' + KEEP_ALIVE_EDGES.length + ' 条（<4）—— 边被删了，门禁失去覆盖面');
+const dupNotif = [...notifIds.entries()].filter(([, where]) => where.length > 1);
+if (notifIds.size < 4) edgeFails.push('全仓只扫到 ' + notifIds.size + ' 个通知 id 常量（<4）—— 命名变了，唯一性检查失去覆盖面');
 
 // DAG 不变式单独取证：登记表原文 + 权限目录原文（判权限 id 是否真有定义）。
 const catalogText = fs.readFileSync(path.join(PKG, CATALOG_REL), 'utf8');
@@ -389,10 +463,21 @@ if (dagFails.length) {
   console.log('FAIL 依赖图不变式被破坏（spec §2.1 规则 2/3）：');
   dagFails.forEach((v) => console.log('  ' + v));
 }
+if (edgeFails.length) {
+  failed = true;
+  console.log('FAIL 常驻链的边被拆掉了（真机 2026-09-26 定罪「锁屏后 App 被清理」）：');
+  edgeFails.forEach((v) => console.log('  ' + v));
+}
+if (dupNotif.length) {
+  failed = true;
+  console.log('FAIL 通知 id 撞号（同包多进程共享一套通知命名空间，后 notify 顶掉前一条）：');
+  dupNotif.forEach(([id, where]) => console.log('  id ' + id + ' → ' + where.join(' | ')));
+}
 if (failed) {
   console.log('\n结果: 0 passed, 1 failed');
   process.exit(1);
 }
 console.log('PASS 判据单一真值：' + RULES.length + ' 条规则在归属层内均有命中，归属层外零复写，v1 模型词汇零残留');
 console.log('PASS 依赖图不变式：' + dagMeta.join('；'));
+console.log('PASS 常驻链：' + KEEP_ALIVE_EDGES.length + ' 条边全在位；通知 id ' + notifIds.size + ' 个全仓唯一');
 console.log('结果: 1 passed, 0 failed');

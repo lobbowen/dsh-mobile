@@ -28,11 +28,11 @@ class PermissionSprintTest {
         assertTrue(PermissionSprint.REQUIRED.contains(PermissionCatalog.POST_NOTIFICATIONS))
     }
 
-    @Test fun 冲刺首项必须是必要项_其余待选项不得挡在前面() {
+    @Test fun 冲刺首项必须是必要项_其余不得挡在前面() {
         assertEquals(PermissionSprint.REQUIRED.first(), PermissionSprint.ORDER.first())
         assertEquals(
-            "待选项不许挤掉必要项的位置",
-            PermissionSprint.REQUIRED + PermissionSprint.OPTIONAL,
+            "锚与待选项不许挤掉必要项的位置",
+            PermissionSprint.REQUIRED + PermissionSprint.ANCHORS + PermissionSprint.OPTIONAL,
             PermissionSprint.ORDER,
         )
         // 待选项一律「无前置、非加速器」：冲刺不能被自己的前置锁死（门禁规则 4 的镜像）
@@ -41,6 +41,21 @@ class PermissionSprintTest {
             assertTrue("$id 有前置，不该进静默冲刺", c.requires.isEmpty())
             assertFalse("$id 是加速器/每次会话项，物理不可预置", c.optional)
         }
+    }
+
+    @Test fun 保活锚从登记表推导_不是手写第二张清单() {
+        assertEquals(
+            CapabilityCatalog.ALL
+                .filter { it.keepAliveAnchor && it.id !in PermissionSprint.REQUIRED }.map { it.id },
+            PermissionSprint.ANCHORS,
+        )
+        // 反事实钉死（真机 2026-09-26「锁屏后 App 被清理」的直接病根）：无障碍与通知读取
+        // 是 :main 不被冻结的实证锚，必须在开屏就要，不许推给「等通道通了再静默办」。
+        assertTrue(PermissionSprint.ANCHORS.contains(PermissionCatalog.ACCESSIBILITY))
+        assertTrue(PermissionSprint.ANCHORS.contains(PermissionCatalog.NOTIFICATION_ACCESS))
+        assertTrue(PermissionSprint.ANCHORS.contains(PermissionCatalog.BATTERY_OPTIMIZATION))
+        // 锚住在 ANCHORS 档，不重复出现在 OPTIONAL 里
+        assertTrue(PermissionSprint.ANCHORS.intersect(PermissionSprint.OPTIONAL.toSet()).isEmpty())
     }
 
     @Test fun 需要通道或每次会话的能力不进冲刺() {
@@ -52,11 +67,7 @@ class PermissionSprintTest {
         assertFalse(PermissionSprint.ORDER.contains(CapabilityCatalog.WIRELESS_DEBUG))
     }
 
-    @Test fun 通道一通就能静默办的项不进冲刺() {
-        // SECURE_SETTINGS 档（通知读取、无障碍）在 F4 由 `settings put secure` 静默开。
-        // 开屏把人送进系统无障碍页 = 用户多点一次、我们一点没省（flow-spec §2.2「不进冲刺」）。
-        assertFalse(PermissionSprint.ORDER.contains(PermissionCatalog.NOTIFICATION_ACCESS))
-        assertFalse(PermissionSprint.ORDER.contains(PermissionCatalog.ACCESSIBILITY))
+    @Test fun 需要人点的待选项仍然要问() {
         // 反面对照：AppOps 档没有 shell 通道（Android 17 已无 MANAGE_APP_OPS_MODES），只能人点 → 该要
         assertTrue(PermissionSprint.OPTIONAL.contains(PermissionCatalog.MANAGE_EXTERNAL_STORAGE))
     }
