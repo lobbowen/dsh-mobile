@@ -44,6 +44,11 @@
 | 壳 versionCode 单调 + 同版本通道分叉 | 判据 `scripts/verify-apk-version-gate.sh`，取数 `scripts/check-apk-release-version.sh`；四个发布口（`fast-apk` / `build-apk` / `release-admin` 的 publish 与 repack）各自调用 | 回退 → 已升级设备永远收不到新版本；**自动通道同号换字节** → 下载地址指向的东西变了而版本号没说谎的能力没了 |
 | 内核版本唯一 | `kernel-ota` 发布步骤 | 版本复用 → 设备端判为"无更新" → **静默不生效** |
 
+> 上面两道门禁都要先读「线上现在是什么」。**「不存在」与「取不到」的三态分类只住
+> `scripts/read-release-asset.sh`**（退 0=取到 / 退 10=该 Release 或该资产确实没有，即首次发布 /
+> 退 2=看不清）。退 2 一律**禁止发布** —— 旧写法把它降成 `::warning` 然后照发，等于
+> 「看不清就当没有」，两条链（APK 读 `version.json`、内核读 `kernel-manifest.json`）共用这一处判。
+
 ## 4. 发布物
 
 **壳**（`apk-latest` Release）：
