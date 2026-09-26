@@ -977,6 +977,140 @@ if (fs.existsSync(RNV)) {
     !fs.existsSync(path.join(ROOT, 'scripts', 'validate-workflows.py')));
 }
 
+// ── ⑨b APK 原生件审计收口（门禁法①）：三份漂移副本 → scripts/verify-apk-native.sh ──
+// 定罪（2026-09-27 复算）：fast-apk 全量硬红 / build-apk 只查清单且 lib/ 零条目只 echo
+// 不红、不查内核(ADR-0005)/npm/小体积件 / release-admin diag 刻意只出报告。
+// 三处各自的错误信息、处置口径都在漂 —— 这里用合成 zip 夹具把宿主的每条出口都真跑一遍。
+const VAN = path.join(ROOT, 'scripts', 'verify-apk-native.sh');
+check('APK 原生件审计宿主 scripts/verify-apk-native.sh 存在', fs.existsSync(VAN));
+{
+  const runVan = (args) => {
+    const r = spawnSync('/bin/bash', [VAN, ...args], { encoding: 'utf8' });
+    return { rc: r.status, out: String(r.stdout || '') + String(r.stderr || '') };
+  };
+  const noargs = runVan([]);
+  check('verify-apk-native：缺参数 → 退 2 打 usage（审计不许空跑）',
+    noargs.rc === 2 && noargs.out.includes('用法'), JSON.stringify(noargs));
+  const nofile = runVan(['/nonexistent/app-debug.apk', 'arm64-v8a']);
+  check('verify-apk-native：apk 不存在 → 退 2（拿不到对象就不许走到 [ok]）',
+    nofile.rc === 2, JSON.stringify(nofile.out.slice(0, 80)));
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'van-'));
+  const mkZip = (name, files) => {
+    const stage = path.join(tmp, name + '.src');
+    for (const rel of Object.keys(files)) {
+      const p = path.join(stage, rel);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, files[rel] || 'x');
+    }
+    const z = spawnSync('zip', ['-r', '-q', path.join(tmp, name + '.apk'), '.'], { cwd: stage, encoding: 'utf8' });
+    if (z.status !== 0) return null;
+    return path.join(tmp, name + '.apk');
+  };
+  // 合法空包（只有 22 字节的 EOCD）：zip 命令造不出这种形态，直接写字节。
+  const emptyZip = path.join(tmp, 'empty.apk');
+  fs.writeFileSync(emptyZip, Buffer.from('504b05060000000000000000000000000000000000000000', 'hex'));
+
+  // pipefail 反噬的回归位（本轮定罪见脚本头部注释）：左侧 printf 撞 SIGPIPE 后，
+  // 整条管道退码被 pipefail 翻成非零 —— 「命中」会被读成「未命中」。
+  // 断言锁【机制】不锁实现写法：任何经管道的命中判定都可能吃到这口，宿主必须不用它。
+  const pipeProbe = path.join(tmp, 'pipe-probe.sh');
+  fs.writeFileSync(pipeProbe, 'set -euo pipefail\nL="$(printf \'%s\\n\' a b c d e f g h i j k l m n o p q r s t u v w x y z)"\nif printf \'%s\\n\' "$L" | grep -q "  z"; then echo HIT_OK; else echo HIT_FLIPPED_TO_MISS; fi\n');
+  const pOut = spawnSync('/bin/bash', [pipeProbe], { encoding: 'utf8' });
+  check('回归位：pipefail 会把「grep 命中但左侧 SIGPIPE」翻成未命中（旧宿主的假阳性根因）',
+    pOut.status !== 0 || String(pOut.stdout).includes('HIT_FLIPPED_TO_MISS'),
+    JSON.stringify({ rc: pOut.status, out: String(pOut.stdout).trim(), err: String(pOut.stderr).trim().slice(0, 80) }));
+
+  const notzip = path.join(tmp, 'not-zip.apk');
+  fs.writeFileSync(notzip, '这不是 zip');
+  const rNz = runVan([notzip, 'arm64-v8a']);
+  check('verify-apk-native：文件不是 zip → 退 2「审计没发生」（读不出清单 ≠ 审计不通过）',
+    rNz.rc === 2 && rNz.out.includes('审计没发生'), JSON.stringify({ rc: rNz.rc, out: rNz.out.slice(0, 100) }));
+  const rNzRep = runVan([notzip, 'arm64-v8a', '--report']);
+  check('verify-apk-native：--report 读不出清单 → 退 0 打 [FAIL]（诊断通道不判红，但要说真话）',
+    rNzRep.rc === 0 && rNzRep.out.includes('[FAIL]'), JSON.stringify({ rc: rNzRep.rc, out: rNzRep.out.slice(0, 100) }));
+
+  const rEmpty = runVan([emptyZip, 'arm64-v8a']);
+  check('verify-apk-native：空 APK → 退 1 且点名 lib/ 零条目（不空转放行）',
+    rEmpty.rc === 1 && rEmpty.out.includes('没有 lib/ 条目') && !rEmpty.out.includes('审计没发生'),
+    JSON.stringify({ rc: rEmpty.rc, out: rEmpty.out.slice(0, 140) }));
+
+  // 只有 libnode.so：越过 1)，应在内核之后的小件/清单处逐条点名。
+  const libOnly = mkZip('libonly', { 'lib/arm64-v8a/libnode.so': 'ELFAKE' });
+  const rLo = runVan([libOnly, 'arm64-v8a']);
+  check('verify-apk-native：缺件逐条点名（libc++_shared / 自有小件 / npm 都要出现在缺项里）',
+    rLo.rc === 1 && rLo.out.includes('libc++_shared.so') && rLo.out.includes('libdshflock.so')
+      && rLo.out.includes('assets/npm/npm.zip') && rLo.out.includes('审计不通过'),
+    JSON.stringify({ rc: rLo.rc, out: rLo.out.slice(-260) }));
+
+  const rLoNoAbi = runVan([libOnly]);
+  check('verify-apk-native：gate 模式缺 ABI → 退 2（静默用错默认值会把错 ABI 的包判过）',
+    rLoNoAbi.rc === 2 && rLoNoAbi.out.includes('ABI'), JSON.stringify({ rc: rLoNoAbi.rc }));
+
+  // 不该有的东西单独红：内核资产进门 = ADR-0005 被改回去。
+  const withKernel = mkZip('wkernel', { 'lib/arm64-v8a/libnode.so': 'ELFAKE', 'assets/kernel/k.zip': 'x' });
+  const rK = runVan([withKernel, 'arm64-v8a']);
+  check('verify-apk-native：APK 含内核资产 → 立刻退 1（ADR-0005，先于其它条目拦）',
+    rK.rc === 1 && rK.out.includes('APK 含内核资产'), JSON.stringify({ rc: rK.rc, out: rK.out.slice(0, 140) }));
+
+  // report 模式对同一份坏包：必须退 0，且把缺项打成事实而不是吞掉。
+  const rRep = runVan([libOnly, 'arm64-v8a', '--report']);
+  check('verify-apk-native：--report 对坏包退 0 且逐条列事实（诊断通道永不判红）',
+    rRep.rc === 0 && rRep.out.includes('[MISSING]') && rRep.out.includes('结果:'),
+    JSON.stringify({ rc: rRep.rc, out: rRep.out.slice(-200) }));
+  const rRepK = runVan([withKernel, 'arm64-v8a', '--report']);
+  check('verify-apk-native：--report 把「不该有」记成 FAIL（不混进缺项清单）',
+    rRepK.rc === 0 && rRepK.out.includes('[FAIL]'), JSON.stringify({ rc: rRepK.rc }));
+
+  // 全绿对照组：补齐全部条目后必须真 PASS —— 证明审计不是"怎么跑都红"的摆设。
+  const all = {
+    'assets/npm/npm.zip': 'zipzip', 'assets/npm/version.txt': 'v',
+    'assets/node/adb-client/cli.js': 'x',
+  };
+  for (const a of fs.readFileSync(path.join(ROOT, '.github/native-assets.txt'), 'utf8')
+    .split('\n').map((s) => s.trim()).filter((s) => s && !s.startsWith('#'))) {
+    all[`lib/arm64-v8a/${a}`] = 'ELFAKE';
+  }
+  for (const b of ['libdshflock.so', 'libdshposix.so', 'libdshptyprobe.so', 'libbash.so', 'libdshrg.so', 'libdshpty.so']) {
+    all[`lib/arm64-v8a/${b}`] = 'ELFAKE';
+  }
+  const srcDir = path.join(ROOT, 'container/app/src/main/assets/node/adb-client');
+  for (const f of fs.readdirSync(srcDir).filter((x) => x.endsWith('.js'))) {
+    all[`assets/node/adb-client/${f}`] = fs.readFileSync(path.join(srcDir, f));
+  }
+  const fullZip = mkZip('full', all);
+  const rFull = runVan([fullZip, 'arm64-v8a']);
+  check('verify-apk-native：条目齐备 → 退 0 打「审计通过」（全绿对照组，缺此则判红无从证伪）',
+    rFull.rc === 0 && rFull.out.includes('APK 原生件审计通过'),
+    JSON.stringify({ rc: rFull.rc, out: rFull.out.slice(-220) }));
+  // libdshpty.so 缺席只降级：从全绿夹具里拿掉它，仍须退 0 且出现软失败告警。
+  const softZip = mkZip('soft', Object.fromEntries(
+    Object.entries(all).filter(([k]) => !k.endsWith('libdshpty.so'))));
+  const rSoft = runVan([softZip, 'arm64-v8a']);
+  check('verify-apk-native：libdshpty.so 缺席 → 软失败 ::warning:: 且整体仍放行',
+    rSoft.rc === 0 && rSoft.out.includes('::warning') && rSoft.out.includes('PTY'),
+    JSON.stringify({ rc: rSoft.rc, out: rSoft.out.slice(-160) }));
+  fs.rmSync(tmp, { recursive: true, force: true });
+
+  // 回潮门禁：workflow 里不许再内联展开这份判据（unzip -l/-v 的清单审计形态）。
+  const AUDIT_RE = /unzip\s+-(l|v)\b/;
+  check('审计判据自证：旧内联形态必被抓、宿主调用不误伤（双向对照组）',
+    AUDIT_RE.test('unzip -l "$APK" | grep \'lib/\'') && AUDIT_RE.test('unzip -v "$APK" | awk')
+      && !AUDIT_RE.test('bash scripts/verify-apk-native.sh "$APK" "$ABI"')
+      && !AUDIT_RE.test('unzip -o -q "$APK"'));
+  const wfDir = path.join(ROOT, '.github/workflows');
+  const auditBack = fs.readdirSync(wfDir).filter((f) => f.endsWith('.yml'))
+    .filter((f) => AUDIT_RE.test(fs.readFileSync(path.join(wfDir, f), 'utf8')));
+  check('workflow 无内联 APK 清单审计回潮（判据只住 verify-apk-native.sh）',
+    auditBack.length === 0, auditBack.join(','));
+  const vanCallers = fs.readdirSync(wfDir).filter((f) => f.endsWith('.yml'))
+    .filter((f) => /scripts\/verify-apk-native\.sh/.test(fs.readFileSync(path.join(wfDir, f), 'utf8')))
+    .sort();
+  check('审计宿主被 fast-apk/build-apk/release-admin 三链同调（gate×2 + report×1）',
+    JSON.stringify(vanCallers) === JSON.stringify(['build-apk.yml', 'fast-apk.yml', 'release-admin.yml']),
+    vanCallers.join(','));
+}
+
 const METHODS_JS = path.join(ROOT, 'container/engine/src/bridge/methods.js');
 if (fs.existsSync(METHODS_JS)) {
   const js = fs.readFileSync(METHODS_JS, 'utf8');

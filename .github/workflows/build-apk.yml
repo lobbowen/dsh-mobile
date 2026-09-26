@@ -687,74 +687,17 @@ jobs:
           ./gradlew assembleDebug --no-daemon 2>&1 | tee /tmp/gradle-build.log
 
       - name: Audit APK contents (must contain libc++_shared.so)
+        # 判据的唯一实现是 scripts/verify-apk-native.sh，与 fast-apk 同调。
+        # 本链路此前只查 native-assets 清单，且 lib/ 零条目只 echo 不红、
+        # 不查内核资产（ADR-0005）/npm/小体积件 —— 收口后一并变严：
+        # 这条链路发的是 apk-latest，没有理由比日常链路松。
         run: |
-          echo "=== 打包后审计：APK 里到底有没有运行期依赖 ==="
-          # 为什么要这一步（真实教训）：
-          # 真机报 cannot locate symbol "_ZTVNSt6__ndk119basic_ostringstream..."，
-          # 这是【运行期动态链接】找不到 libc++_shared.so 的表现。
-          # 而此前的门禁只检查了 jniLibs 目录里有没有 libnode.so，
-          # 完全没有校验 libc++_shared.so 是否真的被 AGP 收进了 APK ——
-          # 于是"编译成功"和"真机可跑"之间有一道没人守的门。
-          #
-          # 这一步把门补上：直接解开产出的 APK 查验，不在就当场失败。
+          echo "8.5/9 audit-apk" > /tmp/ci-stage
           # `|| exit 1`：本 step 没开 set -e，pick.sh 报错后脚本会继续往下走 ——
-          # 继续就意味着拿空 APK 去 unzip/审计，红点会落在一个和真因无关的地方。
+          # 继续就意味着拿空 APK 去审计，红点会落在一个和真因无关的地方。
           APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)" \
             || { echo "[error] 没有可审计的 APK —— 审计这一步不许空跑"; exit 1; }
-          echo "APK: $APK ($(stat -c%s "$APK") 字节)"
-          echo
-          echo "--- lib/ 下的条目 ---"
-          unzip -l "$APK" | grep 'lib/' || echo "(没有 lib/ 条目 —— 严重异常)"
-          echo
-
-          # 清单驱动：路径与资产名都从 .github/native-assets.txt 读，
-          # 加资产不用回来改这一大段（此前是逐个硬编码 + 各自写一段报错）。
-          ASSETS="$(grep -v '^[[:space:]]*#' .github/native-assets.txt | grep -v '^[[:space:]]*$' | tr -d '\r')"
-          if [ -z "$ASSETS" ]; then
-            echo "[error] .github/native-assets.txt 里没有任何资产 —— 审计无意义，中止"
-            exit 1
-          fi
-
-          MISSING_ASSETS=""
-          for a in $ASSETS; do
-            n=$(unzip -l "$APK" | grep -c "lib/arm64-v8a/$a" || true)
-            printf '  %-22s: %s\n' "$a" "$n"
-            [ "$n" -ge 1 ] || MISSING_ASSETS="$MISSING_ASSETS $a"
-          done
-
-          if [ -n "$MISSING_ASSETS" ]; then
-            echo
-            echo "[error] APK 里缺少:$MISSING_ASSETS"
-            echo "        这正是真机 'cannot locate symbol _ZTVNSt6__ndk119basic_ostringstream' 一类"
-            echo "        故障的直接原因：libnode.so 动态依赖 libc++_shared.so，而后者不在 Android"
-            echo "        系统里，必须随 APK 打包。请检查 scripts/build-node-android.sh 的打包段"
-            echo "        与 app/build.gradle.kts 的 jniLibs 配置。"
-            echo "        清单来源: .github/native-assets.txt（NativeAssetRegistry 的投影）"
-            exit 1
-          fi
-
-          # 压缩方式检查：useLegacyPackaging=true 时 .so 会被压成 Deflate（这没问题，
-          # 系统安装时会解压落盘）。这里只把事实打印出来，便于对照排查。
-          echo
-          echo "--- 压缩方式（Stored=未压缩 / Defl=压缩） ---"
-          unzip -v "$APK" | awk '$NF ~ /lib\/arm64-v8a\// {print "  " $NF "  " $2 "  " $3 "  " $4}'
-          echo
-          echo "[ok] APK 审计通过：清单内 ${ASSETS} 全部在包里。"
-
-          # --- adb-client 资产审计（与 fast-apk.yml 同款，硬失败）---
-          # 这 8 个 JS 是 ADB 配对/shell 的唯一实现（ADR-0003），运行时由
-          # NodeProvisioner.ensureAdbClientScripts 整目录复制到 files/adb-client。
-          # 文件集合以 src/main/assets 目录为事实源：加文件/误删都会在这里红。
-          echo
-          echo "--- adb-client 资产 ---"
-          for f in container/app/src/main/assets/node/adb-client/*.js; do
-            n="assets/node/adb-client/$(basename "$f")"
-            if unzip -l "$APK" | grep -q "$n"; then echo "[ok] $n"; else echo "[error] APK 缺 $n"; exit 1; fi
-          done
-          SRC_N=$(ls container/app/src/main/assets/node/adb-client/*.js 2>/dev/null | wc -l)
-          APK_N=$(unzip -l "$APK" | grep -c 'assets/node/adb-client/[^/]*\.js$' || true)
-          [ "$SRC_N" = "$APK_N" ] || { echo "[error] adb-client 件数不一致：源码 $SRC_N vs APK $APK_N"; exit 1; }
-          echo "[ok] adb-client 审计通过（$SRC_N 个文件）"
+          bash scripts/verify-apk-native.sh "$APK" arm64-v8a
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
