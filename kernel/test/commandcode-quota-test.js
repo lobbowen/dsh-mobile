@@ -131,7 +131,6 @@ function mkInst(pp, key) {
   check('CC14 额度充足 → 不取订阅（subCalls=0）且 monthlyResetAt=null', r8.ok && subCalls === 0 && inst8.quota && inst8.quota.monthlyResetAt === null, JSON.stringify({ subCalls, mr: inst8.quota && inst8.quota.monthlyResetAt }));
 
   delete global.fetch;
-  delete global.fetch;
 
   const failed = results.filter((r) => !r);
   console.log('\n结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');

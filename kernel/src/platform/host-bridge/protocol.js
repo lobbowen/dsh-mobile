@@ -2,7 +2,7 @@
 
 // HostBridge 协议常量与编解码（内核侧）。
 //
-// 本文件是容器侧 `container-engine/src/bridge/protocol.js` 的**内核镜像**：两仓独立，
+// 本文件是容器侧 `container/engine/src/bridge/protocol.js` 的**内核镜像**（单仓布局）：
 // 但协议必须逐字节一致（PROTOCOL_VERSION / 错误码 / 帧字段）。任一侧语义变更须同步递增
 // PROTOCOL_VERSION（与 ui/src/services/supervisor/kernelUpdateBridge.ts 的 BRIDGE_PROTOCOL_VERSION 同源）。
 

@@ -46,7 +46,7 @@ data class NativeExecutable(
      * 两件事缺一不可：这些库真在同目录，**且本体自带含 `$ORIGIN` 的 `DT_RUNPATH`**
      * 指向该目录（链接期注入，`scripts/verify-runtime-elf.sh` 在构建/固化/打包三处校验）。
      * 不能靠调用方补 `LD_LIBRARY_PATH` —— `dsh` 的 `run_code` 清空环境。
-     * 完整论证见 ARCHITECTURE.md 第 3 节。
+     * 完整论证见 docs/architecture.md 第 3 节。
      *
      * 依赖缺失时 linker 报 `error=13` —— 与「SELinux 拒绝 exec」的 errno 完全相同，
      * 极易误导排查。本字段的存在就是为了让 [NativePreparer] 能**先查依赖再归因**。

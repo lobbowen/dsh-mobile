@@ -84,6 +84,25 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
     check('K4-e start 抛异常 → ok:false / phase 非 running', r.ok === false && lc.phase !== 'running', 'phase=' + lc.phase);
   }
 
+  // ── K4-f/g/h：stop 失败必须恢复**进入前的相位**（自 round13-lifecycle-stop-phase 归并）──
+  // K4-d 只要求「不是 stopped」；这里更强：failed/backoff 进去，失败后必须原样回来，
+  // 否则面板会把一个**已知失败**的模块显示成「运行中」，与观测相反。
+  {
+    const lcF = new ManagedLifecycle({ id: 't7', kind: 'test', name: 'T7', stop: async () => ({ ok: false, error: 'nope' }) });
+    lcF._setPhase('failed');
+    const rF = await lcF.stop('test');
+    check('K4-f stop 被拒 → phase 恢复为 failed（不是硬编码 running）', rF.ok === false && lcF.phase === 'failed', 'phase=' + lcF.phase);
+
+    const lcB = new ManagedLifecycle({ id: 't8', kind: 'test', name: 'T8', stop: async () => { throw new Error('boom'); } });
+    lcB._setPhase('backoff');
+    const rB = await lcB.stop('test');
+    check('K4-g stop 抛异常 → phase 恢复为 backoff', rB.ok === false && lcB.phase === 'backoff', 'phase=' + lcB.phase);
+
+    const lcR = new ManagedLifecycle({ id: 't9', kind: 'test', name: 'T9', stop: async () => ({ ok: false, error: 'nope' }) });
+    lcR._setPhase('running');
+    await lcR.stop('test');
+    check('K4-h 原本 running：失败后仍为 running（不回归）', lcR.phase === 'running', 'phase=' + lcR.phase);
+  }
   // ── 反向：成功路径不被误伤 ──
   {
     const lc = new ManagedLifecycle({

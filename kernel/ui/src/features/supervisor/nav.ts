@@ -2,7 +2,7 @@
  * supervisor 功能域导航 — 5 域（Android 内核保留域）
  *
  * ⚠ 已删除的域（勿回潮）：实例管理（沙箱 instances）、远程控制（lan / relay / frpc）、
- *   桌面壳（Tauri shell）—— 对应端点与页面已整体删除，见 docs/ANDROID-PLAN.md §4。
+ *   桌面壳（Tauri shell）—— 对应端点与页面已整体删除，见 docs/components/kernel-android-plan.md §4。
  *   ADB 配对域（pairing）：写操作物理归 L0 容器 GUI（ADR-0007），面板仅 OverviewPage
  *   的只读环境状态瓦片。
  */

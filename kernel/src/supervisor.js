@@ -95,7 +95,7 @@ class Supervisor {
     // 取代旧 _explicitAction 时间窗布尔（漏消费竞态已根治）。词表见 guard/intent.js。
     this.intents = new IntentLedger();
     this._stopping = false;
-    // ── 会话生命周期（契约（docs/ANDROID-PLAN.md） §3）：
+    // ── 会话生命周期（契约（docs/components/kernel-android-plan.md） §3）：
     // starting → running → stopping → stopped；stopping/stopped 期间抑制一切自动拉起（INV-S1）。
     // 唯一入口 /session/stop；唯一读取口 /session/status（INV-S2/S4）。
     this._sessionState = 'starting';
@@ -347,7 +347,7 @@ class Supervisor {
           this.config.apiPort = port;
           if (this.configPath) this.persistConfigPatch({ apiPort: port });
         }
-        // **登记实际绑定端口**（docs/ANDROID-PLAN.md（端口登记））：
+        // **登记实际绑定端口**（docs/components/kernel-android-plan.md（端口登记））：
         // 壳的唯一就绪判据 =「ports.json 的 supervisor-api 实际值」；绝不能让配置期望值滞留在登记表。
         try { ports.register('supervisor-api', port); } catch (e) { this.logger.warn('ports.register(actual) 失败: ' + e.message); }
         this.events.append('api_listening', { host: this.config.apiHost, port });
@@ -728,7 +728,7 @@ class Supervisor {
 
   /** 退出内核（契约 §4.1 冻结时序）：停全部被管对象 → 置 stopped → 回执。
    * **守卫绝不自己 stop 自己**：进程的所有者是外部（APK 容器 / Android Service），
-   * 守卫只回执「被管对象已全部停止」，由容器侧停止守卫进程（docs/ANDROID-PLAN.md §6）。
+   * 守卫只回执「被管对象已全部停止」，由容器侧停止守卫进程（docs/components/kernel-android-plan.md §6）。
    * 返回 { ok, sessionState } 供容器做退出握手。 */
   async shutdownAll() {
     // 幂等：已进入退出流程 → 直接回执当前态（壳可安全重试/轮询）

@@ -411,7 +411,6 @@ if (!hasReadelf) {
   check('⑨ 仓库的 native-deps.txt + native-assets.txt 能被宿主读通',
     /系统库白名单/.test(real.out) && /可执行资产/.test(real.out), detail(real));
   fs.writeFileSync(path.join(libs, 'libnode.so'), elf({ needed: ['libm.so', 'libdl.so', 'liblog.so', 'libc++_shared.so', 'libc.so'], runpath: "$ORIGIN" }));
-  fs.writeFileSync(path.join(libs, 'libnode.so'), elf({ needed: ['libm.so', 'libdl.so', 'liblog.so', 'libc++_shared.so', 'libc.so'], runpath: "$ORIGIN" }));
   fs.writeFileSync(path.join(libs, 'libc++_shared.so'), elf({ interp: null, needed: ['libc.so', 'libm.so', 'libdl.so'] }));
   const k = { c: BASE, lib: libs, deps: path.join(ROOT, 'scripts/native-deps.txt'), manifest: path.join(ROOT, '.github/native-assets.txt') };
   const r = run(k);
@@ -439,10 +438,8 @@ const SMELLS = [
   ['bionic 解释器判据', /linker64/, HOST, /system\/bin\/linker64/],
   ['系统库白名单副本', /libc\.so\|libm\.so|libm\.so\|libdl\.so/, DEPS_FILE, /^libm\.so$/m],
 ];
-/** 剥掉整行注释：注释里提这些串是**交代历史**（「原先自己抄了一条…」），不是判据。 */
-function stripComments(src) {
-  return src.split('\n').filter((l) => !/^\s*(#|\/\/)/.test(l)).join('\n');
-}
+// stripComments 的唯一实现住 harness.js（门禁法①，勿在本文件再写第二份）。
+const stripComments = makeRunner.stripComments;
 for (const rel of SITES) {
   const p = path.join(ROOT, rel);
   const exists = fs.existsSync(p);

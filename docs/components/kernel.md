@@ -9,7 +9,7 @@ DeepSeek Harness 等 Agent 产品，对外提供 HTTP 控制面与同源托管�
 > 清理政策：**不做「忽略 / 占位 / 降级 / 兼容保留」** —— PC 专属机制一律**真删**（删文件、
 > 删路由、删类型、删字段、删断言），不留 410 下架桩与「返回 unsupported」的空壳实现。
 >
-> 架构与迁移全貌见 **[docs/ANDROID-PLAN.md](docs/ANDROID-PLAN.md)**（内核侧唯一架构文档）。
+> 架构与迁移全貌见 **[kernel-android-plan.md](kernel-android-plan.md)**（内核侧唯一架构文档）。
 
 ---
 
@@ -43,7 +43,7 @@ DeepSeek Harness 等 Agent 产品，对外提供 HTTP 控制面与同源托管�
 
 | 域 | 路径 | 职责 |
 |---|---|---|
-| **native** | `src/domains/native/` | Agent 运行时（DSH 等）安装 / 升级 / 卸载 / 探活 |
+| **native** | `src/guard/native/` | Agent 运行时（DSH 等）安装 / 升级 / 卸载 / 探活 |
 | **dist** | `src/domains/dist/` | npm 分发、镜像源测速与固定 |
 | **plugin** | `src/domains/plugin/` | 第三方插件市场 / 安装 / 启用 |
 | **router** | `src/domains/router/` | 模型网关（多供应商 Key 轮换代理） |
@@ -73,7 +73,7 @@ DeepSeek Harness 等 Agent 产品，对外提供 HTTP 控制面与同源托管�
 > APK 构建、OTA 引擎、OTA 签名与公钥焊接、HostBridge、系统通知、存储、自启、设备策略——
 > **不含** `desktop/`、`systemd unit`、`release/`（SEA 打包）、`archive/`、`shared/version-vectors.json`
 > 这些 PC 时代构建/部署物（本次**整仓真删、无处持有**；容器直接出 APK，无 SEA 打包 / launcher / 归档）。
-> CI 的 `release` job 仅把 `ui/dist` 作为 OTA 资源挂 GitHub Release，与已删的 `release/` 目录无关。
+> 注意区分：内核仓**没有** `release/` 目录（PC SEA 打包物已真删）；而 CI 的 `kernel-ota.yml` 在构建时会创建一个**临时** `release/` 输出目录，存放签好名的 OTA 包（`kernel-<v>.zip` + `kernel-manifest.json`），二者无关。
 
 ---
 
@@ -96,7 +96,7 @@ process.env.ANDROID_ROOT !== undefined
 能力矩阵（`DSH_ANDROID=1 node -e "require('./src/platform/os').capabilities()"`）：
 
 ```json
-{"platform":"linux","arch":"x64","multiInstance":false,"pidAdoption":true,
+{"platform":"android","arch":"arm64","multiInstance":false,"pidAdoption":true,
  "processTreeKill":false,"desktopNotify":false,"autostart":false,
  "frpExpose":false,"hostService":"none"}
 ```
@@ -138,7 +138,7 @@ dsh-supervisor daemon
 dsh-supervisor status
 ```
 
-可用命令：`daemon | status | start | stop | restart | install | events | logs | version | upgrade`
+可用命令：`daemon | status | start | stop | restart | install | self-check | events | logs | version | upgrade`
 （`uninstall` / `gui-autostart` / `self-update` 已删，归容器）。
 
 > 前置：Node ≥ 18；状态根由 `DSH_SUPERVISOR_HOME` 或 `$XDG_STATE_HOME` 决定（见 §7）。
@@ -242,7 +242,7 @@ $DSH_SUPERVISOR_HOME  →  $XDG_STATE_HOME/dsh-supervisor  →  ~/.local/state/d
 ## 9. 测试与门禁
 
 ```bash
-npm test                                   # 48 个测试文件入链
+npm test                                   # 64 个测试文件入链
 npm run test:native-uninstall              # 真实卸载场景（不进主链）
 npm run test:plugin-change-restart         # 含插件卸载场景（不进主链）
 ```
@@ -269,14 +269,14 @@ npm run test:plugin-change-restart         # 含插件卸载场景（不进主�
 `http://127.0.0.1:<apiPort>/`）。五个页面：概览、插件、智能路由、任务、设置。
 
 - 已随 PC 三域删除：实例管理页、局域网/FRP 远程控制页、开机自启卡片、Tauri 桌面壳双版本线。
-- **待办（P6）**：移动端容器 WebView 适配（见 `docs/ANDROID-PLAN.md` §8 路线图）。
+- **待办（P6）**：移动端容器 WebView 适配（见 `kernel-android-plan.md` §8 路线图）。
 
 ---
 
 ## 11. 路线图
 
 UDS 控制面 → HostBridge（JS↔Kotlin）→ Android Service 接入 → 能力桥落地 →
-UI 移动端适配。详见 [docs/ANDROID-PLAN.md](docs/ANDROID-PLAN.md) §6–§8。
+UI 移动端适配。详见 [kernel-android-plan.md](kernel-android-plan.md) §6–§8。
 
 ---
 

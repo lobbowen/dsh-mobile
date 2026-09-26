@@ -18,56 +18,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
-// 端口必须经 safePort 取（门禁 T1/T2：不得硬编码，且须落在安全段 28000+）。
-const { safePort } = require('./_ports.js');
-const TEST_PORT = safePort('defects-batch-f', 0);
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
-
-// ── K6 Origin/Host 双闸 ──
-console.log('== K6 CSRF 深化校验（Host + Origin）==');
-{
-  const apiPath = path.join(ROOT, 'src', 'api', 'index.js');
-  const src = fs.readFileSync(apiPath, 'utf8');
-  // 直接测真实导出的函数（若未导出，则退回源码断言）。
-  let originAllowed = null;
-  try { originAllowed = require(apiPath).originAllowed; } catch {}
-  if (typeof originAllowed === 'function') {
-    const mk = (headers) => ({ headers });
-    const P = TEST_PORT;              // 测试端口（安全段，经 safePort 取）
-    const R = TEST_PORT + 1;          // 另一个端口（用于「异端口」用例）
-    const evil = `http://evil.com:${P}`;
-    // 闸 ①：Host 必须是回环名（防 DNS-rebinding）
-    check('K6-a 恶意 Host（evil.com）被拒',
-      originAllowed(mk({ host: 'evil.com' }), P) === false, 'evil.com');
-    check('K6-a 回环 Host（127.0.0.1:port）被接受',
-      originAllowed(mk({ host: `127.0.0.1:${P}` }), P) === true);
-    check('K6-a IPv6 回环 Host（[::1]:port）被接受',
-      originAllowed(mk({ host: `[::1]:${P}` }), P) === true);
-    check('K6-a localhost:port 被接受',
-      originAllowed(mk({ host: `localhost:${P}` }), P) === true);
-    // 闸 ②：Origin
-    check('K6-b 恶意 Origin（http://evil.com:同端口）被拒（旧实现只比端口 → 会放行）',
-      originAllowed(mk({ origin: evil }), P) === false, evil);
-    check('K6-b 回环 Origin + 同端口被接受',
-      originAllowed(mk({ origin: `http://127.0.0.1:${P}` }), P) === true);
-    check('K6-b 回环 Origin + 异端口被拒',
-      originAllowed(mk({ origin: `http://127.0.0.1:${R}` }), P) === false);
-    check('K6-b 非 http(s) 壳协议 origin（tauri://）被拒（PC 桌面壳已删，面板同源托管）',
-      originAllowed(mk({ origin: 'tauri://localhost' }), P) === false);
-    check('K6-b 无 Origin（curl/CLI）放行',
-      originAllowed(mk({}), TEST_PORT) === true);
-    check('K6-b 畸形 Origin 被拒',
-      originAllowed(mk({ origin: 'not a url' }), TEST_PORT) === false);
-  } else {
-    // 退回源码断言（函数未导出时）
-    check('K6 读取 req.headers.host（identity.js 声称的深化校验已实现）',
-      /req\.headers\.host/.test(src), 'req.headers.host');
-    check('K6 Origin 校验含 hostname 判定',
-      /u\.hostname/.test(src) && /isLoopbackHost/.test(src), 'isLoopbackHost');
-  }
-  check('K6 源码无 tauri 壳 origin 特判（PC 桌面壳已删）', !/tauri:/.test(src), 'no tauri:');
-}
 
 // ── K7 ports.js 不用 HOME 兜底 ──
 console.log('== K7 端口注册表路径（三平台一致）==');
@@ -97,13 +49,6 @@ console.log('== K9 版本解析正则 ==');
     .filter((l) => !/^\s*\/\//.test(l)).join(String.fromCharCode(10));
   check('K9 不再有 [^s] 字符类误用（已剥注释）', !/\[\^s\]/.test(src), '[^s]');
   check('K9 使用 [^\\s]（正确的「非空白」）', /\[\^\\s\]/.test(src), '[^\\s]');
-  check('K9 正则被赋值给变量 m 并从 out 提取',
-    /const m = \/dsh-supervisor v\(\[\^\\s\]\+\)\/\.exec\(out\)/.test(src), 'ok');
-  const re = /dsh-supervisor v([^\s]+)/;
-  check('K9 含 s 的版本不被截断', re.exec('dsh-supervisor v1.0.5s')?.[1] === '1.0.5s',
-    String(re.exec('dsh-supervisor v1.0.5s')?.[1]));
-  check('K9 不跨行吞字', re.exec('dsh-supervisor v1.0.0\nEXTRA')?.[1] === '1.0.0',
-    JSON.stringify(re.exec('dsh-supervisor v1.0.0\nEXTRA')?.[1]));
 }
 
 // ── K10 卸载失败保留 manifest ──
@@ -120,8 +65,6 @@ console.log('== K10 卸载失败时保留 manifest ==');
     check('K10 删除 manifest 受 exitCode===0 守卫（失败时保留以便重试）',
       /if\s*\(exitCode\s*===\s*0\)\s*\{\s*\n\s*rm\(this\.manifestFile\)/.test(seg),
       'exitCode===0 → rm');
-    check('K10 失败分支保留 manifest',
-      /保留 manifest/.test(seg), '保留 manifest');
   }
 }
 

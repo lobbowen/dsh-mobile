@@ -30,7 +30,7 @@ function handle(ctx) {
       return send(200, { ok: true, url: 'http://127.0.0.1:' + sup.config.targetPort + '/?token=' + token });
     }
 
-    // ══ 会话生命周期（契约（docs/ANDROID-PLAN.md） §3/§4）══
+    // ══ 会话生命周期（契约（docs/components/kernel-android-plan.md） §3/§4）══
     // GET  /session/status → { sessionState }：会话态唯一读取口（INV-S4）。
     // POST /session/stop   → 进入 stopping，停全部被管对象，置 stopped 并回执（INV-S2）。
     //   **守卫不停止自己**；容器（APK / Android Service）收到本回执后停止守卫进程（契约 §4.1）。

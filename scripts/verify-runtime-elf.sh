@@ -25,7 +25,7 @@
 #     -Wl,--enable-new-dtags；这一档不拦住，三小时 CI 与一轮真机都白跑。
 #
 # 为什么 5 是硬门槛而不是「建议」：dsh 的 run_code 从空环境起子进程，继承不到主进程
-# 设的 LD_LIBRARY_PATH。完整论证与 2026-09-26 真机实测见 ARCHITECTURE.md 第 3 节。
+# 设的 LD_LIBRARY_PATH。完整论证与 2026-09-26 真机实测见 docs/architecture.md 第 3 节。
 #
 # 取数一律 LC_ALL=C：readelf 的字段名会随 locale 本地化（zh_CN 下 "Machine:" 变成
 # 「机器:」），届时下面每一条 awk/sed 都不命中 —— 判据会静默空转成全绿。本机就是

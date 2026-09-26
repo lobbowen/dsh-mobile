@@ -20,8 +20,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const { DaemonLifecycle } = require(path.join(ROOT, 'src', 'guard', 'proc', 'daemon-lifecycle'));
-// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
-const { safePort } = require(path.join(__dirname, '_ports'));
+// 端口手工分配在安全段（避开 OS ephemeral 与生产池）；跨文件不撞号靠人工规划，T1 兜底。
 const FAKE = path.join(ROOT, 'test', 'fixtures', 'fake-ctl-daemon.js');
 const CTL = 28040; // 测试专用端口段（远离生产）
 const ctlHealth = () => new Promise((resolve) => {

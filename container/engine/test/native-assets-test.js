@@ -649,7 +649,7 @@ if (fs.existsSync(VGATE)) {
     sameExplicit.rc === 0 && sameExplicit.out.includes('同版本重发'), JSON.stringify(sameExplicit));
   const sameAuto = runV([vSame, v7, 'auto']);
   check('版本门禁：同版本 + 自动通道判红（动了 APK 内容就必须 bump）',
-    sameAuto.rc === 1 && sameAuto.err.includes('versioning.md'), JSON.stringify(sameAuto));
+    sameAuto.rc === 1 && sameAuto.err.includes('release.md'), JSON.stringify(sameAuto));
   const backAuto = runV([v6, v7, 'auto']);
   const backExplicit = runV([v6, v7, 'explicit']);
   check('版本门禁：回退两种通道都判红（不可逆，显式通道也不放过）',
@@ -1105,7 +1105,15 @@ check('APK 原生件审计宿主 scripts/verify-apk-native.sh 存在', fs.exists
     .split('\n').map((s) => s.trim()).filter((s) => s && !s.startsWith('#'))) {
     all[`lib/arm64-v8a/${a}`] = 'ELFAKE';
   }
-  for (const b of ['libdshflock.so', 'libdshposix.so', 'libdshptyprobe.so', 'libbash.so', 'libdshrg.so', 'libdshpty.so']) {
+  // 小体积原生件清单**从注册表派生**，不再在这里手抄第二份（门禁法②：清单禁手维护）。
+  // 由 NativeAssetRegistry.kt 的 libName 声明推出「除 libnode/libc++ 之外的全部资产」；
+  // 注册表新增一件，这里自动跟上 —— 漏抄一件就是「条目齐备」对照组悄悄失真。
+  // libdshpty.so 是 node-pty 的**软失败件**，不登记在 CAPABILITY 里，故显式补一个。
+  const registryLibs = [...stripKotlinComments(fs.readFileSync(REGISTRY_KT, 'utf8'))
+    .matchAll(/libName\s*=\s*"([^"]+)"/g)].map((m) => m[1]);
+  const provenSmall = registryLibs.filter((n) => n !== 'libnode.so' && n !== 'libc++_shared.so');
+  if (!provenSmall.includes('libdshpty.so')) provenSmall.push('libdshpty.so');
+  for (const b of provenSmall) {
     all[`lib/arm64-v8a/${b}`] = 'ELFAKE';
   }
   const srcDir = path.join(ROOT, 'container/app/src/main/assets/node/adb-client');

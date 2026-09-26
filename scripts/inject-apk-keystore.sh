@@ -71,7 +71,7 @@ PEM_TXT="$(<"$CERT")"
 case "$PEM_TXT" in (*"-----BEGIN CERTIFICATE-----"*) ;; (*) echo "[error] 导出的 $CERT 不是 PEM 证书 —— 锚点不可用，禁止继续。"; exit 2 ;; esac
 
 # 指纹只作展示，不参与任何判定：keytool 的指纹行写法在 JDK 版本间变过（历史前科见
-# docs/runbook/handover.md：正则写 "SHA256:" 永不匹配 → 健康路径也误报校验失败）。
+# docs/architecture.md：正则写 "SHA256:" 永不匹配 → 健康路径也误报校验失败）。
 # 真正的身份比对在 scripts/verify-apk-signing.sh 里做，那里对三种写法都做了归一。
 while IFS= read -r ln; do
   case "${ln,,}" in (*"ingerprint"*) echo "[dsh-signing] keystore 证书 $ln" ;; esac

@@ -7,7 +7,7 @@
 > ⚠ **已删除的宿主形态（勿回潮）**：① Tauri 桌面完整壳（`window.__TAURI__` / `api_proxy` Rust 转发）；
 > ② `ui-react/` 发布镜像（GET / → supervisor.html，浏览器/局域网）；③ 自定义无边框窗口（decorations:false / transparent）。
 > 全部 PC 桌面壳概念已随双仓拆分移除，安卓内核只有「容器 WebView / 手机浏览器」一种宿主。
-> 内核更新 = **单写入者契约**：面板经 HostBridge 消息桥请安卓容器 OTA 执行（见 `docs/ANDROID-PLAN.md`）。
+> 内核更新 = **单写入者契约**：面板经 HostBridge 消息桥请安卓容器 OTA 执行（见 `kernel-android-plan.md`）。
 
 ---
 
@@ -75,7 +75,7 @@ src/
 
 ### 4.3 质量门禁
 - scripts：typecheck（tsc --noEmit）/ lint（eslint src）/ test（vitest run）/ verify（四者串联）。
-- 门禁在 CI 强制跑（见 `.github/workflows/build.yml` 的 `verify` job）：本仓自包含，不依赖壳仓/发布脚本。
+- 门禁在 CI 强制跑（见 `.github/workflows/ci.yml` 的 `verify` job）：本仓自包含，不依赖壳仓/发布脚本。
 - ESLint：flat config + @babel/eslint-parser（preset-typescript + preset-react）。
   **原因**：项目 TypeScript 7.0（preview 标 latest）与 typescript-eslint peer 上限冲突且运行时硬拒 TS7 —— eslint 侧放弃类型规则，纯类型由 tsc strict + noUnusedLocals + noUnusedParameters 承担。
 - 单元测试：vitest（node env）+ vi.stubGlobal fetch 注入；覆盖 polling 事件合并去重 / in-flight 守卫、client 错误归一化与超时信号装配。

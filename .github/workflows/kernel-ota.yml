@@ -180,6 +180,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           ls -la release/
 
           # 发布说明写到文件再 --notes-file 读入。
@@ -220,7 +221,7 @@ jobs:
           # 「该通道还没有 manifest」与「取不到 manifest」是两种结局，分类只住
           # scripts/read-release-asset.sh（APK 侧读 version.json 用的是同一处）。
           # 旧写法把「取不到」降成 ::warning 然后照发，还把「取到了但读不出 version」
-          # 也当成空 —— 两者都是把「看不清」当成「没有」，正是 versioning.md §3 定过的那类罪。
+          # 也当成空 —— 两者都是把「看不清」当成「没有」，正是 release.md §3 定过的那类罪。
           TMPD="$(mktemp -d)"
           FEEDRC=0
           bash scripts/read-release-asset.sh kernel-channel-manifest "$ROLL" kernel-manifest.json "$TMPD" || FEEDRC=$?

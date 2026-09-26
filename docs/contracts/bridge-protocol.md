@@ -7,7 +7,8 @@
 
 ## 1. 传输
 
-- **Unix 域套接字（UDS）**，路径位于 `Context.getFilesDir()` 下（如 `files/bridge.sock`），文件权限绑定本 App UID，**仅本应用进程可连**。
+- **Unix 域套接字（UDS）**：**Linux 抽象命名空间**，名为 `dsh_hostbridge`（无文件系统路径，故无 `chmod` 可言）。内核侧 `net.connect('\0dsh_hostbridge')`（前导 NUL）。
+  > ⚠ 抽象命名空间 socket 不做 UID 鉴权：当前实现**没有对端认证**，隔离完全依赖 SELinux 域。这是已知缺口，见 README §4。
 - 协议：**JSON-RPC 2.0**（请求/响应/通知）。
 - 连接由 `:node` 进程（内核）主动发起；HostBridge（Kotlin Service）监听。
 - 严禁经 TCP（`127.0.0.1:*`）暴露控制面。
@@ -29,6 +30,7 @@
 | `app.launch` | `pkg`, `activity?` | 基础 | ✅ |
 | `app.stop` | `pkg` | 基础 | ✅（`audit=false`，按 §5） |
 | `app.listInstalled` | — | 基础 | ✅ |
+| `app.openUrl` | `url` | 基础 | ✅ |
 | `app.install` | `apkPath`（包内/下载） | **Device Owner**（静默安装） | ✅ `PackageInstaller` |
 | `app.uninstall` | `pkg` | **Device Owner**（静默卸载） | ✅ `PackageInstaller.uninstall` |
 | `app.grantPermission` | `pkg`, `perm` | **Device Owner** | ✅ |
@@ -120,7 +122,7 @@
 > **语义已修正**：本组不再是「内置编译工具链」。那个方案**已实测证伪**——
 > Google Maven 上没有 aarch64 版 aapt2（`linux-aarch64`/`linux-arm64` 均 404），
 > 解包实为 x86-64 + glibc，exec 四道关的后三关装机后无法补救。
-> 完整论证见 [ARCHITECTURE.md §2.2–2.3](../../ARCHITECTURE.md)。
+> 完整论证见 [architecture.md §2.2–2.3](../architecture.md)。
 >
 > 现在的语义是「**从 OTA 源安装/升级已签名内核**」（ADR-0005）：设备不生产内核，只安装。
 > **来源只有一个**（远端 feed）—— 本地 feed 与 APK 内置基线已收敛删除：

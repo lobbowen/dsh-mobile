@@ -33,7 +33,7 @@
 `scripts/read-release-asset.sh`：退 0=取到 / 退 10=该通道 Release 或该资产确实没有（= 首次发布，合法）/
 退 2=看不清（网络、鉴权、限流）。退 2 与「manifest 取到了却读不出 version」都**判红不发布** ——
 旧写法是降成 `::warning` 然后照发，等于 GitHub 抖一下门禁就地不存在而流水线全绿
-（2026-09-26 定罪，判据表见 `docs/runbook/versioning.md` §3）。
+（2026-09-26 定罪，判据表见 `docs/runbook/release.md` §3）。
 
 **产物与稳定 URL**：
 

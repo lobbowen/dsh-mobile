@@ -101,7 +101,11 @@ function httpGetFor(srv) {
   check('应用后 currentVersion = 2.0.0', eng.currentVersion() === '2.0.0');
   check('应用后 installedVersions 含 2.0.0', eng.installedVersions().includes('2.0.0'));
   check('应用后 kernel.json 落盘', fs.existsSync(path.join(base, 'kernel', '2.0.0', 'kernel.json')));
-  check('坏包绝不切指针(apply 前需先 verify 通过)', true); // 结构性：apply 仅对已验证包调用
+  // 结构性：apply 仅对已验证包调用 —— 用「未验签的坏包」证伪这条通路。
+  let badApplyThrew = false;
+  try { eng.apply('9.9.9', Buffer.from('not-a-zip')); } catch { badApplyThrew = true; }
+  check('坏包绝不切指针（apply 对未验证的坏包抛错且指针不动）',
+    badApplyThrew && eng.currentVersion() === '2.0.0', 'threw=' + badApplyThrew + ' current=' + eng.currentVersion());
 
   // 回滚：仅一个版本时无上一版 → null
   check('仅一版本时 rollback 返回 null', eng.rollback() === null);

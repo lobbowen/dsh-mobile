@@ -50,7 +50,7 @@ class SettingsView {
       // 此前注释已承诺该字段，但实现未暴露，导致 UI 只能在后端报错后才知道。
       capabilities: (() => { try { return require('../../platform/os/index').capabilities(); } catch { return null; } })(),
       // Android 内核：桌面壳（Tauri）已删除；`shellWatchdog` 观测快照随之移除——
-      // 现由 APK 容器 / Android Service 保活，内核侧不再持有桌面壳看护状态（见 docs/ANDROID-PLAN.md）。
+      // 现由 APK 容器 / Android Service 保活，内核侧不再持有桌面壳看护状态（见 docs/components/kernel-android-plan.md）。
     };
   }
 

@@ -85,6 +85,55 @@ check('E-c release 签名接受第二参', /release\(port, ownerId\)/.test(
   try { fs.rmSync(tmp, { force: true }); } catch {}
 }
 
+// ── E-c2：release 的空值顺序 + 调用方 ownerId 纪律（自 round13-ports-release 归并）──
+{
+  const { PortRegistry } = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'ports.js'));
+  const os = require('node:os');
+  const tmp = path.join(os.tmpdir(), 'p4-port-null-' + process.pid + '.json');
+  const reg = new PortRegistry({ file: tmp });
+
+  // 核心缺陷：未登记端口 + ownerId 曾抛 TypeError（空值检查在 owner 比较之后）
+  let threw = null, ret;
+  try { ret = reg.release(65500, 'owner-X'); } catch (e) { threw = e; }
+  check('E-c2 release(未登记端口, ownerId) 不抛且返回 false（旧实现抛 TypeError）',
+    threw === null && ret === false, threw ? threw.constructor.name : 'no-throw/' + ret);
+  let ret2, threw2 = null;
+  try { ret2 = reg.release(65501); } catch (e) { threw2 = e; }
+  check('E-c2 release(未登记端口, 无 ownerId) 也不抛且返回 false',
+    threw2 === null && ret2 === false, JSON.stringify({ threw2: !!threw2, ret2 }));
+  try { fs.rmSync(tmp, { force: true }); } catch {}
+
+  // 源码顺序：空值检查必须在 owner 比较之前
+  const code = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'lifecycle', 'ports.js'), 'utf8')
+    .split(String.fromCharCode(10)).filter((l) => !l.trim().startsWith('//')).join(String.fromCharCode(10));
+  const base = code.indexOf('release(port, ownerId)');
+  const iN = code.indexOf('if (!rec) return false;', base);
+  const iO = code.indexOf('rec.owner !== ownerId', base);
+  check('E-c2 源码实现：空值检查在 owner 比较之前（防旧顺序回归）',
+    iN >= 0 && iO >= 0 && iN < iO, 'null@' + iN + ' owner@' + iO);
+
+  // 调用方纪律：全仓 .release( 调用必须带第二个参数
+  const files = [];
+  (function walk(d) {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p); else if (e.name.endsWith('.js')) files.push(p);
+    }
+  })(path.join(ROOT, 'src'));
+  const offenders = [];
+  for (const ff of files) {
+    if (ff.endsWith(path.join('lifecycle', 'ports.js'))) continue;
+    const src = fs.readFileSync(ff, 'utf8');
+    const body = src.split(String.fromCharCode(10)).filter((l) => {
+      const t = l.trim(); return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*');
+    }).join(String.fromCharCode(10));
+    for (const m of body.matchAll(/\.release\(([^)]*)\)/g)) {
+      if (m[1].indexOf(',') < 0) offenders.push(path.relative(ROOT, ff) + ' → release(' + m[1].trim() + ')');
+    }
+  }
+  check('E-c2 全仓 release 调用方都带 ownerId（owner 归属纪律）',
+    offenders.length === 0, offenders.length ? offenders.join(' | ') : '0 处');
+}
 // ── E-d：setProviderKeys 删除路径的收尾 ──
 {
   const m = ops.match(/setProviderKeys\(id, opts\) \{[\s\S]*?\n  \}/);

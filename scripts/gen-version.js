@@ -9,7 +9,7 @@
 //   node scripts/gen-version.js           打印聚合清单（进 CI 日志，供评审）
 //
 // 为什么**不**生成一个进 git 的清单文件：
-//   那会要求"本地先跑生成器、再提交结果"，与 docs/runbook/testing-standard.md 的
+//   那会要求"本地先跑生成器、再提交结果"，与 docs/standards/testing.md 的
 //   红线（本地不得调起任何仓内执行）直接冲突。改为 CI 侧校验 + 日志报告：
 //   评审看 CI 日志即可看到"这次各层版本分别是什么"。
 //

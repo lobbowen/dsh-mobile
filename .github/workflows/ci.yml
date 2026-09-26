@@ -1,7 +1,7 @@
 name: CI (gates)
 
 # 统一门禁：容器引擎（契约/对账/原生资产/桥）+ 内核回归 + 面板前端。
-# 单一事实源与红线见 docs/STORAGE-STANDARD.md、docs/runbook/testing-standard.md。
+# 单一事实源与红线见 docs/standards/storage.md、docs/standards/testing.md。
 # 出包（APK/内核 OTA）不在这里，见 apk-fast / apk-full / kernel-ota。
 
 on:
@@ -73,16 +73,10 @@ jobs:
       - name: Container engine tests (logic)
         run: |
           set -euo pipefail
-          # verify-runtime-elf-test.js 用合成 ELF 夹具真跑 scripts/verify-runtime-elf.sh，
-          # 判据取数靠 readelf。工具没装**不是跳过测试的理由** —— 那条断言会如实红，
-          # 这里先按唯一宿主把它装上，让红只可能来自产物而不是环境。
-          bash ../../scripts/ensure-tool.sh readelf binutils
-          # ota-anchor-test.js 用 openssl 现造临时 ed25519 密钥对证伪配对判据；同理，缺工具就装，不跳过。
-          bash ../../scripts/ensure-tool.sh openssl openssl
-          npm run test:logic 2>&1 | tee /tmp/engine-test.log
-          echo
-          echo "=== 容器引擎逻辑测试汇总 ==="
-          echo "$(grep -c '^PASS' /tmp/engine-test.log || true) 个 PASS，$(grep -c '^FAIL' /tmp/engine-test.log || true) 个 FAIL"
+          # 步骤体唯一宿主：scripts/run-engine-tests.sh —— 它内含「先装 readelf/openssl、
+          # 不许因缺工具而跳过测试」的纪律。此前本文件与 build-apk.yml 各写一份，
+          # 且 build-apk 那份漏装了工具，已收口到一处。
+          bash ../../scripts/run-engine-tests.sh
 
   # ══════════════════════════════════════════════════════════════════════════
   # kernel：L1 内核回归（安卓路径）+ 面板前端门禁
@@ -131,7 +125,7 @@ jobs:
       - name: 前端门禁（typecheck + lint + test + build）
         working-directory: kernel/ui
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm run verify
 
       - name: 上传前端构建产物
@@ -212,17 +206,20 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon :app:testDebugUnitTest
           # BUILD SUCCESSFUL 不等于「跑了测试」：一个测试都没匹配上时 Gradle 照样绿。
-          # 因此从 XML 结果实名核对执行计数与**已定罪的判据用例**，改名/删测试必须连同这里一起改。
+          # 因此从 XML 结果实名核对执行计数与**已定罪的判据用例**；清单见 .github/convicted-cases.txt。
           RES="container/app/build/test-results/testDebugUnitTest"
           ls "$RES"/*.xml >/dev/null || { echo "FAIL: 没有任何单测结果 XML（$RES）"; exit 1; }
           TOTAL=$(grep -ho 'tests="[0-9]*"' "$RES"/*.xml | grep -o '[0-9]\+' | awk '{s+=$1} END {print s+0}')
           echo "单测执行数：$TOTAL"
-          [ "$TOTAL" -ge 8 ] || { echo "FAIL: 单测执行数 $TOTAL 低于地板 8，说明测试被静默跳过"; exit 1; }
-          # K2 定罪的三条口径（半包假红 / 尸体无人认领 / 误删已装内核）各点名一条判据用例：
-          # 用例被改名或整条删掉时，这里必须红 —— 否则修好的判据可以静默消失。
-          for T in 保活锚从登记表推导_不是手写第二张清单 冲刺首项必须是必要项_其余不得挡在前面 需要人点的待选项仍然要问 零字节空壳是唯一真失败 有内容的半包只陈列不判红 建名与认名往返一致 指针文件与正式版本目录绝不认成暂存 诊断落盘的总结论把未知算成不通过; do
-            grep -rq "$T" "$RES" || { echo "FAIL: 单测「$T」没有执行记录"; exit 1; }
-          done
+          # 定罪用例清单是**数据**（.github/convicted-cases.txt），不写在本文件里。
+          # 加一条定罪用例 = 往清单加一行；改名/删测试会让下面这圈立刻红（判据不许静默消失）。
+          CASES=.github/convicted-cases.txt
+          FLOOR=$(grep -vE '^[[:space:]]*(#|$)' "$CASES" | wc -l)
+          [ "$TOTAL" -ge "$FLOOR" ] || { echo "FAIL: 单测执行数 $TOTAL 低于地板 $FLOOR（= 定罪清单条目数），说明测试被静默跳过"; exit 1; }
+          while IFS= read -r T; do
+            case "$T" in ''|'#'*) continue ;; esac
+            grep -rq -- "$T" "$RES" || { echo "FAIL: 单测「$T」没有执行记录"; exit 1; }
+          done < "$CASES"
 
       - name: 上传测试报告（仅失败时）
         if: failure()

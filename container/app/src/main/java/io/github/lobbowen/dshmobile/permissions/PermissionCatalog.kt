@@ -4,7 +4,7 @@ import android.Manifest
 import android.provider.Settings
 
 /**
- * 权限分档 —— 决定「能不能拿、怎么拿」。对齐 docs/ANDROID-PERMISSION-PLAN.md 的五档：
+ * 权限分档 —— 决定「能不能拿、怎么拿」。分档定义：
  * NORMAL/T0 安装即得、RUNTIME/T1 运行时弹窗、APPOP/T1 AppOps 设置页、
  * SETTINGS/T1 特殊设置页、SERVICE_TOGGLE/T1 服务开关、DEVICE_ADMIN/T4、ADB_ONLY/T3。
  */

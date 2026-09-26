@@ -128,6 +128,33 @@ console.log('== W5 用 scripts/ 的 job 必须有 checkout ==');
   check('W5 全部 workflow 的每个 job：用 scripts/ 者必 checkout', gaps.length === 0, gaps.join(', '));
 }
 
+// ── W6 诊断输出的「step outcomes」清单不得两份漂移 ──
+// build-apk.yml 把同一份清单**手写了两遍**（正常路径 / 失败路径）。只改一份的后果：
+// 失败诊断里看不到那个步骤，把它误判成"上一步失败"（案底见该文件内的注释）。
+console.log('== W6 step outcomes 清单两份一致 ==');
+{
+  const src = W.normalize(W.readWorkflow('build-apk.yml', path.join(ROOT, '..')));
+  const lines = src.split('\n');
+  const lists = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!/step outcomes/.test(lines[i])) continue;
+    const ids = [];
+    for (let j = i + 1; j < lines.length; j++) {
+      if (/^\s*(#|$)/.test(lines[j])) continue;
+      const m = lines[j].match(/echo\s+"([a-z][a-z0-9-]*)\s*:\s*\$\{\{\s*steps\.[A-Za-z0-9_-]+/);
+      if (!m) break;
+      ids.push(m[1]);
+    }
+    lists.push(ids);
+  }
+  check('W6-a 找到两份清单且都非空',
+    lists.length === 2 && lists.every((l) => l.length > 0),
+    '份数=' + lists.length + ' 长度=' + lists.map((l) => l.length).join('/'));
+  const same = lists.length === 2 && JSON.stringify(lists[0]) === JSON.stringify(lists[1]);
+  check('W6-b 两份清单逐项一致（只改一份会红）', same,
+    same ? '' : 'A=' + JSON.stringify(lists[0]) + ' B=' + JSON.stringify(lists[1]));
+}
+
 const failed = results.filter((r) => !r);
 console.log(String.fromCharCode(10) + '结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');
 process.exit(failed.length ? 1 : 0);

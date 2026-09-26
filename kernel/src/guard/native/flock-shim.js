@@ -10,7 +10,7 @@
 // 发消息即「本轮运行失败 flock is not supported on android-arm64」。
 //
 // 解法（与 require-builtin-shim 同一模式）：fast-apk CI 用 NDK 把 vendor 自带的
-// src/flock.c（BSD-3，见 native/flock/PROVENANCE.md）编成 libdshflock.so 放进
+// src/flock.c（BSD-3，见 docs/components/native.md）编成 libdshflock.so 放进
 // jniLibs → 容器经 DSH_FLOCK_NATIVE 环境变量把 nativeLibraryDir 路径递给守卫 →
 // 守卫在安装前/spawn 前幂等把安装树里的 lib/flock.js 替换为 JS 垫片：
 // DSH_FLOCK_NATIVE 可 dlopen 时走真 flock(2)（错误面与 vendor 逐字一致），

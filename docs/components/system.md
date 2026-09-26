@@ -8,7 +8,7 @@ Tier S 是底座正解：容器成为特权系统服务，垫片全部消失。
 
 `untrusted_app` 域在四个方向上封死了容器：自家目录禁 `execve`、`link(2)` 被 neverallow、
 祖先目录不可读（durable fsync 必挂）、`unshare(CLONE_NEWUSER)` 被应用 seccomp 挡成 EINVAL。
-这四条都不是缺 API，而是「普通应用」这个身份本身带来的。见 docs/ADR-001。
+这四条都不是缺 API，而是「普通应用」这个身份本身带来的。见 ../adr/0001-android-execution-domain.md。
 
 ## 落地通道（按可获得性排序）
 
@@ -37,6 +37,6 @@ Tier S 是底座正解：容器成为特权系统服务，垫片全部消失。
 
 ## Tier S 到位后可删除的垫片
 
-- `app/build.gradle.kts` 的 `targetSdk = 28`（exec 限制不再适用）
-- `native/posix/*`（`link(2)` 替代与 open 回退）
+- `container/app/build.gradle.kts` 的 `targetSdk = 28`（exec 限制不再适用）
+- `container/native/posix/*`（`link(2)` 替代与 open 回退）
 - `PrefixProvisioner` 的 lib→真名复制（可直接以镜像内可执行文件分发）

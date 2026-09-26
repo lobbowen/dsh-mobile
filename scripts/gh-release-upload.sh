@@ -86,7 +86,9 @@ CREATE_NEEDED=0
 if ! VIEW_ERR="$(gh release view "$TAG" --repo "$REPO" 2>&1 >/dev/null)"; then
   LOW="${VIEW_ERR,,}"
   case "$LOW" in
-    *"not found"*|*"does not exist"*|*"could not find"*|*"could not locate"*)
+    # 措辞表与 scripts/read-release-asset.sh 的 absent() 保持同一份语义（那边是唯一判据宿主）；
+    # 两处列表不一致会让同一句 gh 报错在这里被判「不存在」、在那边被判「看不清」。
+    *"not found"*|*"does not exist"*|*"could not find"*|*"could not locate"*|*"http 404"*|*"no assets"*|*"matching pattern"*)
       echo "[gh-release-upload] Release $TAG 不存在，创建中…"
       CREATE_NEEDED=1 ;;
     *)

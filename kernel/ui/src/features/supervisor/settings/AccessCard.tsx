@@ -4,7 +4,7 @@
  *
  * ⚠ 已删除的「启动」区块（勿回潮）：开机自启（/autostart）与关闭窗口行为
  *   （/settings/close-action，隐藏至托盘）—— 均属 PC 桌面壳能力，Android 内核
- *   常驻与否由 APK 容器 / Android Service 决定（docs/ANDROID-PLAN.md §5）。
+ *   常驻与否由 APK 容器 / Android Service 决定（docs/components/kernel-android-plan.md §5）。
  */
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";

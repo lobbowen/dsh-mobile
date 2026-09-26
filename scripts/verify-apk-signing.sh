@@ -143,7 +143,7 @@ if [ "$IS_DEBUG" = "1" ]; then
     echo "::error title=发布包是 debug 签名::本链路产物会投给存量设备（apk-latest），一次性 debug 签名会把它们打成 INSTALL_FAILED_UPDATE_INCOMPATIBLE —— 请配置 ANDROID_KEYSTORE_BASE64 后重跑。"
     exit 1
   fi
-  echo "::warning title=开发签名（不可发布）::未配置 ANDROID_KEYSTORE_BASE64，本次为 debug 签名；既有设备无法覆盖安装，且无自我升级能力。见 docs/runbook/release-identity.md"
+  echo "::warning title=开发签名（不可发布）::未配置 ANDROID_KEYSTORE_BASE64，本次为 debug 签名；既有设备无法覆盖安装，且无自我升级能力。见 docs/runbook/release.md"
   exit 0
 fi
 

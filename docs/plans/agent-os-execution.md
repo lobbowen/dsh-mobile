@@ -75,8 +75,8 @@ dsh-mobile/
 
 | 词汇 | ①仓内路径（PC 可改） | ②产物 / 设备落盘（**不许改**） | ③代码符号 / 日志（随搬家改） |
 |---|---|---|---|
-| `container/` | 145 件：`app` 99 / `engine` 38 / `native` 7 / `_artifacts` 1 | 无（APK 内不留仓名痕迹；Release 资产名 `app-debug-<ver>+<code>.apk` 与此无关） | `settings.gradle.kts:23` `projectDir`；commit scope `app·engine·native` 与 tag 规范 `container-v<semver>`（`docs/runbook/git-repo-standard.md:48,57`，现役实际用 `fast-*`/`v<ver>`） |
-| `kernel/` | 239 件：`src` 84 / `test` 74 / `ui` 74 / `bin`+`adapters`+`docs` 各 1 | **OTA 包内前缀 `kernel/<version>/`**（`container/engine/src/kernel-bundle.js:124`、`ota-engine.js:119`）⇒ 设备 `files/kernel/<ver>/`；APK 断言 `assets/kernel/` 必须为空（`fast-apk.yml:536-538`、`scripts/verify-apk-native.sh:138-146`）；`assets/kernel-feed.json` | `kernelota/` 包、`KernelManager` 等 12 个类名、tag `kernel-<channel>`；`kernel/package.json` 的 version = OTA 版本单一事实源（ADR-0004） |
+| `container/` | 约 144 件：`app` 99 / `engine` 41 / `native` 4（`_artifacts/` 已删） | 无（APK 内不留仓名痕迹；Release 资产名 `app-debug-<ver>+<code>.apk` 与此无关） | `settings.gradle.kts:23` `projectDir`；commit scope `app·engine·native` 与 tag 规范 `container-v<semver>`（`docs/runbook/git.md:48,57`，现役实际用 `fast-*`/`v<ver>`） |
+| `kernel/` | 236 件：`src` 84 / `test` 74 / `ui` 74 / `bin`+`adapters`+`docs` 各 1 | **OTA 包内前缀 `kernel/<version>/`**（`container/engine/src/kernel-bundle.js:124`、`ota-engine.js:119`）⇒ 设备 `files/kernel/<ver>/`；APK 断言 `assets/kernel/` 必须为空（`fast-apk.yml:536-538`、`scripts/verify-apk-native.sh:138-146`）；`assets/kernel-feed.json` | `kernelota/` 包、`KernelManager` 等 12 个类名、tag `kernel-<channel>`；`kernel/package.json` 的 version = OTA 版本单一事实源（ADR-0004） |
 | `supervisor` | `kernel/src/supervisor.js`（1094 行，D1 的顶层入口）+ `kernel/src/guard/supervisor/`（6 个视图 mixin） | **入口脚本名 `dsh-supervisor`**（`kernel/package.json` 的 `bin` + `kernel/bin/dsh-supervisor`）；**设备状态目录 `files/supervisor/`**（`kernel/src/platform/state-root.js:17,48`；壳侧 `NodeRuntimeService.kt:554,841`；`AdbClientRunner.kt:86` 靠 `--migrate-from files/supervisor/adb` 认领密钥） | Kotlin `ContainerSupervisor`/`SupervisorPolicy`；诊断 stage 名 `"supervisor"`（`NodeRuntimeService.kt:193`）；内核日志行 `[supervisor] daemon started` |
 | `guard` | `kernel/src/guard/` 27 件（`lifecycle`/`monitor`/`proc`/`native`/`supervisor`/`guardian`/`health.js`/`intent.js`） | 锁文件落盘名 `supervisor/guard.lock`（`NodeRuntimeService.kt:547,554`）；**stderr 日志前缀 `[guard]`**（壳侧 `RuntimeDiagnostics` 逐行采集，改前缀会让既有定罪日志的读法失效） | require 边 `supervisor.js:14,27-31`、`api/guard.js`、`guardVersion`（`platform/version.js`） |
 | `engine` | `container/engine/`：`src` 12（含 `bridge/` 4）/ `test` 24 / `bin` 1 / `package.json` | — | **`container/engine/package.json:2` 的 `name` 至今 = `container-engine`，正是 `docs/contracts/layout.json:152` `legacyForbidden` 在册的旧名**；CI 的 `working-directory: container/engine`（`ci.yml:39`、`build-apk.yml:241`）；24 个测试文件用 `require('../src/…')` 相对边（整目录搬即可，不必逐条改） |
@@ -98,10 +98,10 @@ dsh-mobile/
 | 现状（origin 实拍件数） | 去向 | 批次 | 搬家当轮的打断点（见 §5.1） |
 |---|---|---|---|
 | `container/`（145） | `host/` | PC-1 | `settings.gradle.kts:23`、4 份 workflow 的 paths/字面量、`dependency-rule-test.js:25,39` |
-| `container/engine/`（38） | `host/hosttools/` | PC-1 | `ci.yml:39`、`build-apk.yml:239-241`、`kernel-ota.yml:244`、`scripts/{gen-version.js:34-37,69,build-kernel-bundle.sh:33}` |
+| `container/engine/`（41） | `host/hosttools/` | PC-1 | `ci.yml:39`、`build-apk.yml:239-241`、`kernel-ota.yml:244`、`scripts/{gen-version.js:34-37,69,build-kernel-bundle.sh:33}` |
 | `container/native/`（7） | `host/native/` | PC-1 | `fast-apk.yml:51,333,343,390`、`scripts/build-node-android.sh:58` |
 | `container/_artifacts/`（1 个 README） | **删或并进 `docs/runbook/`**（目标树 §3 未列它；它存在的唯一理由曾是 ADR-0005 删掉的签入内核包） | PC-1 裁决 | 无（`.gitignore` 刻意不忽略内核包的叙述在 `git-repo-standard.md:159`） |
-| `kernel/`（239） | `runtime/` | PC-1 | 全部 `kernel/**` glob + `gen-version.js:35` + `ci.yml:158` + `kernel-ota.yml:92-98` |
+| `kernel/`（236） | `runtime/` | PC-1 | 全部 `kernel/**` glob + `gen-version.js:35` + `ci.yml:158` + `kernel-ota.yml:92-98` |
 | `kernel/src/supervisor.js` + `kernel/src/guard/**`（1+27） | `runtime/src/init/{index.js,lifecycle,supply,proc,monitor,…}`（D1 双词汇合并；`supervisor.js` 1094 行按 §3.3 的六域拆） | PC-1 | `require('./guard/…')` 边（`supervisor.js:14,27-31`）、`kernel/test/*` 读源路径（`kernel-update-single-writer-test.js:45` 直读 `src/supervisor.js`） |
 | `kernel/src/platform/`（28） | `runtime/src/platform/`（不改名，安卓专属客户端层） | — | — |
 | `kernel/src/domains/`（17）+`kernel/adapters/dsh/agent.json`（1） | `runtime/src/workloads/`（D5 裁决后保留或删） | PC-1/PC-4 | `platform/os/index.js:79` → `domains/router/router-ops.js:29` 的 browser 边 |
@@ -141,7 +141,7 @@ Kotlin 侧（PC-2，现状 9 个包 + 包根 4 件 = 60 个 `.kt`）：
    成本 = §5.1 列出的 4 份 workflow / 12 个 scripts 调用点 / 5 个门禁文件的同步改，以及 `runtime/` 这个
    词在壳侧已有 `runtime/` 包与 `runtime.json` 契约（PC-2 把壳侧那个包拆进 `machine/`+`supply/` 后冲突自消）。
    **推荐：做，且 PC-1 一次改完三条顶层名**（分两轮 = 打断 CI 两次）。
-2. **`container/_artifacts/`（1 个 README）的去留**：推荐删并把其叙述并进 `docs/runbook/versioning.md`，
+2. **`container/_artifacts/`（1 个 README）的去留**：推荐删并把其叙述并进 `docs/runbook/release.md`，
    同时从 `layers.L0.paths` 移除 —— 目标树里不留"没人认领的目录"。
 3. **`SHIM_MARKER` 的旧名（含设备数据兼容判等）**：不进 PC 系列，另案；在案证据见 §3.1 第 6 行。
 
@@ -167,7 +167,7 @@ manifest `android:name` 保持相对类名写法：改一处不扩散（「同�
 
 **行号已于 2026-09-27 对 origin main HEAD `1c32d8cf`（#94 之后）逐条复算**：HEAD 相对 `3d5cd9e7` 只动了
 9 个 blob（4 份 workflow + `container/engine/package.json` + `docs/contracts/layout.json` 的
-`scriptsOwnership` + `docs/runbook/versioning.md` + 新增 `scripts/gh-release-upload.sh` 与其测试），
+`scriptsOwnership` + `docs/runbook/release.md` + 新增 `scripts/gh-release-upload.sh` 与其测试），
 本表受影响的只有两处行号（`fast-apk.yml` 的 `APK_SHA` 700→669、`build-apk.yml` 的 apk 路径 776→777，已按新值填），
 其余全部原位。**这张表本身就是 §5 那句「搬家 PR 必须当场验证 job 真的跑了」的操作性前提**：
 上一段（`3d5cd9e7`）到这一段（`1c32d8cf`）之间行号就会漂，所以每次开搬家 PR 前必须重跑
@@ -188,7 +188,7 @@ manifest `android:name` 保持相对类名写法：改一处不扩散（「同�
 | `scripts/gen-version.js:34-37,52-54,62,69-74` | 四个版本源（`container/engine/package.json`、`kernel/package.json`、`kernel/ui/package.json`、`container/app/src/main/assets/node-versions.json`）+ `container/engine/src/bridge/protocol.js` | 同上新路径 | 响（#83 的三态语义：取不到 = 「看不清」= 禁止发布，不降 warning） |
 | `scripts/gen-native-assets.js:9,53` + `.github/native-assets.txt:4` | `NativeAssetRegistry.kt` 全路径（含 Java 包名段） | 随 PC-2 包重排改 | 响（清单会 `git diff --exit-code` 判「生成物≠源」）——**注意 PC-2 的包名改动会连带重写整份清单头注释** |
 | `scripts/{build-node-android.sh:58,66,build-kernel-bundle.sh:33,keygen.sh:18,make-release.sh:22,read-node-versions.sh:8,stage-npm-assets.sh:22,verify-apk-native.sh:216,build-apk-local.sh:41}` | `container/app/src/main/{jniLibs,assets/…}`、`container/engine/bin/build-bundle.js`、`container/app/build/outputs/…` | `host/…` | 多数响；`build-node-android.sh:58` 的 `OUT_DIR` 属**半静默**（编好的件投到没人读的目录，要等下游门禁才红） |
-| `docs/runbook/git-repo-standard.md:16,27,31,48,57,73-75` | 规范正文钉死 `container/{app,engine,native}`+`kernel/`、commit scope `app·engine·native·ci·docs`、tag `container-v*`/`kernel-v*`、paths 示例 | 同步改 | **静默**（文档即断言；PR #78 的教训：口径不跟着改，下一个人拿它当证据误判） |
+| `docs/runbook/git.md:16,27,31,48,57,73-75` | 规范正文钉死 `container/{app,engine,native}`+`kernel/`、commit scope `app·engine·native·ci·docs`、tag `container-v*`/`kernel-v*`、paths 示例 | 同步改 | **静默**（文档即断言；PR #78 的教训：口径不跟着改，下一个人拿它当证据误判） |
 
 ### 5.2 五处「不跟着改就静默通过」的门禁（搬家轮必须先修判据）
 

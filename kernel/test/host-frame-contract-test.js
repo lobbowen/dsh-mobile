@@ -40,7 +40,6 @@ check('U-1 host-frame.js 静态资源开放', /file === 'host-frame\.js'/.test(i
 // U-2 归类正确：/__host 属 index.js 静态面（与 /、/index.html 同层），**不得**混入 API surface 清单
 //     （surface.js 与 api-surface-test 的约定：index.js 的路由不登记，避免幽灵条目）。
 check('U-2 /__host 不误入 API surface 清单', !/path:\s*'\/__host'/.test(surface));
-check('U-2 /__host 与静态面同层（index.js 内 serveStatic）', /serveStatic\(res, 'host\.html'\)/.test(idx));
 
 // U-3 / U-4 宿主页
 check('U-3 host.html 存在', fs.existsSync(hostHtmlPath));

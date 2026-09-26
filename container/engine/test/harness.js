@@ -3,7 +3,12 @@
 // 测试运行器（镜像内核仓风格）：results[] + check() 打印 PASS/FAIL，结尾打印「结果: X passed, Y failed[, Z skipped]」。
 // skip() 是**唯一合法的"少验"出口**：跳过必须逐条打行、进汇总计数——
 // 用 check('（跳过）…', true) 把跳过伪装成 PASS 是禁止的（会让 grep -c '^PASS' 的 CI 汇总说谎）。
-module.exports = function makeRunner(name) {
+/** 剥掉整行注释（# 或 //）：注释里提到某个串通常是交代历史，不是判据。 */
+function stripComments(src) {
+  return src.split(String.fromCharCode(10)).filter((l) => !/^\s*(#|\/\/)/.test(l)).join(String.fromCharCode(10));
+}
+
+function makeRunner(name) {
   const results = [];
   let skipped = 0;
   const check = (n, c, x) => {
@@ -20,4 +25,8 @@ module.exports = function makeRunner(name) {
     process.exit(failed.length ? 1 : 0);
   };
   return { results, check, skip, finish };
-};
+}
+
+// 共享工具：回潮扫描类门禁都要剥注释 —— 同一判据只许一处实现（门禁法①）。
+makeRunner.stripComments = stripComments;
+module.exports = makeRunner;

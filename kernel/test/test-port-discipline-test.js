@@ -14,8 +14,10 @@
 //
 // 本门禁确保该问题不再回归：
 // T1 所有测试固定端口必须落在安全段（test/_ports.js 的 28000-28999）
-// T2 测试不得硬编码端口字面量 —— 必须经 safePort() 取（防跨文件撞号）
-// T3 跨文件端口段不得重叠
+// T4 安全段本身必须真的安全（两端都不在动态范围/生产池内）
+//
+// 原 T2（已登记文件都引用 safePort）与原 T3（跨文件段不重叠）已于 2026-09-27 删除：
+// 前者被「未使用的 import」满足（空转门禁），后者依赖的 SEGMENTS 分段表 12 项里 11 项无人使用。
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -71,34 +73,8 @@ console.log('== T1 固定端口落在安全段 ==');
   check('T1 无固定端口落在 ephemeral/生产池内', offenders.length === 0, offenders.slice(0, 5).join(' | '));
 }
 
-// ── T2：迁移过的文件必须经 safePort 取端口 ──
-console.log('== T2 迁移文件使用 safePort ==');
-{
-  const migrated = Object.keys(SEG.SEGMENTS);
-  let missing = [];
-  for (const name of migrated) {
-    const f = files.find((x) => x.replace(/-test\.js$/, '').replace(/\.js$/, '') === name);
-    if (!f) continue;
-    const src = fs.readFileSync(path.join(ROOT, 'test', f), 'utf8');
-    if (!/safePort/.test(src)) missing.push(f);
-  }
-  check('T2 已登记的文件都引用了 safePort', missing.length === 0, missing.join(', '));
-}
-
-// ── T3：跨文件段不重叠 ──
-console.log('== T3 跨文件端口段不重叠 ==');
-{
-  const seen = new Map();
-  let dup = 0;
-  for (const name of Object.keys(SEG.SEGMENTS)) {
-    const base = SEG.safeBase(name);
-    for (let i = 0; i < 10; i++) {
-      if (seen.has(base + i)) dup += 1;
-      seen.set(base + i, name);
-    }
-  }
-  check('T3 端口段无跨文件重叠', dup === 0, dup + ' 处重叠');
-}
+// （原 T2/原 T3 已删除：T2 只断言文件里出现字符串 safePort（未使用的 import 即可满足，空转）；
+//   T3 依赖的 SEGMENTS 分段表因无真实使用者而一并移除。端口纪律现由 T1 与 T4 承担。）
 
 // ── T4：安全段本身必须真的安全 ──
 console.log('== T4 安全段自洽 ==');

@@ -111,7 +111,10 @@ HostBridge.onCreate③ → :node onCreate/boot 尝试④ → 监督者 → {桥,
 
 ## 2. 硬约束一：SELinux W^X —— 可执行文件只能放在哪
 
-**结论：应用私有文件里，只有 `nativeLibraryDir` 允许 `execve()`。**
+**结论：`execve()` 的可用范围取决于 `targetSdk`。本项目钉 `targetSdk = 28`（落在 `untrusted_app_27` 域），应用私有目录（含 `filesDir`）与 `nativeLibraryDir` 都可 exec；一旦 `targetSdk ≥ 29`，就只有 `nativeLibraryDir`（`exec_type`）可执行。**
+
+> 取舍见 [ADR-0001](adr/0001-android-execution-domain.md)：钉 28 换的是 app home 可 exec（`$PREFIX` 下的 bash/rg 全靠它）。
+> 把 `libnode.so` 放进 `nativeLibraryDir` 是**打包既成事实**，不是唯一可执行路径。
 
 | 路径 | SELinux label | 能否 exec |
 |---|---|---|
@@ -309,7 +312,7 @@ provider（只认硬件密钥，导入软件 PKCS8 会 `InvalidKeySpecException`
 
 | 令牌 | 含义 | 设备是否具备 |
 |---|---|---|
-| `kernel_update` | 从本地 feed **安装已签名内核**（读文件 + 验签 + 写 filesDir） | **是**，任意设备 |
+| `kernel_update` | 经 **OTA** 安装已签名内核（下载 + 验签 + 写 filesDir） | **是**，任意设备 |
 | `build_chain` | 设备上有**编译工具链**（aapt2/d8/JDK） | **否，永不置位** |
 
 后者已被实测证伪（见下节）。原先 `bridge:build` 整组绑在 `build_chain` 上，
@@ -349,9 +352,9 @@ GET maven.aliyun.com/repository/google/com/android/tools/build/aapt2/<V>/
 
 **转向 A''：设备只安装已签名内核，不生产内核。**
 
-| | A/C1 内置构建链 | **A'' 本地 feed 安装** |
+| | A/C1 内置构建链 | **A'' 远端 OTA 安装** |
 |---|---|---|
-| APK 体积 | +300~500 MB | **+1.2 MB**（基线包） |
+| APK 体积 | +300~500 MB | **+0**（APK 不含内核） |
 | 需要新原生二进制 | 整套工具链 | **无** |
 | 触碰 W^X 链 | 是 | **否** |
 | 私钥在设备上 | 需要（要签名） | **不需要**（只验签） |
@@ -467,7 +470,7 @@ Android linker 查找依赖库的目录**只有三个**：
 |---|---|
 | 链接期 | `scripts/build-node-android.sh` 以 make 命令行变量注入 `LDFLAGS.target=-Wl,--enable-new-dtags -Wl,-rpath,'$$ORIGIN'`。两层 `$$` 是 bash→make→sh 三段展开的必然写法；注入点必须是**命令行变量**而不是 `export LDFLAGS_target` —— gyp 的 make 生成器只把裸 `$(LDFLAGS)` 落到 `LDFLAGS.target`（宿主侧才认 `_host` 后缀），那个环境变量没有任何规则引用它，run 36216072106 实测 92715 行展开里 `-rpath` 出现 0 次 |
 | 构建期 | 同脚本用 `make -n`（带同一串命令行变量）断言展开结果：`-rpath` 必须出现在 **node 本体那次链接**的配方行里，找不到该配方即判红；三层 `$` 转义错了会静默变成 `RIGIN`。编完再调 `verify-runtime-elf.sh` 验产物 |
-| 固化期 / 打包期 / 重打包期 | `scripts/verify-runtime-elf.sh`（同一份判据）有四个出口：`fast-apk.yml` 的 Gate、`build-apk.yml` 的 pre-gradle Gate、`release-admin.yml` 的 pin 校验与 repack 校验；缺 `readelf` 时退出码 2，宁红不猜。`build-apk.yml` 那一次是必需的：命中 node 缓存时构建脚本整步 skipped，只有它覆盖「复用二进制再出包」这条路。`repack` 那一次也是必需的：它只换签名与注入库，libnode 本体来自任意一次历史构建 —— 不查就会把修复前的包重签成"最新可安装包" |
+| 固化期 / 打包期 / 重打包期 | `scripts/verify-runtime-elf.sh`（同一份判据）有五个出口（含 `build-node-android.sh` 构建脚本自身）：`fast-apk.yml` 的 Gate、`build-apk.yml` 的 pre-gradle Gate、`release-admin.yml` 的 pin 校验与 repack 校验；缺 `readelf` 时退出码 2，宁红不猜。`build-apk.yml` 那一次是必需的：命中 node 缓存时构建脚本整步 skipped，只有它覆盖「复用二进制再出包」这条路。`repack` 那一次也是必需的：它只换签名与注入库，libnode 本体来自任意一次历史构建 —— 不查就会把修复前的包重签成"最新可安装包" |
 | 运行期 | `NativePreparer.probe` 在**清空环境**下 exec 探针 —— 与 `run_code` 同形，跑绿才是真绿 |
 
 `$ORIGIN` 的可靠性不是引来的说法，是 2026-09-26 在自己设备上验的：自造
@@ -542,7 +545,7 @@ packaging {
         useLegacyPackaging = true
         // 直接从 .github/native-assets.txt 读（NativeAssetRegistry 的投影）——
         // 不再硬编码文件名，加资产时 gradle 配置自动跟上。
-        keepDebugSymbols += nativeAssetNames.map { "**/$it" }
+        keepDebugSymbols += nativeAssetNames().map { "**/$it" }
     }
 }
 ```
@@ -706,9 +709,8 @@ aarch64）在 GitHub 免费 runner 上要 **2~3 小时**。
 | `node-stderr` | node 自己报的错 | **最关键的一项** |
 | `port` | 端口是否就绪 | 成功标志 |
 
-> 历史阶段名 `provision` / `libdir` / `apk-libs` / `exec-probe` 已合并为
-> `native-assets` 一项 —— 它们本就是同一个问题的四个侧面，分开写只会
-> 制造「四处都说了但拼不出结论」的困境。
+> 历史阶段名 `libdir` / `apk-libs` / `exec-probe` 已合并为 `native-assets` 一项。
+> 注意：`provision` 这个阶段名**尚未完全消灭** —— `NodeRuntimeService` 的原生资产失败出口仍以 `"provision"` 上屏，待收口。
 
 ### 归因速查（`native-assets` 结构化结论）
 

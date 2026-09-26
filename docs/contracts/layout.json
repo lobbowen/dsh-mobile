@@ -1,9 +1,9 @@
 {
-  "version": 1,
+  "version": 2,
   "updated": "2026-09-27",
+  "_note": "v2：文档收敛进 docs/（源码目录不再放文档）；删除历史快照。",
   "rootAllow": [
     "README.md",
-    "ARCHITECTURE.md",
     ".github",
     ".gitignore",
     "container",
@@ -17,8 +17,7 @@
     "gradle.properties",
     "settings.gradle.kts",
     "build.gradle.kts",
-    "version.json",
-    "_archive"
+    "version.json"
   ],
   "layers": {
     "L0": {
@@ -26,8 +25,7 @@
       "paths": [
         "container/app",
         "container/engine",
-        "container/native",
-        "container/_artifacts"
+        "container/native"
       ]
     },
     "L1": {
@@ -50,17 +48,52 @@
       ]
     },
     "DOCS": {
-      "title": "文档",
+      "title": "文档（唯一归宿）",
       "paths": [
         "docs",
-        "README.md",
-        "ARCHITECTURE.md"
+        "README.md"
       ]
     },
-    "ARCHIVE": {
-      "title": "归档（只读）",
+    "DOCS_ARCH": {
+      "title": "文档-架构",
       "paths": [
-        "_archive"
+        "docs/architecture.md"
+      ]
+    },
+    "DOCS_ADR": {
+      "title": "文档-决策记录",
+      "paths": [
+        "docs/adr"
+      ]
+    },
+    "DOCS_CONTRACTS": {
+      "title": "文档-契约（被代码消费，路径不可移动）",
+      "paths": [
+        "docs/contracts"
+      ]
+    },
+    "DOCS_STANDARDS": {
+      "title": "文档-规范",
+      "paths": [
+        "docs/standards"
+      ]
+    },
+    "DOCS_RUNBOOK": {
+      "title": "文档-操作手册",
+      "paths": [
+        "docs/runbook"
+      ]
+    },
+    "DOCS_COMPONENTS": {
+      "title": "文档-组件说明",
+      "paths": [
+        "docs/components"
+      ]
+    },
+    "DOCS_PLANS": {
+      "title": "文档-在途方案",
+      "paths": [
+        "docs/plans"
       ]
     }
   },
@@ -81,14 +114,7 @@
       "from": "native",
       "to": "container/native",
       "kind": "dir",
-      "expectFiles": 7
-    },
-    {
-      "from": "_artifacts",
-      "to": "container/_artifacts",
-      "kind": "dir",
-      "_expectFilesNote": "P1 迁移基线为 2；ADR-0005 删除了签入的内核包 baseline/baseline.zip（1.2MB），故降为 1。这是**有意的文件减少**，不是迁移丢失。",
-      "expectFiles": 1
+      "expectFiles": 4
     },
     {
       "from": "dsh-android-kernel",
@@ -102,18 +128,8 @@
       "kind": "file"
     },
     {
-      "from": "docs/GIT-REPO-STANDARD.md",
-      "to": "docs/runbook/git-repo-standard.md",
-      "kind": "file"
-    },
-    {
       "from": "docs/BRIDGE_PROTOCOL.md",
       "to": "docs/contracts/bridge-protocol.md",
-      "kind": "file"
-    },
-    {
-      "from": "docs/HANDOVER.md",
-      "to": "docs/runbook/handover.md",
       "kind": "file"
     },
     {
@@ -127,23 +143,83 @@
       "kind": "file"
     },
     {
-      "from": "README-交接包.md",
-      "to": "_archive/README-交接包.md",
-      "kind": "file"
-    },
-    {
-      "from": "CONTAINER-STATUS.md",
-      "to": "docs/runbook/container-status.md",
+      "from": "docs/BASE_SPEC.md",
+      "to": "docs/contracts/base-spec.md",
       "kind": "file"
     },
     {
       "from": "docs/ARCHITECTURE.md",
-      "to": "ARCHITECTURE.md",
+      "to": "docs/architecture.md",
       "kind": "file"
     },
     {
-      "from": "docs/BASE_SPEC.md",
-      "to": "docs/contracts/base-spec.md",
+      "from": "ARCHITECTURE.md",
+      "to": "docs/architecture.md",
+      "kind": "file"
+    },
+    {
+      "from": "docs/STORAGE-STANDARD.md",
+      "to": "docs/standards/storage.md",
+      "kind": "file"
+    },
+    {
+      "from": "docs/runbook/testing-standard.md",
+      "to": "docs/standards/testing.md",
+      "kind": "file"
+    },
+    {
+      "from": "docs/runbook/git-repo-standard.md",
+      "to": "docs/runbook/git.md",
+      "kind": "file"
+    },
+    {
+      "from": "docs/runbook/versioning.md",
+      "to": "docs/runbook/release.md",
+      "kind": "file"
+    },
+    {
+      "from": "docs/runbook/release-identity.md",
+      "to": "docs/runbook/release.md",
+      "kind": "file"
+    },
+    {
+      "from": "kernel/README.md",
+      "to": "docs/components/kernel.md",
+      "kind": "file"
+    },
+    {
+      "from": "kernel/docs/ANDROID-PLAN.md",
+      "to": "docs/components/kernel-android-plan.md",
+      "kind": "file"
+    },
+    {
+      "from": "kernel/ui/FRAMEWORK.md",
+      "to": "docs/components/kernel-ui.md",
+      "kind": "file"
+    },
+    {
+      "from": "system/README.md",
+      "to": "docs/components/system.md",
+      "kind": "file"
+    },
+    {
+      "from": "container/native/flock/PROVENANCE.md",
+      "to": "docs/components/native.md",
+      "kind": "file"
+    },
+    {
+      "from": "container/native/posix/PROVENANCE.md",
+      "to": "docs/components/native.md",
+      "kind": "file"
+    },
+    {
+      "from": "container/native/ptyprobe/PROVENANCE.md",
+      "to": "docs/components/native.md",
+      "kind": "file"
+    },
+    {
+      "from": "_artifacts",
+      "to": "docs/components/container.md",
       "kind": "file"
     }
   ],
@@ -153,9 +229,24 @@
     "native",
     "dsh-android-kernel",
     "_artifacts",
+    "container/_artifacts",
+    "_archive",
     "README-交接包.md",
+    "ARCHITECTURE.md",
     "docs/ARCHITECTURE.md",
-    "docs/BASE_SPEC.md"
+    "docs/BASE_SPEC.md",
+    "docs/STORAGE-STANDARD.md",
+    "docs/runbook/testing-standard.md",
+    "docs/runbook/git-repo-standard.md",
+    "docs/runbook/versioning.md",
+    "docs/runbook/release-identity.md",
+    "docs/runbook/handover.md",
+    "docs/runbook/handover-2026-09-24.md",
+    "docs/runbook/container-status.md",
+    "kernel/README.md",
+    "kernel/docs",
+    "kernel/ui/FRAMEWORK.md",
+    "system/README.md"
   ],
   "generated": [
     "container/app/build/",
@@ -163,7 +254,6 @@
     "container/engine/node_modules/",
     "container/app/src/main/assets/npm/",
     "container/app/src/main/assets/node-bin/",
-    "container/app/src/main/assets/kernel/baseline.zip",
     "release/",
     "feed/"
   ],
@@ -183,9 +273,12 @@
     "stage-npm-assets.sh": "L0",
     "build-kernel-bundle.sh": "L1",
     "keygen.sh": "L1",
+    "sign-kernel-manifest.js": "L1",
+    "upload-qiniu.js": "L1",
     "gen-native-assets.js": "cross",
     "gen-version.js": "cross",
     "require-ci.js": "cross",
+    "run-engine-tests.sh": "L0",
     "ensure-tool.sh": "cross",
     "read-node-versions.sh": "cross",
     "verify-apk-native.sh": "cross",
@@ -202,8 +295,6 @@
     "pick.sh": "cross",
     "read-release-asset.sh": "cross",
     "check-apk-release-version.sh": "L0",
-    "verify-apk-version-gate.sh": "L0",
-    "sign-kernel-manifest.js": "L1",
-    "upload-qiniu.js": "L1"
+    "verify-apk-version-gate.sh": "L0"
   }
 }

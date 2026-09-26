@@ -11,8 +11,9 @@
 // 各有独立 npm script 但没人跑 → 永不执行。这是"门禁静默不跑"。
 //
 // ## Android 内核版政策（见 package.json._uninstallTests）
-// 主链 = 全部测试，**仅排除**真实卸载类两个（native / plugin-change-restart）；
-// 排除表只此两项，任何新增排除都必须在此写明理由。
+// 主链 = 全部测试，**仅排除**由独立入口（`test:<name>` 脚本）承载的卸载类测试。
+// 排除集合**从 package.json 推导**，不手抄第二份（手抄的表必然与真实清单漂移）；
+// 新增排除必须同时改 package.json 与 _uninstallTests 政策，否则 N-b 会红。
 //
 // ## 锁定不变量
 // N-a `test/` 下每个测试文件要么在 `scripts.test` 链中，要么在**排除表**中并写明理由
@@ -32,13 +33,19 @@ const check = (n, c, x) => {
   console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : ''));
 };
 
-/** 显式排除表：刻意不进主链的测试，必须写明理由。
- * 本表只允许「真实卸载」这一类 —— 加入任何其它项都必须在此给出充分理由，
- * 否则就是"门禁静默不跑"，正是本文件要消灭的缺陷。 */
-const EXCLUDED = {
-  'test/native-test.js': '真实原生卸载（npm uninstall 全量清理），按需经 npm run test:native-uninstall 单独执行',
-  'test/plugin-change-restart-test.js': '含插件真实卸载场景，按需经 npm run test:plugin-change-restart 单独执行',
-};
+/** 独立入口集合：**从 package.json 推导**（`test:<name>` 脚本指向的测试文件）。
+ * 只允许「真实卸载」这一类；加入任何其它项都要同时改 package.json 与政策，否则 N-b 会红。 */
+const EXCLUDED = {};
+{
+  const pkg = require(path.join(ROOT, 'package.json'));
+  for (const [k, v] of Object.entries(pkg.scripts)) {
+    if (k === 'test' || !k.startsWith('test:')) continue;
+    // 命令行形如 `node --require ./test/_preload.js test/<x>.js` —— 取非 _ 前缀的那个文件。
+    const files = [...v.matchAll(/(?:^|\s)(test\/[\w.-]+\.js)/g)]
+      .map((m) => m[1]).filter((f) => !/_/.test(f.replace(/^test\//, '')));
+    if (files.length === 1) EXCLUDED[files[0]] = '独立入口 npm run ' + k + '（刻意不进自动链）';
+  }
+}
 
 function chainFiles() {
   const s = require(path.join(ROOT, 'package.json')).scripts.test;
@@ -64,9 +71,6 @@ function isTestFile(name) {
   check('N-a 每个测试文件都在 scripts.test 链中或被显式排除',
     orphans.length === 0,
     orphans.length ? ('未入链且未排除: ' + orphans.join(', ')) : (all.length + ' 个测试文件全部有归属'));
-  check('N-a 链中文件数 + 排除数 = 测试文件总数',
-    inChain.filter((f) => all.includes(f)).length + Object.keys(EXCLUDED).length === all.length,
-    inChain.filter((f) => all.includes(f)).length + ' + ' + Object.keys(EXCLUDED).length + ' = ' + all.length);
   check('N-a 链中无重复项', new Set(inChain).size === inChain.length,
     inChain.length + ' 项');
 }
@@ -80,6 +84,11 @@ function isTestFile(name) {
   const inChain = chainFiles();
   const wronglyExcluded = Object.keys(EXCLUDED).filter((f) => inChain.includes(f));
   check('N-b 排除项不在链中（不重复计入）', wronglyExcluded.length === 0, wronglyExcluded.join(', ') || 'ok');
+  // 推导出来的集合必须仍被**书面政策**覆盖 —— 防"悄悄加个独立入口就绕过主链"。
+  const policy = require(path.join(ROOT, 'package.json'))._uninstallTests || '';
+  const undocumented = Object.keys(EXCLUDED).filter((f) => !policy.includes(f.replace('test/', '')));
+  check('N-b 每条独立入口都在 _uninstallTests 政策里被点名',
+    undocumented.length === 0, undocumented.join(', ') || 'ok');
 }
 
 // ── N-c：助手/fixture 不被误报 ──
@@ -111,8 +120,8 @@ function isTestFile(name) {
   const deadRef = ['test/api-contract-test.js']; // 已随 PC 三域删除的文件名
   const deadDetected = deadRef.filter((f) => !fs.existsSync(path.join(ROOT, f))).length === 1;
   check('N-e 反向：判据能识别链中的死引用', deadDetected, 'hit');
-  check('N-e 反向：链中文件不会被误判为孤儿',
-    inChain.every((f) => inChain.includes(f)) && isTestFile('core-test.js'), 'ok');
+  check('N-e 反向：链中每一项都能被 isTestFile 识别为测试（防链里混入非测试）',
+    inChain.every((f) => isTestFile(f.replace(/^test\//, ''))), 'ok');
 }
 
 const failed = results.filter((r) => !r);

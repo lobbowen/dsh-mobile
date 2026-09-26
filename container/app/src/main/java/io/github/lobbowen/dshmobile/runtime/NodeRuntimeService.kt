@@ -89,7 +89,7 @@ class NodeRuntimeService : Service() {
      * 唯一正确取值由 [NativePreparer.libSearchPath] 从 [NativeAssetRegistry] 派生 ——
      * 不要再各写一份。它现在只服务 `$PREFIX` 下尚未带 RUNPATH 的能力件；
      * 依赖解析本身应当由二进制自己的 `DT_RUNPATH=$ORIGIN` 负责，
-     * 完整论证见 ARCHITECTURE.md 第 3 节。
+     * 完整论证见 docs/architecture.md 第 3 节。
      */
     private val libSearchPath: String get() = NativePreparer.libSearchPath(this)
 
@@ -211,7 +211,7 @@ class NodeRuntimeService : Service() {
             // 预置体检 + 写路径/PTY 取证：每进程只做一次（设备事实不随 boot 重试改变），
             // 但必须**先于**任何 spawn 上屏 —— 内核起不来时屏幕要能回答"设备缺哪环"。
             // （docs/runbook/provisioning.md §4；真机报告「全盘不可写 EACCES」的定位探针；
-            //   PTY 判定实验见 native/ptyprobe/PROVENANCE.md。）
+            //   PTY 判定实验见 docs/components/native.md。）
             if (!probesDone) {
                 probesDone = true
                 try {

@@ -324,7 +324,7 @@ object NativePreparer {
      *
      * 环境必须清空，不能补 `LD_LIBRARY_PATH`：`dsh` 的 `run_code` 就是这样起子进程的，
      * 补了就是给被测对象装脚手架（门禁绿、真机全灭）。依赖路径属于二进制的
-     * `DT_RUNPATH=$ORIGIN`，判据与实测见 ARCHITECTURE.md 第 3 节。
+     * `DT_RUNPATH=$ORIGIN`，判据与实测见 docs/architecture.md 第 3 节。
      */
     private fun probe(exe: NativeExecutable, f: File): AssetStatus {
         try {

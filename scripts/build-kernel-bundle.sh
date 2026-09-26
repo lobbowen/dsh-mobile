@@ -6,7 +6,7 @@
 #    ./scripts/build-kernel-bundle.sh <kernel-src-dir> <version> [abi] [url-base]
 #
 #  例：
-#    ./scripts/build-kernel-bundle.sh ../dsh-android-kernel 1.4.0 \
+#    ./scripts/build-kernel-bundle.sh <内核源码目录> 1.4.0 \
 #        node24-arm64-android35 https://cdn.example.com/ota
 #
 #  前置：

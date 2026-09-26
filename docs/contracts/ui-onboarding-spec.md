@@ -82,36 +82,36 @@ Capability(id, title, segment, optional, requires, judge, acquirer, bridgeToken,
 
 | id | 段 | 判据（绿） | 取法链（主 → 降级） | 硬前置 | optional |
 |---|---|---|---|---|---|
-| `dev_options` | S0 | `Settings.Global.development_settings_enabled == 1` | USER_TAP → 开发者选项页 | —— | |
-| `wireless_debug` | S0 | `Settings.Global.adb_wifi_enabled == 1` | USER_TAP → 无线调试页（`NAV_WIRELESS_DEBUG`）。落点**由 `CapabilityNavigation.wirelessDebugIntent` 现场问系统**：`resolveActivity` 命中就直达，无响应（PLP120/ColorOS 已定罪，§7③）就退开发者选项页 —— 承诺「直达」是假话，承诺「一定跳到一个能拨开关的页」才是真话 | —— | |
-| `perm:post_notifications` | **S0** | `checkSelfPermission(POST_NOTIFICATIONS)` | RUNTIME_DIALOG：系统弹窗（shell 侧 `pm grant` 在 Android 17 不可用） | —— | |
-| `adb_credentials` | S0 | 凭据在册（`adbkey.pem` + `state.json`）**且**最近一次配对尝试非 FAILED | USER_CODE：通知栏 RemoteInput 输 6 位码（§3） | dev_options, wireless_debug, **post_notifications** | |
-| **`adb_channel`** | **S0** | **活探针为真：现问 mDNS 端点 → `id -u` 返回 `uid=2000`，且读数未过期（TTL 内）** | AUTO：`AdbChannelProbe`（LIVE 读数 10s 内复用、可信期 TTL 30s；DEAD 5s 冷却；事件可强制作废） | adb_credentials | |
-| `device_owner` | S1 | `isDeviceOwnerApp(packageName)`（系统侧回读；`dpm` 命令 exit 0 不算数，真机 2026-09-25 17:12） | SILENT_VIA_ADB：`dpm set-device-owner` → 输出含 `several users` 归因 UNREACHABLE | adb_channel | **是（加速器）** |
-| `perm:manage_external_storage` | S2 | `Environment.isExternalStorageManager()` | USER_TAP（AppOps 档：Android 17 shell 已无 `MANAGE_APP_OPS_MODES`，实测只能人点）→ SILENT_VIA_DO | —— | |
-| `perm:request_install_packages` | S2 | `canRequestPackageInstalls()` | USER_TAP → SILENT_VIA_DO | —— | |
-| `perm:system_alert_window` | S2 | `Settings.canDrawOverlays()` | USER_TAP → SILENT_VIA_DO | —— | |
-| `perm:battery_optimization` | S2（**锚**） | `isIgnoringBatteryOptimizations()` | USER_TAP：`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | —— | |
-| `secure:notification_listener` | S2（**锚**） | `Secure.enabled_notification_listeners` 含本包 | **SILENT_VIA_ADB**：`settings put secure`（§2.0 实测）→ USER_TAP 通知使用权页 | —— | |
+| `dev-options` | S0 | `Settings.Global.development_settings_enabled == 1` | USER_TAP → 开发者选项页 | —— | |
+| `wireless-debug` | S0 | `Settings.Global.adb_wifi_enabled == 1` | USER_TAP → 无线调试页（`NAV_WIRELESS_DEBUG`）。落点**由 `CapabilityNavigation.wirelessDebugIntent` 现场问系统**：`resolveActivity` 命中就直达，无响应（PLP120/ColorOS 已定罪，§7③）就退开发者选项页 —— 承诺「直达」是假话，承诺「一定跳到一个能拨开关的页」才是真话 | —— | |
+| `post-notifications` | **S0** | `checkSelfPermission(POST_NOTIFICATIONS)` | RUNTIME_DIALOG：系统弹窗（shell 侧 `pm grant` 在 Android 17 不可用） | —— | |
+| `adb-credentials` | S0 | 凭据在册（`adbkey.pem` + `state.json`）**且**最近一次配对尝试非 FAILED | USER_CODE：通知栏 RemoteInput 输 6 位码（§3） | dev-options, wireless-debug, **post_notifications** | |
+| **`adb-channel`** | **S0** | **活探针为真：现问 mDNS 端点 → `id` 返回 `uid=2000`，且读数未过期（TTL 内）** | AUTO：`AdbChannelProbe`（LIVE 读数 10s 内复用、可信期 TTL 30s；DEAD 5s 冷却；事件可强制作废） | adb-credentials | |
+| `device_owner` | S1 | `isDeviceOwnerApp(packageName)`（系统侧回读；`dpm` 命令 exit 0 不算数，真机 2026-09-25 17:12） | SILENT_VIA_ADB：`dpm set-device-owner` → 输出含 `several users` 归因 UNREACHABLE | adb-channel | **是（加速器）** |
+| `manage-external-storage` | S2 | `Environment.isExternalStorageManager()` | USER_TAP（AppOps 档：Android 17 shell 已无 `MANAGE_APP_OPS_MODES`，实测只能人点）→ SILENT_VIA_DO | —— | |
+| `request-install-packages` | S2 | `canRequestPackageInstalls()` | USER_TAP → SILENT_VIA_DO | —— | |
+| `system-alert-window` | S2 | `Settings.canDrawOverlays()` | USER_TAP → SILENT_VIA_DO | —— | |
+| `battery-optimization` | S2（**锚**） | `isIgnoringBatteryOptimizations()` | USER_TAP：`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | —— | |
+| `notification-access` | S2（**锚**） | `Secure.enabled_notification_listeners` 含本包 | **SILENT_VIA_ADB**：`settings put secure`（§2.0 实测）→ USER_TAP 通知使用权页 | —— | |
 | `accessibility` | S2（**锚**） | 服务实例已连（`DshAccessibilityService.isReady()`，与桥 caps 同一把尺子；设置串残留不作数） | **SILENT_VIA_ADB**：`settings put secure enabled_accessibility_services` → USER_TAP 无障碍页 | —— | |
 | `mediaprojection` | S2 | `ScreenCaptureService.isReady()` | USER_TAP：App 内「授权屏幕捕获」（每次会话，物理不可预置） | —— | 是 |
 | `runtime` | S3 | 控制面 `/status` 200 | USER_TAP：「看运行时启动日志」→ 诊断页。**没有「重启运行时」动作**：它的实现是 destroy 正在跑的内核，运行时死活归常驻监督链（onboarding-flow-spec §1 总则 8） | —— | |
-| `kernel_bundle` | S3 | `KernelSelfCheck` 无失败项 | AUTO → 灾难兜底诊断页 | runtime | |
-| `workbench` | S4 | **入口三要素**（`adb_channel` + `runtime` + `kernel_bundle`）全为 GRANTED | USER_TAP：进入控制面板 | adb_channel, runtime, kernel_bundle | |
+| `kernel-bundle` | S3 | `KernelSelfCheck` 无失败项 | AUTO → 重跑自检 | runtime | |
+| `workbench`（**非 Capability**，由 `PipelineProjection.workbenchReady` 派生） | S4 | **入口三要素**（`adb-channel` + `runtime` + `kernel-bundle`）全为 GRANTED | USER_TAP：进入控制面板 | adb-channel, runtime, kernel-bundle | |
 
 必须钉住的五点：
 
-1. **S0 的绿 = `adb_channel`，不是 `adb_credentials`。** 凭据在册只回答「密钥与配对记录在不在」，
+1. **S0 的绿 = `adb-channel`，不是 `adb-credentials`。** 凭据在册只回答「密钥与配对记录在不在」，
    通道通不通必须靠活探针 —— 这条区分是 §2.0-1 的唯一解。
 2. **`device_owner` 不在任何能力的 `requires` 里。** 它只出现在取法链的降级位。
-3. **`perm:post_notifications` 属 S0，不属 S2**（2026-09-25 真机定罪后补）：S0 主路径的输码交互
+3. **`post-notifications` 属 S0，不属 S2**（2026-09-25 真机定罪后补）：S0 主路径的输码交互
    走通知栏 RemoteInput（§3.2），通知权限被拒 = 输码入口根本不存在 = S0 死锁。把它登记在 S2
    就是 §3.4 反对的「顺序倒挂」的漏网一条 —— 而 `nm.notify()` 在缺权限时不抛异常、只是不显示，
    死锁连案底都不留。修法与状态机位置见 [onboarding-flow-spec.md](onboarding-flow-spec.md) §3。
 4. **S4 的绿 ≠ S2 全绿。** 进工作台的门槛只有「通道能跑 shell + 运行时在线 + 内核自检无失败项」
    三要素；悬浮窗/全部文件/电池这些补齐项在 F4 里继续要，但不挡门（onboarding-flow-spec §5）。
    反过来也不许把「三要素绿」写成「权限集全绿」。
-5. **三项「锚」不是 S2 的普通待办**。`battery_optimization` / `secure:notification_listener` /
+5. **三项「锚」不是 S2 的普通待办**。`battery_optimization` / `notification-access` /
    `accessibility` 段上写 S2（它们确实不挡入口），但 `keepAliveAnchor` 让它们在**开屏 P0** 就被要掉。
    2026-09-26 真机定罪的因果链是：没锚 → :main 被 HANS 冻结清理 → 通道与运行时一起死 →
    那段「通道通了再静默办」的降级链永远等不来。判据层里谁把锚的 `anchor` 位摘掉，
@@ -120,12 +120,14 @@ Capability(id, title, segment, optional, requires, judge, acquirer, bridgeToken,
 ### 2.3 依赖图与管线投影
 
 ```
-dev_options ┐
-wireless_debug ├─→ adb_credentials ─→ adb_channel ─┬─→ device_owner (optional，加速器)
-post_notifications ┘                               ├─→ secure:notification_listener
-                                                   └─→ accessibility
-        其余 perm:*（USER_TAP / RUNTIME_DIALOG，与 DO 无关）   runtime ─→ kernel_bundle
-                       └──────────────────────────────────────────────→ workbench
+dev-options ┐
+wireless-debug ├─→ adb-credentials ─→ adb-channel ─→ device-owner (optional，加速器)
+post-notifications ┘
+
+notification-access / accessibility / manage-external-storage / request-install-packages /
+system-alert-window / battery-optimization / mediaprojection     ← 无 requires，各自独立（不挂在通道下）
+
+runtime ─→ kernel-bundle ─→ workbench（派生行，非 Capability）
 ```
 
 - S0–S4 五段是能力按 `requires` **拓扑排序后的呈现视图**（用户要的简单），不再是模型本身。
@@ -138,9 +140,9 @@ post_notifications ┘                               ├─→ secure:notificati
 ### 2.4 证据采集与新鲜度
 
 - 采集器（`capability/CapabilityEvidenceCollector`）是**唯一**允许碰 Android 侧读数的地方；
-  系统属性/权限走现读，`adb_channel` 走探针缓存，配对失败走类型化 `PairAttempt`
+  系统属性/权限走现读，`adb-channel` 走探针缓存，配对失败走类型化 `PairAttempt`
   （由 §3 的配对流程直接写入，不经过日志文本）。
-- 证据必须带 `judgedAt`；除 `adb_channel` 外一次采集一次读数，不缓存（成本低）。
+- 证据必须带 `judgedAt`；除 `adb-channel` 外一次采集一次读数，不缓存（成本低）。
 - 采集在 IO 线程；GUI 线程只做渲染与发 intent（§4）。
 
 ### 2.5 单一真值与反向门禁（能红）
@@ -234,7 +236,7 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
                               「等待 mDNS 记录」—— 那是用户判断「成没成」的唯一依据
                               对话框之后靠 connect 记录（常驻，但端口仍会轮换）
                               adb connect 自动完成
-                              活探针（现问端点 + id -u）→ adb_channel 变绿 → 通知收起
+                              活探针（现问端点 + id）→ adb-channel 变绿 → 通知收起
 回到 App                ──→  标题下第一块 = **常驻定罪行**（ResidencyAudit，与通知首行同一份文案源：
                               上次进程被回收才出现；正常收尾写 clean 戳、设备重启另有判据，都不出现）；
                               下面「最近动作」与配对通知**同一句话**（同读 AttemptStore 时间线）；
@@ -317,7 +319,7 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
 | `kernel/src/adb/`（`index.js pairing.js transport.js spake2.js ed25519.js x509.js adbkey.js`） | 整目录删除 |
 | `kernel/test/adb-*-test.js` ×5 + `test/_adb-mocks.js`，及 `package.json` test 链中对应条目 | 随源同删（L0 侧 `assets/node/adb-client` 的测试在容器仓，不动） |
 | `kernel/src/api/adb.js`（`/adb/pair` `/adb/shell` `/adb/forget` 路由） | 删除；`/adb/status` 改为只读透传桥 `shell.status` |
-| `kernel/src/api/index.js:25` | 移除 `require('./adb')` 注册 |
+| `kernel/src/api/index.js:25` | **保留** `require('./adb')` 注册（承载只读 `/adb/status` 路由，删了就少一条只读入口）|
 | `kernel/src/api/surface.js:100-103` | 契约表同步：仅留 `/adb/status`（category 由 `public` 改只读语义），删其余三行 |
 | `kernel/ui/src/features/supervisor/PairingPage.tsx` | 删除 |
 | `kernel/ui/src/features/supervisor/nav.ts`（`"pairing"` 视图键 + 「ADB 配对」导航项）、`SupervisorApp.tsx`（lazy import + 路由分支 + PAGE_META 行） | 删除对应条目（6 域 → 5 域） |
@@ -332,7 +334,7 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
 | # | 验证项 | 判据 | 定罪结果 |
 |---|---|---|---|
 | ① | 下拉通知栏快捷回复时「无线调试/配对设备」对话框存活；RemoteInput intent 可达 Service | 输码后对话框仍在、码仍有效；intent 侧收到码 | **成立**。端到端已从零跑通一次配对（对话框不碎，SPAKE2 成功，`state.json` 落盘） |
-| ② | NsdManager 能否 browse 到 `_adb-tls-pairing._tcp` 与 `_adb-tls-connect._tcp` | 两条记录各至少一次解析出端口 | **成立**。且发现 connect 记录在配对**之后仍继续轮换**（→ §3.1 推论与 `adb_channel` 活探针判据） |
+| ② | NsdManager 能否 browse 到 `_adb-tls-pairing._tcp` 与 `_adb-tls-connect._tcp` | 两条记录各至少一次解析出端口 | **成立**。且发现 connect 记录在配对**之后仍继续轮换**（→ §3.1 推论与 `adb-channel` 活探针判据） |
 | ③ | `android.settings.WIRELESS_DEBUGGING_SETTINGS` 深链在 ColorOS 是否响应 | intent 直达无线调试开关页 | **不成立**（PLP120/ColorOS 无 Activity 响应）。v2 的修法不是把落点写死成开发者选项页，而是**发之前现场 `resolveActivity`**：能解析就直达、不能就退开发者选项页，并把命中/退路写进探针日志（`CapabilityNavigation.wirelessDebugIntent`，deeplink 一行）。换台机器也许就能直达 —— 写死落点等于对本机以外说谎 |
 | ⑤ | pairing 记录是否只在「与配对设备配对」对话框开着期间在册 | 对话框关闭后 `onServiceLost` 是否回调 | **待定罪（v2 新立判据）**。代码已按「回调必来」写：记录消失即作废端口、输码一律拒发。若真机测出**关框不回调**，则 45s 看门狗是唯一防线，必须补 TTL 作废（`pairingLive` 加过期时刻），否则上一轮端口会被当成有效值 |
 | ⑥ | 点「开始配对」那一下的现场引导是否落到正确的页 | 缺开关→能拨开关的页；缺通知→系统弹窗；全齐→无线调试页 | **待定罪**。判据与动作同源由 `PairingGateTest` 钉；真机要核的是 ROM 会不会把 settings 页吞回主页（`launch` 的返回值只说明系统接了 intent） |

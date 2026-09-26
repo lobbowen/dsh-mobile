@@ -20,7 +20,7 @@
 // restart 用户点"重启"——真重启（停旧拉新，不计崩溃）
 // upgrade-resume 升级完成后恢复运行——升级本身即用户显式意图
 //
-// 定位（阶段 2 意图单源，契约（docs/ANDROID-PLAN.md） §6）：
+// 定位（阶段 2 意图单源，契约（docs/components/kernel-android-plan.md） §6）：
 // 本登记簿是**瞬态加速器**（同一次运行内的即时动作），**不是**恢复依据。
 // 「是否应运行」的持久权威是 desired（managed-objects.json）——守卫重启后由 desired 恢复，
 // 绝不依赖本登记簿（内存态、重启即空）。任何「靠意图解锁首次拉起」的逻辑都是错误的

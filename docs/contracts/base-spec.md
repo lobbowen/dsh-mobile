@@ -1,6 +1,6 @@
 # 容器底座规范（BASE_SPEC）
 
-> 架构与硬约束的**唯一事实来源**是仓根 [`ARCHITECTURE.md`](../ARCHITECTURE.md)；
+> 架构与硬约束的**唯一事实来源**是仓根 [`architecture.md`](../architecture.md)；
 > 本文件只定义「冻结容器 ↔ 可热更新内核」之间的**契约**。
 >
 > 状态：v0.3（2026-09 P3 收口：移除内置构建链，`build` 组语义 = 安装已签名内核；前版 v0.2 修正内核模型：内核=控制面板/Manager，Agent 由运行时 npm 从公共源拉取）
@@ -44,7 +44,7 @@
 | C++ 运行时 | 容器内 `libc++_shared.so`（native 模块必须链接它） |
 | **npm 客户端** | **运行时可用**（npm 11.19.0 纯 JS，随 APK `assets/npm/` 投放；由 node 代跑 `npm-cli.js` —— npm 是纯 JS，调用通路只有这一条，形态见 `runtime.json` 的 `npmEntry`）。边界：安装一律 `--ignore-scripts`（容器无 sh 可 spawn）；`git:`/需编译的 native 依赖不支持；全局前缀固定 `$HOME/.npm-global`（内核侧 `npm_config_prefix` 显式注入，容器侧启动时写 `$HOME/.npmrc`，两处目录名由 `kernel/test/npm-contract-chain-test.js` 逐字对账） |
 | 运行时交接文件 | `<DSH_SUPERVISOR_HOME>/supervisor/runtime.json`（**容器写、内核读**，schema 2）：`nodePath`（libnode.so 绝对路径）、`nodeBinDir`、`npmPath`、`npmEntry`（npm-cli.js 绝对路径，**可选键**：缺失时内核退回 ambient npm）、`prefix`（`$PREFIX` 根 = `files/usr`，**可选键**：能力件真名的家，`bin/{bash,rg}` 与 `bin/node`（→ libnode.so 的符号链接）、`lib/pty.node`；内核原生件投放单元的唯一取件路径，缺失即判 `blocked` 并上屏，不再静默跳过）、`minNode`。内核侧解析入口唯一：`src/platform/runtime-contract.js`（`npmInvocation()`/`nodeBin()`/`npmEnv()`/`prefixRoot()`） |
-| 内置构建链 | **无**（已实测证伪：Google Maven 无 aarch64 版 aapt2，见 ARCHITECTURE.md §2.3）。`build` 组语义为「从本地 feed 安装已签名内核」（A''，见本契约 §3.6） |
+| 内置构建链 | **无**（已实测证伪：Google Maven 无 aarch64 版 aapt2，见 architecture.md §2.3）。`build` 组语义为「经 OTA 安装已签名内核」（A''，见本契约 §3.6） |
 | 进程模型 | `NodeRuntimeService`（前台 `START_STICKY`）spawn 独立 `:node` 进程加载内核入口 |
 
 容器在 `kernel.json` 中声明上述契约，内核可据此声明兼容性。
@@ -58,8 +58,8 @@
 ```
 kernel/<version>/
   kernel.json          # 内核包清单（见下）
-  manager/             # 控制面板代码（Node）
-  node_modules/        # Manager 依赖（含已按固定 ABI 预编译的 .node）
+  bin/dsh-supervisor   # 内核入口（被 node 解释的脚本）
+  ui/dist/             # 控制面板静态资源（运行期必需）
 ```
 
 > **不含 `agents/`**：Agent 产品由内核运行时从公共 npm 拉取，不打包进内核。
@@ -72,7 +72,7 @@ kernel/<version>/
   "version": "1.4.0",
   "abi": "node24-arm64-android35",
   "engines": { "node": ">=24 <25" },
-  "entry": "manager/index.js",
+  "entry": "bin/dsh-supervisor",
   "requires": [
     "bridge:app_control",
     "bridge:ui_automation",
@@ -116,7 +116,7 @@ kernel/<version>/
 - **坏包永不生效**：验签不过直接丢弃，绝不切换指针。
 
 ### 通道二：内核 → Agent（运行时 npm，公共源）
-Manager 在运行时按 `managedAgents` 的 `pkg` + `version`，从**公共 npm registry** 执行 `npm install` 安装/升级 Agent；安装到内核可写目录，按 `bin`/`entry` 拉起。
+Manager 在运行时按 `managedAgents` 的 `pkg` + `version`，从**公共 npm registry** 执行 `npm install` 安装/升级 Agent；安装到内核可写目录，按 `bin`/`entry` 拉起。（**未落地**：`managedAgents` 目前无消费者，设备端不执行此编排。）
 - **不设私有源**；Agent 为标准规范公共产品，无特殊处理。
 - 完整性依赖 **npm 内置 sha512 integrity**（安装即自动校验）。
 - 版本由内核升级逻辑**锁定已知良好版本**，不盲目追 latest。
@@ -152,7 +152,7 @@ Manager 在运行时按 `managedAgents` 的 `pkg` + `version`，从**公共 npm 
 ## 8. 安全模型
 
 - **双信任根**：容器公钥签内核；npm 标准完整性验 Agent。
-- **传输私有**：Agent↔HostBridge 走 **Unix 域套接字（UDS）**，文件权限绑定本 App UID，**不走 TCP**（当前 `127.0.0.1:3080` 在安卓上其他 App 可连，控制权面必须改 UDS）。
+- **传输私有**：Agent↔HostBridge 走 **Unix 域套接字（UDS）** 的**抽象命名空间**（名 `dsh_hostbridge`，无文件系统路径、无文件权限保障），**不走 TCP**。控制面是 `127.0.0.1:36360`；3080 只是无内核时的探针端口。
 - **能力作用域**：Agent 仅能使用其 `requires` 声明且在设备已预置的能力；缺失能力 → 桥拒绝/降级。
 - **审计**：所有经桥执行的特权操作（装卸应用、锁屏、shell、读屏）须落审计日志。
 
@@ -162,7 +162,7 @@ Manager 在运行时按 `managedAgents` 的 `pkg` + `version`，从**公共 npm 
 
 ```
 App 启动 → NodeRuntimeService(START_STICKY) → 读 CURRENT 指针
-  → 加载 kernel/<version>/manager/index.js（spawn :node）
+  → 加载 kernel/<version>/bin/dsh-supervisor（由 node 解释）
   → Manager 读 kernel.json → 按 requires 连接 HostBridge(UDS)
   → Manager 按 managedAgents 在运行时经 npm 安装/拉起各 Agent
   → 健康检查（端口/探针/桥握手）

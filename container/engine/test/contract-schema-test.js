@@ -26,6 +26,12 @@ function validate(obj, schema, p) {
   } else if (t === 'string') {
     if (typeof obj !== 'string') return [p + ' 应为 string'];
     if (schema.pattern && !new RegExp(schema.pattern).test(obj)) errs.push(p + ' 不匹配 ' + schema.pattern);
+  } else if (t === 'integer' || t === 'number') {
+    if (typeof obj !== 'number' || (t === 'integer' && !Number.isInteger(obj))) return [p + ' 应为 ' + t];
+    if (typeof schema.minimum === 'number' && obj < schema.minimum) errs.push(p + ' < minimum ' + schema.minimum);
+    if (typeof schema.maximum === 'number' && obj > schema.maximum) errs.push(p + ' > maximum ' + schema.maximum);
+  } else if (t === 'boolean') {
+    if (typeof obj !== 'boolean') return [p + ' 应为 boolean'];
   }
   return errs;
 }
@@ -49,6 +55,22 @@ const kj = buildKernelJson({ version: '1.2.3' });
 kj.signature = 'sig';
 const ke = validate(kj, kSchema, 'kernel');
 check('kernel.json 样本符合 schema', ke.length === 0, ke.join('; '));
+
+// 反向自证：schema 里 requiresProtocol 是 integer+minimum，校验器必须真的判它，
+// 否则「类型/下界」这一格是空转（历史上本校验器只认 object/array/string）。
+{
+  const badType = buildKernelJson({ version: '1.2.3' });
+  badType.requiresProtocol = '1';            // 字符串 → 必须被抓
+  badType.signature = 'sig';
+  const e1 = validate(badType, kSchema, 'kernel');
+  check('反向：requiresProtocol 类型错（字符串）会被抓', e1.length > 0, e1.join('; '));
+
+  const badMin = buildKernelJson({ version: '1.2.3' });
+  badMin.requiresProtocol = -1;              // 低于 minimum 0 → 必须被抓
+  badMin.signature = 'sig';
+  const e2 = validate(badMin, kSchema, 'kernel');
+  check('反向：requiresProtocol 低于 minimum 会被抓', e2.length > 0, e2.join('; '));
+}
 
 console.log('\n结果: ' + pass + ' passed, ' + fail + ' failed');
 if (fail) process.exit(1);

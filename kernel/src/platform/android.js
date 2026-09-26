@@ -1,7 +1,7 @@
 'use strict';
 
 // Android 平台判定（唯一入口）
-// 平台抽象层铁律（docs/ANDROID-PLAN.md）：域层不得直接碰 systemctl/launchctl/schtasks/
+// 平台抽象层铁律（docs/components/kernel-android-plan.md）：域层不得直接碰 systemctl/launchctl/schtasks/
 // notify-send/osascript/xdg-open；一切平台差异经 src/platform/os/* 收敛。本文件是「是否为安卓」
 // 的唯一真源——安卓上 Node 的 process.platform === 'linux'、arch === 'arm64'，
 // **与桌面 Linux 无法仅靠 process.platform 区分**，必须显式判定（不能只靠平台分支）。

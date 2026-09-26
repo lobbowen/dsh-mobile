@@ -12,7 +12,7 @@
 // · desktop（图形会话检测，原为桌面壳看护前置条件） → 已删（无桌面壳）
 // 保留并经 Android 化的能力：
 // · pidlookup / processControl / execPath / fileProtect —— Android 走 Linux（/proc、chmod）实现
-// · notify / browser —— 桌面命令实现已删，现为 **HostBridge 占位**（见 docs/ANDROID-PLAN.md §6）
+// · notify / browser —— 桌面命令实现已删，现为 **HostBridge 占位**（见 docs/components/kernel-android-plan.md §6）
 //
 // 安卓判定唯一入口 = src/platform/android.js 的 isAndroid()（process.platform 在安卓仍是 'linux'，
 // 无法靠平台分支区分桌面 Linux，必须显式判定）。

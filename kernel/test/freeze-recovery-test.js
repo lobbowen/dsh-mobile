@@ -11,8 +11,7 @@ const http = require('node:http');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
-// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
-const { safePort } = require(path.join(__dirname, '_ports'));
+// 端口手工分配在安全段（避开 OS ephemeral 与生产池）；跨文件不撞号靠人工规划，T1 兜底。
 
 const ROOT = path.join(__dirname, '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'freeze-recovery-'));
@@ -97,7 +96,6 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
     const hitsBefore = billingHits;
     // 冻结（走 markQuotaExhausted 覆写 → 触发 _probeAfterResponseFreeze 的 300ms 定时补探测）
     p.markQuotaExhausted(acc, 5 * 3600 * 1000);
-    check('B1 冻结后 300ms 定时补探测已排定（等 800ms）', true);
     await new Promise((r) => setTimeout(r, 800));
     // 补探测应命中 billing server（detectInstanceQuota 直连 mock）
     check('B2 补探测已访问 billing server（冻结后 quota 不再 stale）', billingHits > hitsBefore, 'hits ' + hitsBefore + '→' + billingHits);

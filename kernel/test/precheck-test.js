@@ -7,8 +7,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
-// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
-const { safePort } = require(path.join(__dirname, '_ports'));
+// 端口手工分配在安全段（避开 OS ephemeral 与生产池）；跨文件不撞号靠人工规划，T1 兜底。
 
 const ROOT = path.join(__dirname, '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'sup-precheck-'));

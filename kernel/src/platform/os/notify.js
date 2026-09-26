@@ -4,7 +4,7 @@
 //
 // 原 PC 三端实现（Linux notify-send / macOS osascript / Windows PowerShell 气泡）已随桌面端删除：
 // 安卓无桌面通知机制，通知经**容器层 HostBridge**（NotificationManager 通道）下发，
-// 见 docs/ANDROID-PLAN.md §5.2 / §6。
+// 见 docs/components/kernel-android-plan.md §5.2 / §6。
 //
 // 桥可用（容器内且 HostBridge 在听）→ 经 `notif.post` 派发，返回 true。
 // 桥不可用（不在容器内 / socket 未就绪 / 调用失败）→ 静默返回 false。

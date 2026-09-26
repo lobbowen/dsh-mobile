@@ -72,7 +72,7 @@ if [ "$VC" -lt "$PVC" ]; then
 fi
 if [ "$VC" -eq "$PVC" ]; then
   if [ "$CHANNEL" = auto ]; then
-    die "同版本重发（versionCode=$VC）在自动通道被拒：这次改动动了 APK 内容却没 bump version.json 的 shell.versionCode。请 bump（见 docs/runbook/versioning.md §2），确认要原地重传则推 fast-* tag。"
+    die "同版本重发（versionCode=$VC）在自动通道被拒：这次改动动了 APK 内容却没 bump version.json 的 shell.versionCode。请 bump（见 docs/runbook/release.md §2），确认要原地重传则推 fast-* tag。"
   fi
   echo "[version] 同版本重发（versionCode=$VC，显式通道允许：用于修复投递/重传）"
   exit 0

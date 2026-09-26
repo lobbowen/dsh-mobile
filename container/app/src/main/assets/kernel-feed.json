@@ -1,15 +1,18 @@
 {
   "schema": 1,
-  "$comment": "远端内核 OTA feed。设备端读 <baseUrl>/kernel-<channel>/kernel-manifest.json。autoCheck=true = 启动即检测并自动升级（手动入口仍为面板按钮 / build.kernelInstall）。releaseTag 非空时覆盖 channel 推导（调试用）。",
   "baseUrl": "https://hubcdn.zll.ink",
-  // ⚠ 当前为 canary：按 ADR-0005，内核必须先经**真机**在灰度通道验证，才允许提升到 stable。
-  // 真机验证通过后的两件事（见 docs/runbook/kernel-device-verification.md 末节）：
-  //   ① 发一次 kernel-ota(channel=stable) 把同一版本提升到生产通道；
-  //   ② 把这里改回 "stable" 并重新出 APK。
-  // 在①之前保持 canary —— 否则设备读 stable 会 404（那里还没有任何 manifest）。
   "channel": "canary",
   "releaseTag": "",
   "manifestName": "kernel-manifest.json",
   "autoCheck": true,
-  "startupBudgetMs": 12000
+  "startupBudgetMs": 12000,
+  "notes": [
+    "远端内核 OTA feed。设备端读 <baseUrl>/kernel-<channel>/kernel-manifest.json。",
+    "autoCheck=true = 启动即检测并自动升级（手动入口仍为面板按钮 / build.kernelInstall）。",
+    "releaseTag 非空时覆盖 channel 推导（调试用）。",
+    "当前为 canary：按 ADR-0005，内核必须先经真机在灰度通道验证，才允许提升到 stable。",
+    "真机验证通过后：① 发一次 kernel-ota(channel=stable) 提升到生产通道；② 把这里改回 stable 并重新出 APK。",
+    "在①之前保持 canary —— 否则设备读 stable 会 404（那里还没有任何 manifest）。",
+    "本文件必须是合法 strict JSON（不允许 // 或 /* */ 注释）。改本文件后请自行确认可被 JSON.parse 解析。"
+  ]
 }

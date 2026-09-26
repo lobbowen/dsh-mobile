@@ -21,7 +21,7 @@ name: Fast APK (no Node rebuild)
 #    这两类改动才需要真正重编，编完用 release-admin 的 pin 模式固化
 #    （tag: pin-node-*），之后本 workflow 自动用上新版本。
 #
-#  决策表见 ARCHITECTURE.md 第 8 节。
+#  决策表见 docs/architecture.md 第 8 节。
 # ============================================================================
 
 on:
@@ -61,7 +61,7 @@ on:
       node_version:
         description: '用作运行时的 Node 版本（须已有对应的 pinned release）'
         required: false
-        default: '24.21.0'
+        default: ''          # 留空 = 从 assets/node-versions.json 读（单一事实源）
       abi:
         description: '目标 ABI'
         required: false
@@ -83,8 +83,10 @@ jobs:
     timeout-minutes: 40
 
     env:
-      NODE_VERSION: ${{ inputs.node_version || '24.21.0' }}
-      ABI: ${{ inputs.abi || 'arm64-v8a' }}
+      # 不在这里写死版本/ABI：下面的 Resolve 步骤会从 assets/node-versions.json 读
+      # 并通过 GITHUB_ENV 覆盖；这里只在显式传入时有值（门禁法②：清单禁手维护）。
+      NODE_VERSION: ${{ inputs.node_version }}
+      ABI: ${{ inputs.abi }}
 
     steps:
       - name: Checkout
@@ -313,7 +315,7 @@ jobs:
         # darwin 预编译件，无 android-arm64 ⇒ 设备发消息报
         # "flock is not supported on android-arm64"。flock(2) 无 JS 等价物
         #（O_EXCL 锁崩溃后残留=砍能力），唯一正解=NDK 现编 vendor 的 src/flock.c
-        #（源码见 container/native/flock/PROVENANCE.md）放进 jniLibs —— nativeLibraryDir 是
+        #（源码见 docs/components/native.md）放进 jniLibs —— nativeLibraryDir 是
         # W^X 下唯一可 dlopen/exec 的通道（libnode.so 同款先例）。
         # 刻意**不**登记进 native-assets.txt：那份清单的 ≥1MB 门槛会误杀小体积绑定。
         run: |
@@ -398,7 +400,7 @@ jobs:
             file "$f" | sed 's/^/      /'
           }
 
-          # ── ① PTY 探针（必须成功；见 container/native/ptyprobe/PROVENANCE.md）──
+          # ── ① PTY 探针（必须成功；见 docs/components/native.md）──
           "$CC" -static -O2 -o "$J/libdshptyprobe.so" container/native/ptyprobe/pty-probe.c \
             || { echo "[error] ptyprobe 编译失败（纯 C 静态，失败即环境问题）"; exit 1; }
           check_so "$J/libdshptyprobe.so" 1000 || exit 1

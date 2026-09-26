@@ -505,7 +505,7 @@ echo "==> 宿主工具链: CC_host=$CC_host  CXX_host=$CXX_host  AR_host=$AR_hos
 # ---------------------------------------------------------------------------
 # 目标侧链接标志：把 DT_RUNPATH=$ORIGIN 写进 node 本体，让它自己找得到同目录的
 # libc++_shared.so。不能靠调用方补 LD_LIBRARY_PATH —— dsh 的 run_code 从空环境起
-# 子进程，补了也传不下去。论证与 2026-09-26 真机实测见 ARCHITECTURE.md 第 3 节。
+# 子进程，补了也传不下去。论证与 2026-09-26 真机实测见 docs/architecture.md 第 3 节。
 #
 # 两个 flag 缺一不可：bionic 忽略 DT_RPATH，不加 --enable-new-dtags 就只写进 RPATH，
 # 看着「有」、真机上仍是死的。

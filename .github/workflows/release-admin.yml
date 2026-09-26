@@ -780,7 +780,8 @@ jobs:
           fi
 
           # 版本号缺省时，尝试从该 run 的 ci-ok/ci-last 自报里取；取不到用默认值。
-          if [ -z "$VERSION" ]; then VERSION="24.21.0"; fi
+          # 缺省从单一事实源读，不写死字面量（门禁法②）
+          if [ -z "$VERSION" ]; then VERSION="$(bash scripts/read-node-versions.sh default)"; fi
           if [ -z "$ABI" ]; then ABI="arm64-v8a"; fi
 
           echo "源 run  : $RUN_ID"

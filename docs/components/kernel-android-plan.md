@@ -49,7 +49,7 @@
 
 | 域 | 路径 | 移动端职责 |
 |---|---|---|
-| **native** | `src/domains/native/` | Agent 运行时（如 DSH）安装 / 升级 / 卸载 / 探活 |
+| **native** | `src/guard/native/` | Agent 运行时（如 DSH）安装 / 升级 / 卸载 / 探活 |
 | **dist** | `src/domains/dist/` | npm 分发、镜像源测速与固定 |
 | **plugin** | `src/domains/plugin/` | 第三方插件市场 / 安装 / 启用 |
 | **router** | `src/domains/router/` | **模型网关**（多供应商 Key 轮换代理，移动端同样需要） |
@@ -139,14 +139,14 @@ UI 移动端 webview 适配 · 签名包 OTA 与 APK 公钥焊接。
 |---|---|---|
 | 应用控制（拉起/停止 Agent 进程） | `native` 域已有 spawn 能力；`app.launch/stop/openUrl` 经桥 | 进程可见性 / 前台服务绑定 |
 | UI 自动化 | **容器侧全组已实现**（`ui.tap/swipe/inputText/getUiTree/waitFor` + `ui.screenshot`）；内核侧**尚无调用方** | 无障碍服务（`DshAccessibilityService` 已落）+ MediaProjection（`ScreenCaptureService` 已落） |
-| 构建（安装已签名内核，非编译） | 容器侧 `build.kernelInstall/kernelStatus` ✅ 已实现（A''）；内核侧调用方待补 | 签名内核包投递本地 feed；~~内置编译工具链~~ **已证伪撤销**（无 aarch64 aapt2） |
+| 构建（安装已签名内核，非编译） | 容器侧 `build.kernelInstall/kernelStatus` ✅ 已实现（A''）；内核侧调用方待补 | 签名内核包经 OTA 投递；~~内置编译工具链~~ **已证伪撤销**（无 aarch64 aapt2） |
 | 存储（沙箱目录 / 外部存储） | 走 `state-root`；**容器侧 `fs.*` 已实现** | 应用私有目录 + 授权外部存储 |
 | 通知 | **已接桥**：`notify.js` → `notif.post` | `NotificationManager` 通道（替代 notify-send） |
 | 设备策略（电池/省电/前台保活） | 无 | 电池优化白名单 / 前台 Service 保活 |
 | 自启与保活 | `autostart` = `none` | Android Service + 开机广播（BOOT_COMPLETED） |
 
 > **桥客户端状态（2026-09-16）**：内核侧客户端（`src/platform/host-bridge/`）与容器侧服务端
-> （`android-node-container`：Kotlin `HostBridgeService` / `container-engine/src/bridge/`）已**真实互通**
+> （`android-node-container`：Kotlin `HostBridgeService` / `container/engine/src/bridge/`）已**真实互通**
 > （抽象命名空间 UDS，`\0dsh_hostbridge`；Node 22 原生支持）。`notify` / `browser` 已从占位切到真桥。
 > **组级能力语义已两侧收敛**：「组可用」= 该组**代表能力**具备（`GROUP_REQUIRED`），
 > 特权方法另由**方法级 caps** 单独门禁（调用时 -32001）。
@@ -174,8 +174,8 @@ UI 移动端 webview 适配 · 签名包 OTA 与 APK 公钥焊接。
 > - ✅ `build` —— **P3 已收口（2026-09 决策：不做内置编译链）**。「内置构建链」已实测证伪
 >   （Google Maven 无 aarch64 版 aapt2，interp/架构/libc 三关装机后无法补救），
 >   原「全内置 / 首启下载 / 最小子集」三选一并撤销；方案论证以容器仓
->   `docs/ARCHITECTURE.md` §2.2–2.3 为唯一权威（原文档引用的《P3 内置构建链方案对比.md》已不在仓内，勿再找）。
->   本组现语义 =「从本地 feed 安装已签名内核」（`build.kernelInstall`，能力 `kernel_update`，任意设备具备），
+>   `../architecture.md` §2.2–2.3 为唯一权威（原文档引用的《P3 内置构建链方案对比.md》已不在仓内，勿再找）。
+>   本组现语义 =「经 OTA 安装已签名内核」（`build.kernelInstall`，能力 `kernel_update`，任意设备具备），
 >   容器侧已真实实现；`build.apk` 已废弃（返回 `-32602` 迁移指引）。
 >   若「设备资源级重打包修改 APK」成为真实需求，另立方案（纯 Node 重打包 + 重签名，不引入原生工具链）。
 >
@@ -202,7 +202,7 @@ UI 移动端 webview 适配 · 签名包 OTA 与 APK 公钥焊接。
 | P1 | **UDS 控制面**替代 TCP（回环安全边界） | 容器侧 UDS 服务端 |
 | ~~P2~~ ✅ | **HostBridge 客户端**（内核侧 `platform/host-bridge/`）+ JS↔Kotlin RPC 协议（与容器逐字段对齐） | BRIDGE_PROTOCOL |
 | P3 | **Android Service** 接入（拉起 / 保活 / 生命周期对齐）— 容器侧已落（`NodeRuntimeService`/`BootReceiver`） | 容器侧 Service |
-| ~~P4~~ ❌ 已撤销 | ~~构建链内置~~（JDK + build-tools 随 APK 分发）—— 实测证伪，P3 收口不实施；`build` 组语义改为「从本地 feed 安装已签名内核」（A''），容器侧已实现 | 无（论证见容器仓 ARCHITECTURE §2.3） |
+| ~~P4~~ ❌ 已撤销 | ~~构建链内置~~（JDK + build-tools 随 APK 分发）—— 实测证伪，P3 收口不实施；`build` 组语义改为「经 OTA 安装已签名内核」（A''），容器侧已实现 | 无（论证见容器仓 ARCHITECTURE §2.3） |
 | P5 | **能力桥落地**（§6 各组能力按优先级实现）— 组级/方法级门禁已通，`notify`/`browser` 已接；**容器侧 `ui_automation`（含截图）/ `device_policy` / `storage` 已真实实现，`shell` 已兜底**，内核侧调用方待补 | HostBridge |
 | P6 | **UI 移动端适配**（桌面 React → 容器 webview）— 容器宿主帧 + `dsh:kernel-update-*` 桥已落 | 控制面稳定 |
 
@@ -212,11 +212,11 @@ UI 移动端 webview 适配 · 签名包 OTA 与 APK 公钥焊接。
 
 - `require('./src/supervisor')` / `require('./src/api/index')` / `require('./src/api/surface')` **加载成功**。
 - `test/api-surface-test.js`：**12 passed, 0 failed**（契约面双向一致）。
-- `npm test`：**49 个测试文件入链，约 695 项断言全部通过，0 failed**；
+- `npm test`：**64 个测试文件入链，约 695 项断言全部通过，0 failed**；
   排除表仅剩真实卸载两项（`native-test.js` / `plugin-change-restart-test.js`），
   由 `test/test-chain-completeness-test.js` 强制「每个测试文件要么在链中、要么写明排除理由」。
 - `test/kernel-update-single-writer-test.js`：**24 passed, 0 failed**（内核零自更新面）。
 - `test/host-bridge-test.js`：**20 passed, 0 failed**（H-1…H-6：抽象命名空间路径、socket 名解析、
   桥不可用降级不抛、真实 UDS 端到端握手/调用/-32001/-32601、notify/browser 接线、超时不挂死）。
-- `package.json`：`name=dsh-android-kernel`、`version=0.1.0-android.1`，
+- `package.json`：`name=dsh-android-kernel`、`version=0.1.0-android.13`，
   移除 `npmPublish`、指向已删 `release/` 的构建脚本与指向已删 `api-contract-test.js` 的 `test:api-contract`。

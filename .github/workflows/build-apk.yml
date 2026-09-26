@@ -239,11 +239,8 @@ jobs:
         run: |
           echo "2.5/9 container/engine-tests" > /tmp/ci-stage
           set -euo pipefail
-          cd container/engine
-          npm run test:logic 2>&1 | tee /tmp/engine-test.log
-          echo
-          echo "=== 容器引擎逻辑测试汇总 ==="
-          echo "$(grep -c '^PASS' /tmp/engine-test.log || true) 个 PASS，$(grep -c '^FAIL' /tmp/engine-test.log || true) 个 FAIL"
+          # 步骤体唯一宿主：scripts/run-engine-tests.sh（与 ci.yml 同源，含 ensure-tool 纪律）。
+          bash scripts/run-engine-tests.sh
 
       - name: Set up JDK 17
         id: setupjava
@@ -557,6 +554,7 @@ jobs:
       - name: Verify node binary is in place (pre-gradle gate)
         id: verifybin
         run: |
+          set -euo pipefail
           echo "=== 打包前门禁：确认 node 二进制以 jniLibs 形态就位 ==="
           DEST="container/app/src/main/jniLibs/arm64-v8a/libnode.so"
           if [ ! -f "$DEST" ]; then
@@ -631,7 +629,10 @@ jobs:
       - name: Stage pinned npm into APK assets
         # npm 属 L0 基础环境（纯 JS，由 libnode.so 代跑，从不直接 exec）。
         # 与 fast-apk 同一份脚本，版本/sha512 双钉见脚本头注释。
-        run: ./scripts/stage-npm-assets.sh
+        # 守卫与 fast-apk 那份对齐（原先这里缺 set -euo pipefail，两份写法不同）。
+        run: |
+          set -euo pipefail
+          ./scripts/stage-npm-assets.sh
 
       - name: Build debug APK
         id: gradlebuild
@@ -881,6 +882,10 @@ jobs:
             echo
             echo "=== step outcomes (success/failure/skipped) ==="
             echo "wfvalidate  : ${{ steps.wfvalidate.outcome }}"
+            # enginetests 紧跟在 validate 之后，是"秒级快速失败"的关键一环，必须登记 ——
+            # 漏了它就会把"容器引擎测试失败"误报成"validate-workflow 失败"（真实踩过）。
+            # W6 门禁（kernel/test/workflow-parse-test.js）检查本清单与正常路径那份逐项一致。
+            echo "enginetests : ${{ steps.enginetests.outcome }}"
             echo "hbstart     : ${{ steps.hbstart.outcome }}"
             echo "ping        : ${{ steps.ping.outcome }}"
             echo "checkout    : ${{ steps.checkout.outcome }}"

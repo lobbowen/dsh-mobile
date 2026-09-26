@@ -59,10 +59,22 @@ try {
   const top = fs.readdirSync(ROOT, { withFileTypes: true }).filter(e => e.name !== '.git').map(e => e.name)
     .filter(n => !layout.rootAllow.includes(n) && !(!ENFORCE && movingFrom.has(n)));
   if (top.length) problems.push('undeclared root entries: ' + top.join(', '));
+
+  // scriptsOwnership 对账（门禁法②：手维护清单必须可对账，否则必然悄悄漂移）
+  const owned = Object.keys(layout.scriptsOwnership || {});
+  const actual = fs.readdirSync(path.join(ROOT, 'scripts'));
+  const unregistered = actual.filter(f => !owned.includes(f));
+  const stale = owned.filter(f => !actual.includes(f));
+  if (unregistered.length) problems.push('scriptsOwnership 未登记: ' + unregistered.join(', '));
+  if (stale.length) problems.push('scriptsOwnership 登记了不存在的文件: ' + stale.join(', '));
+  // 自证：同一个「未登记」判据必须能识破一个不存在的样本（防判据写坏成恒空）
+  if (['__nonexistent__'].filter(f => !owned.includes(f)).length !== 1) problems.push('scriptsOwnership 判据自证失败（恒空）');
   console.log('== summary ==');
   console.log('  pending=' + pending + ' done=' + done + ' conflict=' + conflict + ' missing=' + missing);
   console.log('  legacyForbidden present: ' + (legacy.length ? legacy.join(', ') : 'none'));
   console.log('  undeclared root entries: ' + (top.length ? top.join(', ') : 'none'));
+  console.log('  scriptsOwnership: ' + owned.length + ' 项 / scripts 实际 ' + actual.length + ' 个'
+    + (unregistered.length || stale.length ? '  ← 漂移' : '  ✓ 一致'));
   if (ENFORCE && problems.length) {
     console.log('\n结果: 0 passed, 1 failed');
     problems.forEach(p => console.log('  FAIL ' + p));

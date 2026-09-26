@@ -97,7 +97,7 @@ object GuestAdapter {
             // fail-closed。danger-full-access = 放弃 dsh 层二次隔离、以外层 SELinux
             // 为 confinement（产品拍板 2026-09-23）。
             put("DSH_PERMISSION_MODE", "danger-full-access")
-            // flock(2) 原生绑定（fast-apk CI 现编进 jniLibs，见 native/flock/PROVENANCE.md）。
+            // flock(2) 原生绑定（fast-apk CI 现编进 jniLibs，见 docs/components/native.md）。
             // 文件缺席时垫片 dlopen 失败 ⇒ 逐字回退 vendor 原始语义，故只是声明、不要求存在。
             put("DSH_FLOCK_NATIVE", i.flockNative.absolutePath)
             // link(2) 用户态替代：经 LD_PRELOAD 注入 DSH 进程，见 native/posix/。
@@ -122,7 +122,7 @@ object GuestAdapter {
         "HOME" to base.filesDir.absolutePath,
         "TMPDIR" to base.cacheDir.absolutePath,
         // 只服务 $PREFIX 下尚无 RUNPATH 的工具；libnode 的依赖由二进制的
-        // DT_RUNPATH=$ORIGIN 负责（见 ARCHITECTURE.md 第 3 节），这些工具按同一判据
+        // DT_RUNPATH=$ORIGIN 负责（见 docs/architecture.md 第 3 节），这些工具按同一判据
         // 重编之后本键即可删除。
         "LD_LIBRARY_PATH" to base.nativeLibDir,
         "NODE_BIN" to base.nodeBin.absolutePath,

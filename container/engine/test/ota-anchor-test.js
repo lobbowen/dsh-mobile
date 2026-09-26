@@ -180,10 +180,8 @@ const WF = {
   fast: path.join(ROOT, '.github/workflows/fast-apk.yml'),
 };
 const BUNDLE = path.join(ROOT, 'scripts/build-kernel-bundle.sh');
-/** 剥掉整行注释：注释里提这些串是交代历史，不是判据。 */
-function stripComments(src) {
-  return src.split('\n').filter((l) => !/^\s*(#|\/\/)/.test(l)).join('\n');
-}
+// stripComments 的唯一实现住 harness.js（门禁法①，勿在本文件再写第二份）。
+const stripComments = makeRunner.stripComments;
 {
   const src = {};
   for (const [k, p] of Object.entries(WF)) src[k] = fs.existsSync(p) ? stripComments(fs.readFileSync(p, 'utf8')) : '';

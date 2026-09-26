@@ -28,6 +28,14 @@
 //   E-d  DNS-rebinding（Host=evil.com）→ 仍 DENY
 //   E-e  公网 IP Host（8.8.8.8）→ 仍 DENY
 //   E-f  边界正确：172.32.x（非私有）与 172.15.x（非私有）→ DENY
+// ── E-h：自 defects-batch-f 的 K6 归并过来的三条唯一用例 ──
+check('E-h IPv6 回环 Host（[::1]:port）→ ALLOW', allow({ host: '[::1]:' + PORT }) === true);
+check('E-h localhost Host → ALLOW', allow({ host: 'localhost:' + PORT }) === true);
+check('E-h 同源但异端口 Origin → DENY',
+  allow({ host: '127.0.0.1:' + PORT, origin: 'http://127.0.0.1:36361' }) === false);
+check('E-h 畸形 Origin（不可解析）→ DENY',
+  allow({ host: '127.0.0.1:' + PORT, origin: 'not a url' }) === false);
+
 //   E-g  判定复用 identity 的同一份实现（不重写第二份 RFC1918）
 // ═══════════════════════════════════════════════════════════════════════════
 

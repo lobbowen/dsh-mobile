@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 // 从 NativeAssetRegistry.kt（唯一事实来源）生成 .github/native-assets.txt。
-// CI 运行本脚本后执行 `git diff --exit-code`；本地不得执行（见 docs/runbook/testing-standard.md）。
+// CI 运行本脚本后执行 `git diff --exit-code`；本地不得执行（见 docs/standards/testing.md）。
 const fs = require('fs');
 const path = require('path');
 

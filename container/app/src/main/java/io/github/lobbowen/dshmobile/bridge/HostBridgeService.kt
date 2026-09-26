@@ -780,7 +780,7 @@ class HostBridgeService : Service() {
         // ---- 3.6 build：内核安装（A'' 自举）----
         //
         // 语义澄清：本组**不是**「内置编译工具链」（那个方案已实测证伪，见
-        // ARCHITECTURE.md（仓库根）§2.3：Google Maven 无 aarch64 版
+        // docs/architecture.md（仓库根）§2.3：Google Maven 无 aarch64 版
         // aapt2，exec 四道关的后三关装机后无法补救）。
         //
         // 它是「设备从本地 feed 安装**已签名**内核」—— 职责是安装而非生产。
@@ -831,7 +831,7 @@ class HostBridgeService : Service() {
                 CODE_INVALID_PARAM,
                 "build.apk 已废弃：内置构建链经实测不可行（Google Maven 无 aarch64 版 aapt2，" +
                     "interp/架构/libc 三关装机后无法补救）。请改用 build.kernelInstall —— " +
-                    "设备安装已签名内核，无需编译。详见 ARCHITECTURE.md（仓库根）§2.2"
+                    "设备安装已签名内核，无需编译。详见 docs/architecture.md（仓库根）§2.2"
             )
         },
         "build.status" to MethodDef(listOf("kernel_update"), false) { _ ->

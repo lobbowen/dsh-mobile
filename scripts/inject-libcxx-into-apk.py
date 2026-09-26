@@ -117,7 +117,7 @@ def main():
     # 为什么锚定 libnode.so：它是本包的主可执行资产，必定存在；
     # 且两个 lib*.so 相邻便于人工核对。
     # 这两个名字都来自 NativeAssetRegistry（libcxx / node 两项），
-    # 改注册表时也要改这里 —— container-engine/test/native-assets-test.js 会拦。
+    # 改注册表时也要改这里 —— container/engine/test/native-assets-test.js 会拦。
     anchor = ('lib/%s/libnode.so' % args.abi).encode()
     print('==> APK       : %s (%d 字节, %d 个条目)' % (args.apk, len(data), len(entries)))
     print('==> 注入目标  : %s (%d 字节)' % (new_name.decode(), len(libcxx)))

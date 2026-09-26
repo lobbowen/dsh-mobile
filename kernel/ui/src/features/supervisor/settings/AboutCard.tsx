@@ -2,7 +2,7 @@
  * 设置 — 关于卡（产品信息，放设置页最底部）
  *
  * Android 内核的产品构成（2026-09 去耦）：
- *   · 内核（本仓 dsh-android-kernel，运行于冻结 APK 容器 Node 运行时）
+ *   · 内核（本仓 kernel/，运行于冻结 APK 容器 Node 运行时）
  *   · 容器（APK：Node 运行时 + HostBridge + OTA，冻结不随内核升级）
  * 内核版本线独立呈现；**内核自身只提供版本读取**，安装/升级由容器 OTA 执行
  * （单写入者契约：/self-update/apply|restart-guard 已下架 = 410）。

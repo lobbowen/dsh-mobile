@@ -13,7 +13,6 @@
 //     设备端：过期即拒；sequence 不得低于本通道已见最大值（防重放）。
 //
 // 用法：node scripts/sign-kernel-manifest.js <manifest.json> <private-key.pem> [rolloutPercent]
-// 环境：DSH_MANIFEST_SEQUENCE_BASE（上一份 manifest 的 sequence；留空=从 0 起）
 //       DSH_MANIFEST_TTL_DAYS（默认 30）
 // ============================================================================
 

@@ -21,7 +21,7 @@ android {
     buildToolsVersion = "35.0.0"
 
     // =========================================================================
-    // 版本单一事实源：仓根 version.json（规则见 docs/runbook/versioning.md）
+    // 版本单一事实源：仓根 version.json（规则见 docs/runbook/release.md）
     // =========================================================================
     // 为什么不写死在 build 脚本里：versionCode/versionName 是**分发身份**，必须与
     // 内核 / 引擎 / UI / 运行时 的版本一起被审计；散落在这里既看不全，也拦不住漏 bump。
@@ -37,7 +37,7 @@ android {
         applicationId = "io.github.lobbowen.dshmobile"
         minSdk = 24
         // targetSdk 决定 SELinux 域：28 落在 untrusted_app_27，允许 exec app home。
-        // 取舍与依据见 docs/ADR-001；link(2) 不在此豁免内，走自有原语。
+        // 取舍与依据见 docs/adr/0001-android-execution-domain.md；link(2) 不在此豁免内，走自有原语。
         targetSdk = 28
         versionCode = appVersionCode
         versionName = appVersionName
