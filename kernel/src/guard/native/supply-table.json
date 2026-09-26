@@ -17,9 +17,16 @@
     "hostPackage": "@koromix/koffi-android-arm64"
   },
   "probe": {
+    "node": {
+      "version": "24.21.0",
+      "from": "container/app/src/main/assets/node-versions.json#default",
+      "why": "npm 把 engines 检查用的 nodeVersion 硬编成 process.version，而 optional 依赖 engines 不满足就被剔除、且无视 --engine-strict（arborist build-ideal-tree #checkEngineAndPlatform）。本闭包实测 node 22 与 24 的两份计划逐字相同（502 / 495），钉这一格是为了堵「某平台件声明 engines >= 新主版本」时缺口被吃进假绿：那时真机装得到、探针装不到。版本事实源是设备运行时那格 default"
+    },
     "npm": {
       "version": "11.19.0",
-      "why": "探针必须用设备上那份 npm：设备 node 24.21.0 捆绑 npm 11.19.0（nodejs/node v24.21.0 的 deps/npm/package.json），--os/--cpu 平台覆盖要这一版才认。CI 的 setup-node 22 自带 npm 10.9.3，实测它静默忽略这两个配置 —— 两份计划各 575 项、差集为空，正是双向对照组要拦的那种绿"
+      "shippedBy": "scripts/stage-npm-assets.sh#NPM_VER",
+      "shippedByWhy": "设备上跑的就是 APK 里那份 npm：NodeProvisioner.ensureNpm 按 assets/npm/version.txt 解到 files/npm/<ver>/，内核经 runtime.json 的 npmEntry 用 libnode.so 代跑。表锚必须等于投放脚本钉的那份，CI 也按表锚装探针 —— 两处一变另一处没跟上就红。",
+      "why": "探针必须用设备上那份 npm：npm 10 静默忽略 --os/--cpu，差集会空转成「无缺口」。CI runner（setup-node 22 → node v22.23.2 / npm 10.9.8）实测两份计划各 575 项、两侧差集皆空，正是双向对照组要拦的那种绿"
     }
   },
   "dispositions": {
