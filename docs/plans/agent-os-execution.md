@@ -7,7 +7,7 @@
 
 | 轨 | 内容 | 状态 | 量 |
 |---|---|---|---|
-| **P0** | C1 出生收口：`onCreate` 自出生 + 三态判据 + 空壳上屏 + 门禁出生链 | 已合入 main（`07faed6`，壳 1.1.6(8)），CI 绿；真机判据 **1、2、4、5 已过**（01:2x/01:38 实跑，见 §7 收口状态），**判据 3 真机判失败 = D9** ⇒ 补修（D9 通知正文单写者 + D10 转发线程不致命）在本轮 PR，出壳 1.1.7(9)；**判据 3 未复点前 P0 仍不收口** | 0.5d + 1 壳 + 1 机 + 补修 1 壳 1 机 |
+| **P0** | C1 出生收口：`onCreate` 自出生 + 三态判据 + 空壳上屏 + 门禁出生链 | **已收口**（壳 1.1.7(9)，main=`7afa06d5`）：真机判据 **1、2、3、4、5 全过**。1.1.6(8) 上判据 3 真机判失败 = D9（通知 1004 双正文写者），补修（D9 单写者 + D10 转发线程不致命）随 PR #92 合入并上线；02:05 同型注入复点，t+24s 实读「运行时未出生」⇒ 判据 3 成立。逐条读数与口径更正见 §7，ADR-0008 §5 同步 | 0.5d + 1 壳 + 1 机 + 补修 1 壳 1 机 |
 | **PC-0** | 命名表 / 目标树终稿 / CI paths 对照表 / `capability`⇄`permissions` 裁决阅读 | 待做 | 0.5–1d |
 | **PC-1** | D1+D2 搬家：`guard`⇄`supervisor` 双词汇合并 + `container/engine`→`hosttools` | 待做 | 2 壳 |
 | **PC-2** | Kotlin 六域包制重排（含组件名迁移 + a11y 注册串自校正） | 待做 | 2–3 壳 + 1 机 |
@@ -33,7 +33,7 @@
 | D7 | **`system/` 目录本体无罪**：Tier S（特权系统服务形态）集成契约，与 Tier A 垫片路径并存的刻意设计 | `system/README.md` | 保留，只修引用 |
 | D8 | **交付通道无单一写者**（2026-09-26 夜间事故，2026-09-27 复核）：`fast-apk` 从**任意 ref** 都能写共享发布通道，未合入 main 的分支字节被原地投成用户手里的下载地址 | 实证：16:12–16:13 分支 commit `090abbd`（领先 main 18 个 commit）经 run #185 同时覆盖 `apk-latest` 与 `v1.1.6`，`ci-ok.txt` 落 `sha : 090abbd`；成因三处逐行复核 —— `fast-apk.yml` 全文无 `github.ref_name` 校验（发布步骤 `:730`、`TAG="apk-latest"` `:736`、版本化归档 `VTAG="v$VN"` `:796`），版本门禁放行同号换字节（`verify-apk-version-gate.sh:77`），两条合起来 = 任何分支都能顶掉线上 | 归 **P2b**（另一工作区正收敛门禁/`fast-apk.yml`/`scripts`，本轮不碰）：发布步骤加「`GITHUB_SHA` 必须是 main head」硬失败 + 门禁活样本；合同条文已进 ADR-0008 §4 C4。本轮治标**已完成并复核**：fast-apk run #188（`main` / `9d530d3`，21 步全绿，含 step 17 签名门与 step 20 发布）后，Releases API 实读 `apk-latest/app-debug.apk` 与 `v1.1.6/app-debug-1.1.6+8.apk` digest 相同 = `sha256:8466cdaa67b6a4b03…`（53406521 字节），`ci-ok.txt` 现记 `sha : 9d530d3` + 同值 `apk_sha`（污染版是 `25c117d…` / 53406529 字节 / `090abbd`）；**同一破口 8 分钟后再次点火**：16:30:59 分支 `ws-p2b-audit`（`a6c9fafb`）dispatch fast-apk run #189，只因它自己红在 step 18「Audit APK contents」（发布步 `:730` 没有 `if:`，前一步红则后续整步不跑）才没顶掉通道 —— 挡住事故的是别人的门禁判红，不是这条链有设计 |
 | D9 | **常驻通知（NOTIF_ID 1004）有两个内容写者**（2026-09-27 真机判据 3 定罪）：`promoteToForeground()` 每次 `onStartCommand` 都用 `ResidencyAudit.interruption() ?: "状态采集中…"` 覆盖正文（`ContainerSupervisor.kt:100` 投递 → `:118-124`，覆盖语句在 `:121`），而三态结论只由 `refreshStatusNotice()`/`statusLine()`（`:209-243`，`NOTIFY_MS = 20_000L` 在 `:313`）发布 ⇒ **拉起风暴里后者的节拍永远赢不过前者**。为什么必然成风暴：`ensureRunning` 是普通 `startService`（`:321-327`），而它的调用点包含「`:node` 每次 boot 尝试」（注释 `:316-320` 自证）⇒ :node 越是不出生就越频繁地戳，戳一次盖一次，屏幕上恒定只剩定罪段。罪不在 throttle，在**同一 id 两套正文** | 真机注入 `POWER ∧ ¬BORN ∧ ¬ONLINE` 后 13 个采样点（40s / 3s 粒度）通知从未印「运行时未出生」，撤掉注入后同一条通知立刻自愈成「运行时在线」⇒ 链路在跑、内容被盖；logcat 无「监督拍异常」⇒ 非抛异常（实跑记录与口径更正见 §7 收口状态） | 补修已落（壳 1.1.7(9)）：1004 的正文**单写者** = `statusLine()` —— `promoteToForeground()` 改为 `startForeground(NOTIF_ID, buildNotification(statusLine()))`（`:126`），首拍读数未采时由 `statusLine()` 自己如实说「状态采集中…」（新增 `readingsCollected`，声明 `:73-75`、落 `:225`、用 `:235-237`）。**刻意不加**「状态变化即发布」的第二套节拍：判据 3 的窗口是 40s，20s 一档足够，加机制=加风险 |
-| D10 | **内核 stdout/stderr 转发线程未捕获 `InterruptedIOException`**：`forward()` 在裸 `Thread { }` 里 `bufferedReader().use { r -> r.forEachLine { … } }`（`NodeRuntimeService.kt:627-632`），任一异常沿默认 `UncaughtExceptionHandler` 上抛 ⇒ 拆内核管道（`close()`）与读线程抢 FD，抛 `read interrupted by close() on another thread`，**整个 `:node` 进程 FATAL** | 真机 crash buffer 实证：`FATAL EXCEPTION: Thread-2/Thread-3 · Process: …:node · java.io.InterruptedIOException: read interrupted by close() on another thread`，栈尾实名 `kotlin.io.TextStreamsKt.forEachLine(ReadWrite.kt:163)` → `NodeRuntimeService.forward$lambda$11(NodeRuntimeService.kt:632)`；01:07:46 / 01:11:13（两条）/ 01:12:13（两条）共 5 次、三个不同 pid（22169 / 26037 / 27052），stdout 与 stderr 两条转发线程都会炸 ⇒ **不是我这轮手动杀进程才有的罕见竞态，内核每次被拆管都炸一次整进程** | 修已落（壳 1.1.7(9)）：`forward()` 的读取整体收进 `try/catch (Throwable)`（`NodeRuntimeService.kt:627-679`），异常按**正常收尾**处理 —— `InterruptedIOException("read interrupted by close()…")` 是 libcore 对「另一线程关掉了 FD」的信号，不是故障；收尾时 `Log.w` + `RuntimeDiagnostics.append(kernel-$tag)` 留痕，绝不上抛。顺带给线程命名 `kernel-$tag-forward`（本缺陷在崩溃栈里只叫 Thread-2/Thread-3，无从归因）。**没做**「先停读线程再 close()」的顺序改造：拆管方在别处且不止一条路径，把「转发线程之死不许带走宿主」这条不变式立住之后，顺序竞态只会少几行日志、不再致命 —— 为一个不致命的窗口引一套线程协调属过度设计。判据 = 反复拆/起内核后 crash buffer 零新增 |
+| D10 | **内核 stdout/stderr 转发线程未捕获 `InterruptedIOException`**：`forward()` 在裸 `Thread { }` 里 `bufferedReader().use { r -> r.forEachLine { … } }`（`NodeRuntimeService.kt:627-632`），任一异常沿默认 `UncaughtExceptionHandler` 上抛 ⇒ 拆内核管道（`close()`）与读线程抢 FD，抛 `read interrupted by close() on another thread`，**整个 `:node` 进程 FATAL** | 真机 crash buffer 实证：`FATAL EXCEPTION: Thread-2/Thread-3 · Process: …:node · java.io.InterruptedIOException: read interrupted by close() on another thread`，栈尾实名 `kotlin.io.TextStreamsKt.forEachLine(ReadWrite.kt:163)` → `NodeRuntimeService.forward$lambda$11(NodeRuntimeService.kt:632)`；01:07:46 / 01:11:13（两条）/ 01:12:13（两条）共 5 次、三个不同 pid（22169 / 26037 / 27052），stdout 与 stderr 两条转发线程都会炸 ⇒ **不是我这轮手动杀进程才有的罕见竞态，内核每次被拆管都炸一次整进程** | 修已落（壳 1.1.7(9)）：`forward()` 的读取整体收进 `try/catch (Throwable)`（`NodeRuntimeService.kt:627-679`），异常按**正常收尾**处理 —— `InterruptedIOException("read interrupted by close()…")` 是 libcore 对「另一线程关掉了 FD」的信号，不是故障；收尾时 `Log.w` + `RuntimeDiagnostics.append(kernel-$tag)` 留痕，绝不上抛。顺带给线程命名 `kernel-$tag-forward`（本缺陷在崩溃栈里只叫 Thread-2/Thread-3，无从归因）。**没做**「先停读线程再 close()」的顺序改造：拆管方在别处且不止一条路径，把「转发线程之死不许带走宿主」这条不变式立住之后，顺序竞态只会少几行日志、不再致命 —— 为一个不致命的窗口引一套线程协调属过度设计。判据 = 反复拆/起内核后 crash buffer 零新增；壳 1.1.7(9) 真机复点：12 次拆内核 + 3 次换 :node，FATAL 恒 14（修前 5 次全在里面）、:node 全程存活，但落盘诊断 `转发线程结束` 计数 0 ⇒ **只到「不复现」，未拿到「catch 真的接住过」的正向证据**，判据不销（读数与探针自匹配的坑见 §7） |
 
 ## 3. 目标树（发布维 L0/L1/L2 不动，职责维六域落目录）
 
@@ -129,11 +129,45 @@ manifest `android:name` 保持相对类名写法：改一处不扩散（「同�
   **同型复现（01:38，脚本 `/tmp/t11.sh`、日志 `/tmp/t11.log`）**：`:node=1816` 全程稳定（POWER）、
   `birth=[]`（¬BORN），t+6/12/18/24s 四个采样点正文均为裸定罪段，清理后立刻回到
   `:node=2911 birth=2911 · 运行时在线 · 通道通 · :node 已绑定` ⇒ 非偶发，是稳定判据失败。
-  **⇒ P0 仍未收口**：断服根因已被 `node.birth` 单源治好（判据 4 成立），
-  但「空壳必须上屏」这条产品判据在 1.1.6(8) 上未成立。补修（D9 正文单写者 + D10 转发线程不致命）
+  **⇒ P0 已收口（判据 3 于壳 1.1.7(9) 复点通过）**：断服根因已被 `node.birth` 单源治好（判据 4 成立），
+  「空壳必须上屏」这条产品判据在 1.1.6(8) 上未成立；补修（D9 正文单写者 + D10 转发线程不致命）
   已随 PR #92 合入 main=`7afa06d5`，**壳 1.1.7(9) 已上线**：
   `apk-latest/version.json` 带 `?t=` 读回 = 1.1.7 / versionCode 9，
   `apk-latest/app-debug.apk` 与 `v1.1.7/app-debug-1.1.7+9.apk` 同 53,406,864B /
   `sha256:d60a290accb7dd815…`。CI 实证：`container 430 PASS / 0 FAIL`（出生链 6 处、常驻链 8 边、
   通知 id 6 个全仓唯一）、`app-tests BUILD SUCCESSFUL + 单测执行数 143`、`kernel` success、
-  `kernel-release` skipped。**判据 3 在 1.1.7(9) 上的复点尚未做** —— 复点通过前本轨不收口。
+  `kernel-release` skipped。
+
+- **判据 3 复点通过（02:05，壳 1.1.7(9)，同型注入）**：干净态出口
+  「… · 运行时在线 · 通道通 · :node 已绑定」；注入 `rm -f node.birth; mkdir node.birth` + 每拍杀内核后，
+  t+24s 通知正文变成 **「常驻被打断：… · 运行时未出生 · 通道通 · :node 已绑定」**，
+  撤掉注入立刻回到「运行时在线」⇒ D9 修复真机证实（1.1.6(8) 上 13+4 个采样点一次都没出现过这句话）。
+  t+6/12/18s 仍显示「运行时在线」不是漏判：那三拍 `端口=1`（控制面真可达），ONLINE 优先是判据本意。
+- **D10 复点：只到「不复现」，没到「已被捕获」**：同一台机连做 12 次拆内核 + 3 次换 :node，
+  crash buffer 的 FATAL 计数恒为 14（修前那 5 次全在里面）、`:node` 全程存活；
+  但新 catch 写的诊断行 `转发线程结束` 在 `files/diagnostics.txt` 里**计数为 0** ⇒ 本轮没有触发到
+  `close()` 抢 FD 那个窗口，无法断言「是 catch 救了进程」。**判据留在册**：下次真复现时看该计数是否 >0。
+  **作废一条我差点写进去的假正向证据**：收尾那轮我曾读到 `catch=2`，据此几乎要把结论升级成「已被捕获」。
+  复核实读：那两条匹配是 logcat 里 `adbd` 打印的**我自己那条 shell 命令行**（命令行含
+  `grep '转发线程结束'`，被 adbd 原样回显成日志行），不是产品日志。同型探针再跑即全中：
+  `logcat -d | grep 'id=1004'` 的 3 条命中也全是我的 `dumpsys`/`grep` 命令回显。
+  ⇒ 口径改两条：**计数型 grep 一律先 `grep -v adbd`**；**「已捕获」只认 `files/diagnostics.txt`
+  这个落盘产物，不认 logcat**。清理注入后重读该文件：`转发线程结束` 仍 0 条（`run-as … grep -c` 实读），
+  结论维持「不复现 ≠ 已验证」。
+  **测量坑记一笔**：只要每拍杀内核，`:node` 的 boot 重试就会反复重写 `node.pid`，
+  `pidRecordAgeMs` 永远回不到 30s 阈值 ⇒ **空壳清账（EscalateStop）在这种注入下不会发生**；
+  要验清账路径得让 :node 自己静下来（别再杀内核）而不是杀得更勤。
+  **这条坑被正面证实了一次**：02:13 撤注入（`rmdir files/node.birth` → `rmdir-ok`）后，
+  `:node` 自家 boot 重试在 02:14:15 同时重写 `node.pid`（`205956392` → `206016548`）与 `node.birth`
+  （实读 `birth=23118` == 当时的 `:node` pid），而 pid 全程是同一个 23118、`diagnostics.txt` 里
+  没有任何清账记录 ⇒ **自愈走的是「被监督者自己出生」这条边，监督者的清账路径本轮仍未被真机走过**
+  （判据上它是安全的：空壳清账只在 ¬BORN ∧ pidAge≥30s 才发，而 :node 每拍重试都会把计时器归零）。
+  **注入回收口径（同一类假阳性）**：`mkdir node.birth` 造出来的空壳，撤的时候 `rm -f` 撤不掉
+  （`rm: files/node.birth: Is a directory`），残留目录会让**下一轮**注入的第一句 `rm -f` 直接失败、
+  整轮空壳态是继承来的而不是新造的（本轮 02:1x 那批就是这样）。⇒ 撤注入一律 `rmdir`，
+  开跑前 `ls -l files/node.birth` 确认它是 `-rw-------` 普通文件，否则这一轮读数全部作废。
+  **取证通道边界（下次别再当成缺陷）**：本机通知正文只能靠 logcat 的 `NotificationRecord … id=1004`
+  那一条，且**必须发布后立刻抓**——这台机 logcat 滚得极快，收尾窗口整块 buffer 里 `id=1004` 命中 0 条；
+  `dumpsys notification --noredact` 在 ColorOS 上只印 channel/flags/intent，**不印正文**，
+  `uiautomator dump` 也取不到（首页此时无该文本）。⇒ 判据 3 的正向读数只在那次 40s 窗口里成立过，
+  现在要复核必须重跑注入。
