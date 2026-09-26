@@ -21,6 +21,10 @@ import { useSupervisorAction } from "./useSupervisorAction";
 
 const NOISE = new Set(["dist_registry_selected", "lan_panel_changed"]);
 
+/** 能力三态词表。null 一律显式写成「未知」，不许与「可用」同形也不许省略整行 ——
+ *  空白在内核重启后与全通长得一样，那是第二种假绿。 */
+const capWord = (ok: boolean | null): string => (ok === true ? "可用" : ok === false ? "不可用" : "未知");
+
 export function OverviewPage() {
   const { snap } = useSupervisorData();
   const { busy, run } = useSupervisorAction();
@@ -111,6 +115,7 @@ export function OverviewPage() {
   const installedVer = installed ? (native?.version || v?.installed || "—") : "—";
   // null = 本轮还没跑过投放（不是"全部正常"），此时整行不渲染。
   const units = native?.nativeUnits ?? null;
+  const caps = native?.nativeCaps ?? null;
 
   return (
     <div className="grid content-start gap-4">
@@ -184,6 +189,30 @@ export function OverviewPage() {
                     {unit}·{o.status}
                   </span>
                 ))}
+              </div>
+            ) : null}
+
+            {/* 能力核验：与上面那排投放结局**正交**的第二个结论。上面说「我们动过手没有」，
+                这一排才说「用户能不能用」。真机 2026-09-26 定罪：sharp-image 报 applied
+                （@img/sharp-wasm32 逐字节在树内）而绑定取不到、read_image 全灭，界面零痕迹。
+                有 units 而无 caps = 本轮没跑过探针，必须显式写出来（不显示=看着像全通）。 */}
+            {caps ? (
+              <div className="flex flex-wrap gap-x-3 gap-y-1 font-mono text-xs leading-none text-muted-foreground">
+                <span className={caps.overall === false ? "font-semibold text-destructive" : undefined}
+                      title="任一格不可用即整体不可用；没有红但有未知，整体就是未知">
+                  能力{capWord(caps.overall)}
+                </span>
+                {Object.values(caps.units).map((c) => (
+                  <span key={c.id} className={c.ok === false ? "text-destructive" : undefined} title={c.detail || c.id}>
+                    {c.id}·{capWord(c.ok)}
+                  </span>
+                ))}
+                {caps.note ? <span title={caps.note}>（{caps.note}）</span> : null}
+                <span>核验于 {formatClockTime(caps.at)}</span>
+              </div>
+            ) : units ? (
+              <div className="font-mono text-xs leading-none text-muted-foreground">
+                能力未核验（本轮探针未执行，不等于可用）
               </div>
             ) : null}
           </div>
