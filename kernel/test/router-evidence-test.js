@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// 自动取证 JSONL（src/system-services/router/evidence.js）回归：
+// 自动取证 JSONL（src/domains/router/evidence.js）回归：
 //  - append 落盘（JSON 一行一条，0600）；
 //  - 轮转：超 maxBytes → 当前文件改名 .1 再开新文件；
 //  - readTail：只回已解析行（坏行跳过）、按序返回最后 n 条；

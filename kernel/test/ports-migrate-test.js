@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// migrateRouterSegment 契约（迁移S2，docs/MIGRATION-PROXY-PORTS.md）：
+// migrateRouterSegment 契约（迁移S2，src/guard/lifecycle/ports.js:104）：
 //   router 自治端口段（owner 前缀 proxy:/providerApi:）从共享 oldFile 迁出到 newFile 并清旧段；
 //   幂等（无 router 段时 0 条）；目标合并去重；守卫段（system:/inst: 等）保留在旧文件。
 

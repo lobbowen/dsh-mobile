@@ -4,7 +4,7 @@
 //
 // 目的：证明「内核能连上容器桥」这一关键接线成立（此前内核侧无任何桥客户端，桥是孤儿）。
 // 用容器侧参考服务端（BridgeServer，真实暴露抽象命名空间 UDS）+ 内核侧真实客户端
-// （dsh-android-kernel/src/platform/host-bridge/client.js），走完整链路：
+// （kernel/src/platform/host-bridge/client.js），走完整链路：
 //   连接 → bridge.handshake 能力协商 → 调用 8 组方法 → 能力门禁(-32001) / 未知方法(-32601)。
 //
 // 抽象命名空间 socket 名随机化，避免与真实设备 / 并行测试冲突。
@@ -17,10 +17,10 @@ const path = require('path');
 const { check, finish } = makeRunner('bridge-interop');
 
 // ============================================================================
-//  跨仓依赖：内核侧 HostBridge 客户端
+//  跨边界依赖：内核侧 HostBridge 客户端
 // ============================================================================
-//  本文件是**跨仓**测试 —— 它要的不是容器仓里的任何东西，而是内核仓的
-//  `src/platform/host-bridge/client.js`。所以「内核仓在不在」直接决定它能不能跑。
+//  本文件跨容器/内核边界 —— 它要的不是容器侧的任何东西，而是同仓 `kernel/` 的
+//  `src/platform/host-bridge/client.js`。所以「内核源码在不在」直接决定它能不能跑。
 //
 //  原先这里写死了 `require('/workspace/dsh-android-kernel/src/...')`，后果是：
 //  在**单仓 CI**（只 checkout 容器仓）上直接 `Cannot find module` 崩溃 ——
@@ -31,29 +31,28 @@ const { check, finish } = makeRunner('bridge-interop');
 //    · 路径可配置（env DSH_KERNEL_REPO），不写死绝对路径；
 //    · 找不到就**显式 SKIP** 并说明"未验证什么"，让读者知道这次没验到什么。
 //
-//  注意：不能把 SKIP 做成静默通过 —— 跨仓互通是本项目最关键的接线之一，
+//  注意：不能把 SKIP 做成静默通过 —— 跨边界互通是本项目最关键的接线之一，
 //  "没验"和"验过了"在日志里必须能区分。所以 SKIP 时会把原因与补救方式打全。
 // ============================================================================
-// 单仓布局：内核就是仓内 dsh-android-kernel/ 子目录，默认路径直接按本文件位置算。
-// DSH_KERNEL_REPO 仍可覆盖（跨仓试验 / fork）。
+// 单仓布局：内核就是仓内 kernel/ 子目录，默认路径直接按本文件位置算。
+// DSH_KERNEL_REPO 仍可覆盖（内核源码单独放时指过去 / fork）。
 const KERNEL_REPO = process.env.DSH_KERNEL_REPO || path.join(__dirname, '..', '..', '..', 'kernel');
 const CLIENT_REL = path.join('src', 'platform', 'host-bridge', 'client.js');
-// 必须 path.resolve 而不是 path.join：env 给相对路径时（README 教的
-// `DSH_KERNEL_REPO=../../dsh-android-kernel`），path.join 产出的仍是相对路径，
+// 必须 path.resolve 而不是 path.join：env 给相对路径时（如
+// `DSH_KERNEL_REPO=../../kernel`），path.join 产出的仍是相对路径，
 // 而 fs.existsSync 按 cwd 解析、require 按本测试文件所在目录解析 —— 两者
 // 解析出不同目标，存在性检查过了、require 却 MODULE_NOT_FOUND 崩溃，
 // 绕过了上面注释里立的"找不到必须显式 SKIP"契约。
 const CLIENT_ABS = path.resolve(KERNEL_REPO, CLIENT_REL);
 
 if (!fs.existsSync(CLIENT_ABS)) {
-  console.log('SKIP 跨仓互通测试：找不到内核侧桥客户端');
+  console.log('SKIP 互通测试：找不到内核侧桥客户端');
   console.log('     期望路径: ' + CLIENT_ABS);
   console.log('     —— 未验证：内核客户端 ←→ 容器桥服务端的真实 UDS 互通');
   console.log('        （握手 / 能力协商 / 8 组方法调用 / -32001 与 -32601 门禁）。');
-  console.log('     —— 这是**跨仓**测试，单仓 CI 上内核仓不在，属预期情况。');
-  console.log('     —— 本地跑法：确认单仓子目录 dsh-android-kernel/ 存在，');
-  console.log('        或设 DSH_KERNEL_REPO=<内核源码路径> 指过去。');
-  console.log('     —— CI 若要跑它，需在 checkout 步骤额外拉内核仓并设置该环境变量。');
+  console.log('     —— 内核 = 同仓 kernel/ 子目录；找不到说明 checkout 缺内核目录，');
+  console.log('        或 DSH_KERNEL_REPO 指错了路径（内核源码单独放时用它指过去）。');
+  console.log('     —— SKIP 不是通过：跨边界互通这条接线本次未被验证，日志里必须看得见。');
   finish();
 }
 

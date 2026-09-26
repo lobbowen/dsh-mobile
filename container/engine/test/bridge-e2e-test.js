@@ -24,9 +24,10 @@ function call(cli, id, method, params) {
 (async () => {
   const srv = new BridgeServer({
     socketPath: sock,
-    // 设备已预置：base / device_owner / accessibility / adb_shell / build_chain
+    // 设备已预置：base / device_owner / accessibility / adb_shell / kernel_update
     // 未预置：manage_external_storage（故 storage 组不可用）、mediaprojection、notification_access
-    deviceCapabilities: ['base', 'device_owner', 'accessibility', 'adb_shell', 'build_chain'],
+    // build 组代表能力是 kernel_update；build_chain 已证伪、永不置位（methods.js:23），不得出现在预置里
+    deviceCapabilities: ['base', 'device_owner', 'accessibility', 'adb_shell', 'kernel_update'],
     auditLogPath: audit,
   });
   await srv.start();
@@ -36,11 +37,12 @@ function call(cli, id, method, params) {
 
   const hs = await new Promise((resolve) => {
     cli.onMessage((m) => { if (m.id === 1) resolve(m); });
-    cli.send(proto.handshakeRequest(1, ['bridge:app_control', 'bridge:notification', 'bridge:device_policy', 'bridge:storage']));
+    cli.send(proto.handshakeRequest(1, ['bridge:app_control', 'bridge:notification', 'bridge:device_policy', 'bridge:storage', 'bridge:build']));
   });
   check('握手返回 capabilities 含 device_owner', Array.isArray(hs.result.capabilities) && hs.result.capabilities.includes('device_owner'));
   check('握手 groups 含 bridge:app_control', hs.result.groups.includes('bridge:app_control'));
   check('握手 groups 不含缺能力的 storage', !hs.result.groups.includes('bridge:storage'));
+  check('握手 groups 含 kernel_update 解锁的 build', hs.result.groups.includes('bridge:build'));
 
   const np = await call(cli, 2, 'notif.post', { title: 'hi', text: 'there' });
   check('notif.post（base）成功', np.result && np.result.posted === true);
@@ -72,6 +74,11 @@ function call(cli, id, method, params) {
   // sys.setTimeZone 与 sys.setTime 同属 system 组、同需 device_owner
   const tz = await call(cli, 10, 'sys.setTimeZone', { timeZone: 'Asia/Shanghai' });
   check('sys.setTimeZone（device_owner）成功', tz.result && tz.result.ok === true);
+
+  // build 组由 kernel_update 解锁（曾错绑已证伪的 build_chain）——实调一次坐实这条绑定
+  const ks = await call(cli, 11, 'build.kernelStatus', {});
+  check('build.kernelStatus（kernel_update）返回 mock 版本契约',
+    ks.result && ks.result.current === '0.1.0-android.1' && Array.isArray(ks.result.installed));
 
   const log = fs.existsSync(audit) ? fs.readFileSync(audit, 'utf8') : '';
   check('审计日志含 policy.lockNow（特权）', log.includes('policy.lockNow'));

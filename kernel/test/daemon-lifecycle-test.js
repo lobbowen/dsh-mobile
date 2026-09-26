@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// 统一受管进程生命周期核心（src/infra/proc/daemon-lifecycle.js）回归：
+// 统一受管进程生命周期核心（src/guard/proc/daemon-lifecycle.js）回归：
 //  - ensureRunning：身份接管 / 首启 spawn / latch barrier
 //  - replace 换代：停旧→等死→等端口释放→才启新（同一 ctl 端口，绝不双代并存）
 //  - superviseOnce：死透才重拉；残留先 TERM

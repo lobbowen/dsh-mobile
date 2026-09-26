@@ -10,6 +10,9 @@
 // 于是 jobSection 返回空串 → 5 个断言失败；而 Linux/macOS（LF）全绿。
 // 表现为「只在 Windows 红」，极难排查。
 //
+// 现状（2026-09-26 核对）：本仓 workflow 已无 Windows job，build.yml 也不在；
+// 上述为历史事故记录。W1–W4 判据对现行 ci.yml 继续生效（其被测对象就是 ci.yml）。
+//
 // 本门禁确保不再回归：
 //   W1 _workflow.normalize 对 CRLF / CR / LF 归一化结果一致
 //   W2 jobSection 在 CRLF 下与 LF 下结果**完全相同**（用真实 ci.yml 实测）
