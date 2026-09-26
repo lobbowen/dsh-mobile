@@ -910,17 +910,19 @@ if (fs.existsSync(ENSURE_TOOL)) {
   fs.mkdirSync(bin, { recursive: true });
   // PATH 里只放一个假 readelf、不放 sudo：走了安装分支必然 command-not-found，
   // 所以「退出 0 且 stdout 空」只可能来自"工具已在 → 完全不碰 apt"这一条路。
+  // 用绝对路径起 bash：Node 对 env.PATH 的覆盖会同时作用于可执行文件查找，
+  // 只给 PATH=假 bin 时 'bash' 自身会 ENOENT（首轮 CI 就是这么红的）。
   fs.writeFileSync(path.join(bin, 'readelf'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
-  const okRun = spawnSync('bash', [ENSURE_TOOL, 'readelf', 'binutils'], { encoding: 'utf8', env: { PATH: bin } });
+  const okRun = spawnSync('/bin/bash', [ENSURE_TOOL, 'readelf', 'binutils'], { encoding: 'utf8', env: { PATH: bin } });
   check('ensure-tool：工具已在 → 退出 0 且无任何安装动作',
-    okRun.status === 0 && String(okRun.stdout).trim() === '',
-    JSON.stringify({ rc: okRun.status, out: okRun.stdout, err: String(okRun.stderr).slice(0, 120) }));
+    okRun.status === 0 && String(okRun.stdout || '').trim() === '',
+    JSON.stringify({ rc: okRun.status, out: String(okRun.stdout || ''), err: String(okRun.stderr || '').slice(0, 120) }));
   const empty = path.join(eTmp, 'empty');
   fs.mkdirSync(empty, { recursive: true });
-  const miss = spawnSync('bash', [ENSURE_TOOL, 'readelf', 'binutils'], { encoding: 'utf8', env: { PATH: empty } });
+  const miss = spawnSync('/bin/bash', [ENSURE_TOOL, 'readelf', 'binutils'], { encoding: 'utf8', env: { PATH: empty } });
   check('ensure-tool：工具缺失 → 报"缺少"并尝试安装（安装不可得时如实非零，不静默放行）',
-    miss.status !== 0 && miss.stdout.includes('缺少 readelf'),
-    JSON.stringify({ rc: miss.status, out: miss.stdout, err: String(miss.stderr).slice(0, 120) }));
+    miss.status !== 0 && String(miss.stdout || '').includes('缺少 readelf'),
+    JSON.stringify({ rc: miss.status, out: String(miss.stdout || ''), err: String(miss.stderr || '').slice(0, 120) }));
   const noargs = spawnSync('bash', [ENSURE_TOOL], { encoding: 'utf8' });
   check('ensure-tool：缺参数 → 非零并打 usage', noargs.status !== 0,
     JSON.stringify({ rc: noargs.status }));
