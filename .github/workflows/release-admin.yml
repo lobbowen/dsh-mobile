@@ -873,94 +873,22 @@ jobs:
           set -euo pipefail
           cd /tmp/pin/out
 
-          # readelf / file 由 binutils/file 提供。"工具没装"与"产物不合格"分开处置的
+          # readelf 由 binutils 提供。"工具没装"与"产物不合格"分开处置的
           # 判据已收口到唯一宿主 scripts/ensure-tool.sh（门禁法①），这里只声明缺什么装什么。
           bash "$GITHUB_WORKSPACE/scripts/ensure-tool.sh" readelf binutils
-          bash "$GITHUB_WORKSPACE/scripts/ensure-tool.sh" file file
 
-          echo "=== 1) ELF 架构 ==="
-          file libnode.so libc++_shared.so
-
-          # 必须是 AArch64 ELF。架构错了装到真机上就是 exec format error。
-          if ! file libnode.so | grep -q 'ARM aarch64'; then
-            echo "[error] libnode.so 不是 ARM aarch64 ELF，拒绝固化。"
-            exit 1
-          fi
-          echo "[ok] 架构正确：ARM aarch64"
-
-          echo
-          echo "=== 2) 解释器必须指向 Android linker64 ==="
-          readelf -W -l libnode.so 2>/dev/null | grep -i interpreter || true
-          if ! readelf -W -l libnode.so 2>/dev/null | grep -qi 'linker64'; then
-            echo "[error] 未找到 /system/bin/linker64 解释器。"
-            echo "        这说明它是用 glibc 工具链链接的，不是 Android bionic —— "
-            echo "        真机上无法 exec。拒绝固化。"
-            exit 1
-          fi
-          echo "[ok] 解释器正确"
-
-          echo
-          echo "=== 3) 16KB 页对齐（Android 15+ 要求；不满足则新设备无法加载）==="
-          # 两点注意（第一次跑时都踩到了）：
-          #   a) 必须用 readelf -W（wide）。默认模式在输出非终端时会把超 80 列的
-          #      Program Headers 表折行，同一个 LOAD 段的字段被拆到两行 —— 于是
-          #      awk 取的 $NF 不再是对齐值，这项校验就会【误报失败】。
-          #   b) 判据用「是否存在 0x4000 对齐的 LOAD 段」而非「全部段都必须是」。
-          #      后者看起来更严格，但 ELF 里段的对齐值本就允许不同（如最后一个
-          #      RW 段），拿它当硬门槛是在校验一个 ELF 规范并不要求的东西，
-          #      只会制造假失败。真正的目的是确认「这份产物支持 16KB 页设备」。
-          readelf -W -l libnode.so 2>/dev/null | grep -E '^  LOAD' || true
-          if readelf -W -l libnode.so 2>/dev/null | grep -qE '0x4000'; then
-            echo "[ok] 检出 16KB (0x4000) 对齐的 LOAD 段"
-          else
-            echo "[error] 未检出 16KB 对齐的 LOAD 段。"
-            echo "        Android 15+ 在 16KB 页设备上会返回 ELIBBAD / Exec format error。"
-            echo "        NDK r27+ 默认应满足；若是旧 NDK 编出的产物，拒绝固化。"
-            exit 1
-          fi
-
-          echo
-          echo "=== 4) 动态依赖闭环 ==="
-          # 遍历 DT_NEEDED，除 bionic 提供的系统库外，其余必须由随包文件提供。
-          NEEDED="$({ readelf -d libnode.so 2>/dev/null || true; } | awk '/NEEDED/ {gsub(/[\[\]]/,"",$5); print $5}')"
-          # 空清单 = 下面的闭环循环一条都不跑就走到 [ok]，那是空转放行。读不出来就拒绝固化。
-          [ -n "$NEEDED" ] || { echo "[error] 读不出 libnode.so 的 DT_NEEDED，依赖闭环无从进行，拒绝固化。"; exit 1; }
-          echo "NEEDED 列表："
-          echo "$NEEDED" | sed 's/^/  /'
-          MISSING=""
-          while IFS= read -r lib; do
-            [ -z "$lib" ] && continue
-            case "$lib" in
-              libc.so|libm.so|libdl.so|liblog.so|libz.so|libandroid.so|\
-              libGLESv2.so|libEGL.so|libnativewindow.so|libsync.so|\
-              libatomic.so|libstdc++.so)
-                echo "  [ok] $lib （bionic/系统提供）" ;;
-              *)
-                if [ -f "./$lib" ]; then
-                  echo "  [ok] $lib （已随包提供）"
-                else
-                  echo "  [MISSING] $lib"
-                  MISSING="$MISSING $lib"
-                fi ;;
-            esac
-          done <<< "$NEEDED"
-          if [ -n "$MISSING" ]; then
-            echo "[error] 以下依赖既不在系统里、也没随包提供：$MISSING"
-            echo "        固化了也跑不起来，拒绝。"
-            exit 1
-          fi
-          echo "[ok] 依赖闭环完整"
-
-          echo
-          echo "=== 5) 同目录依赖能否自解析（DT_RUNPATH 含 \$ORIGIN）==="
-          # 依赖闭环只回答「库在不在」，这一问回答「linker 找不找得到它」。
-          # dsh run_code 从空环境起子进程，继承不到我们主进程设的 LD_LIBRARY_PATH，
-          # 所以没有 $ORIGIN RUNPATH 的产物在真机上是死的 —— 而它在 CI 里看起来完全正常。
-          # 装机后无法补救，只能在固化前拦住。判据实现在脚本里，三处（构建/固化/打包）共用。
+          echo "=== ELF 形态门禁：架构 / 16KB 对齐 / 解释器 / 依赖闭环 / 同目录自解析 ==="
+          # 这五项判据此前在本步骤里内联写了四份（file 架构、linker64 解释器、0x4000 对齐、
+          # DT_NEEDED 闭环 —— 后者的白名单是 scripts/native-deps.txt 那 12 项的第二份副本），
+          # 而构建脚本对同样的事实只打 [info]/[warn] 不判红。同一条事实两种结论，等于
+          # 「构建期说没事、固化期判有罪」，而固化期已是最后还能拦住的地方。
+          # 现在判据只住宿主一份，五个出口（构建 / 固化 / 打包两条 / 重打包）同调；
+          # 系统库白名单与「谁是要被 exec 的可执行资产」由宿主自己从仓库读
+          # （scripts/native-deps.txt、.github/native-assets.txt），这里不再抄第二份。
           bash "$GITHUB_WORKSPACE/scripts/verify-runtime-elf.sh" .
 
           echo
-          echo "=== 6) 记录指纹 ==="
+          echo "=== 记录指纹 ==="
           sha256sum libnode.so libc++_shared.so | tee /tmp/pin/out/SHA256SUMS
 
       - name: Publish as immutable release
