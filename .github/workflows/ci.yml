@@ -88,6 +88,17 @@ jobs:
         with:
           node-version: '22'
 
+      - name: 把 npm 钉到设备上那份
+        # 原生件供给门禁靠 `npm install --dry-run --os/--cpu` 造差集；runner 自带的 npm（setup-node 22
+        # → 10.9.3）会**静默忽略**这两个配置，实测两份计划各 575 项、差集为空。版本来自供给表的
+        # probe.npm.version（= 设备 node 24.21.0 捆绑的那份），门禁自己会再核对一次并当场红。
+        run: |
+          set -euo pipefail
+          echo "runner 自带 npm: $(npm --version)"
+          NPMV="$(node -p "require('./kernel/src/guard/native/supply-table.json').probe.npm.version")"
+          npm install -g "npm@$NPMV"
+          echo "探针用 npm: $(npm --version)"
+
       - name: 内核回归测试（安卓路径 · DSH_ANDROID=1）
         env:
           DSH_ANDROID: '1'
