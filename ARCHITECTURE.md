@@ -443,8 +443,8 @@ Android linker 查找依赖库的目录**只有三个**：
 
 | 位置 | 做法 |
 |---|---|
-| 链接期 | `scripts/build-node-android.sh` 导出 `LDFLAGS_target`：`-Wl,--enable-new-dtags -Wl,-rpath,'$$ORIGIN'`（两层 `$$` 是 bash→make→sh 三段展开的必然写法） |
-| 构建期 | 同脚本用 `make -n` 断言展开结果真的是 `$ORIGIN`（三层 `$` 转义错了会静默变成 `RIGIN`），编完再调 `verify-runtime-elf.sh` 验产物 |
+| 链接期 | `scripts/build-node-android.sh` 以 make 命令行变量注入 `LDFLAGS.target=-Wl,--enable-new-dtags -Wl,-rpath,'$$ORIGIN'`。两层 `$$` 是 bash→make→sh 三段展开的必然写法；注入点必须是**命令行变量**而不是 `export LDFLAGS_target` —— gyp 的 make 生成器只把裸 `$(LDFLAGS)` 落到 `LDFLAGS.target`（宿主侧才认 `_host` 后缀），那个环境变量没有任何规则引用它，run 36216072106 实测 92715 行展开里 `-rpath` 出现 0 次 |
+| 构建期 | 同脚本用 `make -n`（带同一串命令行变量）断言展开结果：`-rpath` 必须出现在 **node 本体那次链接**的配方行里，找不到该配方即判红；三层 `$` 转义错了会静默变成 `RIGIN`。编完再调 `verify-runtime-elf.sh` 验产物 |
 | 固化期 / 打包期 / 重打包期 | `scripts/verify-runtime-elf.sh`（同一份判据）有四个出口：`fast-apk.yml` 的 Gate、`build-apk.yml` 的 pre-gradle Gate、`release-admin.yml` 的 pin 校验与 repack 校验；缺 `readelf` 时退出码 2，宁红不猜。`build-apk.yml` 那一次是必需的：命中 node 缓存时构建脚本整步 skipped，只有它覆盖「复用二进制再出包」这条路。`repack` 那一次也是必需的：它只换签名与注入库，libnode 本体来自任意一次历史构建 —— 不查就会把修复前的包重签成"最新可安装包" |
 | 运行期 | `NativePreparer.probe` 在**清空环境**下 exec 探针 —— 与 `run_code` 同形，跑绿才是真绿 |
 

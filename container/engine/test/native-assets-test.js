@@ -290,20 +290,47 @@ if (fs.existsSync(BUILD_SH)) {
 
   // ---- 依赖自解析（RUNPATH）：三处共用判据的构建期那一处 ----
   const shCode = stripHashComments(sh);
-  // 取所有对 LDFLAGS_target 的赋值行，合并后判语义要件 —— 删掉任一要件都会红。
-  // 这里只判「意图是否还在」；转义是否真的展开成 $ORIGIN 由构建脚本自己的
-  // `make -n` 断言把（静态正则判不出三层 $ 展开的对错）。
-  const ldAssigns = (shCode.match(/(?:export\s+)?LDFLAGS_target=[^\n]*/g) || []).join(' | ');
-  check('⑤ LDFLAGS_target 有赋值语句（零命中即红，别让正则空转）', ldAssigns !== '', ldAssigns);
+  // 注入点是 make 命令行变量 LDFLAGS.target=…，不是环境变量 LDFLAGS_target。
+  // 后者在这个 gyp 生成器里没有任何规则引用 —— run 36216072106 实测 out/Makefile 只有
+  // `LDFLAGS.target ?= $(LDFLAGS)`（目标侧取裸 LDFLAGS）与 `LDFLAGS.host ?= $(LDFLAGS_host)`
+  // （只有宿主侧认 _host 后缀），92715 行展开里 -rpath 出现 0 次：那几轮 export 完全空转。
+  // 所以这里既钉住正确写法，也反向钉住死钩子别被「顺手」改回去。
+  const ldOverride = (shCode.match(/LDFLAGS_TARGET_OVERRIDE="[^"]*"/g) || []).join(' | ');
+  check(
+    '⑤ 目标侧链接标志以 make 命令行变量 LDFLAGS.target 赋值（零命中即红，别让正则空转）',
+    ldOverride !== '',
+    '未找到 LDFLAGS_TARGET_OVERRIDE="LDFLAGS.target=…" 赋值行'
+  );
+  check('⑤ 链接标志走命令行变量而非死钩子环境变量 LDFLAGS_target',
+    !/(?:^|\n)\s*(?:export\s+)?LDFLAGS_target=/.test(shCode),
+    'out/Makefile 里没有引用 $(LDFLAGS_target) 的规则：export 它等于什么都没注入'
+  );
   check(
     '⑤ 链接期带 --enable-new-dtags',
-    /--enable-new-dtags/.test(ldAssigns),
+    /--enable-new-dtags/.test(ldOverride),
     '少了它 -rpath 只写进 DT_RPATH，bionic 无条件忽略 → 真机 CANNOT LINK'
   );
   check(
-    '⑤ 链接期带 -rpath 且指向 $ORIGIN',
-    /-rpath/.test(ldAssigns) && /ORIGIN/.test(ldAssigns),
-    `实际赋值行: ${ldAssigns}`
+    '⑤ 链接期带 -rpath 且指向转义后的 $ORIGIN',
+    /-rpath/.test(ldOverride) && /\$\{DOLLAR\}\$\{DOLLAR\}ORIGIN/.test(ldOverride),
+    `实际赋值: ${ldOverride} —— 这里只钉转义形态（\$\{DOLLAR\}\$\{DOLLAR\}ORIGIN）还在，`
+      + '展开是否真的落回 $ORIGIN 由构建脚本自己的 make -n 断言把（静态正则判不出三层展开）'
+  );
+  // ${DOLLAR} 没定义时上面那串静默变成 -Wl,-rpath,'ORIGIN'：有 RUNPATH、值无用。
+  check(
+    '⑤ DOLLAR 有定义（上面那串 \$\{DOLLAR\} 的取值来源）',
+    /^[ \t]*DOLLAR='\$'[ \t]*$/m.test(shCode),
+    "缺少 DOLLAR='$' 赋值行，链接标志里的 rpath 值会退化成字面量 ORIGIN"
+  );
+  // 断言用 make -n 与真实编译用同一次注入 —— 两边各自写一遍就会漂移：
+  // 门禁证明的是 A 构建，出厂的是 B 构建。
+  const makeCalls = shCode.split('\n').filter(l => /^[ \t]*make[ \t]/.test(l));
+  const makeWithOverride = makeCalls.filter(l => l.includes('$LDFLAGS_TARGET_OVERRIDE'));
+  check(
+    '⑤ 两条 make 调用（make -n 断言 / 真实编译）都带同一串链接标志注入',
+    makeCalls.length === 2 && makeWithOverride.length === 2,
+    `make 调用 ${makeCalls.length} 条、带 \$LDFLAGS_TARGET_OVERRIDE 的 ${makeWithOverride.length} 条：`
+      + `断言与构建不同源就是漂移。实际行:\n        ${makeCalls.join('\n        ')}`
   );
   check(
     '⑤ 构建脚本调用 verify-runtime-elf.sh 校验产物',
@@ -360,7 +387,8 @@ check(
 // grep 零命中返回 1，pipefail 把整条 pipeline 判成 1，赋值继承它，`set -e` 当场终止
 // 脚本 —— 于是 CI 日志停在上一句 [ok]，断言块一个字都没打出来（2026-09-26 那一轮
 // build-apk 红了 1m16s 就是这么红的），而且紧接着那句 `[ -z "$VAR" ] && 报原因`
-// 永不可达：伪装成「有校验」的死代码。仓库里同形态共 10 处，一并清掉并由此钉住。
+// 永不可达：伪装成「有校验」的死代码。构建脚本与 workflow 里同形态共 10 处已清掉并由此钉住
+// （`find` 打头的那一批是同一件事的另一半，尚未收口 —— 见下面 EMPTY_OK_RISKY 处的说明）。
 // ---------------------------------------------------------------------------
 
 // 命令替换里的 pipeline，某一段可能因「没找到东西」返回非零 —— 只列真会这样的命令词
@@ -370,6 +398,10 @@ check(
 // 曾试着把 `"$UPPER_VAR"` 也算可疑词，结果 `sha256sum "$OUT" | cut`、
 // `find "$W" -name … | head` 一并误伤 7 处 —— 行正则分不出「段首命令词」与
 // 「参数位置」，硬判只会把门禁变成噪音源。这类只能靠人按同一判据复核。
+// 已知未收口的同形态：`find` 作为段首命令词（`APK="$(find … | head -1)"`）实测在
+// pipefail 生效的块里还有 13 处，全在 fast-apk / release-admin 两条发布路径上；
+// 本轮改的是链接标志，不夹带那条清扫 —— 加进名单会让这 13 处一起红，把两件事混成
+// 一次看不懂的失败。单列一轮：先兜底那 13 行，再把 find 加进可疑词。
 const EMPTY_OK_RISKY = /(?:^|[\s;|&(])(?:grep|egrep|fgrep|ls|readelf|llvm-readelf)(?:\s|$)/;
 // 显式容错：`|| true` / `|| :` / `|| exit` / `|| { ...; }`。
 const TOLERATED = /\|\|\s*(?:true|:|exit\b|\{)/;
