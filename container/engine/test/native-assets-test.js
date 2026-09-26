@@ -728,47 +728,51 @@ if (fs.existsSync(RRA)) {
     '',
   ].join('\n'), { mode: 0o755 });
 
-  const runRra = (mode, dir) => spawnSync('bash', [RRA, 't-' + mode, 'apk-latest', 'version.json', dir], {
-    encoding: 'utf8',
-    env: { ...process.env, PATH: fakeBin + path.delimiter + process.env.PATH, GITHUB_REPOSITORY: 'lobbowen/dsh-mobile', RR_FAKE: mode },
-  });
-  const rcOf = (r) => (r.status === null || r.status === undefined ? -1 : r.status);
+  // 三个 helper 同形（rc/out/err）：spawnSync 的原始结果里那两格叫 stdout/stderr，
+  // 直接往上层断言写 r.err 会在「第一格需要看 stderr 的断言」处当场抛 TypeError，
+  // 于是整轮测试崩在中间 —— 收口到一处包装，别让每个调用点各自记字段名。
+  const rra = (argv, extraEnv) => {
+    const r = spawnSync('bash', [RRA, ...argv], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: fakeBin + path.delimiter + process.env.PATH,
+        GITHUB_REPOSITORY: 'lobbowen/dsh-mobile',
+        ...extraEnv,
+      },
+    });
+    return { rc: r.status === null ? -1 : r.status, out: String(r.stdout || ''), err: String(r.stderr || '') };
+  };
+  const runRra = (mode, dir) => rra(['t-' + mode, 'apk-latest', 'version.json', dir], { RR_FAKE: mode });
 
   const dOk = path.join(rTmp, 'ok');
   const ok = runRra('ok', dOk);
   check('取数三态：线上有资产 → 退 0 且真名文件落地（调用方要读的就是这个路径）',
-    rcOf(ok) === 0 && fs.readFileSync(path.join(dOk, 'version.json'), 'utf8').includes('android.13'),
+    ok.rc === 0 && fs.readFileSync(path.join(dOk, 'version.json'), 'utf8').includes('android.13'),
     JSON.stringify(ok));
   const dMiss = path.join(rTmp, 'norel');
   const noRel = runRra('no_release', dMiss);
   check('取数三态：Release 不存在 → 退 10（首次发布是合法状态，不是失败）',
-    rcOf(noRel) === 10, JSON.stringify(noRel));
+    noRel.rc === 10, JSON.stringify(noRel));
   const dNoAsset = path.join(rTmp, 'noasset');
   const noAsset = runRra('no_asset', dNoAsset);
   check('取数三态：Release 在但资产不在 → 退 10（同上，走门禁的首次发布分支）',
-    rcOf(noAsset) === 10, JSON.stringify(noAsset));
+    noAsset.rc === 10, JSON.stringify(noAsset));
   const dNet = path.join(rTmp, 'net');
   const net = runRra('transport', dNet);
   check('取数三态：gh 因网络失败 → 退 2 并打 ::error（旧实现把这一格降成 warning 后照发）',
-    rcOf(net) === 2 && net.err.includes('::error') && net.err.includes('不是「资产不存在」'),
+    net.rc === 2 && net.err.includes('::error') && net.err.includes('不是「资产不存在」'),
     JSON.stringify(net));
   const dRate = path.join(rTmp, 'rate');
   const rate = runRra('rate_limited', dRate);
   check('取数三态：403 限流 → 退 2（含 4xx 字样也不算「不存在」）',
-    rcOf(rate) === 2 && rate.err.includes('::error'), JSON.stringify(rate));
-  const noRepo = spawnSync('bash', [RRA, 't-norepo', 'apk-latest', 'version.json', path.join(rTmp, 'x')], {
-    encoding: 'utf8',
-    // 真 PATH 必须留着：spawn 要找得到 bash。仓库变量置空就足以在碰 gh 之前判红。
-    env: { ...process.env, PATH: fakeBin + path.delimiter + process.env.PATH, GITHUB_REPOSITORY: '' },
-  });
+    rate.rc === 2 && rate.err.includes('::error'), JSON.stringify(rate));
+  const noRepo = rra(['t-norepo', 'apk-latest', 'version.json', path.join(rTmp, 'x')], { GITHUB_REPOSITORY: '' });
   check('取数三态：没有 GITHUB_REPOSITORY → 退 2（不许把仓库猜成默认值）',
-    rcOf(noRepo) === 2 && noRepo.err.includes('GITHUB_REPOSITORY'), JSON.stringify(noRepo));
-  const shortArgs = spawnSync('bash', [RRA, 't-few', 'apk-latest'], {
-    encoding: 'utf8',
-    env: { ...process.env, PATH: fakeBin + path.delimiter + process.env.PATH, GITHUB_REPOSITORY: 'lobbowen/dsh-mobile' },
-  });
+    noRepo.rc === 2 && noRepo.err.includes('GITHUB_REPOSITORY'), JSON.stringify(noRepo));
+  const shortArgs = rra(['t-few', 'apk-latest'], {});
   check('取数三态：参数不齐 → 退 2 并打用法',
-    rcOf(shortArgs) === 2 && shortArgs.err.includes('用法'), JSON.stringify(shortArgs));
+    shortArgs.rc === 2 && shortArgs.err.includes('用法'), JSON.stringify(shortArgs));
 
   // 分类只准住一处：调用方再写一遍「404 / no assets」就等于两个真相。
   const CLASSIFIER = /no assets|matching pattern|HTTP 404/i;
