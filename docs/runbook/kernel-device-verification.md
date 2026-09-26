@@ -11,7 +11,7 @@
 |---|---|
 | 安装包 | `apk-latest` 的 `app-debug.apk` |
 | 设备通道 | **canary**（`assets/kernel-feed.json`: `baseUrl=https://hubcdn.zll.ink`, `channel=canary`） |
-| 已发布内核 | `0.1.0-android.11`（`https://hubcdn.zll.ink/kernel-canary/`） |
+| 已发布内核 | **别写死在本清单里**，从通道现读：`<base>/kernel-<channel>/kernel-manifest.json?t=<ms>`（`?t=` 不能省，理由见 [kernel-ota.md §2.1](kernel-ota.md)）。下文用 `<目标版本>` 指代它，落到哪条就 substituted 成实际值 |
 
 **两个观察窗口**
 
@@ -40,8 +40,8 @@ adb shell run-as io.github.lobbowen.dshmobile cat files/diagnostics.txt
 |---|---|
 | **触发** | 全新安装后首次启动（或清掉 `files/kernel/` 后启动） |
 | **看** | `diagnostics.txt` 的 `[kernel-ota]` / `[kernel-commit]` 行；`kernel/` 目录 |
-| **期望** | ① 取到 `kernel-canary/kernel-manifest.json`（**带 `?t=` cache-buster**）；② manifest **验签通过**；③ 下载 ~1.2MB 且 **sha256 一致**；④ 安装落盘；⑤ 首次健康检查通过后出现 **`[kernel-commit] 内核 0.1.0-android.11 已提交`** |
-| **落地证据** | `kernel/CURRENT` = `0.1.0-android.11`；`kernel/FLOOR` = 同值；`kernel/PENDING` **不存在**（已提交）；`provisioning.json` 的 `kernelVersion`/`kernelFloor` 均为 `0.1.0-android.11` |
+| **期望** | ① 取到 `kernel-canary/kernel-manifest.json`（**带 `?t=` cache-buster**）；② manifest **验签通过**；③ 下载 ~1.2MB 且 **sha256 一致**；④ 安装落盘；⑤ 首次健康检查通过后出现 **`[kernel-commit] 内核 <目标版本> 已提交`** |
+| **落地证据** | `kernel/CURRENT` = `<目标版本>`；`kernel/FLOOR` = 同值；`kernel/PENDING` **不存在**（已提交）；`provisioning.json` 的 `kernelVersion`/`kernelFloor` 均为 `<目标版本>` |
 
 **若失败看这里**
 
