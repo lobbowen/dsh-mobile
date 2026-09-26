@@ -2,6 +2,7 @@ package io.github.lobbowen.dshmobile.runtime
 
 import android.content.Context
 import android.system.Os
+import io.github.lobbowen.dshmobile.native.NativeAssetRegistry
 import java.io.File
 
 /**
@@ -12,7 +13,13 @@ import java.io.File
  */
 object PrefixProvisioner {
 
-    private val BINS = listOf("libbash.so" to "bash", "libdshrg.so" to "rg")
+    // 文件名从**注册表派生**（唯一事实源）：改 libName 只需改 NativeAssetRegistry。
+    private val BINS = listOf(
+        NativeAssetRegistry.libNameOf("bash") to "bash",
+        NativeAssetRegistry.libNameOf("ripgrep") to "rg",
+    )
+    // libdshpty.so 来自 node-pty 配方，**不登记**在注册表里（它是软失败依赖件，
+    // 登记就会把它纳入 NativePreparer 的探针与 native-assets 投影），故此处仍为字面量。
     private val LIBS = listOf("libdshpty.so" to "pty.node")
 
     /** node 在 $PREFIX/bin 下的名字。报告 2026-09-26 §五：`command -v node` 全 MISSING，

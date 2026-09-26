@@ -416,8 +416,8 @@ class NodeRuntimeService : Service() {
                         kernelDir = kernelDir,
                         kernelEntry = entry,
                         uiDir = File(kernelDir, "ui/dist"),
-                        flockNative = File(nativeDir, "libdshflock.so"),
-                        posixShim = File(nativeDir, "libdshposix.so"),
+                        flockNative = File(nativeDir, NativeAssetRegistry.libNameOf("flock")),
+                        posixShim = File(nativeDir, NativeAssetRegistry.libNameOf("posix")),
                         prefixRoot = PrefixProvisioner.root(this),
                         prefixBin = PrefixProvisioner.binDir(this),
                         bashBin = PrefixProvisioner.bashBin(this),
@@ -570,7 +570,7 @@ class NodeRuntimeService : Service() {
     /** 执行随包 PTY 探针（静态 C，无 libc++ 依赖，直接 exec），stdout 逐行上屏。
      *  缺件（旧 APK/dev）静默跳过——该二进制刻意不登记进 native-assets.txt（同小体积绑定先例）。 */
     private fun runPtyProbe() {
-        val bin = File(libSearchPath.substringBefore(File.pathSeparatorChar), "libdshptyprobe.so")
+        val bin = File(libSearchPath.substringBefore(File.pathSeparatorChar), NativeAssetRegistry.libNameOf("ptyprobe"))
         if (!bin.isFile) {
             RuntimeDiagnostics.append(this, "ptyprobe", null, "PTY 探针未随包（跳过）", bin.absolutePath)
             return

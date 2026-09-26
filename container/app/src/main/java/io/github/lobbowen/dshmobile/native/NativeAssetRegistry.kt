@@ -129,6 +129,20 @@ object NativeAssetRegistry {
     val libNames: List<String> get() = ALL.map { it.libName }
 
     /**
+     * 按 id 取随包 `.so` 的文件名 —— 运行时各处的**唯一取数口**。
+     *
+     * 为什么需要它：`PrefixProvisioner` 与 `NodeRuntimeService` 曾各自硬编码
+     * `libbash.so` / `libdshrg.so` / `libdshflock.so` / `libdshposix.so` / `libdshptyprobe.so`，
+     * 于是「包里有哪些小件」被抄成四份，改一处必漏三处 —— [ALL] 那条同步契约有
+     * `native-assets-test.js` 守着，小件这一路此前没有。
+     *
+     * id 拼错**当场抛**，不静默回落成空路径（那会在真机上表现为"文件不存在"，难查）。
+     */
+    fun libNameOf(id: String): String =
+        (ALL + CAPABILITY).firstOrNull { it.id == id }?.libName
+            ?: error("NativeAssetRegistry 里没有 id=" + id + " 的资产 —— 拼错的 id 必须当场炸。")
+
+    /**
      * 解析资产在设备上的绝对路径。
      *
      * 永远指向 `nativeLibraryDir` —— **不要**复制到 `filesDir`：那里 `app_data_file`
