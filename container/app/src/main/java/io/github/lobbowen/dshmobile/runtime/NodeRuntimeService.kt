@@ -625,41 +625,57 @@ class NodeRuntimeService : Service() {
 
     /** 转发子进程 stdout/stderr：都进 logcat；stderr 落盘**并限量上屏**。 */
     private fun forward(stream: InputStream, tag: String) {
-        Thread {
-            var shown = 0
-            var childShown = 0
-            stream.bufferedReader().use { r ->
-                r.forEachLine { line ->
-                    Log.i("Kernel:$tag", line)
-                    if (tag == "stderr") {
-                        RuntimeDiagnostics.recordNodeStderr(this, line + "\n")
-                        // stderr 必须上屏：dsh/守卫的启动崩溃**只往 stderr 抛栈**，此前只有
-                        // stdout 上屏 → 屏幕上一片安静、面板却打不开，无从排查（真机 2026-09-22）。
-                        // 限量防 npm 海噪刷爆诊断页；全文仍在 node-stderr.log。
-                        // 守卫镜像的子进程崩溃行（"[stderr] " 前缀）单独计数：真机秒退的
-                        // 死因恰恰排在守卫自身日志之后，与 INFO 共用限量会被挡在屏幕外。
-                        val isChildLine = line.startsWith("[stderr] ")
-                        if (isChildLine) {
-                            if (childShown < CHILD_STDERR_SCREEN_LINES) {
+        // 转发线程不许带走 :node：拆管时另一线程 close() 会让在读的 read() 抛
+        // InterruptedIOException（libcore 的「管道被关」正常信号，不是故障），沿默认
+        // UncaughtExceptionHandler 上抛就是整进程 FATAL —— 真机 crash buffer 里
+        // forEachLine→forward$lambda$11 五连发、三个 pid（D10）。
+        val t = Thread {
+            try {
+                var shown = 0
+                var childShown = 0
+                stream.bufferedReader().use { r ->
+                    r.forEachLine { line ->
+                        Log.i("Kernel:$tag", line)
+                        if (tag == "stderr") {
+                            RuntimeDiagnostics.recordNodeStderr(this, line + "\n")
+                            // stderr 必须上屏：dsh/守卫的启动崩溃**只往 stderr 抛栈**，此前只有
+                            // stdout 上屏 → 屏幕上一片安静、面板却打不开，无从排查（真机 2026-09-22）。
+                            // 限量防 npm 海噪刷爆诊断页；全文仍在 node-stderr.log。
+                            // 守卫镜像的子进程崩溃行（"[stderr] " 前缀）单独计数：真机秒退的
+                            // 死因恰恰排在守卫自身日志之后，与 INFO 共用限量会被挡在屏幕外。
+                            val isChildLine = line.startsWith("[stderr] ")
+                            if (isChildLine) {
+                                if (childShown < CHILD_STDERR_SCREEN_LINES) {
+                                    RuntimeDiagnostics.append(this, "kernel-stderr", null, line)
+                                    childShown++
+                                    if (childShown == CHILD_STDERR_SCREEN_LINES) {
+                                        RuntimeDiagnostics.append(this, "kernel-stderr", null, "……(子进程 stderr 上屏截断，完整见 node-stderr.log)")
+                                    }
+                                }
+                            } else if (shown < STDERR_SCREEN_LINES) {
                                 RuntimeDiagnostics.append(this, "kernel-stderr", null, line)
-                                childShown++
-                                if (childShown == CHILD_STDERR_SCREEN_LINES) {
-                                    RuntimeDiagnostics.append(this, "kernel-stderr", null, "……(子进程 stderr 上屏截断，完整见 node-stderr.log)")
+                                shown++
+                                if (shown == STDERR_SCREEN_LINES) {
+                                    RuntimeDiagnostics.append(this, "kernel-stderr", null, "……(stderr 上屏截断，完整见 node-stderr.log)")
                                 }
                             }
-                        } else if (shown < STDERR_SCREEN_LINES) {
-                            RuntimeDiagnostics.append(this, "kernel-stderr", null, line)
-                            shown++
-                            if (shown == STDERR_SCREEN_LINES) {
-                                RuntimeDiagnostics.append(this, "kernel-stderr", null, "……(stderr 上屏截断，完整见 node-stderr.log)")
-                            }
+                        } else {
+                            RuntimeDiagnostics.append(this, "kernel-$tag", null, line)
                         }
-                    } else {
-                        RuntimeDiagnostics.append(this, "kernel-$tag", null, line)
                     }
                 }
+            } catch (e: Throwable) {
+                Log.w("Kernel:$tag", "转发线程结束（不影响运行时存活）", e)
+                RuntimeDiagnostics.append(
+                    this, "kernel-$tag", null,
+                    "转发线程结束：${e::class.java.simpleName}: ${e.message}",
+                    "tag=$tag —— 这条线程死掉只该丢掉日志转发，绝不许拖垮 :node（真机 D10）"
+                )
             }
-        }.start()
+        }
+        // 线程名进 logcat：本缺陷此前在崩溃栈里只叫 Thread-2/Thread-3，无从归因。
+        t.name = "kernel-$tag-forward"
+        t.start()
     }
 
     /**
