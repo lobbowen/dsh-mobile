@@ -7,7 +7,7 @@
 
 | 轨 | 内容 | 状态 | 量 |
 |---|---|---|---|
-| **P0** | C1 出生收口：`onCreate` 自出生 + 三态判据 + 空壳上屏 + 门禁出生链 | 本 PR（壳 1.1.6(8)） | 0.5d + 1 壳 + 1 机 |
+| **P0** | C1 出生收口：`onCreate` 自出生 + 三态判据 + 空壳上屏 + 门禁出生链 | 已合入 main（`07faed6`，壳 1.1.6(8)），CI 绿；真机判据 §7-3/4/5 挂起（设备未接入） | 0.5d + 1 壳 + 1 机 |
 | **PC-0** | 命名表 / 目标树终稿 / CI paths 对照表 / `capability`⇄`permissions` 裁决阅读 | 待做 | 0.5–1d |
 | **PC-1** | D1+D2 搬家：`guard`⇄`supervisor` 双词汇合并 + `container/engine`→`hosttools` | 待做 | 2 壳 |
 | **PC-2** | Kotlin 六域包制重排（含组件名迁移 + a11y 注册串自校正） | 待做 | 2–3 壳 + 1 机 |
@@ -26,11 +26,12 @@
 |---|---|---|---|
 | D1 | **双词汇生命周期权威**：`kernel/src/supervisor.js`（顶层）⇄ `kernel/src/guard/`（目录）⇄ `guard/supervisor/*.js`（mixin 视图）三套名字指同一权威 | `ls kernel/src`、`ls kernel/src/guard` 实拍 | PC-1：合并为单一 `init/`，旧名进死词汇门禁 |
 | D2 | **`container/engine` 名不副实**：目录里是发布工具链（`src/sign.js`、`verify.js`、`ota-engine.js`、`kernel-bundle.js`、`zip.js`、`keys.js`、`runtime-json.js`）+ 契约夹具（`test/boot-fixture.js`），与「运行时引擎」无关，L-C/L-D 真身在 Kotlin `runtime/` | `ls container/engine/src` 实拍 | PC-1：改名 `hosttools/`，与 test 夹具分家 |
-| D3 | **Kotlin 顶层散文件 + 特权双包**：`MainActivity`/`NodeContainerApp`/`ProvisioningProbe`/`RuntimeDiagnostics` 裸在包根；`capability/`（CapabilityCatalog 单源）与 `permissions/`（PermissionCatalog/Center/LifecycleChecks）并存 | `ls …/dshmobile/*.kt`、`ls …/permissions/` 实拍 | PC-2：六域包制收编；capability⇄permissions 职责线**先读文件裁决再合并**（不许印象定罪） |
+| D3 | **Kotlin 顶层散文件 + 特权双包并存（原判「capability⇄permissions 双权威」已被代码证伪）**：`MainActivity`/`NodeContainerApp`/`ProvisioningProbe`/`RuntimeDiagnostics` 裸在包根；`capability/` 与 `permissions/` 并存，但查询裁决**已是单源** —— `PermissionCenter.isGranted()` 唯一入口（`PermissionCenter.kt:40` 按 id 分发、`:72` `batteryExempt()`），`LifecycleChecks.kt:22` 也走它而不是自己判。残留罪 = **字面量外溢**：权限 id 在 `LifecycleChecks.kt:24` 裸写 `"battery-optimization"`（单源常量在 `PermissionCatalog.kt:34`），同一事实的显示名有三份写法（`PermissionCatalog.kt:87` 与 `CapabilityCatalog.kt:148` 各写「电池优化豁免」，`LifecycleChecks.kt:24` 写「电池优化」） | 2026-09-27 逐文件通读 + origin main 行号复核（上一轮「双权威」属印象定罪，本轮自纠并按 D3 现述为准） | PC-2：六域包制收编散文件；把 §6 判据 2 的「跨域读取只经合同常量」从**文件路径**扩到**权限 id / 显示名**（门禁扫 Kotlin 裸字面量，活样本自证） |
 | D4 | **`NodeRuntimeService.kt` 860 行上帝文件**：预置体检/写探针/OTA/暂存清扫/装配/spawn/轮询/退避/诊断转发混住 | 本轮通读全文 | PC-3：按 ADR-0008 §2 拆 machine / supply / kernelota |
 | D5 | **死残待判**：`kernel/src/platform/os/browser.js` 等桌面域文件仍被 `platform/os/index.js`、`guard/supervisor/settings-view.js` require | grep 引用实拍 | PC-4：**删前逐项引用计数 + 真机域运行证明**；若该代码路径在 Android 运行期会被触达，先解耦再删（不许砍能力迁就缺陷） |
 | D6 | **根目录半拉子文档**：仓根平铺方案 md，且被 `layout-manifest-test` 的 rootAllow 判红；`system/README.md` 指向不存在的 `docs/ADR-001`（实际在 `docs/adr/0001-*`） | 本轮 `node test/layout-manifest-test.js` 实跑 FAIL + head 实拍 | 本 PR：方案文档一律进 `docs/plans/`，决策进 `docs/adr/`；stale 引用修复入门禁 |
 | D7 | **`system/` 目录本体无罪**：Tier S（特权系统服务形态）集成契约，与 Tier A 垫片路径并存的刻意设计 | `system/README.md` | 保留，只修引用 |
+| D8 | **交付通道无单一写者**（2026-09-26 夜间事故，2026-09-27 复核）：`fast-apk` 从**任意 ref** 都能写共享发布通道，未合入 main 的分支字节被原地投成用户手里的下载地址 | 实证：16:12–16:13 分支 commit `090abbd`（领先 main 18 个 commit）经 run #185 同时覆盖 `apk-latest` 与 `v1.1.6`，`ci-ok.txt` 落 `sha : 090abbd`；成因三处逐行复核 —— `fast-apk.yml` 全文无 `github.ref_name` 校验（发布步骤 `:730`、`TAG="apk-latest"` `:736`、版本化归档 `VTAG="v$VN"` `:796`），版本门禁放行同号换字节（`verify-apk-version-gate.sh:77`），两条合起来 = 任何分支都能顶掉线上 | 归 **P2b**（另一工作区正收敛门禁/`fast-apk.yml`/`scripts`，本轮不碰）：发布步骤加「`GITHUB_SHA` 必须是 main head」硬失败 + 门禁活样本；合同条文已进 ADR-0008 §4 C4。本轮治标**已完成并复核**：fast-apk run #188（`main` / `9d530d3`，21 步全绿，含 step 17 签名门与 step 20 发布）后，Releases API 实读 `apk-latest/app-debug.apk` 与 `v1.1.6/app-debug-1.1.6+8.apk` digest 相同 = `sha256:8466cdaa67b6a4b03…`（53406521 字节），`ci-ok.txt` 现记 `sha : 9d530d3` + 同值 `apk_sha`（污染版是 `25c117d…` / 53406529 字节 / `090abbd`） |
 
 ## 3. 目标树（发布维 L0/L1/L2 不动，职责维六域落目录）
 
@@ -99,3 +100,10 @@ manifest `android:name` 保持相对类名写法：改一处不扩散（「同�
 4. 真机：退后台被 cached-kill 后，**不点图标**、仅靠监督者 rebind 即恢复控制面（`/proc/net/tcp`
    端口 3080/36360 复听）；恢复耗时 ≤2 个监督拍。
 5. 边界不变：强停（`am force-stop`）后保持沉默，只由 `ResidencyAudit` 定罪可见。
+
+**收口状态（2026-09-27）**：判据 1、2 的代码随 `07faed6` 进 main；CI 侧实读 run #214（head `9d530d3`）
+四个 job：`container` / `kernel` / `app-tests` 全 success，`kernel-release` skipped（paths 无关，
+skipped ≠ 红）。门禁输出 `PASS 出生链：6 处按函数体/签名段取证全在位…负样本判为不合格`。
+判据 3、4、5 **全部挂起，非代码原因**：本机 `adb devices` 为空、`lsusb` 无 OPPO `22d9` 设备，
+手机未接入 —— 需要接线并确认 USB 调试，才能装机跑这三条。
+P0 因此**不算交付完成**：合入 ≠ 上线，上线 = 真机判据 3–5 逐条复点。
