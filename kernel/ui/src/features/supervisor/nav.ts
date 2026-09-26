@@ -107,6 +107,7 @@ export const EVENT_LABELS: Record<string, string> = {
   router_provider_deactivated: "供应商停用", router_provider_endpoint: "独立端点上线",
   plugin_install_started: "插件安装开始", plugin_install_done: "插件安装完成",
   native_unit: "原生件投放",
+  native_capability: "原生件能力核验",
   native_install_started: "DSH 安装开始", native_installed: "DSH 安装完成",
   native_install_failed: "DSH 安装失败", native_uninstall_started: "DSH 卸载开始",
   native_uninstalled: "DSH 卸载完成", native_uninstall_failed: "原生卸载失败",
