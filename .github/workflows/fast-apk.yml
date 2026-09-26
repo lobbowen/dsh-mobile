@@ -553,7 +553,7 @@ jobs:
         #  但会打醒目的 ::warning:: —— 让"这次产物不能用来升级"这件事
         #  留在 CI 日志里，而不是靠人去猜。
         #
-        #  secret 命名复用 repack-apk.yml 已经用的那一组，不另立一套
+        #  secret 命名复用 release-admin.yml 的 repack job 已经用的那一组，不另立一套
         #  （见 scripts/keygen-android-keystore.sh 头注释）。
         #
         #  与 OTA 内核签名（ed25519 / keys/ota-private.pem）**无关**，

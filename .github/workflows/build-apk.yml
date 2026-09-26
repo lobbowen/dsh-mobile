@@ -612,7 +612,7 @@ jobs:
         # 仍然**不 fail**（secret 未配置时构建照常，便于 fork/PR 场景），
         # 但 ::warning:: 会显式说明"本包不具备升级能力"。
         #
-        # 与 repack-apk.yml 复用同一组 secret 名（ANDROID_KEYSTORE_BASE64 等），
+        # 与 release-admin.yml 的 repack job 复用同一组 secret 名（ANDROID_KEYSTORE_BASE64 等），
         # 见 scripts/keygen-android-keystore.sh 头注释里的两把钥匙辨析。
         # =====================================================================
         env:
