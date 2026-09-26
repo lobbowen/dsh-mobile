@@ -1,14 +1,14 @@
 CI_HEARTBEAT
-beat : 16
-time : Sat Sep 26 04:30:09 UTC 2026
+beat : 17
+time : Sat Sep 26 04:30:55 UTC 2026
 stage: 7/9 NODE-BUILD (longest, V8 compile)
 run  : 36217430866
 sha  : 4bb4c2a8ed274943db8c01191842d57436cd9722
-mem  : avail=14.1GB
+mem  : avail=11.5GB
 cgmax: n/a
-load : 3.01 2.78 1.64
-logsize: 5006503
+load : 2.94 2.80 1.70
+logsize: 5055673
 objs   : host=714 target=2109
 oomhits: 0
 0
-lastprog:   /usr/bin/clang++ -o /tmp/tmp.UtnV87z5lq/node/out/Release/obj.host/torque_base/deps/v8/src/torque/declarations.o ../deps/v8/src/torque/declarations.cc '-D_GLIB
+lastprog:   touch ebb6760e896b7b03b87ea761a2332545328656b5b4b65a08bd467dab3ffc42c9.intermediate   LD_LIBRARY_PATH=/tmp/tmp.UtnV87z5lq/node/out/Release/lib.host:/tmp/tmp.U
