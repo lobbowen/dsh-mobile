@@ -1,0 +1,86 @@
+name: Pin native capabilities
+
+# 把小件原生能力件「编译一次 → 固化为不可变 Release」——与 Node 运行时（node-runtime-*）同构。
+#
+# 为什么单独一条 workflow：它只做一件事（编一次 + 固化），触发是**人为显式动作**；
+# 与 build-apk（2~3 小时 Node 全量）分开，避免混在一条链里。
+#
+# 幂等：Release 的 tag 由**源指纹**命名（scripts/native-capabilities-fingerprint.sh），
+# 同一份源码重复跑不会产生第二个产物。
+#
+# 拓扑：本 workflow 负责「产出 + 固化 + 记账」；随后 fast-apk 按指纹**下载校验**，
+# 命中即不再现场编译（见 .github/native-capabilities-pin.json）。
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write     # 建 Release / 传资产 / 回写固化记录
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      ABI: arm64-v8a
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 确认 runner 上有 NDK
+        run: |
+          set -euo pipefail
+          NDK_HOME="${ANDROID_NDK_LATEST_HOME:-}"
+          echo "ANDROID_NDK_LATEST_HOME=$NDK_HOME"
+          [ -n "$NDK_HOME" ] || { echo "[error] runner 上没预装 NDK，无法固化。"; exit 1; }
+
+      - name: Build capabilities（唯一实现）
+        # 与 fast-apk 调的是同一份脚本：产物、档位、清单口径完全一致，
+        # 不存在「固化用的是另一套配方」这种漂移。
+        run: bash scripts/build-native-capabilities.sh
+
+      - name: 源指纹
+        run: |
+          set -euo pipefail
+          FP="$(bash scripts/native-capabilities-fingerprint.sh)"
+          echo "FP=$FP" >> "$GITHUB_ENV"
+          echo "源指纹 = $FP"
+
+      - name: 打包（zip + sha256）
+        run: |
+          set -euo pipefail
+          ZIP="native-cap-${FP}-${ABI}.zip"
+          M="$(mktemp -d)"
+          N=0
+          while read -r TIER LIB _ID; do
+            case "$TIER" in ''|'#'*) continue ;; esac
+            P="container/app/src/main/jniLibs/${ABI}/${LIB}"
+            if [ -f "$P" ]; then cp "$P" "$M/"; N=$((N + 1)); fi
+          done < .github/native-capabilities.txt
+          [ "$N" -gt 0 ] || { echo "[error] 一件产物都没有 —— 拒绝固化空包。"; exit 1; }
+          cp /tmp/native-capabilities-manifest.txt "$M/manifest.txt"
+          ( cd "$M" && zip -q -r "$GITHUB_WORKSPACE/$ZIP" . )
+          sha256sum "$ZIP" > "$ZIP.sha256"
+          {
+            echo "ZIP=$ZIP"
+            echo "SHA=$(cut -d' ' -f1 "$ZIP.sha256")"
+          } >> "$GITHUB_ENV"
+          echo "=== 固化内容 ==="; cat "$ZIP.sha256"; cat "$M/manifest.txt"
+
+      - name: 发布为不可变 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # 判据只住 scripts/gh-release-upload.sh（同名资产记录、孤立对象回退、事后逐字节确认）。
+          bash scripts/gh-release-upload.sh "native-cap-${FP}-${ABI}" --title "Native capabilities ${FP}" --notes "小件能力件固化产物。源指纹 ${FP}，ABI ${ABI}。清单见包内 manifest.txt。" "$ZIP" "$ZIP.sha256"
+
+      - name: 回写固化记录
+        run: |
+          set -euo pipefail
+          FP="$FP" ZIP="$ZIP" SHA="$SHA" ABI="$ABI" node -e 'const fs=require("fs");const p=".github/native-capabilities-pin.json";const j=JSON.parse(fs.readFileSync(p,"utf8"));j.pins[process.env.FP]={tag:"native-cap-"+process.env.FP+"-"+process.env.ABI,zip:process.env.ZIP,sha256:process.env.SHA,abi:process.env.ABI};fs.writeFileSync(p,JSON.stringify(j,null,2)+String.fromCharCode(10));'
+          git config user.name ci-pin
+          git config user.email ci-pin@users.noreply.github.com
+          git add .github/native-capabilities-pin.json
+          if git diff --cached --quiet; then echo "固化记录无变化（该指纹已固化过）"; exit 0; fi
+          git commit -m "pin: native capabilities ${FP}"
+          git push

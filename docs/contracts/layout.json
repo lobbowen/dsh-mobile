@@ -280,6 +280,7 @@
     "require-ci.js": "cross",
     "run-engine-tests.sh": "L0",
     "build-native-capabilities.sh": "L0",
+    "native-capabilities-fingerprint.sh": "cross",
     "ensure-tool.sh": "cross",
     "read-node-versions.sh": "cross",
     "verify-apk-native.sh": "cross",

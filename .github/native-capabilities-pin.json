@@ -1,0 +1,5 @@
+{
+  "$comment": "小件能力件的固化记录：源指纹 → 已发布的不可变 Release。由 .github/workflows/pin-capabilities.yml 写入。fast-apk 先算指纹，命中本表就下载校验而不再重编。",
+  "abi": "arm64-v8a",
+  "pins": {}
+}
