@@ -16,7 +16,7 @@ const makeRunner = require('./harness');
 const fs = require('fs');
 const path = require('path');
 
-const { check, finish } = makeRunner('kernel-update-bridge');
+const { check, skip, finish } = makeRunner('kernel-update-bridge');
 
 // 内核源码路径（单仓：同仓 dsh-android-kernel/ 子目录）。**不写死绝对路径**。
 // 本文件对内核源码的引用是**静态比对**（读文件做正则/存在性检查），
@@ -110,7 +110,7 @@ function main() {
     check('内核 RESULT 常量一致', new RegExp('"' + RESULT + '"').test(ts));
     check('内核 PROGRESS 常量一致', new RegExp('"' + PROGRESS + '"').test(ts));
   } else {
-    check('（跳过）内核源码不可达，仅做行为契约', true);
+    skip('内核源码不可达 → 静态比对 4 条未执行（仅行为契约）');
   }
 
   // ── 4) 宿主帧产物存在且含关键契约元素 ──
@@ -121,7 +121,7 @@ function main() {
     check('宿主页 iframe 同源（src="/"）', /<iframe[^>]*src="\/"/.test(h));
     check('宿主页脚本外链（满足 CSP script-src self）', /src="\/host-frame\.js"/.test(h));
   } else {
-    check('（跳过）宿主页不可达', true);
+    skip('宿主页不可达 → 2 条未执行');
   }
   if (fs.existsSync(hostJs)) {
     const j = fs.readFileSync(hostJs, 'utf8');
@@ -129,7 +129,7 @@ function main() {
     check('宿主帧脚本转发 REQUEST', j.includes(REQUEST));
     check('宿主帧脚本暴露 dshDeliverResult', /dshDeliverResult\s*=/.test(j));
   } else {
-    check('（跳过）宿主帧脚本不可达', true);
+    skip('宿主帧脚本不可达 → 3 条未执行');
   }
 
   finish();
