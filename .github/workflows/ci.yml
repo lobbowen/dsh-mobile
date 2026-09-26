@@ -15,6 +15,10 @@ on:
       - 'scripts/**'
       - '.github/native-assets.txt'
       - '.github/workflows/**'
+      # version.json 是壳分发身份的单一事实源（versionName / versionCode / bridgeProtocol），
+      # 也是 container job 里 gen-version.js --check 的输入。它原先不在白名单 —— 于是
+      # 「只改版本清单」的提交触发不了任何 CI，那道对账变成"只在别的文件碰巧改动时才跑"。
+      - 'version.json'
   pull_request:
     paths:
       - 'container/**'
@@ -26,6 +30,8 @@ on:
       # 若被 paths 挡在门外，等于「线上下载清单被人改错」这条路只能等合进 main 才第一次被检查。
       - '.github/native-assets.txt'
       - '.github/workflows/**'
+      # 与上面 push 的清单**保持逐字对称**（本文件注释已要求两侧一致）。
+      - 'version.json'
   workflow_dispatch: {}
 
 jobs:

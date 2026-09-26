@@ -49,6 +49,10 @@ on:
       # native/ 下的 C 源（flock/publish/ptyprobe 等）现场编译进 jniLibs ——
       # 改源码同样等于改 APK 内容（tag 触发不受 paths 限制，但 push 直出也要能触发）。
       - 'container/native/**'
+      # version.json 决定 APK 的分发身份（versionName / versionCode）。改它 = 改产物身份，
+      # 而本 workflow 的版本门禁正是拿它比较 —— 原先不在白名单，会出现
+      # 「改了版本却不触发构建 / 只改版本时无人验证」。
+      - 'version.json'
       # 注意【不】包含 kernel/**：ADR-0005 后内核不随 APK 分发（下面有专门断言），
       # 内核改动走 kernel-ota.yml 出 OTA 包 —— 让 fast-apk 监听它只会白烧机时。
     # 额外的 tag 触发：推 fast-<任意> 即可手动跑一次，不必改代码。
