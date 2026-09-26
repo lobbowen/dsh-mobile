@@ -630,95 +630,12 @@ jobs:
           fi
 
       - name: Audit APK contents
+        # 判据的唯一实现是 scripts/verify-apk-native.sh（与 build-apk 同调，
+        # 缺件/内核资产/npm/adb-client 逐条硬红，动机见脚本头注释）。
         run: |
           set -euo pipefail
           APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)"
-          echo "APK: $APK  ($(stat -c%s "$APK") 字节)"
-
-          echo "--- lib/ 下的条目 ---"
-          unzip -l "$APK" | grep 'lib/' || { echo "[error] 没有 lib/ 条目"; exit 1; }
-
-          # 清单里每个文件缺了，装到真机上都会挂：
-          #   缺 libnode.so       → exec 找不到东西
-          #   缺 libc++_shared.so → cannot locate symbol
-          # 与其让它在真机上失败，不如在这里失败 —— 反馈快得多。
-          #
-          # 路径由 ${ABI} 与清单拼出，不再硬编码 —— 加资产/换 ABI 都不用改这里。
-          ASSETS="$({ grep -v '^[[:space:]]*#' .github/native-assets.txt | grep -v '^[[:space:]]*$' || true; } | tr -d '\r')"
-          [ -n "$ASSETS" ] || { echo "[error] .github/native-assets.txt 里没有任何资产 —— 下面的 APK 条目审计会一条都不检查就放行。"; exit 1; }
-          for a in $ASSETS; do
-            f="lib/${ABI}/$a"
-            if unzip -l "$APK" | grep -q "$f"; then
-              echo "[ok] $f"
-            else
-              echo "[error] APK 里缺少 $f"
-              echo "        清单来源: .github/native-assets.txt（NativeAssetRegistry 的投影）"
-              exit 1
-            fi
-          done
-          echo "[ok] APK 审计通过（原生资产）"
-
-          # --- 小体积原生件审计（刻意不登记 native-assets.txt 的那批）---
-          # 自有 C（flock/publish/ptyprobe）编译失败即环境问题 ⇒ 硬红；
-          # bash/rg 来自上游源码配方（交叉编译有真实失败概率）⇒ 缺席只降级为
-          # ::warning::：缺件时垫片旋钮逐字回退原语义、真机侧诚实报错，
-          # 不该让生命周期/PTC 修复陪葬。
-          echo
-          echo "--- 小体积原生件 ---"
-          for b in libdshflock.so libdshposix.so libdshptyprobe.so; do
-            if unzip -l "$APK" | grep -q "lib/${ABI}/$b"; then echo "[ok] lib/${ABI}/$b"; else echo "[error] APK 缺 lib/${ABI}/$b（自有 C，必产）"; exit 1; fi
-          done
-          for b in libbash.so libdshrg.so; do
-            if unzip -l "$APK" | grep -q "lib/${ABI}/$b"; then echo "[ok] lib/${ABI}/$b"; else echo "::error title=必需件缺失::lib/${ABI}/$b 不在 APK（$PREFIX 依赖它，无回退）"; exit 1; fi
-          done
-          # libdshpty.so：上游 node-pty 配方，软失败（终端降级，不影响其它能力）
-          if unzip -l "$APK" | grep -q "lib/${ABI}/libdshpty.so"; then echo "[ok] lib/${ABI}/libdshpty.so"; else echo "::warning title=能力降级::lib/${ABI}/libdshpty.so 不在 APK —— 终端 PTY 不可用"; fi
-
-          # --- 内核资产审计（ADR-0005：APK **不允许**含内核）---
-          #
-          # 与历史行为**相反**：过去 APK 带内核、缺了才警告；现在内核只从 OTA 源安装，
-          # APK 里出现内核资产意味着架构被改回去了 —— 所以这里是**硬失败**。
-          echo
-          echo "--- 内核资产（必须为空）---"
-          if unzip -l "$APK" | grep -qE 'assets/kernel/'; then
-            echo "::error title=APK 含内核资产::ADR-0005 规定内核不随 APK 分发（内核只从 OTA 源安装）。"
-            unzip -l "$APK" | grep -E 'assets/kernel/' || true
-            exit 1
-          else
-            echo "[ok] APK 不含内核资产（内核经 OTA 安装）"
-          fi
-
-          # --- npm 基础环境审计（硬失败）---
-          # 缺了它面板装不了任何 Agent —— 这是核心能力，不是可选增强。
-          # 与基线包不同，它没有"仍可走 feed"的降级路径，故不沿用 warning。
-          echo
-          echo "--- npm 基础环境 ---"
-          if unzip -l "$APK" | grep -q 'assets/npm/npm.zip'; then
-            SIZE=$(unzip -l "$APK" | awk '/assets\/npm\/npm\.zip/{print $1}')
-            echo "[ok] 含 assets/npm/npm.zip（$SIZE 字节，版本 $(cat container/app/src/main/assets/npm/version.txt)）"
-            unzip -l "$APK" | grep -q 'assets/npm/version.txt' \
-              || { echo "[error] npm.zip 在但 version.txt 缺失（解包版本戳无从确定）"; exit 1; }
-          else
-            echo "::error title=APK 无 npm::assets/npm/npm.zip 不在 APK 内 —— 面板无法安装任何 Agent。常见原因：Stage pinned npm 步骤被删/改名。"
-            exit 1
-          fi
-
-          # --- adb-client 资产审计（硬失败，权限通道的字节）---
-          # 这 8 个 JS 是 ADB 配对/shell 的唯一实现（ADR-0003），运行时由
-          # NodeProvisioner.ensureAdbClientScripts 整目录复制到 files/adb-client。
-          # 任何一个没被打进 APK，真机表现都是 adb.* 功能静默不可用。
-          # 文件集合以 src/main/assets 目录为事实源（不硬编码数量）：
-          # 加文件忘了被打包、或误删文件，都会在这里红。
-          echo
-          echo "--- adb-client 资产 ---"
-          for f in container/app/src/main/assets/node/adb-client/*.js; do
-            n="assets/node/adb-client/$(basename "$f")"
-            if unzip -l "$APK" | grep -q "$n"; then echo "[ok] $n"; else echo "[error] APK 缺 $n"; exit 1; fi
-          done
-          SRC_N=$(ls container/app/src/main/assets/node/adb-client/*.js 2>/dev/null | wc -l)
-          APK_N=$(unzip -l "$APK" | grep -c 'assets/node/adb-client/[^/]*\.js$' || true)
-          [ "$SRC_N" = "$APK_N" ] || { echo "[error] adb-client 件数不一致：源码 $SRC_N vs APK $APK_N"; exit 1; }
-          echo "[ok] adb-client 审计通过（$SRC_N 个文件）"
+          bash scripts/verify-apk-native.sh "$APK" "$ABI"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
