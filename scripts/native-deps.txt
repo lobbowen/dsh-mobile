@@ -1,15 +1,21 @@
-# bionic / 系统提供的 .so 白名单 —— 构建期依赖闭环自检用
+# bionic / 系统提供的 .so 白名单 —— 依赖闭环判据的事实源
 #
-# 用途：scripts/build-node-android.sh 读 ELF 的 DT_NEEDED 列表，逐个核对。
+# 用途：scripts/verify-runtime-elf.sh 读 ELF 的 DT_NEEDED 列表，逐个核对（判据 4）。
 #   在名单里的 → 由系统提供，跳过；
-#   不在名单里的 → 必须由我们随包提供（即 app/src/main/jniLibs/<abi>/ 下必须有）。
+#   不在名单里的 → 必须由我们随包提供（即同目录里必须有这个文件）。
+#
+# ⚠ 名单里的每一项都必须**有实证**（真机/产物 readelf 读到过，或 Android 系统镜像里
+#   确有其库）。往名单里加一项就等于宣告「这个库设备上一定有，不用我们投」——
+#   判错一次的代价是装到机器上才报 cannot locate symbol，而不是 CI 红一下。
+#   2026-09-27 之前这份名单在 release-admin 的 pin 步骤里还抄了第二份（12 项一模一样），
+#   那份副本已删；这里增删时不必再去改别处，别处也不该再有第二份。
 #
 # 为什么需要这道护栏：这类问题在【编译期毫无征兆】，只有装到真机才会暴露，
 # 而一轮完整 CI 要 2~3 小时 —— 人工核对极易漏，必须让脚本自己兜住。
 # 真机曾报：CANNOT LINK EXECUTABLE ".../libnode.so": cannot locate symbol
 #
 # ⚠ 本名单只描述「Android 系统自带」的库。随包提供的库（如 libc++_shared.so）
-#   刻意【不】列在这里 —— 它们必须通过闭环自检，被证明确实在 OUT_DIR 里。
+#   刻意【不】列在这里 —— 它们必须通过闭环自检，被证明确实在产物目录里。
 #   随包库的清单位于 app/src/main/java/.../native/NativeAssetRegistry.kt
 #   的 requiredDeps 字段（另有 .github/native-assets.txt 供 CI 使用）。
 #

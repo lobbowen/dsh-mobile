@@ -97,7 +97,7 @@ IOException: Cannot run program ".../files/node/24.21.0/node": error=13, Permiss
 > ```
 > CANNOT LINK EXECUTABLE ".../libnode.so": cannot locate symbol "_ZTVNSt6__ndk119basic_ostringstream..."
 > ```
-> 由 `scripts/build-node-android.sh` 在链接期注入（`-Wl,--enable-new-dtags` 少了它只会得到被 bionic 忽略的 `DT_RPATH`），并由 `scripts/verify-runtime-elf.sh` 在构建/固化/打包三处把住。完整论证见 ARCHITECTURE.md 第 3 节。
+> 由 `scripts/build-node-android.sh` 在链接期注入（`-Wl,--enable-new-dtags` 少了它只会得到被 bionic 忽略的 `DT_RPATH`），并由 `scripts/verify-runtime-elf.sh` 在五个出口把住（构建脚本、`fast-apk` Gate、`build-apk` pre-gradle Gate、`release-admin` 的 pin 与 repack）。同一份脚本还判架构 / 16KB 页对齐 / `PT_INTERP` / `DT_NEEDED` 闭环，五项全硬红，2026-09-27 起判据只有这一份实现。完整论证见 ARCHITECTURE.md 第 3 节。
 
 > **一个隐蔽的陷阱**：`File.canExecute()` 对上述限制**完全无感** —— 它只查 stat 的 x 权限位，不知道 noexec 挂载、更不知道 SELinux 策略。所以它在不可 exec 的文件上照样返回 `true`，造成"诊断显示可执行、真 exec 却失败"的假阳性。**判断能否执行，唯一可靠的办法是真去执行一次**（本项目在启动前以**清空后的环境**跑一次 `node -v` 来验证，见 `NativePreparer.probe` —— 裸环境才与 `run_code` 同形，给自己补 `LD_LIBRARY_PATH` 的探针是在给被测对象装脚手架）。
 

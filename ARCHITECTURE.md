@@ -641,16 +641,24 @@ aarch64）在 GitHub 免费 runner 上要 **2~3 小时**。
 `pin-node-latest` tag，或 `workflow_dispatch` 选 `mode: pin`）：从某次成功的
 `build-apk` 运行里取出两个 `.so`，逐项校验后发布为不可变 Release。
 
-校验项（任一不过即失败，绝不放行坏产物）：
+校验项（任一不过即失败，绝不放行坏产物）。**判据只住 `scripts/verify-runtime-elf.sh`
+一份**，五个出口（构建脚本、`fast-apk` Gate、`build-apk` pre-gradle Gate、这里的 pin、
+同文件的 repack）同调；2026-09-27 之前 pin 里内联抄了 1–4、构建脚本对同样的 2/3 只打
+`[info]`/`[warn]`，同一事实两种结论 = 构建期说没事、固化期判有罪，而固化期已是最后还能
+拦住的地方。可执行夹具（不需要 NDK、不需要真产物）在
+`container/engine/test/verify-runtime-elf-test.js` 里逐条证伪这五项 —— 门禁必须能红。
 
-1. ELF 架构必须是 `ARM aarch64`
-2. 解释器必须指向 `/system/bin/linker64`（否则是 glibc 链接，真机无法 exec）
-3. 必须**存在** `0x4000` 对齐的 `LOAD` 段（Android 15+ 要求，16KB 页）。
-   判据不是「全部段都 0x4000 对齐」—— ELF 允许不同段用不同对齐值，
-   拿后者当门槛是在校验规范并不要求的东西，只会制造假失败。
-4. `DT_NEEDED` 依赖闭环：非 bionic 库必须随包提供
-5. 同目录依赖能否自解析：`DT_RUNPATH` 含 `$ORIGIN`（第 3 节；判据实现在
-   `scripts/verify-runtime-elf.sh`，构建/固化/打包三处共用同一份）
+1. ELF 架构必须是 AArch64（`e_machine`，不是 `file` 的字符串输出）
+2. 解释器：只要声明了 `PT_INTERP` 就必须是 `/system/bin/linker64`（否则是 glibc 链接，
+   真机无法 exec）；而「必须有 `PT_INTERP`」只对**清单里的可执行资产**要求
+   （`.github/native-assets.txt` 的「可执行资产本体」段）—— 共享库天生没有该段。
+3. 16KB 页对齐（Android 15+ 要求）：**每一个** `LOAD` 段的 `p_align` 都要是 `0x4000`
+   的整数倍。旧写法「输出里存在字符串 0x4000」两个方向都错：aarch64 链接器默认给
+   `0x10000`（同样满足 16KB 页）会被判红；而一段 `0x4000` 一段 `0x1000` 的混合形态
+   又被放行，那种产物在 16KB 页设备上就是 ELIBBAD。
+4. `DT_NEEDED` 依赖闭环：非系统库必须随包提供。系统库白名单只住
+   `scripts/native-deps.txt`（pin 里那份 12 项副本已删）。
+5. 同目录依赖能否自解析：`DT_RUNPATH` 含 `$ORIGIN`（第 3 节）。
 
 产物含 `manifest.json`（sha256 / 大小 / 来源 run），
 让"这个 APK 用的是哪份运行时"可追溯。
