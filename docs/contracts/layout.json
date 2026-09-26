@@ -193,6 +193,8 @@
     "make-release.sh": "cross",
     "gh-access.sh": "cross",
     "validate-workflow.py": "cross",
-    "attach-and-publish.sh": "cross"
+    "attach-and-publish.sh": "cross",
+    "inject-apk-keystore.sh": "cross",
+    "verify-apk-signing.sh": "cross"
   }
 }
