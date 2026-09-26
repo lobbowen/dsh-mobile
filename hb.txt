@@ -1,14 +1,14 @@
 CI_HEARTBEAT
-beat : 137
-time : Sat Sep 26 06:03:47 UTC 2026
+beat : 138
+time : Sat Sep 26 06:04:34 UTC 2026
 stage: 7/9 NODE-BUILD (longest, V8 compile)
 run  : 36217430866
 sha  : 4bb4c2a8ed274943db8c01191842d57436cd9722
-mem  : avail=13.0GB
+mem  : avail=13.8GB
 cgmax: n/a
-load : 3.00 3.00 3.00
-logsize: 11483670
+load : 3.10 3.03 3.01
+logsize: 11521491
 objs   : host=1975 target=2128
 oomhits: 0
 0
-lastprog:       |                   ^ 2 warnings generated.   /usr/bin/clang++ -o /tmp/tmp.UtnV87z5lq/node/out/Release/obj.host/v8_initializers/gen/torque-generated/src/b
+lastprog:   /usr/bin/clang++ -o /tmp/tmp.UtnV87z5lq/node/out/Release/obj.host/v8_initializers/gen/torque-generated/src/builtins/regexp-search-tq-csa.o /tmp/tmp.UtnV87z5lq
