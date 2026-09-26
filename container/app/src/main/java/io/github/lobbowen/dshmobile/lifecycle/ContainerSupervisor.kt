@@ -316,7 +316,8 @@ class ContainerSupervisor : Service() {
          *  绝不用 startForegroundService：调用点多在后台（:node onCreate / 桥 onCreate /
          *  Application），满足不了 5s FGS 契约反而炸宿主 —— 本服务自己在 onStartCommand 里
          *  转前台，投递方式因此无所谓。
-         *  失败只记日志：互保闭环的其它边（BootReceiver / 无障碍连接 / 解锁广播 / 周期任务）会再试。 */
+         *  失败只记日志：互保闭环的其它边（BootReceiver / 无障碍连接 / 桥 onCreate /
+         *  :node onCreate 与每次 boot 尝试 / Application 与解锁亮屏广播）会再戳。 */
         fun ensureRunning(context: Context) {
             try {
                 context.startService(Intent(context, ContainerSupervisor::class.java))
