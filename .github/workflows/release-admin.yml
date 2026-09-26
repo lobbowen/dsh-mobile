@@ -238,8 +238,11 @@ jobs:
               if ! gh run download "$TARGET" --repo "$REPO" \
                      --name android-node-container-apk --dir "$W" >> "$OUT" 2>&1; then
                 echo "  [FAIL] artifact 下载失败（已过期？run 失败？）" >> "$OUT"
+              elif ! APK="$(bash scripts/pick.sh ci-ok-apk "$W" -name '*.apk' -type f)"; then
+                # 这一步没有 set -e，所以 pick.sh 的 exit 1 只会落在这里而不是中止整个 step。
+                # 判红必须写在 $OUT 里：操作者读的是报告，不是 workflow 日志。
+                echo "  [FAIL] artifact 里没有可判定的 APK（原因见上方 pick(ci-ok-apk) 的报错行）" >> "$OUT"
               else
-                APK="$(find "$W" -name '*.apk' -type f | head -1)"
                 echo "  APK: $APK" >> "$OUT"
                 echo "  大小: $(stat -c%s "$APK") 字节" >> "$OUT"
                 echo "  sha256: $(sha256sum "$APK" | awk '{print $1}')" >> "$OUT"
@@ -380,12 +383,9 @@ jobs:
             --dir /tmp/dl
 
           echo "== 下载内容 =="
-          find /tmp/dl -type f | head -20
-          APK="$(find /tmp/dl -name '*.apk' -type f | head -1)"
-          if [ -z "$APK" ]; then
-            echo "[error] artifact 里没有 .apk 文件。"
-            exit 1
-          fi
+          # 纯列表：列不出来也不该中止这一步（真正的判空在下一行）
+          { find /tmp/dl -type f | head -20 || true; }
+          APK="$(bash scripts/pick.sh inject-apk /tmp/dl -name '*.apk' -type f)"
           echo "找到 APK: $APK ($(du -h "$APK" | cut -f1))"
           cp "$APK" /tmp/app-debug.apk
           ls -la /tmp/app-debug.apk
@@ -501,8 +501,7 @@ jobs:
             --repo '${{ github.repository }}' \
             --name android-node-container-apk \
             --dir /tmp/dl
-          APK="$(find /tmp/dl -name '*.apk' -type f | head -1)"
-          [ -n "$APK" ] || { echo "[error] artifact 内无 .apk"; exit 1; }
+          APK="$(bash scripts/pick.sh pin-src-apk /tmp/dl -name '*.apk' -type f)"
           echo "源 APK: $APK ($(du -h "$APK" | cut -f1))"
           cp "$APK" /tmp/app-src.apk
 
@@ -510,10 +509,15 @@ jobs:
         run: |
           set -euo pipefail
           # 从 NDK 里取 libc++_shared.so（arm64-v8a）
-          LIBCXX="$(find "$ANDROID_NDK_LATEST_HOME" -path '*sysroot/usr/lib/aarch64-linux-android/libc++_shared.so' | head -1)"
+          # --allow-empty：这两条是「先试 A、空了再试 B」的探测链，判空由块尾那条硬失败负责。
+          # 原来用裸 `find … | head -1`：A 不存在时 find 非零 → pipefail 直接中止 step，
+          # B 那一路永远轮不到，兜底是假的。
+          LIBCXX="$(bash scripts/pick.sh --allow-empty libcxx-ndk "$ANDROID_NDK_LATEST_HOME" -path '*sysroot/usr/lib/aarch64-linux-android/libc++_shared.so' -type f)"
           if [ -z "$LIBCXX" ]; then
-            # 兜底：从 runner 上已安装的任意 NDK 里找
-            LIBCXX="$(find /usr/local/lib/android/sdk/ndk -path '*sysroot/usr/lib/aarch64-linux-android/libc++_shared.so' 2>/dev/null | head -1)"
+            # 兜底：从 runner 上已安装的任意 NDK 里找。这一根下会有多个 NDK 版本目录、
+            # 各自一份 libc++_shared.so 且内容不同 —— 命中天然歧义，按版本取末位（= 最新 NDK），
+            # 不能让它走默认的「歧义即红」，否则 runner 装了几个 NDK 就成了随机红点。
+            LIBCXX="$(bash scripts/pick.sh --allow-empty --last libcxx-any-ndk /usr/local/lib/android/sdk/ndk -path '*sysroot/usr/lib/aarch64-linux-android/libc++_shared.so' -type f)"
           fi
           [ -n "$LIBCXX" ] || { echo "[error] 找不到 libc++_shared.so"; exit 1; }
           echo "libc++_shared.so: $LIBCXX ($(stat -c%s "$LIBCXX") 字节)"
@@ -591,7 +595,7 @@ jobs:
             KS_PASS=android; KS_ALIAS=androiddebugkey; KS_KEYPASS=android
           fi
 
-          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)"
+          APKSIGNER="$(bash scripts/pick.sh --last apksigner "$ANDROID_HOME/build-tools" -name apksigner -type f)"
           "$APKSIGNER" sign \
             --ks "$KS" --ks-pass "pass:$KS_PASS" \
             --ks-key-alias "$KS_ALIAS" --key-pass "pass:$KS_KEYPASS" \
@@ -664,8 +668,15 @@ jobs:
             echo
             echo "=== 签名方案 ==="
             if [ -f /tmp/app-signed.apk ]; then
-              APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)"
-              "$APKSIGNER" verify --verbose /tmp/app-signed.apk 2>&1 || true
+              # --allow-empty：这是报告通道，「没有 apksigner」必须写成一行报告。
+              # 少了判空，下面的 "$APKSIGNER" verify 会以空命令串失败，再被 || true 咽掉 ——
+              # 报告里那一节就变成一句噪音，看不出是「没装工具」还是「签名方案有问题」。
+              APKSIGNER="$(bash scripts/pick.sh --allow-empty --last apksigner "$ANDROID_HOME/build-tools" -name apksigner -type f)"
+              if [ -n "$APKSIGNER" ]; then
+                "$APKSIGNER" verify --verbose /tmp/app-signed.apk 2>&1 || true
+              else
+                echo "(runner 上没找到 apksigner —— 本节无数据)"
+              fi
             fi
             echo
             echo "=== Release 里的附件 ==="
@@ -796,21 +807,24 @@ jobs:
 
           echo
           echo "== 下载内容总览 =="
-          find /tmp/pin/dl -type f -printf '%s  %p\n' | sort -rn | head -20
+          # 纯列表：head 提前关管道会让上游吃 SIGPIPE 判非零 —— pipefail 下这不该中止固化
+          { find /tmp/pin/dl -type f -printf '%s  %p\n' | sort -rn | head -20 || true; }
 
           # 找出两个 .so。用 find 而非固定路径，容忍 artifact 内部的目录层级差异。
-          NODE_SO="$(find /tmp/pin/dl -type f -name 'libnode.so*' | head -1)"
-          CXX_SO="$(find /tmp/pin/dl -type f -name 'libc++_shared.so*' | head -1)"
+          # --allow-empty：下面两块是「先找裸 .so，空了从 APK 里解」的探测链，
+          # 判空由块尾那两条 [ -z ] 硬失败负责（它们才是真结论）。
+          NODE_SO="$(bash scripts/pick.sh --allow-empty pin-libnode /tmp/pin/dl -type f -name 'libnode.so*')"
+          CXX_SO="$(bash scripts/pick.sh --allow-empty pin-libcxx /tmp/pin/dl -type f -name 'libc++_shared.so*')"
 
           # 兜底：某些 artifact 可能只含 APK。那就从 APK 的 lib/ 里取。
           if [ -z "$NODE_SO" ]; then
-            APK="$(find /tmp/pin/dl -type f -name '*.apk' | head -1)"
+            APK="$(bash scripts/pick.sh --allow-empty pin-apk /tmp/pin/dl -type f -name '*.apk')"
             if [ -n "$APK" ]; then
               echo "== 未找到裸 .so，改从 APK 中提取 =="
               mkdir -p /tmp/pin/unzip
               unzip -o -q "$APK" 'lib/arm64-v8a/*' -d /tmp/pin/unzip
-              NODE_SO="$(find /tmp/pin/unzip -type f -name 'libnode.so*' | head -1)"
-              CXX_SO="$(find /tmp/pin/unzip -type f -name 'libc++_shared.so*' | head -1)"
+              NODE_SO="$(bash scripts/pick.sh --allow-empty pin-libnode-unzipped /tmp/pin/unzip -type f -name 'libnode.so*')"
+              CXX_SO="$(bash scripts/pick.sh --allow-empty pin-libcxx-unzipped /tmp/pin/unzip -type f -name 'libc++_shared.so*')"
             fi
           fi
 
