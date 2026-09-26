@@ -21,6 +21,16 @@ ABI="${ABI:-arm64-v8a}"
 CAPS=".github/native-capabilities.txt"
 MANIFEST="${MANIFEST:-/tmp/native-capabilities-manifest.txt}"
 
+# ── 环境自足（本脚本是「唯一实现」，**不应依赖调用方的 job env**）──
+# NODE_VERSION 原由 fast-apk 的 job env 提供，而固化工作流没有它 —— set -u 下直接
+# "unbound variable"（固化首跑实测）。现默认取**单一事实源** read-node-versions.sh，
+# 与 fast-apk 解析出的同一份；调用方仍可用环境变量覆盖。
+NODE_VERSION="${NODE_VERSION:-$(bash scripts/read-node-versions.sh default || true)}"
+[ -n "$NODE_VERSION" ] || { echo "[error] 取不到 NODE_VERSION（read-node-versions.sh 失败？）—— 它决定下载哪份 node 头，不能猜。" >&2; exit 1; }
+echo "NODE_VERSION=$NODE_VERSION"
+# ANDROID_HOME 同理：仅在 NDK 环境变量都没给出时才用来兜底找 NDK，缺了要给出清楚的报错。
+ANDROID_HOME="${ANDROID_HOME:-}"
+
 # ═══════════════════════════════════════════════════════════════════
 # 1/3  Build libdshflock.so + libdshposix.so (NDK 原生桥)
 # ═══════════════════════════════════════════════════════════════════
