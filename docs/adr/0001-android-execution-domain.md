@@ -46,7 +46,8 @@ neverallow all_untrusted_apps file_type:file link;
 ```
 → 与 `targetSdk` 无关，降版本救不了。
 
-**(d) 本机实测基线**（`dsh-android-kernel/tools/domain-probe.js`，targetSdk=34）：
+**(d) 历史基线**（2026-09-23 手工取，当时 targetSdk=34；那份一次性脚本 `kernel/tools/domain-probe.js`
+已于 2026-09-26 退役，判据改住供给表 `exec-domain` 格，读数走 `nativeCaps`）：
 
 ```
 SELinux 域         : u:r:untrusted_app_34:s0
@@ -93,7 +94,7 @@ renameat2 NOREPLACE: available
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| P0 | targetSdk=28 重打 APK，跑 `domain-probe` | `exec app 脚本/二进制 = ok`；`link = fail:EACCES` 不变 |
+| P0 | targetSdk=28 重打 APK，读供给表 `exec-domain` 格 | 该格 `ok=true`：app home 里的脚本与自带 ELF 各 exec 一次并读到自身输出（对照组 = `/system/bin/sh`，它起不来则整格红）。`link(2)` 不在本格 —— 它已被 `libdshposix` 的 LD_PRELOAD 接管，同进程量不到系统事实 |
 | P1 | `libdshposix` 收敛（flock/publish/pty/image） | 单一 .so + 单一加载器；旧三件退役 |
 | P2 | `$PREFIX`（bash/coreutils/rg） | DSH bash 工具**无任何补丁**可用；`glob/grep` 无补丁可用 |
 | P3 | Agent 描述符 + DSH adapter | 内核对 DSH 零硬编码；可挂第二个 Agent |
@@ -115,7 +116,7 @@ renameat2 NOREPLACE: available
 
 | 项 | 状态 |
 |---|---|
-| D1 targetSdk=28 | 已落地；待 CI 出包后用 `tools/domain-probe.js` 验证 exec |
+| D1 targetSdk=28 | 已落地（`container/app/build.gradle.kts:41`）。exec 读数不再靠人跑脚本：供给表 `exec-domain` 格每进程核一次，结论进 `status().nativeCaps` 与面板。**真机读数未采** ⇒ 本条只算「判据已就位」，不算「域已自证」 |
 | D2 bionic 原生基底 | 已落地：`PrefixProvisioner` 从 nativeLibraryDir 派生 `$PREFIX`（bash/rg 真名可执行） |
 | D3 原生原语 | 已落地：`native/posix/libdshposix.so` 以 LD_PRELOAD 替代 link(2)，`native/publish` 已删 |
 | D5 依赖供给 | rg 平台包 `@vscode/ripgrep-android-arm64` 由内核补给；flock / require-builtin 两个第三方垫片保留 |
