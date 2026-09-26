@@ -54,14 +54,15 @@ fi
 
 DIR="$(mktemp -d)"
 OLD="-"
-# gh 的 -O 是**文件路径**（不是目录），目标已存在会直接报错 —— 所以指向本目录下尚不存在的路径。
-if gh release download "$TAG" -p version.json -O "$DIR/version.json" --repo "$REPO" 2>"$DIR/err"; then
-  OLD="$DIR/version.json"
-elif grep -qiE 'HTTP 404|no assets' "$DIR/err"; then
-  echo "[version] $TAG 上没有 version.json 资产 —— 按首次发布处理（通道=$CHANNEL）"
-else
-  # 不降成 warning：看不清线上版本时「照发」正是把不可逆风险发出去的那条路。
-  cat "$DIR/err" >&2 || true
-  die "取 $TAG 上已发布的 version.json 失败，且原因不是「资产不存在」—— 看不清线上版本就不许覆盖它。"
-fi
+# 「线上清单不存在（首次发布）」与「取不到（看不清）」是两种完全不同的结局，分类住在
+# scripts/read-release-asset.sh（内核 OTA 那条链共用同一处）。这里只按退码分派：
+#   0 → 拿它比；10 → 按首次发布走门禁；其它（2）→ 直接退 2，不许发。
+# 旧实现把后两者混成一句 ::warning 然后照发 —— 那正是「把不可逆风险发出去」的那条路。
+rc=0
+bash "$(dirname "$0")/read-release-asset.sh" apk-version-manifest "$TAG" version.json "$DIR" || rc=$?
+case "$rc" in
+  0) OLD="$DIR/version.json" ;;
+  10) echo "[version] $TAG 上没有可读的 version.json —— 按首次发布处理（通道=$CHANNEL）" ;;
+  *) echo "::error title=版本门禁::读 $TAG 的已发布清单失败（见上一条），本次不发布。" >&2; exit 2 ;;
+esac
 bash "$(dirname "$0")/verify-apk-version-gate.sh" "$SRC" "$OLD" "$CHANNEL"
