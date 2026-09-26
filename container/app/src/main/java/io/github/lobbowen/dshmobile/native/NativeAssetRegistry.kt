@@ -63,7 +63,7 @@ object NativeAssetRegistry {
      * `PrefixProvisioner` 往 `files/usr/bin` 放的 bash/rg/node 全依赖这条能力。
      * 「借道 jniLibs」因此是**省事**而非**唯一**；真·唯一约束是依赖：libnode 的
      * `DT_RUNPATH=$ORIGIN` 要求 `libc++_shared.so` 与它同目录，见 verify-runtime-elf.sh。
-     * 域内 exec 的自证归 ADR-0001 P0 的 domain-probe（还没跑）。
+     * 域内 exec 的自证归供给表 `exec-domain` 格（真机读数未采）。
      */
     val NODE = NativeExecutable(
         id = "node",

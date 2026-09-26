@@ -23,7 +23,7 @@ import org.json.JSONObject
  * exec 的 ELF，放在 `nativeLibraryDir`（jniLibs 免解压的落点）。
  * 旧注释在此写的理由是「filesDir 的 W^X 禁止 execve」，那句与 ADR-0001 (b)/D1 冲突：
  * 本产品钉 targetSdk=28 换的就是 app home 可 exec（`$PREFIX` 的 bash/rg/node 全靠它）。
- * 域内自证归 ADR-0001 P0 的 domain-probe，在它出结果前这里只主张「入口是脚本，
+ * 域内自证归供给表 `exec-domain` 格，在它出读数前这里只主张「入口是脚本，
  * 由 node 解释」这条与 SELinux 无关的事实。
  *
  * 历史上的类注释误写成「由 :node 进程 exec」，与实现矛盾。这是埋着的雷：

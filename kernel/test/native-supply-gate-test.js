@@ -16,6 +16,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
 const { pickHighestVersion } = require('../src/domains/dist');
 
@@ -178,6 +179,13 @@ if (table) {
       check('判据打通过标记: ' + u.id, MARKER.test(v.node));
       const markerCount = (v.node.match(/DSH_PROBE_PASS/g) || []).length;
       check('通过标记只出现一次（多处=有一条路径不打标记也算过）: ' + u.id, markerCount === 1, markerCount + ' 处');
+      // 判据是数据，CI 从不执行它（它跑在设备上），于是连解析都没人做过：一个括号写错的格子
+      // 到设备上只会读成 false/null，把「判据自己坏了」误报成「能力坏了」。
+      check('对照组：语法检查能命中坏判据',
+        (() => { try { new vm.Script("process.stdout.write('"); return false; } catch (e) { return true; } })());
+      let syntaxErr = null;
+      try { new vm.Script(v.node); } catch (e) { syntaxErr = e.message; }
+      check('判据语法可解析: ' + u.id, !syntaxErr, syntaxErr || '');
     }
     if (kind === 'deferred') {
       const w = v.deferred || {};

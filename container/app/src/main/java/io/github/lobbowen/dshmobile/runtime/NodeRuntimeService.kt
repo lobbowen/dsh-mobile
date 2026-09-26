@@ -288,7 +288,7 @@ class NodeRuntimeService : Service() {
             // 不变式守护：内核入口是【脚本】，必须交给 node 解释执行，且必须落在 filesDir
             // 子树内（内核 OTA 的落盘布局）。旧注释把这条说成「W^X 禁止 execve 所以不能直接跑」——
             // 与 ADR-0001 (b)/D1 冲突（我们钉 targetSdk=28 正是为了 app home 可 exec），
-            // 域内自证归 domain-probe；断言本身不依赖那个解释，照旧成立。
+            // 域内自证归供给表 exec-domain 格；断言本身不依赖那个解释，照旧成立。
             if (hasKernel && kVersion != null) {
                 try {
                     km.assertNotDirectlyExecutable(kVersion)
@@ -420,7 +420,7 @@ class NodeRuntimeService : Service() {
             // 本行旧版把这条理由写成「filesDir 被 W^X 禁止 execve」——那是 targetSdk≥29 的规矩，
             // 而本产品刻意钉 targetSdk=28 换的就是 app home 可 exec（ADR-0001 (b)/D1），
             // 上一条 $PREFIX 放的 bash/rg/node 全依赖这条能力。两句不能同时为真：域内自证
-            // 归 ADR-0001 P0 的 domain-probe（还没跑），在它出结果前不许拿 W^X 当结论用。
+            // 归供给表 exec-domain 格（真机读数未采），在它出读数前不许拿 W^X 当结论用。
             // 不变式由 km.assertNotDirectlyExecutable() 守护。
             val pb = ProcessBuilder(plan.command).directory(plan.cwd)
             // 环境以 plan 为**完整事实**：先清空继承环境，两侧（内核/探针）同一契约，
