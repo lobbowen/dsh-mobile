@@ -23,6 +23,7 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
 const ROOT = path.join(__dirname, '..');
+const REPO_ROOT = path.join(ROOT, '..');
 const NATIVE_DIR = path.join(ROOT, 'src', 'guard', 'native');
 const TABLE_PATH = path.join(NATIVE_DIR, 'supply-table.json');
 const REGISTRY = 'https://registry.npmjs.org';
@@ -37,6 +38,34 @@ const DISP = ['supplied-by-us', 'npm-auto', 'waived', 'runtime-check'];
 function npmVersion() {
   const r = spawnSync('npm', ['--version'], { encoding: 'utf8', timeout: 60000 });
   return r.status === 0 ? String(r.stdout || '').trim() : '';
+}
+
+/**
+ * 读回「文件路径#键名」形式的仓内事实源。.sh 取行首 VAR="…"，.json 取顶层键。
+ * 设备上那两份运行时的落盘产物（assets/npm/、node 运行时包）都不入库，仓内唯一读得到的
+ * 就是钉住它们的声明：投放脚本的 NPM_VER 与 node-versions.json 的 default。表锚只能向它们对账。
+ */
+function anchoredValue(declared) {
+  const m = /^(.+?)#([A-Za-z_][A-Za-z0-9_.]*)$/.exec(String(declared || ''));
+  if (!m) return { err: '要写成「文件路径#键名」，现在: ' + JSON.stringify(declared) };
+  const [ , rel, key ] = m;
+  let src;
+  try {
+    src = fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+  } catch (e) {
+    return { err: '读不到 ' + rel + ': ' + e.code };
+  }
+  if (rel.endsWith('.json')) {
+    let j;
+    try {
+      j = JSON.parse(src);
+    } catch (e) {
+      return { err: rel + ' 不是合法 JSON: ' + e.message };
+    }
+    return j[key] !== undefined ? { version: j[key], from: rel + '#' + key } : { err: rel + ' 里没有键 ' + key };
+  }
+  const v = new RegExp('^' + key + '="([^"]+)"', 'm').exec(src);
+  return v ? { version: v[1], from: rel + '#' + key } : { err: rel + ' 里没有 ' + key + '="…" 赋值（换写法会让核对空转）' };
 }
 
 /** 一份 npm 安装计划里的包名集合。npm 的 --dry-run 每行输出 `<动作> <name> <version>`。 */
@@ -127,12 +156,27 @@ check('表锚定了参照平台与被检平台', !!(REF && HOST),
 const spec = table && table.agent && table.agent.package && table.agent.version
   ? table.agent.package + '@' + table.agent.version : '';
 check('探针安装目标完整（包名@版本）', !!spec, spec || '（无 spec）');
-// 探针必须用设备上那份 npm：npm 10 会静默忽略 --os/--cpu（实测两份计划各 575 项、差集为空），
-// 那时唯一会说话的就是下面这组双向对照 —— 与其让它红得莫名，不如在这里就把版本钉死。
+// 探针必须跑在设备那套 node+npm 上，否则答的不是「设备会装什么」。npm 那头是实测过的：runner 自带
+// （node v22.23.2 / npm 10.9.8）静默忽略 --os/--cpu，两份计划各 575 项、两侧差集皆空。node 这头本闭包
+// 实测 22 与 24 逐字相同，钉它是堵假绿：npm 把 engines 检查用的 nodeVersion 硬编成 process.version，
+// optional 依赖不满足即剔除且无视 --engine-strict（arborist build-ideal-tree #checkEngineAndPlatform），
+// 于是「某平台件声明 engines >= 新主版本」会让真机装得到、探针装不到。
+// 两个版本锚都不许自编：向仓内事实源对账。
 const wantNpm = table && table.probe && table.probe.npm && table.probe.npm.version;
+const wantNode = table && table.probe && table.probe.node && table.probe.node.version;
 const gotNpm = npmVersion();
+const gotNode = process.version;
 check('探针 npm 版本与表锚一致（设备同源）', !!wantNpm && gotNpm === wantNpm,
   '现场 npm ' + (gotNpm || '(取不到)') + ' / 表锚 ' + wantNpm);
+check('探针 node 版本与表锚一致（设备同源）', !!wantNode && gotNode === 'v' + wantNode,
+  '现场 node ' + gotNode + ' / 表锚 ' + wantNode);
+// 表锚不能是自编的数：必须等于 APK 真投放的那两份运行时 —— 设备上跑的就是它们。
+const shipped = anchoredValue(table && table.probe && table.probe.npm && table.probe.npm.shippedBy);
+check('表锚 npm = APK 投放的那份', !!wantNpm && !shipped.err && shipped.version === wantNpm,
+  (shipped.err || shipped.from + ' = ' + shipped.version) + ' / 表锚 ' + wantNpm);
+const devNode = anchoredValue(table && table.probe && table.probe.node && table.probe.node.from);
+check('表锚 node = 设备默认运行时那份', !!wantNode && !devNode.err && devNode.version === wantNode,
+  (devNode.err || devNode.from + ' = ' + devNode.version) + ' / 表锚 ' + wantNode);
 // 探针跑不起来或表缺锚时不许崩在这里：缺口如实记成 FAIL，末尾汇总仍然要打出来。
 const ref = REF && spec ? npmPlan(REF.os, REF.cpu, spec) : { err: '缺参照平台锚或安装目标' };
 const host = HOST && spec ? npmPlan(HOST.os, HOST.cpu, spec) : { err: '缺被检平台锚或安装目标' };
@@ -166,7 +210,8 @@ if (ref.names && host.names && table) {
 
   const waived = table.units.filter((u) => u.disposition === 'waived').map((u) => u.id);
   const supplied = table.units.filter((u) => u.disposition === 'supplied-by-us').map((u) => u.id);
-  console.log('\n差集：真机不装 ' + missing.length + ' 项 / 真机额外装 ' + extra.length + ' 项（探针 npm ' + gotNpm + '）');
+  console.log('\n差集：真机不装 ' + missing.length + ' 项 / 真机额外装 ' + extra.length
+    + ' 项（探针 node ' + gotNode + ' + npm ' + gotNpm + '）');
   console.log('处置：供给 ' + supplied.length + ' 项（' + supplied.join(', ') + '）；缺口 ' + waived.length + ' 项（' + waived.join(', ') + '）');
 }
 
