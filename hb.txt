@@ -1,14 +1,14 @@
 CI_HEARTBEAT
-beat : 24
-time : Sat Sep 26 04:36:21 UTC 2026
+beat : 25
+time : Sat Sep 26 04:37:07 UTC 2026
 stage: 7/9 NODE-BUILD (longest, V8 compile)
 run  : 36217430866
 sha  : 4bb4c2a8ed274943db8c01191842d57436cd9722
-mem  : avail=13.1GB
+mem  : avail=13.6GB
 cgmax: n/a
-load : 3.37 3.04 2.13
-logsize: 5321895
+load : 3.18 3.03 2.17
+logsize: 5360314
 objs   : host=788 target=2124
 oomhits: 0
 0
-lastprog:       |                   ^ 2 warnings generated.   /usr/bin/clang++ -o /tmp/tmp.UtnV87z5lq/node/out/Release/obj.host/v8_compiler/deps/v8/src/compiler/js-type-h
+lastprog:   /usr/bin/clang++ -o /tmp/tmp.UtnV87z5lq/node/out/Release/obj.host/v8_compiler/deps/v8/src/compiler/loop-unrolling.o ../deps/v8/src/compiler/loop-unrolling.cc 
