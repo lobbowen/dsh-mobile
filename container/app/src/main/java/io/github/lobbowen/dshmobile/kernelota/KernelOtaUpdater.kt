@@ -114,8 +114,8 @@ object KernelOtaUpdater {
         val remote = manifest.optString("version", "").trim().ifBlank { null }
             ?: return Outcome(true, false, false, current, null, "manifest 缺 version 字段")
 
-        // ── 准入判定：**纯逻辑**，见 kernel/OtaPolicy（五条规则各有单测）──
-        // 顺序即语义：过期 → 重放 → 是否更新 → 只检查 → 版本下限 → 灰度。
+        // ── 准入判定：**纯逻辑**，见 kernelota/OtaPolicy（六条判定各有单测）──
+        // 顺序即语义（OtaPolicy.evaluate 的实际先后）：过期 → 已是最新 → 重放 → 版本下限 → 只检查 → 灰度。
         val seq = manifest.optLong("sequence", 0L)
         val st = loadState(context)
         val verdict = OtaPolicy.evaluate(
@@ -147,7 +147,8 @@ object KernelOtaUpdater {
         val url = manifest.optString("url", "").trim().ifBlank { cfg.zipUrl(remote) }
         val tmp = File(context.cacheDir, "kernel-ota-$remote.zip")
         // 半包用**独立文件名**并跨启动保留：下次从 Range 断点接着下（见 downloadResumable）。
-        val part = File(context.cacheDir, "kernel-ota-$remote.zip.part")
+        // 名字由 dest 派生：后缀只有一个事实源（ResumableDownloader.PART_SUFFIX）。
+        val part = File(context.cacheDir, tmp.name + ResumableDownloader.PART_SUFFIX)
         // 把 manifest **原样**落盘：签名是对原始字节的规范化 JSON 做的，
         // 只有原始内容才能通过验签（重新序列化会改变 key 顺序 —— canonical 会排序，
         // 所以严格说也行，但"原样"能顺带发现传输/解析层的意外改动）。

@@ -26,6 +26,42 @@ object SelfCheckReport {
     fun unknown(items: List<Item>): Int = items.count { it.ok == null }
 
     /**
+     * 「下载半包」一项的判据（纯逻辑，能被单测钉住）。
+     *
+     * 三条口径，都是被真机报告逼出来的：
+     *  ① **半包不是失败**。跨启动保留并续传是设计（docs/runbook/kernel-ota.md「绝不删半包」），
+     *     把它算成失败就得到「自检 6/7 通过」这种假红 —— 假红和假绿一样贵：它把真红一起稀释掉。
+     *  ② 唯一真失败 = **0 字节的半包**：里面没有任何可续传的东西，只是我们留下的空壳。
+     *  ③ 暂存目录（[staging]）由开机清扫负责；自检看到它只可能是「一次安装正在进行」，
+     *     所以只陈列、不据此判红。
+     */
+    fun partialItem(parts: List<Pair<String, Long>>, staging: List<String> = emptyList()): Item {
+        val hollow = parts.filter { it.second <= 0L }.map { it.first }
+        val detail = buildString {
+            append(
+                if (parts.isEmpty()) "无半包（没有中断过的下载）"
+                else "半包会被续传（非错误）：" + parts.joinToString(", ") { "${it.first}=${it.second}B" }
+            )
+            if (staging.isNotEmpty()) append("   安装正在进行（暂存）：" + staging.joinToString(", "))
+            if (hollow.isNotEmpty()) append("   无可续传内容的空半包：" + hollow.joinToString(", "))
+        }
+        return Item("partial", hollow.isEmpty(), "下载半包", detail)
+    }
+
+    /**
+     * 整份自检的三态结论，供诊断落盘用。
+     *
+     * 界面读 [verdict]（会说"另有 N 项未知"），日志若按"零失败即通过"记录，
+     * 同一份自检就会在两个出口给出两个结论 —— 未知在哪个出口都不算通过。
+     */
+    fun overallOk(items: List<Item>): Boolean? = when {
+        items.isEmpty() -> null
+        failed(items) > 0 -> false
+        unknown(items) > 0 -> null
+        else -> true
+    }
+
+    /**
      * 一句话结论。
      *
      * 刻意规则：**只要有一项未知，就不能说"通过"** —— 否则"没测到"会被读成"没问题"。
