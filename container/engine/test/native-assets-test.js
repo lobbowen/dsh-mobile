@@ -352,6 +352,155 @@ check(
   `命中 ${fallbackHits} 处 restore-keys（期望 0）：回退命中会拿旧脚本的二进制冒充缓存命中`
 );
 
+// ---------------------------------------------------------------------------
+// 门禁：pipefail 之下的「取空即静默终止」赋值形态。
+//
+//     RPATH_SEEN="$(grep -o ... "$DRY_LOG" | sort -u | tr '\n' ' ')"
+//
+// grep 零命中返回 1，pipefail 把整条 pipeline 判成 1，赋值继承它，`set -e` 当场终止
+// 脚本 —— 于是 CI 日志停在上一句 [ok]，断言块一个字都没打出来（2026-09-26 那一轮
+// build-apk 红了 1m16s 就是这么红的），而且紧接着那句 `[ -z "$VAR" ] && 报原因`
+// 永不可达：伪装成「有校验」的死代码。仓库里同形态共 10 处，一并清掉并由此钉住。
+// ---------------------------------------------------------------------------
+
+// 命令替换里的 pipeline，某一段可能因「没找到东西」返回非零 —— 只列真会这样的命令词
+// （tr/head/sort 不进名单，否则全是噪音）。
+// 盲区必须知道：命令词写在变量里的那一段看不见，例如
+//   NEEDED="$("$READELF" -d x 2>/dev/null | awk …)"
+// 曾试着把 `"$UPPER_VAR"` 也算可疑词，结果 `sha256sum "$OUT" | cut`、
+// `find "$W" -name … | head` 一并误伤 7 处 —— 行正则分不出「段首命令词」与
+// 「参数位置」，硬判只会把门禁变成噪音源。这类只能靠人按同一判据复核。
+const EMPTY_OK_RISKY = /(?:^|[\s;|&(])(?:grep|egrep|fgrep|ls|readelf|llvm-readelf)(?:\s|$)/;
+// 显式容错：`|| true` / `|| :` / `|| exit` / `|| { ...; }`。
+const TOLERATED = /\|\|\s*(?:true|:|exit\b|\{)/;
+const ASSIGN_SUBST = /^[ \t]*(?:local[ \t]+|export[ \t]+)?[A-Za-z_][A-Za-z0-9_]*="\$\((.*)$/;
+const SUBST_CLOSES = /"\s*\)?[ \t]*(?:#.*)?$/;
+
+/**
+ * 在一组 shell 行里找「取空即静默终止」的赋值。
+ *
+ * @param lines  shell 源码行（不含注释剥离 —— 注释里不会有赋值形态，剥了反而漏判）
+ * @param offset 首行在文件里的行号（1-based），用于报位置
+ */
+function findSilentAbortAssignments(lines, offset = 1) {
+  const bad = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = ASSIGN_SUBST.exec(lines[i]);
+    if (!m) continue;
+    const body = [m[1]];
+    let j = i;
+    while (!SUBST_CLOSES.test(body[body.length - 1]) && j + 1 < lines.length && j - i < 8) {
+      j += 1;
+      body.push(lines[j].trim());
+    }
+    const full = body.join(' ');
+    // 必须是 pipeline（单条 grep 的赋值由 `VAR="$(grep ... || true)"` 那类兜底覆盖，
+    // 且非 pipeline 时 set -e 的触发点仍是赋值本身 —— 这里只钉跨段的那一层）。
+    if (!/\|[^|]/.test(full)) continue;
+    if (!EMPTY_OK_RISKY.test(full)) continue;
+    if (TOLERATED.test(full)) continue;
+    bad.push({ line: offset + i, text: full.replace(/\s+/g, ' ').slice(0, 120) });
+  }
+  return bad;
+}
+
+/** 取出 workflow 里所有 run 块；只返回真的开了 pipefail 的那些。 */
+function pipefailRunBlocks(ymlPath) {
+  const lines = fs.readFileSync(ymlPath, 'utf8').split('\n');
+  const blocks = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (/^\s*(?:-\s*)?run:\s*[|>][-+]?\s*$/.test(lines[i])) {
+      const indent = /^\s*/.exec(lines[i])[0].length;
+      const body = [];
+      let j = i + 1;
+      while (j < lines.length) {
+        const cur = /^\s*/.exec(lines[j])[0].length;
+        if (lines[j].trim() !== '' && cur <= indent) break;
+        body.push(lines[j]);
+        j += 1;
+      }
+      if (body.some((l) => /pipefail/.test(l))) blocks.push({ start: i + 2, lines: body });
+      i = j;
+    } else {
+      i += 1;
+    }
+  }
+  return blocks;
+}
+
+/** 该 shell 文件是否同时开了 `set -e` 与 pipefail（没开 pipefail 就没有这个坑）。 */
+function hasPipefail(src) {
+  // 只认两件事：set 的参数里带 e、并且出现 pipefail。字母顺序不猜（-euo、
+  // set -e -o pipefail 都算）—— 猜写法会让门禁对某一种拼法静默失明。
+  return /(^|\n)[ \t]*set[ \t]+-[a-z]*e[a-z]*(\s|$)/.test(src) && /\bpipefail\b/.test(src);
+}
+
+const SH_FILES = [];
+(function walkSh(dir) {
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (ent.name === '.git' || ent.name === 'node_modules' || ent.name === 'build') continue;
+    const p = path.join(dir, ent.name);
+    if (ent.isDirectory()) walkSh(p);
+    else if (ent.name.endsWith('.sh')) SH_FILES.push(p);
+  }
+})(ROOT);
+
+const silentAbort = [];
+for (const p of SH_FILES) {
+  const src = fs.readFileSync(p, 'utf8');
+  if (!hasPipefail(src)) continue;
+  for (const b of findSilentAbortAssignments(src.split('\n'))) {
+    silentAbort.push(`${path.relative(ROOT, p)}:${b.line}  ${b.text}`);
+  }
+}
+const WORKFLOWS = fs.readdirSync(path.join(ROOT, '.github/workflows'))
+  .filter((f) => f.endsWith('.yml'))
+  .map((f) => path.join(ROOT, '.github/workflows', f));
+for (const p of WORKFLOWS) {
+  for (const blk of pipefailRunBlocks(p)) {
+    for (const b of findSilentAbortAssignments(blk.lines, blk.start)) {
+      silentAbort.push(`${path.relative(ROOT, p)}:${b.line}  ${b.text}`);
+    }
+  }
+}
+// 对照组：判据本身不能是空转的正则。样本取自本轮真实改掉的那几行（不是编的玩具），
+// 违规形态必须各命中 1、改后形态必须各命中 0 —— 两个方向都要成立。
+// 少了这一段，「零命中」就可能是检测器写坏了：本轮第一版就是这么红的
+// （捕获组下标写错 → 恒不命中，同时把一行无关代码误报成违规）。
+const MUST_HIT = [
+  'RPATH_SEEN="$(grep -o -- \'-Wl,-rpath,[^ ]*\' "$DRY_LOG" | sort -u | tr \'\\n\' \' \')"',
+  '          ASSETS="$(grep -v \'^[[:space:]]*#\' .github/native-assets.txt | grep -v \'^[[:space:]]*$\' | tr -d \'\\r\')"',
+  '          NEEDED="$(readelf -d libnode.so 2>/dev/null | awk \'/NEEDED/ {gsub(/[\\[\\]]/,"",$5); print $5}\')"',
+  '  READELF="$(ls "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin/llvm-readelf 2>/dev/null | head -1)"',
+];
+const MUST_PASS = [
+  'RPATH_SEEN="$( { grep -o -- \'-Wl,-rpath,[^ ]*\' "$DRY_LOG" || true; } | sort -u | tr \'\\n\' \' \')"',
+  '          ASSETS="$({ grep -v \'^[[:space:]]*#\' .github/native-assets.txt | grep -v \'^[[:space:]]*$\' || true; } | tr -d \'\\r\')"',
+  'FIXED="$(grep -c -- \'-rpath\' "$DRY_LOG" || true)"',
+];
+const mustHit = MUST_HIT.map((l) => findSilentAbortAssignments([l]).length);
+const mustPass = MUST_PASS.map((l) => findSilentAbortAssignments([l]).length);
+check(
+  'pipefail 静默终止门禁的对照组：4 个真实违规形态各命中 1 处',
+  mustHit.every((n) => n === 1),
+  `实际命中 ${JSON.stringify(mustHit)}（期望全 1）：检测器失效，下面的零命中断言就成了空转`
+);
+check(
+  'pipefail 静默终止门禁的对照组：3 个已兜底形态各命中 0 处',
+  mustPass.every((n) => n === 0),
+  `实际命中 ${JSON.stringify(mustPass)}（期望全 0）：判据过宽会把门禁变成噪音源`
+);
+check(
+  'pipefail 生效的脚本里没有「$(grep/ls … | …)」这种取空即静默终止的赋值',
+  silentAbort.length === 0,
+  silentAbort.length
+    ? `命中 ${silentAbort.length} 处：pipefail + set -e 之下，这一段会在下一行判空之前`
+      + '终止脚本且不打诊断，其后的错误分支永不可达\n        '
+      + silentAbort.join('\n        ')
+    : '零命中'
+);
+
 // 运行期探针必须与 run_code 同形：裸环境。补 LD_LIBRARY_PATH = 给被测对象装脚手架。
 const PREPARER_KT = path.join(
   ROOT, 'container/app/src/main/java/io/github/lobbowen/dshmobile/native/NativePreparer.kt'

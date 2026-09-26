@@ -197,7 +197,7 @@ jobs:
           # 清单为空或读不到即中止 —— 静默降级会让 APK 悄悄少装东西。
           ASSETS_FILE=".github/native-assets.txt"
           [ -f "$ASSETS_FILE" ] || { echo "[error] 找不到 $ASSETS_FILE"; exit 1; }
-          ASSETS="$(grep -v '^[[:space:]]*#' "$ASSETS_FILE" | grep -v '^[[:space:]]*$' | tr -d '\r')"
+          ASSETS="$({ grep -v '^[[:space:]]*#' "$ASSETS_FILE" | grep -v '^[[:space:]]*$' || true; } | tr -d '\r')"
           [ -n "$ASSETS" ] || { echo "[error] $ASSETS_FILE 里没有任何资产"; exit 1; }
           echo "== 资产清单（取自 $ASSETS_FILE）=="
           echo "$ASSETS" | sed 's/^/  /'
@@ -263,7 +263,8 @@ jobs:
           set -euo pipefail
           D="container/app/src/main/jniLibs/${ABI}"
           # 清单驱动，与上面同一份文件；加资产不用改这里。
-          ASSETS="$(grep -v '^[[:space:]]*#' .github/native-assets.txt | grep -v '^[[:space:]]*$' | tr -d '\r')"
+          ASSETS="$({ grep -v '^[[:space:]]*#' .github/native-assets.txt | grep -v '^[[:space:]]*$' || true; } | tr -d '\r')"
+          [ -n "$ASSETS" ] || { echo "[error] .github/native-assets.txt 里没有任何资产 —— 下面的清单循环会一条都不检查就放行。"; exit 1; }
           for f in $ASSETS; do
             if [ ! -f "$D/$f" ]; then
               echo "[error] $D/$f 缺失 —— 打包会产出真机跑不起来的 APK，中止。"
@@ -643,7 +644,8 @@ jobs:
           # 与其让它在真机上失败，不如在这里失败 —— 反馈快得多。
           #
           # 路径由 ${ABI} 与清单拼出，不再硬编码 —— 加资产/换 ABI 都不用改这里。
-          ASSETS="$(grep -v '^[[:space:]]*#' .github/native-assets.txt | grep -v '^[[:space:]]*$' | tr -d '\r')"
+          ASSETS="$({ grep -v '^[[:space:]]*#' .github/native-assets.txt | grep -v '^[[:space:]]*$' || true; } | tr -d '\r')"
+          [ -n "$ASSETS" ] || { echo "[error] .github/native-assets.txt 里没有任何资产 —— 下面的 APK 条目审计会一条都不检查就放行。"; exit 1; }
           for a in $ASSETS; do
             f="lib/${ABI}/$a"
             if unzip -l "$APK" | grep -q "$f"; then
