@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// 确定性槽位仲裁 claimSlot 回归（2026-09，docs/port-architecture.md）：
+// 确定性槽位仲裁 claimSlot 回归（2026-09，src/guard/lifecycle/ports.js）：
 //  byOwner 绑定复用 / binding-lost 迁移(显式) / preferred advisory 回退 / 顺序补位 / 单 owner 单端口
 // 隔离 range（28130+50）→ 确定性，不依赖宿主真实 relay 段占用。
 
