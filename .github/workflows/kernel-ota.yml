@@ -250,39 +250,24 @@ jobs:
           # ── 版本化归档（全局唯一一次）────────────────────────────────────
           # kernel-<version> 只创建一次。**从 canary 提升到 stable 时不再重建** ——
           # 提升是标准动作，若把"同版本第二次发布"判为错误，就无法提升。
-          if gh release view "kernel-${{ env.KERNEL_VER }}" --repo '${{ github.repository }}' >/dev/null 2>&1; then
-            echo "[promote] kernel-${{ env.KERNEL_VER }} 已存在（灰度→生产提升），跳过归档创建"
-          else
-            gh release create "kernel-${{ env.KERNEL_VER }}" \
-              release/kernel-${{ env.KERNEL_VER }}.zip \
-              release/kernel-manifest.json \
-              --title "Kernel OTA ${{ env.KERNEL_VER }}" \
-              --notes-file /tmp/notes.md
-          fi
+          # 「已存在就整步跳过」这条政策用宿主的 --skip-existing 表达，判据本身
+          # （读线上、创建、覆盖、回读确认）只住 scripts/gh-release-upload.sh 一份。
+          bash scripts/gh-release-upload.sh "kernel-${{ env.KERNEL_VER }}" \
+            --skip-existing \
+            --title "Kernel OTA ${{ env.KERNEL_VER }}" \
+            --notes-file /tmp/notes.md \
+            "release/kernel-${{ env.KERNEL_VER }}.zip" release/kernel-manifest.json
 
           # ---- 通道滚动归档：发布方不必追着 kernel-<version> 的 tag 找当前版本 ----
           # 设备端读的是对象存储的 <base>/kernel-<channel>/（下一步），GitHub 这一份
           # 只做归档与本 workflow 的版本前进门禁 —— github.com 在目标网络不可达。
-          if gh release view "$ROLL" --repo '${{ github.repository }}' >/dev/null 2>&1; then
-            gh release upload "$ROLL" release/kernel-manifest.json \
-              --repo '${{ github.repository }}' --clobber
-            gh release upload "$ROLL" "release/kernel-${{ env.KERNEL_VER }}.zip" \
-              --repo '${{ github.repository }}' --clobber
-            # 清理：通道 feed 只保留**本次**的 zip（否则会随每次发布无限堆积历史包）。
-            KEEP="kernel-${{ env.KERNEL_VER }}.zip"
-            gh api "repos/${{ github.repository }}/releases/tags/$ROLL" \
-              --jq ".assets[] | select(.name | test(\"^kernel-[0-9]\")) | select(.name != \"$KEEP\") | .id" 2>/dev/null \
-              | while read -r id; do
-                  [ -n "$id" ] && gh api -X DELETE "repos/${{ github.repository }}/releases/assets/$id"
-                done || true
-          else
-            gh release create "$ROLL" \
-              release/kernel-manifest.json \
-              "release/kernel-${{ env.KERNEL_VER }}.zip" \
-              --repo '${{ github.repository }}' \
-              --title "Kernel OTA channel $KERNEL_CHANNEL" \
-              --notes "通道 feed（$KERNEL_CHANNEL）：设备端读 $ROLL/kernel-manifest.json 判断是否有更新。"
-          fi
+          # --prune 让通道 feed 只保留**本次**的 zip（否则会随每次发布无限堆积历史包）；
+          # 本次刚传上去的资产名由宿主自动列入保留名单，不会被自己清掉。
+          bash scripts/gh-release-upload.sh "$ROLL" \
+            --title "Kernel OTA channel $KERNEL_CHANNEL" \
+            --notes "通道 feed（$KERNEL_CHANNEL）：设备端读 $ROLL/kernel-manifest.json 判断是否有更新。" \
+            --prune '^kernel-[0-9]' \
+            release/kernel-manifest.json "release/kernel-${{ env.KERNEL_VER }}.zip"
 
       - name: Publish to Qiniu (the channel devices actually read)
         # 为什么必须有这一步：**GitHub 在目标网络不可达**（实测 github.com / raw.githubusercontent.com
