@@ -584,8 +584,8 @@ jobs:
           # 「配了 keystore 却出 debug 签名 → 硬红」同一判据方向）。
           #
           # 解码 + keytool 核验 + 锚点导出收口到 scripts/inject-apk-keystore.sh（与另两条链路
-          # 同一份实现）。这里额外解决的是 secret 的落点：以前四个 secret 被 ${{ }} 直接内插进
-          # 【步骤正文】，GitHub 会把展开后的整段脚本打回日志（secret 掩码只护得住已登记值），
+          # 同一份实现）。这里额外解决的是 secret 的落点：以前四个 secret 的表达式是直接内插进
+          # 【步骤正文】的，GitHub 会把展开后的整段脚本打回日志（secret 掩码只护得住已登记值），
           # 现在 secret 只进步骤 env，脚本按环境变量名读取。
           # apksigner 那一侧仍用 pass: —— 它的 env:/file: 形态本仓没有可查证的先例，
           # 不拿发布链路去猜（猜错的代价是 repack 整条路红，且只有真跑过才知道）。

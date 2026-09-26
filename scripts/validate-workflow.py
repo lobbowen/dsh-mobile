@@ -8,7 +8,7 @@
  workflow 的错误有个共同特点：【发现得极晚】。一次构建动辄几十分钟
  到几小时，而这些错误本该在提交前几毫秒就发现。
 
- 真实踩过的三类坑：
+ 真实踩过的四类坑：
 
  1) 重复 key
     PyYAML 的 safe_load 对重复 key 是宽容的（静默保留最后一个），
@@ -27,6 +27,10 @@
  3) readelf 不加 -W
     默认模式在输出被重定向时会折行，按字段解析（awk $NF）会拿到
     错误值，校验步骤因此误报失败。本仓库在 pin-node 上踩过。
+
+ 4) run: 块里出现空表达式（${{ }}）或没闭合的 ${{
+    同样让 GitHub 以【0 个 job、无步骤日志】拒掉整份 workflow，PyYAML 却不报错。
+    定罪与判据见 check_expressions()。
 
 ============================================================================
  用法
@@ -73,6 +77,55 @@ def get_on_block(doc):
     return None
 
 
+def walk_strings(node, where="$"):
+    """产出 (位置, 字符串标量)。
+
+    只扫【解析后的字符串值】而不是原文：YAML 注释里的 `${{ }}` 是无害的（GitHub 看不到它），
+    而 run: 块里的 shell 注释属于标量内容，GitHub 照样会去替换 —— 差别就在这里，
+    漏扫会放行、扫原文会误伤注释。
+    """
+    if isinstance(node, str):
+        yield where, node
+    elif isinstance(node, dict):
+        for k, v in node.items():
+            if isinstance(k, str):
+                yield from walk_strings(k, "%s.<key %r>" % (where, k))
+            yield from walk_strings(v, "%s.%s" % (where, k))
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from walk_strings(v, "%s[%d]" % (where, i))
+
+
+def _line_at(text, pos):
+    """匹配点所在的那一行（压掉换行），用于报错时指得回原文。"""
+    start = text.rfind("\n", 0, pos) + 1
+    end = text.find("\n", pos)
+    line = text[start:(end if end != -1 else len(text))]
+    return line.strip()[:100]
+
+
+def check_expressions(doc):
+    """GitHub 的表达式替换发生在字符串标量上：${{ }} 空表达式或没闭合的 ${{ 会让
+    【整份 workflow】判为无效 —— 表现与重复 key 同类：红色、0 个 job、没有步骤日志。
+    本仓真实前科（2026-09-27）：release-admin.yml 的 run 块里一句 shell 注释写了
+    "以前四个 secret 被 ${{ }} 直接内插进…"，于是 publish/repack/pin/admin 四条运维通道
+    一起哑掉，而 PyYAML 与既有各道门禁全无反应（ci.yml 跑的就是本脚本，当时它不看表达式）。
+    """
+    errs = []
+    for where, s in walk_strings(doc):
+        for m in re.finditer(r"\$\{\{", s):
+            end = s.find("}}", m.end())
+            if end == -1:
+                errs.append("%s: ${{ 没有闭合（往后找不到 }}）—— 整份 workflow 会被判无效：%s"
+                            % (where, _line_at(s, m.start())))
+            elif s[m.end():end].strip() == "":
+                errs.append("%s: 空表达式 ${{ }} —— GitHub 会判整份 workflow 无效"
+                            "（0 个 job、无步骤日志）。要举例就写成中文描述，别在 run: 的"
+                            " shell 注释里留下真 token：%s"
+                            % (where, _line_at(s, m.start())))
+    return errs
+
+
 def check(path: Path):
     """返回 (errors, warns)。"""
     errs, warns = [], []
@@ -88,6 +141,10 @@ def check(path: Path):
     if not isinstance(doc, dict):
         errs.append("顶层不是映射（mapping）")
         return errs, warns
+
+    # ---- 表达式 token（${{ }} / 未闭合的 ${{）----
+    # 与重复 key 同一类【整份文件被拒】的错误，只有 GitHub 的解析器认，PyYAML 不认。
+    errs.extend(check_expressions(doc))
 
     # ---- 必须有 name ----
     # 没有 name 时，run 列表里会显示文件路径而不是业务名，
