@@ -313,13 +313,14 @@ jobs:
           bash scripts/verify-ota-anchor.sh \
             --anchor container/app/src/main/assets/ota-public.pem
 
-      - name: Build capability binaries (小件原生件)
-        # 唯一实现：scripts/build-native-capabilities.sh —— 由本文件原样抽出（含设计注释）。
-        # 抽出来的目的：固化（pin）job 能调同一份实现把产物发成不可变 Release；
-        # 之后本步骤会改为「下载 + 校验 sha256」，不再每次现场编译。
-        # 失败语义：bash / rg / PTY 探针为硬性必需（$PREFIX 依赖，无回退）；
+      - name: Capabilities (小件原生件)：命中固化就取用，否则现场编译
+        # 唯一取用/回退逻辑：scripts/ensure-native-capabilities.sh
+        #   ① 源指纹命中 .github/native-capabilities-pin.json → 下载 + 校验 sha256 + 解包（**不重编**）
+        #   ② 未命中 / 下载失败 / sha256 不符 / 固化包缺件 → 回退 scripts/build-native-capabilities.sh
+        # 取舍：固化机制坏了只会退化成"慢"，不会退化成"打不出包"。
+        # 失败语义（由构建脚本保证）：bash / rg / PTY 探针为硬性必需（$PREFIX 依赖，无回退）；
         #          node-pty 走上游配方，软失败（终端降级，不陪葬其它能力）。
-        run: bash scripts/build-native-capabilities.sh
+        run: bash scripts/ensure-native-capabilities.sh
 
       - name: Stage pinned npm into APK assets
         # npm 是**基础环境**的一部分（与 Node 版本锁死、几乎不变）⇒ 进 APK 而非内核包。
