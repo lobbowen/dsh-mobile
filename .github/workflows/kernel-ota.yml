@@ -112,11 +112,18 @@ jobs:
           chmod 600 keys/ota-private.pem
           echo "private key restored -> keys/ota-private.pem"
 
-      - name: Verify welded public key anchor present
+      - name: Verify OTA public key anchor matches the signing private key
+        # 这条是 P2b-e 的落点：此前这一步只查「锚点文件在不在 + 多少字节」。于是
+        # 私钥轮换后重焊了 APK 公钥却忘了改 secrets.OTA_PRIVATE_KEY_PEM（或反过来）
+        # 会一路绿到底 —— 签出的每个包在所有设备上判 signature-invalid，OTA 静默死亡，
+        # 取证却要一轮真机。只有这条链拿得到私钥，所以配对判据在这里执行。
+        # 判据实现唯一：scripts/verify-ota-anchor.sh（build-apk 那边同调、只缺 --private）。
         run: |
-          ANCHOR=container/app/src/main/assets/ota-public.pem
-          [ -f "$ANCHOR" ] || { echo "::error::缺少 $ANCHOR（设备端验签公钥锚点）"; exit 1; }
-          echo "anchor present: $(wc -c < "$ANCHOR") bytes"
+          set -euo pipefail
+          bash scripts/ensure-tool.sh openssl openssl
+          bash scripts/verify-ota-anchor.sh \
+            --anchor container/app/src/main/assets/ota-public.pem \
+            --private keys/ota-private.pem
 
       - name: Stage kernel source
         # 单仓默认：内核源码就是同仓 kernel/ 子目录，无需跨仓检出。
