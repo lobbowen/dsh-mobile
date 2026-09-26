@@ -210,18 +210,31 @@ jobs:
           # ── 版本前进门禁（**按通道**比较）────────────────────────────────
           # 发布一个"不大于本通道已发布"的版本 = 该通道设备永远不更新且无报错。
           # 按通道而非全局：canary 可以领先 stable；提升(promote)到 stable 时对 stable 仍需前进。
+          # 「该通道还没有 manifest」与「取不到 manifest」是两种结局，分类只住
+          # scripts/read-release-asset.sh（APK 侧读 version.json 用的是同一处）。
+          # 旧写法把「取不到」降成 ::warning 然后照发，还把「取到了但读不出 version」
+          # 也当成空 —— 两者都是把「看不清」当成「没有」，正是 versioning.md §3 定过的那类罪。
+          TMPD="$(mktemp -d)"
+          FEEDRC=0
+          bash scripts/read-release-asset.sh kernel-channel-manifest "$ROLL" kernel-manifest.json "$TMPD" || FEEDRC=$?
           CUR=""
-          if gh release view "$ROLL" --repo '${{ github.repository }}' >/dev/null 2>&1; then
-            TMPD="$(mktemp -d)"
-            if gh release download "$ROLL" -p kernel-manifest.json -O "$TMPD/m.json" --repo '${{ github.repository }}' 2>/dev/null; then
-              CUR="$(node -p "require('$TMPD/m.json').version || ''" 2>/dev/null || true)"
-            else
-              echo "::warning title=feed 读取失败::未取到 $ROLL 的 manifest，本次跳过版本前进检查"
+          if [ "$FEEDRC" = "0" ]; then
+            CUR="$(node -p "require('$TMPD/kernel-manifest.json').version || ''" 2>/dev/null || true)"
+            if [ -z "$CUR" ]; then
+              echo "::error title=内核版本门禁::$ROLL 的 manifest 取到了却读不出 version 字段 —— 通道状态坏了，先修它再发。"
+              exit 1
             fi
+          elif [ "$FEEDRC" = "10" ]; then
+            echo "[version] $ROLL 上没有 manifest —— 该通道首次发布，跳过前进检查"
+          else
+            echo "::error title=内核版本门禁::读 $ROLL 的已发布 manifest 失败（原因见上一条）—— 看不清通道状态就不许发。"
+            exit 1
           fi
           if [ -n "$CUR" ]; then
             echo "[version] $ROLL 已发布=$CUR，本次=$KERNEL_VER"
-            # 门禁只拦**回退**，放行**同版本重发**（与 APK 侧 versionCode 门禁同一策略）。
+            # 门禁只拦**回退**，放行**同版本重发**。这与 APK 侧 versionCode 门禁的
+            # 「显式通道」那一格同形：本 workflow 的发布口全部是人触发的显式动作
+            # （tag `kernel-ota-*` 或 dispatch 的 publish=true），没有"自动同号覆盖"那条路。
             # 为什么同版本必须放行：修投递通道、重传、补签，都发生在"版本没变"的时候；
             # 若判成错误，这些修复就永远落不了地。而且同版本重发不会让设备"看起来有更新"
             # ——它本来就不会更新（版本相等），这只是把同一份产物重新送到目标位置。
