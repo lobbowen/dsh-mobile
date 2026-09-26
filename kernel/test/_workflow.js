@@ -43,13 +43,20 @@ function stripComments(text) {
  * 入参 text 会先做行尾归一化，因此在 CRLF 检出下同样正确。
  */
 function jobSection(text, name) {
-  const code = stripComments(text);
-  const parts = code.split(/\n  ([a-z][a-z0-9_-]*):\n/);
-  // split 带捕获组 → [前置, 名1, 体1, 名2, 体2, ...]
-  for (let i = 1; i < parts.length; i += 2) {
-    if (parts[i] === name) return parts[i + 1] || '';
-  }
+  for (const [n, body] of jobsOf(text)) if (n === name) return body;
   return '';
 }
 
-module.exports = { normalize, readNormalized, readWorkflow, stripComments, jobSection };
+/**
+ * 列出 workflow 的全部 job（`[[名, 正文]]`，注释已剥、行尾归一）。
+ * 判据要扫「每一个 job」时必须走这里，别在调用方再抄一遍切分正则 —— 那是第二把尺子。
+ */
+function jobsOf(text) {
+  const parts = stripComments(text).split(/\n  ([a-z][a-z0-9_-]*):\n/);
+  const out = [];
+  // split 带捕获组 → [前置, 名1, 体1, 名2, 体2, ...]
+  for (let i = 1; i < parts.length; i += 2) out.push([parts[i], parts[i + 1] || '']);
+  return out;
+}
+
+module.exports = { normalize, readNormalized, readWorkflow, stripComments, jobSection, jobsOf };
