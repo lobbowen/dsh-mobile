@@ -510,13 +510,23 @@ echo "==> 宿主工具链: CC_host=$CC_host  CXX_host=$CXX_host  AR_host=$AR_hos
 # 两个 flag 缺一不可：bionic 忽略 DT_RPATH，不加 --enable-new-dtags 就只写进 RPATH，
 # 看着「有」、真机上仍是死的。
 #
-# '$$ORIGIN' 的两层展开是本脚本特有的坑：gyp 把它落到 out/Makefile 的
-# LDFLAGS.target（递归赋值），make 展开时 $$ 收成 $；只写一个 $ 时 make 会把 $O
-# 当变量吃掉，参数静默变成 RIGIN。下面「RUNPATH 落地断言」用 make -n 实测，不靠推理。
+# 注入点必须是 make 命令行变量 LDFLAGS.target，不是环境变量 LDFLAGS_target ——
+# 后者在这个生成器里没有任何规则引用。run 36216072106 的取证段实测 out/Makefile 只有：
+#     LDFLAGS.target ?= $(LDFLAGS)        # 目标侧取裸 LDFLAGS
+#     LDFLAGS.host   ?= $(LDFLAGS_host)   # 只有宿主侧认 _host 后缀
+# 92715 行展开里 -rpath 出现 0 次。也就是说前面几轮 `export LDFLAGS_target` 一个字
+# 都没注入进去：产物照编、APK 照出、只有真机起进程才死。host/target 这层不对称是
+# gyp make 生成器自己的行为，别按 _host 的直觉推 _target。
+# 走命令行还有一层好处：不会把同名变量漏进 configure 阶段的探测编译。
+#
+# 值里写 '$$ORIGIN' 是跨三层的坑：make 展开 $(LDFLAGS.target) 时把
+# $$ 收成 $，再交给 /bin/sh，单引号保住 $ORIGIN 原样进 ld。只写一个 $ 时 make 会把
+# $O 当变量吃掉，参数静默变成 RIGIN。下面「RUNPATH 落地断言」用 make -n 实测展开结果，
+# 不靠推理。
 # ---------------------------------------------------------------------------
 DOLLAR='$'
-export LDFLAGS_target="${LDFLAGS_target:-} -Wl,--enable-new-dtags -Wl,-rpath,'${DOLLAR}${DOLLAR}ORIGIN'"
-echo "==> 目标侧链接标志: LDFLAGS_target=$LDFLAGS_target"
+LDFLAGS_TARGET_OVERRIDE="LDFLAGS.target=-Wl,--enable-new-dtags -Wl,-rpath,'${DOLLAR}${DOLLAR}ORIGIN'"
+echo "==> 目标侧链接标志（make 命令行变量）: $LDFLAGS_TARGET_OVERRIDE"
 
 echo "==> 运行官方 android-configure (NDK ${ANDROID_NDK} + API ${ANDROID_API} + arch ${ARCH})"
 # Node 24 官方参数顺序: ./android-configure [patch] <path to the Android NDK> <Android SDK version> <target architecture>
@@ -587,28 +597,40 @@ DRY_LOG="${TMPDIR:-/tmp}/dsh-node-make-n.log"
 # 退出码要记下来而不是 `|| true` 一吞了之：取证段得区分「make 压根没展开出东西」
 # 和「展开了但链接行里没有 -rpath」，这两种红的处置完全不同。
 MAKE_N_RC=0
-make -n > "$DRY_LOG" 2>&1 || MAKE_N_RC=$?
+# 命令行变量必须和下面真正编译那一次一模一样：只在断言里带、编译时不带（或反之），
+# 这道门禁证明的就是另一个构建过程，等于没证明。
+make -n "$LDFLAGS_TARGET_OVERRIDE" > "$DRY_LOG" 2>&1 || MAKE_N_RC=$?
 EXPECTED_RPATH="-Wl,-rpath,'${DOLLAR}ORIGIN'"
 # 里面那个 `|| true` 是这一段的要害，不是装饰。本脚本开了 pipefail，grep 零命中返回 1，
 # 于是裸赋值会被 set -e 在打印任何取证之前终止脚本 —— 上一轮 CI 就是这么红的：
-# 日志停在上一句 [ok]，断言块一个字都没输出，分不清是「gyp 没采纳 LDFLAGS_target」
+# 日志停在上一句 [ok]，断言块一个字都没输出，分不清是「gyp 没采纳链接标志」
 # 还是「我的判据写错了」。取证在前、判定在后，红了也要能自己说明为什么红。
 RPATH_SEEN="$( { grep -o -- '-Wl,-rpath,[^ ]*' "$DRY_LOG" || true; } | sort -u | tr '\n' ' ')"
 # 计数用 `grep -c` 而不是 `grep | head -1`：head 读够就退，上游可能吃到 SIGPIPE，
 # pipefail 之下这又是一次「诊断还没打印人就没了」。
 RPATH_LINES="$(grep -c -- '-rpath' "$DRY_LOG" || true)"
-LDFLAGS_TARGET_IN_MK="$(sed -n 's/^\(LDFLAGS\.target[[:space:]]*?*[=:][[:space:]]*\)/\1/p' out/Makefile)"
+# node 本体那次链接的配方行。全局 -rpath 命中只证明「标志进了展开」，
+# 这一行才证明「进了该进的那次链接」——两种形态都取证，红了不必再猜。
+# 末尾那一段字符类是必要的宽松：gyp 的配方常写成 -o "$@"/-o $@，make -n 展开后
+# node 后面跟的是空格或引号；写死 `( |$)` 会把带引号的真实链接行判成「找不到」，
+# 那是判据自己失效，不是产物有问题。同时排除 node_gyp / node-js 这类同前缀目标。
+NODE_LINK_PATTERN='-o [^ ]*/Release/node($|[^_a-zA-Z0-9])'
+NODE_LINK_CNT="$(grep -cE -- "$NODE_LINK_PATTERN" "$DRY_LOG" || true)"
+LDFLAGS_TARGET_IN_MK="$(sed -n 's/^\(LDFLAGS\.target[[:space:]]*[*?]*=[[:space:]]*\)/\1/p' out/Makefile | head -1)"
 
 echo "==> 进编译前取证（红也要红得能自证）"
 echo "    make -n: 退出码=$MAKE_N_RC  展开行数=$(wc -l < "$DRY_LOG")  日志=$DRY_LOG"
+echo "    本次注入: $LDFLAGS_TARGET_OVERRIDE"
 echo "    out/Makefile 里 LDFLAGS* 原文行:"
 { grep -n '^LDFLAGS' out/Makefile || true; } | sed -n '1,10p' | cut -c1-300 | sed 's/^/      /'
 echo "    out/Makefile 中含 -rpath 的行数: $(grep -c -- '-rpath' out/Makefile || true)"
 echo "    make -n 展开中含 -rpath 的行数: ${RPATH_LINES:-0}"
 echo "    make -n 展开里的 -rpath 实文: ${RPATH_SEEN:-<无>}"
+echo "    node 本体链接行条数: ${NODE_LINK_CNT:-0}"
+{ grep -E -- "$NODE_LINK_PATTERN" "$DRY_LOG" || true; } | sed -n '1,2p' | cut -c1-400 | sed 's/^/      链接行: /'
 echo "    make -n 日志末尾 15 行:"
 tail -n 15 "$DRY_LOG" | cut -c1-300 | sed 's/^/      /'
-echo "==> 校验展开后的链接参数: $LDFLAGS_TARGET_IN_MK"
+echo "==> 校验展开后的链接参数: ${LDFLAGS_TARGET_IN_MK:-<out/Makefile 里没有 LDFLAGS.target 赋值>}"
 case " $RPATH_SEEN " in
   *" $EXPECTED_RPATH "*)
     echo "    [ok] 链接行含 $EXPECTED_RPATH"
@@ -616,6 +638,22 @@ case " $RPATH_SEEN " in
       echo "==> [error] 有 -rpath 但缺 --enable-new-dtags：bionic 忽略 DT_RPATH，产物会白编。"
       exit 1
     }
+    if [ "${NODE_LINK_CNT:-0}" -eq 0 ]; then
+      # 展开里压根没有 node 的链接配方 = 配置没生成这个目标，或 Makefile 结构与
+      # 预期不同。此时上面那句 [ok] 与我们的产物无关，放行就是空转。
+      echo "==> [error] make -n 展开里找不到 node 的链接命令（-o .../Release/node），"
+      echo "            无法证明链接标志落进了产物那次链接，不放行。make -n 退出码=$MAKE_N_RC。"
+      echo "            按上面「本次注入」与「out/Makefile 里 LDFLAGS* 原文行」核对生成器用的变量名。"
+      exit 1
+    fi
+    # 标志出现在别的目标（宿主工具集）而 node 那行没有 —— 产物仍是死的，以前会放过。
+    if { grep -E -- "$NODE_LINK_PATTERN" "$DRY_LOG" || true; } | grep -q -- '-rpath'; then
+      echo "    [ok] node 本体那次链接就带 $EXPECTED_RPATH（命中 ${NODE_LINK_CNT} 行配方）"
+    else
+      echo "==> [error] -rpath 出现在展开里，但 node 本体那次链接没有它 —— 产物仍会 CANNOT LINK。"
+      echo "            说明标志落到了别的工具集/目标；上面「链接行」原文就是实际配方行。"
+      exit 1
+    fi
     ;;
   *RIGIN*)
     echo "==> [error] -rpath 的参数没有展开成期望的 $EXPECTED_RPATH（出现 RIGIN 字样）。"
@@ -624,11 +662,12 @@ case " $RPATH_SEEN " in
     exit 1
     ;;
   *)
-    echo "==> [error] make -n 展开结果里根本没有 -rpath —— LDFLAGS_target 未被 gyp 采纳。"
-    echo "            期望: $EXPECTED_RPATH"
+    echo "==> [error] make -n 展开结果里根本没有 -rpath —— 链接标志未被 gyp 采纳。"
+    echo "            期望: $EXPECTED_RPATH    本次注入: $LDFLAGS_TARGET_OVERRIDE"
     echo "            make -n 退出码=$MAKE_N_RC（非零则先按上面的日志末尾判断展开本身有没有失败）"
-    echo "            上方取证段列出 out/Makefile 的 LDFLAGS* 原文；若那里有 -rpath 而展开里没有，"
-    echo "            说明链接规则用的是另一个变量（如 LDFLAGS.host 或 -Wl 拼写差异），按原文改判据。"
+    echo "            取证段已列出 out/Makefile 的 LDFLAGS* 原文。若 LDFLAGS.target 在那里"
+    echo "            是 \`?=\` 且被命令行覆盖后仍无 -rpath，说明链接配方引的是另一个变量"
+    echo "            （如裸 \$(LDFLAGS)），按原文改注入点，不要放宽判据。"
     exit 1
     ;;
 esac
@@ -851,16 +890,19 @@ fi
 echo "==> 并行度决策（按内存而非核数）"
 echo "    检测到可用内存: ${MEM_MB:-未知} MB   CPU: ${CPU_JOBS} 核"
 echo "    按 3.5GB/编译进程 + 2GB 余量 → 内存上限 -j${MEM_JOBS}"
-echo "    最终使用: make -j${JOBS}（可用 NODE_BUILD_JOBS 覆盖）"
+echo "    最终使用: make $LDFLAGS_TARGET_OVERRIDE -j${JOBS}（并行度可用 NODE_BUILD_JOBS 覆盖）"
 echo "    预期: host+target 合计约 6800 个编译单元，耗时以小时计。"
 echo "    注: 这里刻意不用满 CPU —— 编译 V8 是内存瓶颈而非 CPU 瓶颈，"
 echo "        并发放大后峰值内存会撞穿 runner 限额，导致进程被 OOM 杀掉，"
 echo "        表现是「任务在远早于超时的时刻突然消失、连收尾步骤都没记录」。"
+# 进度播报跑在后台子 shell 里，它继承了本脚本的 pipefail：目录还没生成时 find 返回 1，
+# 于是这两行赋值会当场终止子 shell —— 表现是「几个小时的构建期间一声不响」，
+# 看着像编译卡死，实际是播报器自己死了。计数用 wc 而不是 head，避开 SIGPIPE。
 (
   while true; do
     sleep 120
-    t=$(find out/Release/obj.target -name '*.o' 2>/dev/null | wc -l)
-    h=$(find out/Release/obj.host   -name '*.o' 2>/dev/null | wc -l)
+    t="$({ find out/Release/obj.target -name '*.o' 2>/dev/null || true; } | wc -l)"
+    h="$({ find out/Release/obj.host -name '*.o' 2>/dev/null || true; } | wc -l)"
     printf '[progress %s] host=%s target=%s\n' "$(date -u +%H:%M:%S)" "$h" "$t"
   done
 ) &
@@ -868,7 +910,8 @@ PROGRESS_PID=$!
 trap 'kill "$PROGRESS_PID" 2>/dev/null || true' EXIT
 
 # 用 make -j${JOBS} 走完全程。make 失败会非零退出，配合 set -e 让脚本干净收尾。
-make -j"${JOBS}"
+# 这里的 LDFLAGS.target 与上面 make -n 那一次同源同一串：断言证明的必须是真在跑的。
+make "$LDFLAGS_TARGET_OVERRIDE" -j"${JOBS}"
 
 echo "==> 拷贝产物到 $OUT_DIR/$OUT_NAME"
 cp out/Release/node "$OUT_DIR/$OUT_NAME"
@@ -988,8 +1031,8 @@ fi
 # 判据只有一份实现：scripts/verify-runtime-elf.sh（构建/固化/打包三处共用）。
 # 上面「依赖闭环自检」证明 libc++_shared.so 就在本目录，所以这里对 libnode.so
 # 的 RUNPATH 判定不会是空转 —— 它一定命中「依赖同目录随包库」这一条。
-# 与进编译前的 make -n 断言配对：那一道保证「链接行里有」，这一道保证「产物里有」，
-# 中间任何一环（ld 版本、链接顺序、段裁剪）都可能丢。
+# 与进编译前的 make -n 断言配对：那一道保证「node 本体那次链接里有」，这一道保证
+# 「产物真的有」，中间任何一环（ld 版本、链接顺序、段裁剪）都可能丢。
 echo "==> 依赖自解析断言（DT_RUNPATH 含 \$ORIGIN）"
 READELF="$READELF" bash "$ROOT/scripts/verify-runtime-elf.sh" "$OUT_DIR"
 
