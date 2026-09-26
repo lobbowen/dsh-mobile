@@ -1,14 +1,14 @@
 CI_HEARTBEAT
-beat : 63
-time : Sat Sep 26 05:06:32 UTC 2026
+beat : 64
+time : Sat Sep 26 05:07:18 UTC 2026
 stage: 7/9 NODE-BUILD (longest, V8 compile)
 run  : 36217430866
 sha  : 4bb4c2a8ed274943db8c01191842d57436cd9722
-mem  : avail=13.3GB
+mem  : avail=13.6GB
 cgmax: n/a
-load : 3.06 3.08 2.97
-logsize: 7086531
+load : 3.02 3.06 2.98
+logsize: 7138141
 objs   : host=1098 target=2124
 oomhits: 0
 0
-lastprog: /usr/bin/../lib/gcc/x86_64-linux-gnu/14/../../../../include/x86_64-linux-gnu/c++/14/bits/c++config.h:100:19: note: expanded from macro '_GLIBCXX_DEPRECATED_SUGG
+lastprog:   /usr/bin/clang++ -o /tmp/tmp.UtnV87z5lq/node/out/Release/obj.host/v8_base_without_compiler/deps/v8/src/heap/page-metadata.o ../deps/v8/src/heap/page-metadata.
