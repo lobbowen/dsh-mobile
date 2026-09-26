@@ -49,9 +49,11 @@ on:
       # native/ 下的 C 源（flock/publish/ptyprobe 等）现场编译进 jniLibs ——
       # 改源码同样等于改 APK 内容（tag 触发不受 paths 限制，但 push 直出也要能触发）。
       - 'container/native/**'
-      # 小件能力件的**构建实现**。它直接决定 APK 里装哪些 .so、怎么编出来的 ——
-      # 改了它就等于改了 APK 内容，必须在本白名单里（与上面的 C 源同理）。
-      - 'scripts/build-native-capabilities.sh'
+      # 刻意**不**放构建脚本（如 scripts/build-native-capabilities.sh）：与既有先例一致 ——
+      # Node 的构建脚本 scripts/build-node-android.sh 同样不在此白名单，它走 build-apk.yml 那条
+      # 重型手动路径。理由是实测出来的：把构建脚本放进来后，**纯重构**（产物字节其实没变）
+      # 也会触发本链，而版本门禁会要求 bump versionCode —— 白白发一个包。
+      # 构建脚本的改动由「C 源变更」（container/native/** 已在上方）或手动 dispatch 覆盖。
       # version.json 决定 APK 的分发身份（versionName / versionCode）。改它 = 改产物身份，
       # 而本 workflow 的版本门禁正是拿它比较 —— 原先不在白名单，会出现
       # 「改了版本却不触发构建 / 只改版本时无人验证」。
