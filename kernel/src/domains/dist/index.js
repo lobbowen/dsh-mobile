@@ -91,6 +91,17 @@ function semverCompare(a, b) {
   return 0;
 }
 
+/** 「设备会装到哪个版本」的唯一判据：dist-tags 值全集 ∪ versions 键全集里的语义最高版。
+ * 刻意不是 latest tag —— 实测 @deepseek-ai/dsh 的 latest 落后于 next（0.1.5-rc.3 vs 0.1.7-rc.2），
+ * 新版本发在哪个 tag 上游随时会改，取全集才不受它影响。
+ * 原生件供给门禁与此共用这一处判据，不允许出现第二份实现。 */
+function pickHighestVersion(tagValues, versionKeys) {
+  const candidates = new Set([...tagValues, ...versionKeys].filter((v) => typeof v === 'string' && VERSION_RE.test(v)));
+  let best = null;
+  for (const v of candidates) if (!best || semverCompare(v, best) > 0) best = v;
+  return best;
+}
+
 /** 最小兜底镜像源 —— **仅契约缺失/损坏时使用**（2026-09-11 契约化）。
  *
  * ## 为什么从 6 条减到 2 条
@@ -436,15 +447,13 @@ class DistributionManager {
       const j = await res.json();
       const tags = (j && j['dist-tags']) || {};
       const versions = (j && j.versions) ? Object.keys(j.versions) : [];
-      const candidates = new Set([...Object.values(tags), ...versions].filter((v) => typeof v === 'string' && VERSION_RE.test(v)));
-      if (!candidates.size) {
+      const best = pickHighestVersion(Object.values(tags), versions);
+      if (!best) {
         const lr = await fetch(origin.replace(/\/+$/, '') + '/' + encodeURIComponent(pkg) + '/latest', { signal: AbortSignal.timeout(8000) });
         if (!lr.ok) return null;
         const lj = await lr.json();
         return (lj && typeof lj.version === 'string' && VERSION_RE.test(lj.version)) ? lj.version : null;
       }
-      let best = null;
-      for (const v of candidates) if (!best || semverCompare(v, best) > 0) best = v;
       return best;
     } catch (e) { return null; }
   }
@@ -620,5 +629,6 @@ class DistributionManager {
 module.exports = {
   DistributionManager,
   semverCompare,
+  pickHighestVersion,
   VERSION_RE,
 };

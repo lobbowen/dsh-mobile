@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "host": { "os": "android", "cpu": "arm64" },
+  "reference": {
+    "os": "linux",
+    "cpu": "x64",
+    "why": "差集需要一个「上游确实发了变体、npm 确实会装」的参照面；取开发机平台。探针用 npm 的 --os/--cpu 平台覆盖配置，不伪造 process.platform"
+  },
+  "agent": {
+    "package": "@deepseek-ai/dsh",
+    "version": "0.1.7-rc.2",
+    "versionRule": "registry 的 dist-tags 与 versions 全集取语义最高版，不是 latest tag"
+  },
+  "probeControl": {
+    "why": "探针必须能自证生效：这个包在参照平台有变体、在被检平台换成另一个变体，两侧都要对上，否则 npm 忽略 --os/--cpu 时差集会空转成「无缺口」",
+    "referencePackage": "@koromix/koffi-linux-x64",
+    "hostPackage": "@koromix/koffi-android-arm64"
+  },
+  "probe": {
+    "node": {
+      "version": "24.21.0",
+      "from": "container/app/src/main/assets/node-versions.json#default",
+      "why": "npm 把 engines 检查用的 nodeVersion 硬编成 process.version，而 optional 依赖 engines 不满足就被剔除、且无视 --engine-strict（arborist build-ideal-tree #checkEngineAndPlatform）。本闭包实测 node 22 与 24 的两份计划逐字相同（502 / 495），钉这一格是为了堵「某平台件声明 engines >= 新主版本」时缺口被吃进假绿：那时真机装得到、探针装不到。版本事实源是设备运行时那格 default"
+    },
+    "npm": {
+      "version": "11.19.0",
+      "shippedBy": "scripts/stage-npm-assets.sh#NPM_VER",
+      "shippedByWhy": "设备上跑的就是 APK 里那份 npm：NodeProvisioner.ensureNpm 按 assets/npm/version.txt 解到 files/npm/<ver>/，内核经 runtime.json 的 npmEntry 用 libnode.so 代跑。表锚必须等于投放脚本钉的那份，CI 也按表锚装探针 —— 两处一变另一处没跟上就红。",
+      "why": "探针必须用设备上那份 npm：npm 10 静默忽略 --os/--cpu，差集会空转成「无缺口」。CI runner（setup-node 22 → node v22.23.2 / npm 10.9.8）实测两份计划各 575 项、两侧差集皆空，正是双向对照组要拦的那种绿"
+    }
+  },
+  "dispositions": {
+    "supplied-by-us": "上游无 android 变体，由我们的守卫把件投进安装树；必须有 impl",
+    "npm-auto": "上游有 android 变体，npm 自己会装上；必须有 evidence 说明为何不需要我们动手",
+    "waived": "已知缺口，暂不供给；必须有 followUp 与 expiresAt，到期未补即门禁红",
+    "runtime-check": "包能装上但能力取决于运行时（编译开关/SELinux/内核 API）；必须有 check 说明谁在真机核验"
+  },
+  "units": [
+    {
+      "id": "require-builtin",
+      "capability": "dsh 启动链 require 内核模块",
+      "disposition": "supplied-by-us",
+      "impl": "src/guard/native/require-builtin-shim.js",
+      "hostExcludes": ["node-addon-require-builtin-linux-x64-gnu"],
+      "why": "该包的 loader 在非 linux/darwin/win32 下算出 android-arm64 并在 require 时即抛；垫片回退 createRequire + --expose-internals"
+    },
+    {
+      "id": "addon-system-flock",
+      "capability": "bash 沙箱/会话持久化所需 flock(2)",
+      "disposition": "supplied-by-us",
+      "impl": "src/guard/native/flock-shim.js",
+      "hostExcludes": ["@deepseek-ai/node-addon-system-linux-x64"],
+      "why": "bionic 无 flock 的 Node 绑定路径；改走 APK jniLibs 里的 libdshflock.so 真 flock(2)"
+    },
+    {
+      "id": "ripgrep",
+      "capability": "glob / grep 搜索",
+      "disposition": "supplied-by-us",
+      "impl": "src/guard/native/ripgrep-package.js",
+      "hostExcludes": ["@vscode/ripgrep-linux-x64"],
+      "why": "@vscode/ripgrep 按 @vscode/ripgrep-<platform>-<arch>/bin/rg 解析，造该平台包并指向 $PREFIX/bin/rg，替代逐字节补丁"
+    },
+    {
+      "id": "sharp-image",
+      "capability": "图片附件处理",
+      "disposition": "supplied-by-us",
+      "impl": "src/guard/native/sharp-wasm.js",
+      "hostExcludes": ["@img/sharp-linux-x64", "@img/sharp-libvips-linux-x64"],
+      "why": "registry 无 @img/sharp-android-arm64；wasm32 变体内含 libvips，是唯一与宿主 CPU 无关的通路"
+    },
+    {
+      "id": "node-pty",
+      "capability": "终端 PTY",
+      "disposition": "supplied-by-us",
+      "impl": "src/guard/native/node-pty-prebuild.js",
+      "hostExcludes": [],
+      "why": "node-pty 包本身能装上，缺的是 prebuilds/android-arm64/pty.node —— 闭包 diff 看不见这类缺口，只能靠本表显式登记"
+    },
+    {
+      "id": "koffi-ffi",
+      "capability": "FFI（dsh 仅在 win32 分支调用）",
+      "disposition": "npm-auto",
+      "hostExcludes": ["@koromix/koffi-linux-x64"],
+      "deviceInstalls": ["@koromix/koffi-android-arm64"],
+      "evidence": "上游发了 android-arm64 变体且被检计划确实装了它（这一条由本门禁的 deviceInstalls 差集当场证伪）；readelf 实测其 koffi.node NEEDED 只有 libm/libdl/libc，带 napi_register_module_v1。dsh 侧全部 koffi 调用点都在 process.platform === 'win32' 分支内，android 永不触达",
+      "why": "上游有 android 变体且会被自动安装，且调用点 android 永不触达，故无需供给动作"
+    },
+    {
+      "id": "sherpa-speech",
+      "capability": "SenseVoice 语音转文字",
+      "disposition": "waived",
+      "waiver": { "followUp": "P-C", "verifiedAt": "2026-09-26", "expiresAt": "2026-10-26" },
+      "hostExcludes": ["sherpa-onnx-linux-x64"],
+      "why": "上游只发 darwin/linux/win 六个变体。sherpa-onnx-node 的 loader 候选路径含 node_modules/sherpa-onnx-android-arm64/sherpa-onnx.node，故自建 addon 即可命中，无需改第三方字节；模型不在供给范围（dsh 按 runtime/assets.json 的 sha256 自行下载，int8 约 228MB）"
+    },
+    {
+      "id": "libreoffice-doc",
+      "capability": "Office 文档转换",
+      "disposition": "waived",
+      "waiver": { "followUp": "P-B", "verifiedAt": "2026-09-26", "expiresAt": "2026-10-26" },
+      "hostExcludes": ["@deepseek-ai/libreoffice-kit-wasm"],
+      "why": "引擎包存在且是 wasm（与宿主 CPU 无关，走 node Web Worker 实例化，不 execve），npm 只因 os:[\"linux\"] 不装 —— 供给可解。真正的门是 libreoffice-kit 自己的 host 白名单：android 走不到 wasm 分支，改它等于改 @deepseek-ai 字节（ADR-0001 禁止）。已拍板等上游放行，我们先把引擎备好"
+    },
+    {
+      "id": "sqlite-query",
+      "capability": "会话 SQL 查询",
+      "disposition": "runtime-check",
+      "hostExcludes": [],
+      "check": "真机验收项：用 APK 自带的那份 node 在 app 域里跑 node -p \"typeof require('node:sqlite').Database\"，期望 function；结论随该版 APK 的验收清单上屏，不在清单里就算未核验",
+      "why": "用的是 node:sqlite 内置模块，成不成取决于我们那份交叉编译是否启用 SQLite；闭包 diff 看不见，必须由真机探针定罪"
+    }
+  ]
+}

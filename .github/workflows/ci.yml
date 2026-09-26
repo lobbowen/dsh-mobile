@@ -83,10 +83,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: 读设备那份 node 版本
+        id: device-node
+        # 原生件供给门禁要答「设备上 npm 会装出什么」，而 npm 的 engines 检查吃的是 process.version，
+        # 所以内核 job 的 node 必须与设备同源。版本事实源是 assets/node-versions.json 的 default
+        # （fast-apk 出包时读同一格）；门禁会核对现场 process.version 并当场红。
+        working-directory: .
+        run: |
+          V="$(python3 -c "import json;print(json.load(open('container/app/src/main/assets/node-versions.json'))['default'])")"
+          echo "设备 node = $V"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ steps.device-node.outputs.version }}
+
+      - name: 把 npm 钉到设备上那份
+        # 设备上跑的 npm 是 APK 投放的那一份（scripts/stage-npm-assets.sh 钉版本+sha512）。
+        # runner 自带的 npm 10 会**静默忽略** --os/--cpu，实测两份计划各 575 项、两侧差集皆空；
+        # 版本取自供给表的 probe.npm.version，门禁两头核对：现场 npm = 表锚，表锚 = 投放脚本。
+        run: |
+          set -euo pipefail
+          echo "runner 自带 npm: $(npm --version)"
+          NPMV="$(node -p "require('./src/guard/native/supply-table.json').probe.npm.version")"
+          npm install -g "npm@$NPMV"
+          echo "探针用 npm: $(npm --version)"
 
       - name: 内核回归测试（安卓路径 · DSH_ANDROID=1）
         env:
