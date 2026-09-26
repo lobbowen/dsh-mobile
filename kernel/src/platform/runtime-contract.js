@@ -49,6 +49,11 @@ function read() {
     // 为什么可选而不升 schema：新 APK + 旧内核是常态，升 schema 会让 OTA 出去的
     // 旧内核拒绝整份契约；未知键按契约规则忽略。
     npmEntry: j.npmEntry || npm.entry || null,
+    // $PREFIX 根（能力件的家：bin/{bash,rg}、lib/pty.node），容器由 PrefixProvisioner.root
+    // 派生并写进来。与 npmEntry 同理是**可选键、不升 schema**：新 APK + 旧内核是常态。
+    // 为什么必须进契约而不是只靠进程环境：投放单元曾以 process.env.PREFIX 为门控，
+    // 而容器从未导出过这个键 ⇒ 真机上 glob/grep 与终端全灭且零日志（2026-09-26 定罪）。
+    prefix: j.prefix || null,
     minNode: j.minNode || null,
     writtenBy: j.writtenBy || null,
     raw: j,
@@ -62,6 +67,12 @@ function nodeBin(fallback) {
     try { if (fs.existsSync(c.nodePath)) return c.nodePath; } catch {}
   }
   return fallback || 'node';
+}
+
+/** $PREFIX 根（能力件的家）；无契约或旧容器无此格 ⇒ null，由调用方如实报缺口。 */
+function prefixRoot() {
+  const c = read();
+  return (c && c.prefix) || null;
 }
 
 /**
@@ -127,4 +138,4 @@ function npmEnv(baseEnv) {
   return e;
 }
 
-module.exports = { SUPPORTED_SCHEMA, file, read, nodeBin, npmInvocation, npmEnv, withPath };
+module.exports = { SUPPORTED_SCHEMA, file, read, nodeBin, npmInvocation, npmEnv, withPath, prefixRoot };

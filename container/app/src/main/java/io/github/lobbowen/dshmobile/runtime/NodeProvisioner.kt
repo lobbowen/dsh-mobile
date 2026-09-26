@@ -16,7 +16,7 @@ object NodeProvisioner {
     /**
      * 把 server.js 探针复制到 filesDir。
      *
-     * 纯数据文件（不是可执行文件），不受 W^X 影响，放 filesDir 完全没问题。
+     * 它是交给 node 的**参数**、不是被 exec 的目标，放 filesDir 没有可执行性问题。
      * 每个启动都覆盖写 —— 这样换了 APK 里的 server.js 就能立即生效，
      * 不会因为残留旧文件而出现"改了没反应"。
      */
@@ -26,6 +26,26 @@ object NodeProvisioner {
             script.outputStream().use { out -> input.copyTo(out) }
         }
         return script
+    }
+
+    /** npm 全局前缀的目录名（guest 里唯一可写的 `npm -g` 目标）。
+     *  同一事实内核也写一次（runtime-contract.js 的 npmEnv → npm_config_prefix），
+     *  两边由 kernel/test/npm-contract-chain-test.js 逐字对账 —— 改名必须同批改。 */
+    const val NPM_GLOBAL_DIR_NAME = ".npm-global"
+
+    /** 建 `$HOME/.npmrc` 并钉住 prefix；文件已在则原样交回，绝不覆盖。
+     *  npm 的默认 prefix 指向 node 安装目录（这里 = 只读的 /data/app/*/lib），
+     *  guest 里 dsh 自己起的 npm 没有内核那份 npm_config_prefix，只有 .npmrc 管得住。
+     *  用户改过 .npmrc（换 registry/代理）就是这台机器的既定事实，开机抹平它不可接受。 */
+    fun ensureNpmPrefixRc(context: Context): File? {
+        val rc = File(context.filesDir, ".npmrc")
+        if (rc.isFile) return rc
+        return try {
+            rc.writeText("prefix=" + File(context.filesDir, NPM_GLOBAL_DIR_NAME).absolutePath + "\n")
+            rc
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     /**
@@ -56,9 +76,9 @@ object NodeProvisioner {
      * 把内置 npm 解到 `files/npm/<version>/`，返回 `bin/npm-cli.js` 的绝对路径；
      * 失败返回 null（**不阻断启动**：没有 npm 内核照常跑，只是"面板装 Agent"不可用）。
      *
-     * 为什么 npm 放 assets 而不是 jniLibs：npm 是纯 JS，**永远不该被直接 execve** ——
-     * 它由 libnode.so 代跑（`libnode.so <npm-cli.js 绝对路径> install ...`）。
-     * W^X 下可 exec 的只有 nativeLibraryDir 那一份，JS 文件放哪都无所谓。
+     * 为什么 npm 放 assets 而不是 jniLibs：npm 是纯 JS，**调用形态永远是 node 代跑**
+     * （`libnode.so <npm-cli.js 绝对路径> install ...`），不存在"把它当二进制 exec"的
+     * 通路，所以放哪都无所谓；jniLibs 只留给真需要被 exec 的 ELF。
      *
      * 为什么"版本目录 + .ready 标记"：npm 解包后约 1900 个文件，覆盖安装 APK 时
      * 版本没变就不该重解；版本变了自然落到新目录，无需处理半旧半新的混叠。

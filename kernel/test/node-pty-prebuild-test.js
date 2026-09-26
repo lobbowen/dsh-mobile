@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 
-// node-pty 预编译件投放回归：applied / already / skipped 三态 + 不覆盖同尺寸产物。
+// node-pty 预编译件投放回归：applied / already / skipped / blocked 四态 + 不覆盖同尺寸产物。
+// blocked 与 skipped 的分界（真机 2026-09-26 定罪）：树里本该有 pty.node 却没有，
+// 那是**我们的供给失败**；旧实现把它记成 skipped，于是终端全灭零告警。
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -30,8 +32,12 @@ check('同尺寸二次调用 -> already（不重复写）', r2.status === 'alrea
 
 const noPty = path.join(TMP, 'no-pty');
 fs.mkdirSync(path.join(noPty, 'node_modules'), { recursive: true });
-check('树内无 node-pty -> skipped', ensureNodePtyPrebuild(noPty, src).status === 'skipped');
-check('产物缺失 -> skipped', ensureNodePtyPrebuild(dshDir, path.join(TMP, 'nope.node')).status === 'skipped');
+check('树内无 node-pty -> skipped（本就不该投）', ensureNodePtyPrebuild(noPty, src).status === 'skipped');
+check('产物路径不存在 -> blocked（我们的供给失败）', ensureNodePtyPrebuild(dshDir, path.join(TMP, 'nope.node')).status === 'blocked');
+// 无 node-pty 时 pty.node 缺席不是缺口：按「树里有没有依赖」定优先级，不许报警
+check('无 node-pty 且无产物 -> 仍 skipped', ensureNodePtyPrebuild(noPty, null).status === 'skipped');
+check('契约无 prefix（srcPath=null）-> blocked 并说明原因',
+  (() => { const r = ensureNodePtyPrebuild(dshDir, null); return r.status === 'blocked' && r.reason.includes('prefix'); })());
 
 fs.rmSync(TMP, { recursive: true, force: true });
 const failed = results.filter((x) => !x);

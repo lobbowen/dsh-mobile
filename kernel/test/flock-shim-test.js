@@ -95,11 +95,12 @@ function probe(entry, env) {
   fs.writeFileSync(badBind, 'module.exports = { somethingElse: () => {} };\n');
   check('F2 绑定缺 tryLock → 视为不可用（不误吞）', probe(entry2, { DSH_FLOCK_NATIVE: badBind }) === 'RESOLVED:ORIGINAL_CALLED:7', probe(entry2, { DSH_FLOCK_NATIVE: badBind }));
 
-  // ── F3 NativeManager.ensureFlockShim：契约 × DSH_FLOCK_NATIVE 双重门控 + 事件记账 ──
+  // ── F3 NativeManager.ensureFlockShim：契约 × DSH_FLOCK_NATIVE 双重门控 + 结局可见 ──
   const { NativeManager } = require(path.join(ROOT, 'src', 'guard', 'native', 'manager.js'));
   const runtimeContract = require(path.join(ROOT, 'src', 'platform', 'runtime-contract'));
   const events3 = [];
   const nm = new NativeManager({ config: { command: ['node', 'dsh', 'web'], packageName: '@deepseek-ai/dsh', targetPort: 3080 }, logger: { info() {}, warn() {}, error() {} }, events: { append: (n, d) => events3.push({ n, d }) }, stateDir: path.join(TMP, 'state3'), npmRoot: root1 });
+  const unitEv = (st) => events3.some((e) => e.n === 'native_unit' && e.d.unit === 'addon-system-flock' && e.d.status === st);
   const contractFile = runtimeContract.file();
   const savedContract = fs.existsSync(contractFile) ? fs.readFileSync(contractFile, 'utf8') : null;
   const npmEntryFile = path.join(TMP, 'fake-npm-cli.js');
@@ -109,39 +110,55 @@ function probe(entry, env) {
   try {
     fs.rmSync(contractFile, { force: true });
     process.env.DSH_FLOCK_NATIVE = okBind;
-    check('F3 无契约（PC）→ 不动作', nm.ensureFlockShim() === null);
+    const s0 = nm.ensureFlockShim();
+    check('F3 无契约（PC）→ skipped，且结局进表/上事件（不许静默）',
+      s0.status === 'skipped' && nm.nativeUnits['addon-system-flock'] === s0 && unitEv('skipped'), JSON.stringify(events3));
     writeContract();
     delete process.env.DSH_FLOCK_NATIVE;
     const root4 = path.join(TMP, 'npmroot4');
     const entry4 = mkVendorPkg(path.join(root4, '@deepseek-ai', 'node-addon-system'));
     nm.npmRoot = root4;
-    check('F3 有契约但无 DSH_FLOCK_NATIVE → 树不动（dev 语义不变）', nm.ensureFlockShim() === null && fs.readFileSync(entry4, 'utf8') === VENDOR_SRC && !fs.existsSync(path.join(path.dirname(entry4), 'flock.dsh-orig.js')));
+    check('F3 有契约却无 DSH_FLOCK_NATIVE → blocked（容器漏装配）且树不动', (() => {
+      const x = nm.ensureFlockShim();
+      return x.status === 'blocked' && unitEv('blocked') && fs.readFileSync(entry4, 'utf8') === VENDOR_SRC && !fs.existsSync(path.join(path.dirname(entry4), 'flock.dsh-orig.js'));
+    })());
     process.env.DSH_FLOCK_NATIVE = okBind;
     const r4 = nm.ensureFlockShim();
-    check('F3 契约+env 双在 → 投放成功并记事件', r4 && r4.results.some((x) => x.status === 'applied') && events3.some((e) => e.n === 'flock_shim_applied') && nm.flockShimApplied === true, JSON.stringify(events3));
-    check('F3 二次调用幂等（already 仍记 applied 状态）', (() => { const x = nm.ensureFlockShim(); return x && x.results.every((y) => y.status === 'already'); })());
+    check('F3 契约+env 双在 → 投放成功并记 applied 结局', r4.status === 'applied' && unitEv('applied') && nm.nativeUnits['addon-system-flock'].status === 'applied', JSON.stringify(events3));
+    const r5 = nm.ensureFlockShim();
+    check('F3 二次调用幂等（already 不重复上事件）', r5.status === 'already' && events3.filter((e) => e.d.status === 'applied').length === 1, JSON.stringify(events3.map((e) => e.d.status)));
+    // 树里本就没有该依赖 ⇒ skipped（不是缺口），与 blocked 区分开
+    nm.npmRoot = path.join(TMP, 'npmroot-empty');
+    fs.mkdirSync(nm.npmRoot, { recursive: true });
+    check('F3 安装树内无该依赖 → skipped（不是我们的缺口）', nm.ensureFlockShim().status === 'skipped');
   } finally {
     if (savedContract !== null) fs.writeFileSync(contractFile, savedContract); else fs.rmSync(contractFile, { force: true });
     if (savedEnv === undefined) delete process.env.DSH_FLOCK_NATIVE; else process.env.DSH_FLOCK_NATIVE = savedEnv;
   }
 
-  // ── F4 Supervisor._androidLaunchReady：spawn 前同步投放 flock 垫片 ──
+  // ── F4 Supervisor._androidLaunchReady：spawn 前一次性跑完投放单元 ──
   const realErr = process.stderr.write.bind(process.stderr);
   process.stderr.write = (chunk, ...rest) => (String(chunk).startsWith('[stderr]') ? true : realErr(chunk, ...rest));
   const { Supervisor } = require(path.join(ROOT, 'src', 'supervisor'));
-  const calls = { narb: 0, flock: 0 };
-  const fake = Object.create(Supervisor.prototype);
-  fake.logger = { info() {}, warn() {}, error() {} };
-  fake.nativeManager = { ensureRequireBuiltinShim: () => { calls.narb++; }, ensureFlockShim: () => { calls.flock++; } };
+  const calls = { units: 0 };
+  const mkHost = (mm) => {
+    const fake = Object.create(Supervisor.prototype);
+    fake.logger = { info() {}, warn() {}, error() {} };
+    fake.nativeManager = mm;
+    return fake;
+  };
   writeContract();
   try {
     const cmd = [process.execPath, path.join(TMP, 'fake-dsh-entry.js'), 'web', '--no-open'];
-    const out4 = fake._androidLaunchReady(cmd);
-    check('F4 spawn 前 ensureFlockShim 被调用（与 NARB 垫片同批）', calls.flock > 0 && out4[1] === '--expose-internals', JSON.stringify({ calls, out4 }));
+    const out4 = mkHost({ ensureNativeUnits: () => { calls.units++; } })._androidLaunchReady(cmd);
+    check('F4 spawn 前 ensureNativeUnits 被调用（全部单元一批）且 flag 已注入', calls.units === 1 && out4[1] === '--expose-internals', JSON.stringify({ calls, out4 }));
+    // 投放是副作用，不得有能力否决启动形态：抛错也要交出带 flag 的命令
+    const outThrow = mkHost({ ensureNativeUnits: () => { throw new Error('boom'); } })._androidLaunchReady(cmd);
+    check('F4 投放抛错 → 启动形态不受影响', outThrow[1] === '--expose-internals' && outThrow[0] === process.execPath, JSON.stringify(outThrow));
+    calls.units = 0;
     fs.rmSync(contractFile, { force: true });
-    calls.flock = 0;
-    fake._androidLaunchReady(cmd);
-    check('F4 无契约（PC）→ 不触发自愈', calls.flock === 0);
+    mkHost({ ensureNativeUnits: () => { calls.units++; } })._androidLaunchReady(cmd);
+    check('F4 无契约（PC）→ 不触发自愈', calls.units === 0);
   } finally {
     fs.rmSync(contractFile, { force: true });
     process.stderr.write = realErr;

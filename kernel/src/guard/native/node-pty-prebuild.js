@@ -11,7 +11,8 @@ const PLATFORM_DIR = 'android-arm64';
 function ensureNodePtyPrebuild(dshDir, srcPath) {
   const ptyDir = path.join(dshDir, 'node_modules', 'node-pty');
   if (!fs.existsSync(ptyDir)) return { status: 'skipped', reason: 'node-pty 不在树中' };
-  if (!srcPath || !fs.existsSync(srcPath)) return { status: 'skipped', reason: '构建产物缺失' };
+  // 构建产物缺席 = 我们的供给失败（能力登记里有这一格），与「本不该有」要分开
+  if (!srcPath || !fs.existsSync(srcPath)) return { status: 'blocked', reason: 'pty.node 缺失' + (srcPath ? ': ' + srcPath : '（契约无 prefix）') };
   const dst = path.join(ptyDir, 'prebuilds', PLATFORM_DIR, 'pty.node');
   const size = fs.statSync(srcPath).size;
   if (fs.existsSync(dst) && fs.statSync(dst).size === size) return { status: 'already' };

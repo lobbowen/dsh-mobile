@@ -145,6 +145,35 @@ if (table) {
   const declared = new Set(units.map((u) => u.impl).filter(Boolean).map((p) => path.basename(p)));
   const orphans = impls.filter((f) => !declared.has(f));
   check('无未登记的投放实现', orphans.length === 0, orphans.join(', '));
+
+  // 反向：manager 里实际跑的投放单元必须与表的 supplied-by-us 集合逐一对应。
+  // 为什么按 manager 源码里的字面量取，而不是按 impl 文件名推：单元 id 是结局表
+  // （nativeUnits）的键，也是面板/取证读的那把名字 —— 键与表对不上，登记得再全也看不到结局。
+  const MANAGER = path.join(NATIVE_DIR, 'manager.js');
+  const ms = fs.readFileSync(MANAGER, 'utf8');
+  const inCode = (re) => {
+    const hits = [];
+    let m;
+    while ((m = re.exec(ms))) hits.push(m[1]);
+    return [...new Set(hits)];
+  };
+  const mgrUnits = inCode(/_\w*Outcome\(\s*'([a-z0-9-]+)'/g);
+  const tableSupplied = units.filter((u) => u.disposition === 'supplied-by-us').map((u) => u.id);
+  check('manager 投放单元与表的供给项双向相等',
+    mgrUnits.length === tableSupplied.length && mgrUnits.every((u) => tableSupplied.includes(u)),
+    'manager ' + mgrUnits.join(', ') + ' / 表 ' + tableSupplied.join(', '));
+
+  // 死词汇：投放实现禁止以容器环境变量 PREFIX 定位能力件。
+  // 根因（真机 2026-09-26 定罪）：容器从未导出过这个键，三个单元因此静默 no-op 一整代，
+  // rg/pty 投放零日志、glob/grep 与终端全灭。$PREFIX 的唯一事实源是 runtime.json 的 prefix 格。
+  // 对照组先行：这条判据若对旧写法零命中，就是一条永不红的死规则。
+  check('对照组：环境变量门控判据能命中被禁写法', /env\.PREFIX/.test('if (!process.env.PREFIX) return null;'), 'hit');
+  for (const f of ['manager.js'].concat(impls)) {
+    const src = fs.readFileSync(path.join(NATIVE_DIR, f), 'utf8');
+    check('投放实现不以环境变量 PREFIX 作门控: ' + f, !/env\.PREFIX/.test(src), '命中 env.PREFIX');
+  }
+  check('对照组：单元 id 抽取判据非空转（认得出全部供给项）', mgrUnits.length === tableSupplied.length && mgrUnits.length >= 5,
+    mgrUnits.join(', '));
 }
 
 // ---- 现场探针：两份 npm 计划做差集 ----

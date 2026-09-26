@@ -102,8 +102,9 @@ object GuestAdapter {
             put("DSH_FLOCK_NATIVE", i.flockNative.absolutePath)
             // link(2) 用户态替代：经 LD_PRELOAD 注入 DSH 进程，见 native/posix/。
             put("LD_PRELOAD", i.posixShim.absolutePath)
-            // $PREFIX：把 nativeLibraryDir 的 lib*.so 以真名复制为可执行文件，
-            // 供 DSH 按名字解析（bash/rg），不改 DSH 内部路径（ADR-0001）。
+            // $PREFIX：nativeLibraryDir 的原生件在这里以**真名**落地（bash/rg 是复制，
+            // node 是指向 libnode.so 的链接 —— 判据见 PrefixProvisioner.linkNode），
+            // 供 DSH 按名字解析，不改 DSH 内部路径（ADR-0001）。
             // PATH 单点组装：$PREFIX/bin 最前，其次 node 目录 —— 旧实现同一键写两次
             // 互相覆盖，哪侧生效全凭运气。注意：boot-env-contract 门禁会连注释一起按
             // 正则计数本文件的 PATH 装配字面量，注释里不要再写这类字面量。

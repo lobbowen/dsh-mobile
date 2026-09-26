@@ -29,6 +29,10 @@
       "type": "string",
       "description": "npm-cli.js 绝对路径（可选）"
     },
+    "prefix": {
+      "type": "string",
+      "description": "$PREFIX 根（可选、不升 schema）：能力件真名的家，bin/{bash,rg,node} 与 lib/pty.node。内核投放单元的唯一取件路径；缺失=旧容器形态，单元判 blocked 而不是静默跳过"
+    },
     "minNode": {
       "type": "string"
     },

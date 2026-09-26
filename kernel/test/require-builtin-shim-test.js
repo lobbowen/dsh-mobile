@@ -66,26 +66,47 @@ function probeNative(entry) {
   shimMod.ensureShim(natRoot);
   check('S2 原生绑定可加载：逐字委派零损伤（无需 flag）', probeNative(natMain) === 'R:NATIVE:whatever', probeNative(natMain));
 
-  // ── S3 NativeManager.ensureRequireBuiltinShim：契约门控 + 事件记账 ──
+  // ── S3 NativeManager.ensureRequireBuiltinShim：契约门控 + 结局可见 ──
   const { NativeManager } = require(path.join(ROOT, 'src', 'guard', 'native', 'manager.js'));
   const runtimeContract = require(path.join(ROOT, 'src', 'platform', 'runtime-contract'));
   const events3 = [];
   const nmConfig = { command: ['node', 'dsh', 'web'], packageName: '@deepseek-ai/dsh', targetPort: 3080 };
   const nm = new NativeManager({ config: nmConfig, logger: { info() {}, warn() {}, error() {} }, events: { append: (n, d) => events3.push({ n, d }) }, stateDir: path.join(TMP, 'state3'), npmRoot: root1 });
   fs.rmSync(runtimeContract.file(), { force: true });
-  check('S3 无契约（PC）→ 不动作', nm.ensureRequireBuiltinShim() === null);
+  check('S3 无契约（PC）→ skipped 且结局上表', (() => {
+    const r = nm.ensureRequireBuiltinShim();
+    return r.status === 'skipped' && nm.nativeUnits['require-builtin'] === r
+      && events3.some((e) => e.n === 'native_unit' && e.d.unit === 'require-builtin' && e.d.status === 'skipped');
+  })(), JSON.stringify(events3));
   const npmEntryFile = path.join(TMP, 'fake-npm-cli.js');
   fs.writeFileSync(npmEntryFile, '//');
   const contractFile = runtimeContract.file();
   const writeContract = () => { fs.mkdirSync(path.dirname(contractFile), { recursive: true }); fs.writeFileSync(contractFile, JSON.stringify({ schema: 2, nodePath: process.execPath, npmEntry: npmEntryFile, nodeBinDir: path.dirname(process.execPath) })); };
   writeContract();
+  check('S3 契约在场但 npm 全局根不可达 → blocked（我们的缺口，非静默）', (() => {
+    const nm2 = new NativeManager({ config: nmConfig, logger: { info() {}, warn() {}, error() {} }, events: { append: (n, d) => events3.push({ n, d }) }, stateDir: path.join(TMP, 'state3x'), npmRoot: path.join(TMP, 'no-such-root') });
+    return nm2.ensureRequireBuiltinShim().status === 'blocked';
+  })());
   // 还原被 S1 二次调用前的原始形态以观察 applied（重新投放到新根）
   const root3 = path.join(TMP, 'npmroot3');
   mkPkg(path.join(root3, 'node-addon-require-builtin'), 'lib/index.js', THROWS);
   nm.npmRoot = root3;
   const r3 = nm.ensureRequireBuiltinShim();
-  check('S3 有契约 → 投放成功并记事件', r3 && r3.results.some((x) => x.status === 'applied') && events3.some((e) => e.n === 'narb_shim_applied'), JSON.stringify(events3));
-  check('S3 ensureRequireBuiltinShim 后 npmRoot 持久生效', (() => { nm.npmRoot = root1; const x = nm.ensureRequireBuiltinShim(); return x && x.results.every((y) => y.status === 'already'); })());
+  check('S3 有契约 → 投放成功并记 applied 结局', r3.status === 'applied' && events3.some((e) => e.n === 'native_unit' && e.d.status === 'applied'), JSON.stringify(events3));
+  check('S3 换根后二次调用 → already（幂等）', (() => { nm.npmRoot = root1; return nm.ensureRequireBuiltinShim().status === 'already'; })());
+  // 单元 id 集合向供给表取（这里不重抄一遍名单：那份清单的事实源是 supply-table.json，
+  // 再由 native-supply-gate 与 manager 双向对账）。本判据钉的是**运行时真跑到了**：
+  // ensureNativeUnits 是 spawn 前唯一入口，漏一格就是能力静默消失。
+  check('S3 ensureNativeUnits 收口全部供给单元（与表逐一对应，不分先后）', (() => {
+    const table = require(path.join(ROOT, 'src', 'guard', 'native', 'supply-table.json'));
+    const want = table.units.filter((u) => u.disposition === 'supplied-by-us').map((u) => u.id);
+    const got = Object.keys(nm.ensureNativeUnits(root3));
+    return want.length > 0 && want.length === got.length && want.every((k) => got.includes(k));
+  })(), Object.keys(nm.nativeUnits || {}).join(','));
+  // 契约缺 prefix 时 rg 单元判 blocked（该格下本该有 rg）；pty 单元先看树里有没有 node-pty，
+  // 本根里没有 ⇒ skipped —— 两种「不投」的语义不许混（混了就分不清缺口与不支持）。
+  check('S3 契约缺 prefix 格 → ripgrep blocked、node-pty skipped（无该依赖）',
+    nm.nativeUnits.ripgrep.status === 'blocked' && nm.nativeUnits['node-pty'].status === 'skipped', JSON.stringify(nm.nativeUnits));
   nmConfig.command = [process.execPath, flat, 'web', '--no-open'];  const inv = nm.dshCliInvocation();
   check('S3 dshCliInvocation 代跑形态带 flag', !!inv && inv.args[0] === '--expose-internals' && inv.args[1] === flat, JSON.stringify(inv || null));
   fs.rmSync(contractFile, { force: true });
@@ -130,7 +151,7 @@ function probeNative(entry) {
     fake.events = { append: (n, d) => events.push({ n, d }) };
     fake.log = events;
     fake.logger = { info() {}, warn() {}, error() {} };
-    fake.nativeManager = { status: () => ({ installed: true, binPath: 'x' }), ensureRequireBuiltinShim: () => { shimCalls.n++; return { found: 0, results: [] }; } };
+    fake.nativeManager = { status: () => ({ installed: true, binPath: 'x' }), ensureNativeUnits: () => { shimCalls.n++; return {}; } };
     fake.tokenService = { feedLine: () => {} };
     fake.dshWriter = { write: () => {} };
     fake.notify = () => {};
@@ -172,7 +193,7 @@ function probeNative(entry) {
   }
   check('S4 有契约 → flag 插在 node 与入口之间且只一次', (() => { const c = f1._androidLaunchReady(f1.spawnCommand()); return JSON.stringify(c) === JSON.stringify([process.execPath, '--expose-internals', entryJs, 'web', '--no-open']) && JSON.stringify(f1._androidLaunchReady(c)) === JSON.stringify(c); })());
   const c1 = f1._androidLaunchReady(f1.spawnCommand());
-  check('S4 有契约 → spawn 前调用 ensureRequireBuiltinShim', shimCalls.n > 0, 'calls=' + shimCalls.n);
+  check('S4 有契约 → spawn 前调 ensureNativeUnits（五单元一批）', shimCalls.n > 0, 'calls=' + shimCalls.n);
 
   const waitFor = async (fn, ms, label) => {
     const t0 = Date.now();

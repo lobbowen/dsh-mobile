@@ -25,8 +25,8 @@ const runtimeContract = require('../../platform/runtime-contract');
 // · 测试注入（构造期 opts.npmBin，或赋值 _npmBinArgs）优先 —— 结构上保证
 // 不触碰真实 npm；假 npm 的做法是 bin=process.execPath + args=[要跑的 .js]，
 // 因为 POSIX #!/bin/sh 脚本在非 POSIX 环境无法执行。
-// · 生产经契约统一解析：安卓 = node 代跑 npm-cli.js（W^X 下 bin/ 里的 npm
-// shim 脚本不可 execve），无契约退回 ambient 'npm'（PC 形态，不变量 C2）。
+// · 生产经契约统一解析：安卓 = node 代跑 npm-cli.js（投放出来的 npm 是一份 JS 文件，
+// 调用通路只有"交给 node"这一条），无契约退回 ambient 'npm'（PC 形态，不变量 C2）。
 function npmSpawn(self) {
   if (self && self._npmBin) {
     return { bin: self._npmBin, args: Array.isArray(self._npmBinArgs) ? self._npmBinArgs.slice() : [] };
@@ -139,6 +139,9 @@ class NativeManager {
       installLog: this.installLog.slice(-8),
       lastInstall: this.lastInstall,
       lastUninstall: this.lastUninstall,
+      // 本轮进程的实际投放结局（每条自带 at）。null = 本轮还没跑过投放 ——
+      // 不从 manifest 回填旧值：把上次进程的结局当成本轮的，就是把「未知」伪装成「正常」。
+      nativeUnits: this.nativeUnits || null,
       // 统一任务视图（若注册表存在）
       task: activeTask ? this.tasks.view(activeTask) : null,
     };
@@ -239,11 +242,9 @@ class NativeManager {
     } catch {}
     // 启动命令写回放在 binPath 读取**之前**：清单应记录安装完成后的现行启动形态。
     this._applyLaunchCommand(npmRoot);
-    this.ensureRequireBuiltinShim();
-    this.ensureFlockShim();
-    this.ensureRipgrepPackage();
-    this.ensureSharpWasm();
-    this.ensureNodePtyPrebuild();
+    // 投放单元跑一次并把结局随清单落盘：面板/取证在内核重启后仍能看到上次供给状态，
+    // 不必等下一次 spawn 才把内存填回来。
+    const units = this.ensureNativeUnits(npmRoot);
     const bin = this.binPath();
     let pkgDir = null;
     try { pkgDir = path.join(npmRoot, this.config.packageName); } catch {}
@@ -254,6 +255,7 @@ class NativeManager {
       npmRoot,
       packageDir: pkgDir || null,
       dshHome: this.dshHome,
+      nativeUnits: units,
       // 只保留显式/继承认领的数据路径；绝不默认写入 ~/.dsh 全部用户数据（防误删凭据/会话）
       dataPaths: claim || [],
     });
@@ -289,8 +291,9 @@ class NativeManager {
    * [契约 node（libnode.so）, <npmRoot>/<pkg> 的 bin 入口脚本绝对路径, 'web', '--no-open']
    * --no-open：dsh web 启动后会 spawn xdg-open/open 打开默认浏览器 —— 安卓无此命令，
    * 且面板本就由容器 WebView 呈现，URL 交给外部打开没有意义。
-   * 为什么必须写回：模板形态 ['node','dsh','web'] 依赖 PATH 与可 execve 的
-   * dsh shim —— 安卓容器两者都不成立（W^X）；装完不写回，守卫重启即拉不起。
+   * 为什么必须写回：绝对形态不依赖 ambient PATH，也不依赖 dsh 的 bin shim 能不能被内核
+   * 直接 exec（我们的投放通路不保证那一份的权限位）。模板形态一旦落到 PATH 里没有
+   * `node` 或 shim 起不来的机器上，`spawn → ENOENT → 60s 冷静期` 是无限循环。
    * 只认容器契约形态（npmEntry 在场）；PC（无契约）行为逐字不变。解析失败静默
    * 保留原命令（不变量 C2：绝不让已成功的安装因写回失败而报错）。 */
   _applyLaunchCommand(npmRoot) {
@@ -337,139 +340,145 @@ class NativeManager {
     return null;
   }
 
+  /* ═══════ 原生件投放单元（唯一出口，结局必须可见）═══════ */
+  /** 投放单元的共同前置：容器契约形态 + npm 全局根可达。
+   * 返回 `{skip: {status, reason}}` 表示本轮不投放，status 区分两种语义：
+   *   · skipped —— 本来就不该投（PC/dev 无容器契约，树逐字不变）；
+   *   · blocked —— 容器形态却缺前置，是**我们自己的缺口**，必须报警。
+   * 为什么前置判定要收在一处：三个单元曾各自以环境变量 PREFIX 为门控并在不满足时
+   * 直接 return null —— 真机上 rg/pty 投放因此静默停摆，事件流与面板上空无一物。
+   * 注意 prefix 是**可空**返回件而非共同前置：$PREFIX 缺席只该挡住真正依赖它的单元
+   * （rg/pty），否则旧 APK 契约（无 prefix 格）会把已在工作的 flock/narb 垫片一起判死。 */
+  _unitContext(rootOverride) {
+    const c = runtimeContract.read();
+    if (!c || !c.npmEntry) return { skip: { status: 'skipped', reason: '非容器契约形态（无 runtime.json 或未写 npmEntry）' } };
+    const root = rootOverride || this.npmRoot || (this._manifest() || {}).npmRoot || null;
+    if (!root || !fs.existsSync(root)) return { skip: { status: 'blocked', reason: 'npm 全局根不可达: ' + (root || '未知') } };
+    return { contract: c, root, prefix: c.prefix || null };
+  }
+
+  /** 记下一个投放单元的结局：内存 + 事件（仅状态变化时）+ 日志（applied 记 info，blocked/failed 记 warn）。 */
+  _unitOutcome(unit, status, reason, extra) {
+    this.nativeUnits = this.nativeUnits || {};
+    const prev = this.nativeUnits[unit];
+    const rec = { status, reason: reason || null, at: new Date().toISOString(), ...(extra || {}) };
+    this.nativeUnits[unit] = rec;
+    if (!prev || prev.status !== status) {
+      if (this.events) this.events.append('native_unit', { unit, status, reason: rec.reason });
+      if (status === 'blocked' || status === 'failed') this.logger.warn && this.logger.warn('原生件 ' + unit + ' ' + status + (rec.reason ? ': ' + rec.reason : ''));
+      else if (status === 'applied') this.logger.info && this.logger.info('原生件 ' + unit + ' 已投放' + (rec.reason ? '（' + rec.reason + '）' : ''));
+    }
+    return rec;
+  }
+
+  /** 跑完全部投放单元（安装/升级/回滚后与每次 spawn 前各一次；恒幂等）。
+   * 返回本轮内存结局表；调用方（_recordManifest）负责随清单落盘。 */
+  ensureNativeUnits(rootOverride) {
+    this.ensureRequireBuiltinShim(rootOverride);
+    this.ensureFlockShim(rootOverride);
+    this.ensureRipgrepPackage(rootOverride);
+    this.ensureSharpWasm(rootOverride);
+    this.ensureNodePtyPrebuild(rootOverride);
+    return this.nativeUnits || {};
+  }
+
+  /** 垫片类单元的 impl 返回**逐目录**结果（安装树里可能有多份副本）→ 折叠成一条结局。
+   * 优先级 failed > applied > already：一轮里只要有一份没投成功就是 failed，
+   * 只要有一份真动过磁盘就是 applied —— 不许被后一份的 already 盖掉。 */
+  _shimOutcome(unit, r) {
+    const hit = (s) => (r.results || []).find((a) => a.status === s);
+    const st = ['failed', 'applied', 'already'].find((s) => !!hit(s)) || 'skipped';
+    const a = hit(st);
+    return this._unitOutcome(unit, st,
+      st === 'skipped' ? '安装树内无该依赖'
+        : st === 'failed' ? a.dir + ' ' + a.error
+        : st === 'already' ? null : a.dir);
+  }
+
   /** 安卓容器自愈：给安装树里的 node-addon-require-builtin 投放 JS 垫片。
    * 根因与方案见 require-builtin-shim.js 头注释。幂等（已投放即 no-op），
    * 每次 spawn 前由守卫调用 —— 覆盖安装/内核升级后旧 dsh 不重装也能被修复。
-   * 门控同 _applyLaunchCommand：只认容器契约形态（npmEntry 在场），PC 行为逐字不变；
-   * 失败只告警不抛（不变量 C2：绝不让运行因自愈失败而中断）。
-   * @param {string} [rootOverride] 显式 npm 全局根（安装完成路径传入刚解析的值） */
+   * 前置同 _unitContext：只认容器契约形态（npmEntry 在场），PC 记 skipped 且树逐字不变；
+   * 抛错只改结局为 failed，绝不让运行因自愈失败而中断（不变量 C2）。
+   * @param {string} [rootOverride] 显式 npm 全局根（安装完成路径传入刚解析的值）
+   * @returns {{status:string,reason:string|null,at:string}} 本轮结局（唯一出口） */
   ensureRequireBuiltinShim(rootOverride) {
+    const ctx = this._unitContext(rootOverride);
+    if (ctx.skip) return this._unitOutcome('require-builtin', ctx.skip.status, ctx.skip.reason);
     try {
-      const c = runtimeContract.read();
-      if (!c || !c.npmEntry) return null;
-      const root = rootOverride || this.npmRoot || (this._manifest() || {}).npmRoot || null;
-      if (!root || !fs.existsSync(root)) return null;
-      const r = require('./require-builtin-shim').ensureShim(root);
-      for (const a of r.results) {
-        if (a.status === 'applied') {
-          this.narbShimApplied = true;
-          if (this.events) this.events.append('narb_shim_applied', { dir: a.dir });
-          this.logger.info && this.logger.info('require-builtin JS 垫片已投放: ' + a.dir);
-        } else if (a.status === 'failed') {
-          if (this.events) this.events.append('narb_shim_failed', { dir: a.dir, error: a.error });
-          this.logger.warn && this.logger.warn('require-builtin JS 垫片投放失败: ' + a.dir + ' ' + a.error);
-        } else if (a.status === 'already') {
-          this.narbShimApplied = true;
-        }
-      }
-      return r;
+      return this._shimOutcome('require-builtin', require('./require-builtin-shim').ensureShim(ctx.root));
     } catch (e) {
-      this.logger.warn && this.logger.warn('require-builtin JS 垫片检查异常（忽略）: ' + e.message);
-      return null;
+      return this._unitOutcome('require-builtin', 'failed', e.message);
     }
   }
 
   /** 安卓容器自愈：给安装树里的 @deepseek-ai/node-addon-system 投放 flock 垫片
    * （真 flock(2) 走 APK jniLibs 的 libdshflock.so，根因见 flock-shim.js 头注释）。
-   * 门控 = 容器契约形态（同 ensureRequireBuiltinShim）**且** 容器已递来
-   * DSH_FLOCK_NATIVE 路径 —— PC/dev 无该变量 ⇒ 树不动、行为逐字不变。
-   * 幂等；失败只告警不抛（不变量 C2）。
-   * @param {string} [rootOverride] 显式 npm 全局根（安装完成路径传入刚解析的值） */
+   * 前置 = _unitContext（容器契约形态）**且** 容器递来了 DSH_FLOCK_NATIVE。
+   * 契约在场却没这个键只可能是容器漏装配（内核模式的 env 由 GuestAdapter 单点给出）
+   * ⇒ 记 blocked 并报警，树不动。幂等；抛错只改结局。 */
   ensureFlockShim(rootOverride) {
+    const ctx = this._unitContext(rootOverride);
+    if (ctx.skip) return this._unitOutcome('addon-system-flock', ctx.skip.status, ctx.skip.reason);
+    const native = process.env.DSH_FLOCK_NATIVE;
+    if (!native || !String(native).trim()) return this._unitOutcome('addon-system-flock', 'blocked', '容器未递 DSH_FLOCK_NATIVE');
     try {
-      const c = runtimeContract.read();
-      if (!c || !c.npmEntry) return null;
-      const native = process.env.DSH_FLOCK_NATIVE;
-      if (!native || !String(native).trim()) return null;
-      const root = rootOverride || this.npmRoot || (this._manifest() || {}).npmRoot || null;
-      if (!root || !fs.existsSync(root)) return null;
-      const r = require('./flock-shim').ensureShim(root);
-      for (const a of r.results) {
-        if (a.status === 'applied') {
-          this.flockShimApplied = true;
-          if (this.events) this.events.append('flock_shim_applied', { dir: a.dir });
-          this.logger.info && this.logger.info('flock 原生垫片已投放: ' + a.dir);
-        } else if (a.status === 'failed') {
-          if (this.events) this.events.append('flock_shim_failed', { dir: a.dir, error: a.error });
-          this.logger.warn && this.logger.warn('flock 原生垫片投放失败: ' + a.dir + ' ' + a.error);
-        } else if (a.status === 'already') {
-          this.flockShimApplied = true;
-        }
-      }
-      return r;
+      return this._shimOutcome('addon-system-flock', require('./flock-shim').ensureShim(ctx.root));
     } catch (e) {
-      this.logger.warn && this.logger.warn('flock 原生垫片检查异常（忽略）: ' + e.message);
-      return null;
+      return this._unitOutcome('addon-system-flock', 'failed', e.message);
     }
   }
 
-
   /** 把 @vscode/ripgrep-android-arm64 平台包补给安装树（指向 $PREFIX/bin/rg）。
-   * 门控：契约在场 + PREFIX 下确有 rg；PC/dev 不动。幂等；失败只告警不抛。
+   * 前置：容器契约 + npm 全局根（PC/dev 无契约记 skipped）。契约缺 prefix 格或该格下
+   * 无 rg ⇒ impl 判 blocked（旧 APK 契约形态 / 容器没交付 rg），不许静默。
+   * 幂等；结局一律进 _unitOutcome。
    * @param {string} [rootOverride] 显式 npm 全局根 */
   ensureRipgrepPackage(rootOverride) {
+    const ctx = this._unitContext(rootOverride);
+    if (ctx.skip) return this._unitOutcome('ripgrep', ctx.skip.status, ctx.skip.reason);
     try {
-      const c = runtimeContract.read();
-      if (!c || !c.npmEntry) return null;
-      const root = rootOverride || this.npmRoot || (this._manifest() || {}).npmRoot || null;
-      if (!root || !fs.existsSync(root)) return null;
-      const r = require('./ripgrep-package').ensureRipgrepPackage(root);
-      for (const a of r.results) {
-        if (this.events) this.events.append('ripgrep_package_applied', { file: a.file });
-        this.logger.info && this.logger.info('ripgrep 平台包已补给: ' + a.file);
-      }
-      return r;
+      const r = require('./ripgrep-package').ensureRipgrepPackage(ctx.root, { prefix: ctx.prefix });
+      return this._unitOutcome('ripgrep', r.status, r.status === 'applied' ? ctx.prefix + '/bin/rg' : r.reason);
     } catch (e) {
-      this.logger.warn && this.logger.warn('ripgrep 平台包补给异常（忽略）: ' + e.message);
-      return null;
+      return this._unitOutcome('ripgrep', 'failed', e.message);
     }
   }
 
   /** Android 走 sharp 的 wasm 回退：把 @img/sharp-wasm32 补给 DSH 树（真实依赖，非替代实现）。
-   * 门控：契约在场 + DSH 树内确有 sharp。幂等；失败只告警不抛。
+   * 前置：容器契约 + DSH 树内确有 sharp。幂等；结局一律进 _unitOutcome。
+   * 注：投放成功 ≠ 能力可用 —— sharp 是否真能 require 到该包由能力判据另算（见供给表 runtime-check）。
    * @param {string} [rootOverride] 显式 npm 全局根 */
   ensureSharpWasm(rootOverride) {
+    const ctx = this._unitContext(rootOverride);
+    if (ctx.skip) return this._unitOutcome('sharp-image', ctx.skip.status, ctx.skip.reason);
+    const dshDir = path.join(ctx.root, this.config.packageName);
+    if (!fs.existsSync(dshDir)) return this._unitOutcome('sharp-image', 'skipped', '安装树内无 ' + this.config.packageName);
     try {
-      const c = runtimeContract.read();
-      if (!c || !c.npmEntry) return null;
-      const root = rootOverride || this.npmRoot || (this._manifest() || {}).npmRoot || null;
-      if (!root) return null;
-      const dshDir = path.join(root, this.config.packageName);
-      if (!fs.existsSync(dshDir)) return null;
       const r = require('./sharp-wasm').ensureSharpWasm(dshDir, {
         npmInvocation: npmSpawn(this),
         tmpdir: this.stateDir,
         env: runtimeContract.npmEnv(process.env),
       });
-      if (this.events && r.status !== 'already' && r.status !== 'skipped') {
-        this.events.append('sharp_wasm_' + r.status, { reason: r.reason || null });
-      }
-      if (r.status === 'applied') this.logger.info && this.logger.info('sharp wasm 回退包已补给');
-      return r;
+      return this._unitOutcome('sharp-image', r.status, r.status === 'applied' ? null : (r.reason || null));
     } catch (e) {
-      this.logger.warn && this.logger.warn('sharp wasm 补给异常（忽略）: ' + e.message);
-      return null;
+      return this._unitOutcome('sharp-image', 'failed', e.message);
     }
   }
 
   /** 把容器构建的 pty.node 投到 node-pty 的 loader 查找位（prebuilds/android-arm64/）。
-   * 门控：契约在场 + DSH 树内确有 node-pty + $PREFIX/lib/pty.node 存在。幂等；失败只告警不抛。
-   * @param {string} [rootOverride] 显式 npm 全局根 */
+   * 前置：容器契约 + DSH 树内确有 node-pty + 契约 prefix 格下的 lib/pty.node。幂等。
+   * prefix 为 null 时把 null 交给 impl —— 它判 blocked，本方法不猜路径。 */
   ensureNodePtyPrebuild(rootOverride) {
+    const ctx = this._unitContext(rootOverride);
+    if (ctx.skip) return this._unitOutcome('node-pty', ctx.skip.status, ctx.skip.reason);
+    const dshDir = path.join(ctx.root, this.config.packageName);
+    const src = ctx.prefix ? path.join(ctx.prefix, 'lib', 'pty.node') : null;
     try {
-      const c = runtimeContract.read();
-      if (!c || !c.npmEntry) return null;
-      const root = rootOverride || this.npmRoot || (this._manifest() || {}).npmRoot || null;
-      if (!root) return null;
-      const dshDir = path.join(root, this.config.packageName);
-      const src = process.env.PREFIX ? path.join(process.env.PREFIX, 'lib', 'pty.node') : null;
       const r = require('./node-pty-prebuild').ensureNodePtyPrebuild(dshDir, src);
-      if (this.events && r.status === 'applied') this.events.append('node_pty_prebuild_applied', { path: r.path });
-      if (r.status === 'applied') this.logger.info && this.logger.info('node-pty 预编译件已就位');
-      return r;
+      return this._unitOutcome('node-pty', r.status, r.status === 'applied' ? r.path : (r.reason || null));
     } catch (e) {
-      this.logger.warn && this.logger.warn('node-pty 预编译件投放异常（忽略）: ' + e.message);
-      return null;
+      return this._unitOutcome('node-pty', 'failed', e.message);
     }
   }
 

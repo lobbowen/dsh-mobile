@@ -109,6 +109,8 @@ export function OverviewPage() {
   }
 
   const installedVer = installed ? (native?.version || v?.installed || "—") : "—";
+  // null = 本轮还没跑过投放（不是"全部正常"），此时整行不渲染。
+  const units = native?.nativeUnits ?? null;
 
   return (
     <div className="grid content-start gap-4">
@@ -169,6 +171,20 @@ export function OverviewPage() {
               <pre className="max-h-[120px] overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted/70 p-3 font-mono text-xs leading-relaxed text-muted-foreground">
                 {(native?.installLog ?? []).slice(-6).join("\n")}
               </pre>
+            ) : null}
+
+            {/* 原生能力件的投放结局。为什么必须上屏：blocked 意味着"容器形态却缺前置"，
+                真机 2026-09-26 的 glob/grep 全灭当时在界面上零痕迹 —— 缺件与"没跑过"
+                合并显示就等于把缺口藏起来。PC 无此字段，整行不显示。 */}
+            {units ? (
+              <div className="flex flex-wrap gap-x-3 gap-y-1 font-mono text-xs leading-none text-muted-foreground">
+                {Object.entries(units).map(([unit, o]) => (
+                  <span key={unit} className={o.status === "blocked" || o.status === "failed" ? "text-destructive" : undefined}
+                        title={o.reason || unit}>
+                    {unit}·{o.status}
+                  </span>
+                ))}
+              </div>
             ) : null}
           </div>
 
