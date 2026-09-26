@@ -140,6 +140,17 @@
         "node": "const s=require('node:sqlite'); const D=s.DatabaseSync||s.Database; if(!D) throw new Error('node:sqlite 里没有构造子（这份 node 未编入 SQLite 或改了导出名）'); const db=new D(':memory:'); db.exec('CREATE TABLE t(a)'); db.prepare('INSERT INTO t VALUES (?)').run(41); const row=db.prepare('SELECT a FROM t').get(); db.close(); if(!row||Number(row.a)!==41) throw new Error('回读不符：'+JSON.stringify(row)); process.stdout.write('DSH_PROBE_PASS node='+process.versions.node)"
       },
       "why": "用的是 node:sqlite 内置模块，成不成取决于我们那份交叉编译是否启用 SQLite；闭包 diff 看不见，必须由真机探针定罪"
+    },
+    {
+      "id": "exec-domain",
+      "capability": "app home 内 exec（ADR-0001 D1 那条 targetSdk=28 承重墙）",
+      "disposition": "runtime-check",
+      "hostExcludes": [],
+      "verify": {
+        "criterion": "在 app home 落一个脚本和一份自带 ELF，各 exec 一次并读到自己的输出；对照组是 /system/bin/sh 本身 —— 对照组起不来就整格红，不许把 spawn 坏了读成 exec 被禁",
+        "node": "const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process'); const base=process.env.DSH_SUPERVISOR_HOME; if(!base) throw new Error('容器未递 DSH_SUPERVISOR_HOME：本格量的是 app home 能不能 exec，没有 app home 就无从落件'); const d=path.join(base,'.exec-domain-probe'); fs.mkdirSync(d,{recursive:true}); const bad=(r)=>((r.error&&r.error.code)||('rc='+r.status+' err='+String(r.stderr||'').slice(0,120))); const dom=(r)=>String(r.stdout||'').split('\\n')[0].trim(); try{ const ctl=cp.spawnSync('/system/bin/sh',['-c','cat /proc/self/attr/current; echo; echo CTL_OK'],{encoding:'utf8',timeout:10000}); if(!String(ctl.stdout||'').includes('CTL_OK')) throw new Error('对照组失效：连 /system/bin/sh 都起不来（'+bad(ctl)+'），本格读数不可解释'); const sh=path.join(d,'p.sh'); fs.writeFileSync(sh,'#!/system/bin/sh\\ncat /proc/self/attr/current; echo; echo SCRIPT_OK\\n'); fs.chmodSync(sh,0o755); const r1=cp.spawnSync(sh,[],{encoding:'utf8',timeout:10000}); if(!String(r1.stdout||'').includes('SCRIPT_OK')) throw new Error('exec app home 脚本 fail: '+bad(r1)); const bin=path.join(d,'p.bin'); fs.copyFileSync('/system/bin/sh',bin); fs.chmodSync(bin,0o755); const r2=cp.spawnSync(bin,['-c','echo BIN_OK'],{encoding:'utf8',timeout:10000}); if(!String(r2.stdout||'').includes('BIN_OK')) throw new Error('exec app home 自带 ELF fail: '+bad(r2)); process.stdout.write('DSH_PROBE_PASS 域='+dom(ctl)+' exec 后域='+dom(r1)); } finally{ fs.rmSync(d,{recursive:true,force:true}); }"
+      },
+      "why": "这条能力此前只有一个手工脚本（kernel/tools/domain-probe.js，无任何调用点）加一份 2026-09-23 在 targetSdk=34 上取的旧基线 —— 判据靠人记得跑就等于没有判据。exec 落在 app_data_file 上，与本进程同域同 uid，所以 Agent 的 run_code 子进程走不走得通由这一格说了算。link(2) 不在本格量：容器给 Agent 进程注入了 libdshposix 的 LD_PRELOAD 用户态替代（container/native/posix/），在本进程里测 link 量到的是垫片而不是系统事实。"
     }
   ]
 }
