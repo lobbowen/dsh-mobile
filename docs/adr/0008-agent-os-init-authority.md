@@ -93,6 +93,19 @@ init 域按 capability 清单申报 → 特权域按「可静默 / 需人点 / �
 init 域 = events 日志 + watermark；特权域 = `ResidencyAudit`）。产品承诺边界仍是
 「被杀看得见」，不做任何进程外复活兜底（否决词汇在册，见 ADR-0006）。
 
+### C4 投递合同（发布维 → 共享通道）
+
+共享发布通道（`apk-latest` 滚动别名、`v<versionName>` 版本化归档）**唯一合法写者 = main 的
+head 字节**。判据不是「谁有权 dispatch」而是「写进去的东西是否可追溯到已合入的 main commit」：
+分支/中途 commit 发的包会覆盖用户手里的下载地址，而 `ci-ok.txt` 的 sha 会指向一个不存在于
+main 历史的 commit（2026-09-26 16:12 实证，见执行案 D8）。
+
+同号换字节（`scripts/verify-apk-version-gate.sh:77` 显式通道放行）因此**只有一种合法用途**：
+把已合入 main 的版本重投回通道，而不是用来发未合入的改动。
+
+合同条文在册，**机器判据未落**：`fast-apk.yml` 全文不校验 `github.ref_name`，任何 ref 都能写通道。
+落地归执行案 P2b（发布步骤硬失败 + 门禁活样本）。
+
 ## 5. 本 ADR 的落地进度
 
 | 项 | 状态 |
@@ -102,6 +115,8 @@ init 域 = events 日志 + watermark；特权域 = `ResidencyAudit`）。产品�
 | C2 desired==actual 状态机、通道 LIVE 后自动首次开机 | 未做（执行案 P1 之后） |
 | C1 adopt-or-start、runtime.json schema 3 握手 | 未做（执行案 P1，先决实验在前） |
 | 六域目录落点（`host/` + `runtime/init`） | 未做（执行案 PC-1…PC-3） |
+| C4 投递合同成文 | 已写（本节） |
+| C4 机器判据（发布步骤只认 main head 字节） | 未做（执行案 D8 → P2b）；本轮治标**已完成**：run #188 从 main `9d530d3` 重投，`apk-latest` 与 `v1.1.6` 两份资产 digest 一致（`sha256:8466cdaa…`），`ci-ok.txt` 记 `sha : 9d530d3` |
 
 ## 6. 不做清单（刻意决策，不是欠账）
 
