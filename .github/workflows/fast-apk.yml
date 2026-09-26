@@ -290,6 +290,18 @@ jobs:
           bash scripts/ensure-tool.sh readelf binutils
           bash scripts/verify-runtime-elf.sh "$D"
 
+      - name: Gate — verify OTA public key anchor is weldable
+        run: |
+          set -euo pipefail
+          # 本链出的包就是设备上那个**唯一验签信任源**的载体（assets/ota-public.pem）。
+          # 判据只住 scripts/verify-ota-anchor.sh（build-apk 与 kernel-ota 同调；配对那一问
+          # 在 kernel-ota，因为只有它拿得到私钥）。这里缺的是「锚点本身能不能用」这一问：
+          # 焊一把解析不了的、或算法不是 ed25519 的公钥进 APK，此后每个内核包在所有设备上
+          # 都判 signature-invalid，而这在打包期完全看不出来。
+          bash scripts/ensure-tool.sh openssl openssl
+          bash scripts/verify-ota-anchor.sh \
+            --anchor container/app/src/main/assets/ota-public.pem
+
       - name: Build libdshflock.so + libdshposix.so (NDK 原生桥)
         # 真机实证（2026-09-23）：dsh 两条设备死路都没有 JS 等价物——
         # ① flock（下列）；② link：Android 7+ SELinux 禁 untrusted_app 硬链接，

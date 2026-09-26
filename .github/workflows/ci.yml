@@ -77,6 +77,8 @@ jobs:
           # 判据取数靠 readelf。工具没装**不是跳过测试的理由** —— 那条断言会如实红，
           # 这里先按唯一宿主把它装上，让红只可能来自产物而不是环境。
           bash ../../scripts/ensure-tool.sh readelf binutils
+          # ota-anchor-test.js 用 openssl 现造临时 ed25519 密钥对证伪配对判据；同理，缺工具就装，不跳过。
+          bash ../../scripts/ensure-tool.sh openssl openssl
           npm run test:logic 2>&1 | tee /tmp/engine-test.log
           echo
           echo "=== 容器引擎逻辑测试汇总 ==="

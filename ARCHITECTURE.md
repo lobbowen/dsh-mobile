@@ -377,6 +377,16 @@ ADR-0005：曾经的 `LocalKernelFeed` 本地投放路径已删除）。
 | 生成 | `scripts/keygen-android-keystore.sh` | `scripts/keygen.sh` |
 | 产物 | `keys/release.keystore`（gitignored） | `keys/ota-private.pem`（gitignored） |
 
+锚点这一列有两个必须成立、却曾被两条 CI 链各查一半的事实：**锚点是一把能用的 Ed25519 公钥**
+（解析得了 RSA 不等于能用它验 ed25519 签名），以及**它与签名用的私钥是一对**（轮换时只改一边
+= 签出的每个包在所有设备上判 `signature-invalid`，OTA 静默死亡而 CI 全绿）。判据只住
+`scripts/verify-ota-anchor.sh` 一份，出口同调：`fast-apk` 与 `build-apk` 查锚点本身
+（出包前，那两条链拿不到私钥），签名侧（`kernel-ota` 那一步，以及它调用的
+`scripts/build-kernel-bundle.sh` —— 手工与 fork 走的也是这条）在真正签名之前带
+`--private` 查配对。
+可证伪夹具（openssl 现造临时密钥对，不碰真凭据）在
+`container/engine/test/ota-anchor-test.js`。
+
 两点容易搞反的推论：
 
 * 内核包签名正确 **≠** APK 能装到设备上。前者不影响安装器决策。
