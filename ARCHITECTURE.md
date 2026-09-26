@@ -52,7 +52,7 @@ HostBridge 被标为"L3"——与发布维撞号且暗示存在第四发布通�
 （注：kernel 源码注释里的"L3 进程解耦/L3 监督"是 router-daemon 脱耦的另一套
 内部代号，与本分层法无关）。
 
-两条由分层推出的铁律：
+三条由分层推出的铁律：
 
 1. **环境装配唯一权威 = `GuestAdapter`。** 「装配环境 → spawn 内核」曾有两份
    孪生实现（Kotlin 内联 ProcessBuilder ⇄ engine 侧旧 `src/boot.js`），靠注释互指"对齐"，
@@ -62,10 +62,18 @@ HostBridge 被标为"L3"——与发布维撞号且暗示存在第四发布通�
    `container/engine/test/boot-env-contract-test.js` 跨语言解析两侧键集与核心值：
    **夹具发明一个 GuestAdapter 没有的键 = CI 红**。装配结果由
    `GuestAdapterTest`（golden 向量）钉住。
-2. **新运行时 = 在 `ContainerSupervisor` 再注册一条 binder 边；禁止运行时进程
-   自己拉自己。** 不变式：**APK（:main + 无障碍锚）不死，运行时环境就不死。**
+2. **新运行时 = 供给域注册一个单元 + init 域注册一类受管对象；安卓侧零改动。**
+   （取代旧条文「新运行时 = 在 `ContainerSupervisor` 再注册一条 binder 边」—— 2026-09-26
+   废止，理由与替代形态见 ADR-0008 §3：照旧条文做，python/go 都得变成安卓服务、各挂一条 FGS、
+   各被 AMS 语义坑一遍。）
+   禁止运行时进程自己拉自己；不变式仍是：**APK（:main + 无障碍锚）不死，运行时环境就不死。**
    旧设计把"抢救"与"尸体"放同一进程（:node 自家的重拉循环与它同归于尽，
    真机定罪见 ADR-0006 §1.2）—— 那是架构错误，不是 bug。
+3. **复活归监督者，出生归被复活者自己。** `bindService(BIND_AUTO_CREATE)` 只会重建进程并跑
+   `onCreate`，**不会**重投 started-service 的 `onStartCommand`（真机 2026-09-26 定罪）。
+   所以 boot 循环由 `:node` 的 `onCreate` 自发起，并在循环入口落出生标记 `node.birth`；
+   监督者按 `POWER / BORN / ONLINE` 三态裁决（判据 `NodeWatchdogPolicy`，ADR-0008 §4 C1）。
+   「观察到空壳就往 `:node` 补投一条 start」已被否决并钉成门禁死词汇。
 
 ### 1.2 正确的启动链路（顺序与边都有实测理由）
 
@@ -82,13 +90,17 @@ ContainerSupervisor.onStartCommand（每次被戳）
   └─ bindService(BIND_AUTO_CREATE) ──► NodeRuntimeService               ← 监督边
        · onBind 必须返回真 binder（null = null-binding，既不保活也无断开回调）
        · 死 → onServiceDisconnected → 立即 rebind（绝不在死亡路径 startForegroundService）
-       · 卡死（node.pid 记录连丢 3 拍 / 断开超 30s 自愈预算）→ stop+unbind+rebind，带冷却
+       · 每拍读三态：POWER(node.pid 进程记录) / BORN(node.birth 属于该 pid) / ONLINE(控制面，只上屏)
+       · 卡死（进程记录连丢 3 拍）或空壳（POWER ∧ ¬BORN 超 30s）或断开超 30s 自愈预算
+         → stop+unbind+rebind 清账，三条升级路径共用 60s 冷却
 
 NodeRuntimeService.onCreate（:node）
   ├─ 提升 FGS + 写 files/node.pid（早于任何 spawn：慢启动不得攒 strikes）
   ├─ ContainerSupervisor.ensureRunning()      ← 互保边④
-  └─ bootLoop: GuestAdapter.probePlan/kernelPlan → spawn → 健康轮询 → SupervisorPolicy 退避
-       └─ 每次 boot 尝试再 ensureRunning()     ← 自纠"监督者先于 :node 死"的窗口
+  └─ scheduleBootLoop()                        ← **自出生**：谁创建我（start / bind 复活 /
+       │                                       sticky 重投）我都自己发起 boot 循环
+       └─ bootLoop: 写 node.birth → GuestAdapter.probePlan/kernelPlan → spawn → 健康轮询 → 退避
+            └─ 每次 boot 尝试再 ensureRunning()  ← 自纠"监督者先于 :node 死"的窗口
 
 互保闭环（任一侧活着，环就能转起来）：BootReceiver① · a11y onServiceConnected② ·
 HostBridge.onCreate③ → :node onCreate/boot 尝试④ → 监督者 → {桥, :node}
