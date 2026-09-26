@@ -1,0 +1,142 @@
+CI_LAST_REPORT
+time   : Sat Sep 26 07:32:56 UTC 2026
+run    : 36217430866
+sha    : 4bb4c2a8ed274943db8c01191842d57436cd9722
+stage  : 8/9 gradle-apk
+job    : success
+
+=== step outcomes ===
+wfvalidate  : success
+enginetests : success
+hbstart     : success
+ping        : success
+checkout    : success
+setup-java  : success
+sdk-env     : success
+sdk-install : success
+host-deps   : success
+node-tag    : success
+sync-json   : success
+node-cache  : success
+node-restore: success
+node-reused : no
+node-build  : success
+signing     : success
+gradle-build: success
+
+=== container/engine test log (tail 60) ===
+23248 /tmp/engine-test.log
+结果: 1 passed, 0 failed
+结果: 1 passed, 0 failed
+结果: 1 passed, 0 failed
+结果: 10 passed, 0 failed  (bridge-methods-crosslang)
+结果: 50 passed, 0 failed  (native-assets)
+结果: 1 passed, 0 failed
+结果: 5 passed, 0 failed
+结果: 6 passed, 0 failed  (sign-verify)
+结果: 13 passed, 0 failed  (kernel-bundle)
+结果: 69 passed, 0 failed  (kernel-selfboot)
+结果: 12 passed, 0 failed  (ota-engine)
+结果: 10 passed, 0 failed  (runtime-json)
+结果: 14 passed, 0 failed  (bridge-protocol)
+结果: 14 passed, 0 failed  (bridge-e2e)
+结果: 15 passed, 0 failed  (bridge-interop)
+结果: 22 passed, 0 failed  (kernel-update-bridge)
+结果: 9 passed, 0 failed  (e2e-mock-kernel)
+结果: 38 passed, 0 failed
+结果: 16 passed, 0 failed  (boot-env-contract)
+结果: 29 passed, 0 failed  (adb-client)
+--- 原始尾部 ---
+PASS 反对称 compare("0.1.0", "0.1.0-android") == -1
+PASS 反对称 compare("0.1.0", "0.1.0-android.11") == -1
+PASS 反对称 compare("1.2.3-alpha", "1.2.3") == 1
+PASS 反对称 compare("1.2.3+build.4", "1.2.3+build.5") == -1
+PASS 反对称 compare("abd", "abc") == 1
+PASS 反对称 compare("1.0.0-beta", "1.0.0-alpha") == 1
+PASS 反对称 compare("0", "") == 1
+PASS 反对称 compare("", "0") == -1
+PASS isNewer(x, null) 为真（尚未安装 → 需要安装）
+PASS isNewer(相等) 为假
+结果: 38 passed, 0 failed
+PASS GuestAdapter 键集解析非空（≥12 个，防空转）  <- size=16
+PASS boot-fixture.js env 块定位成功（防切片空转）
+PASS boot-fixture.js 键集解析非空（≥8 个，防空转）  <- size=9
+PASS boot-fixture.js 的每个环境键都在 GuestAdapter 中（夹具发明键=红）
+PASS socket 名字面量双侧一致（GuestAdapter ⇄ boot-fixture.js）  <- kotlin=dsh_hostbridge js=dsh_hostbridge
+PASS HostBridgeService.SOCKET_NAME 取自 GuestAdapter（不再各写一份字面量）
+PASS GuestAdapter 内 PATH 组装点唯一  <- 出现 2 次（baseEnv 一份 + kernelPlan 覆盖一份，允许多至 2）
+PASS NodeRuntimeService 不再内联组装任何环境键（spawn 装配只剩 GuestAdapter）
+PASS GuestAdapter.TMPDIR = cacheDir（单一事实）
+PASS boot-fixture.js.TMPDIR 优先 o.cacheDir（os.tmpdir 仅桌面回落）
+PASS GuestAdapter NODE_PATH 双段次序（kernelDir 前）
+PASS boot-fixture.js NODE_PATH 双段次序（kernelDir 前）
+PASS GuestAdapter command = nodeBin + entry + daemon
+PASS boot-fixture.js spawn = nodeBin + [entry, daemon]
+PASS GuestAdapter 端口常量齐备（36360 控制面 / 3080 探针）
+PASS NodeRuntimeService 不再自带端口常量（读 GuestAdapter）
+
+结果: 16 passed, 0 failed  (boot-env-contract)
+PASS AOSP 向量重编码逐字节一致（524B）
+PASS exponent 向量正确（65537 小端收尾）
+PASS modulus_size_words = 64
+PASS n0inv 满足 Montgomery 定义式
+PASS n0inv 与 AOSP 向量一致
+PASS rr = 2^4096 mod n
+PASS 公钥串两段（base64 + 名字）
+PASS 524 字节 → 700 字符、1 个 padding
+PASS base64 解回 524 字节
+PASS 自生成密钥 e = 65537
+PASS 签名长度 256
+PASS EM = 00 01 FF.. 00 || SHA1-DigestInfo || token 原文
+PASS 末尾是 token 原文而非 SHA1(token)
+PASS 非 20 字节 token 全部拒绝（0/19/21/32）
+PASS checksum 按无符号字节和（0xFF→255）
+PASS 报文 = 24B 头 + payload
+PASS 头部字段小端一致
+PASS magic = command xor 0xffffffff
+PASS checksum 字段落位
+PASS OPEN shell payload：NUL 结尾且长度 9
+PASS CNXN 版本与最大负载
+PASS 基点 B 编解码回环 = RFC 8032 字节
+PASS M / N 固定点解码成功（非法会得 null）
+PASS 恒等点编码为 01 00…
+PASS l·B = 恒等（阶正确）
+PASS decode 拒绝错误长度与 y≥P
+PASS 同密码往返：两端派生同一 64B key
+PASS 错码：两端 key 不一致（且都非空）
+PASS processMsg 对不可解码的对端点返回 null
+
+结果: 29 passed, 0 failed  (adb-client)
+
+=== node-build.log size / tail ===
+16832884 /tmp/node-build.log
+  ln -fs out/Release/node node; fi
+==> 拷贝产物到 /home/runner/work/dsh-mobile/dsh-mobile/container/app/src/main/jniLibs/arm64-v8a/libnode.so
+==> 打包 libc++_shared.so（node 运行时的动态依赖，系统不提供）
+    源: /usr/local/lib/android/sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so
+    目标: /home/runner/work/dsh-mobile/dsh-mobile/container/app/src/main/jniLibs/arm64-v8a/libc++_shared.so (9290184 字节)
+==> 清单一致性自检（.github/native-assets.txt）
+    [ok] 产物与清单一致（2 项）
+==> 依赖闭环自检
+    系统库白名单: /home/runner/work/dsh-mobile/dsh-mobile/scripts/native-deps.txt（12 项）
+    [ok] libm.so （bionic/系统提供）
+    [ok] libdl.so （bionic/系统提供）
+    [ok] liblog.so （bionic/系统提供）
+    [ok] libc++_shared.so （已随包提供）
+    [ok] libc.so （bionic/系统提供）
+==> 依赖自解析断言（DT_RUNPATH 含 $ORIGIN）
+== 校验器: /usr/local/lib/android/sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf  目录: /home/runner/work/dsh-mobile/dsh-mobile/container/app/src/main/jniLibs/arm64-v8a ==
+  [skip] libc++_shared.so —— 不依赖同目录随包库（NEEDED: libc.so libm.so libdl.so）
+  [ok]   libnode.so —— DT_RUNPATH=[$ORIGIN]，可自解析同目录依赖: libc++_shared.so
+==> [ok] 全部原生产物可自解析同目录依赖
+==> 产物自检
+    file: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /system/bin/linker64, with debug_info, not stripped
+          [Requesting program interpreter: /system/bin/linker64]
+      LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x5894710 0x5894710 R E 0x4000
+      LOAD           0x5894710 0x0000000005898710 0x0000000005898710 0x131308 0x1318f0 RW  0x4000
+      LOAD           0x59c8000 0x00000000059d0000 0x00000000059d0000 0x028d78 0x059618 RW  0x4000
+    [ok] 解释器为 Android linker64（bionic 动态链接，可正常 exec）
+    [ok] 检出 16KB (0x4000) 对齐的 LOAD 段（满足 Android 15+ 要求）
+==> 完成。文件: /home/runner/work/dsh-mobile/dsh-mobile/container/app/src/main/jniLibs/arm64-v8a/libnode.so
+    下一步: ./gradlew assembleDebug 即可把该 Node 打进 APK（首启离线可跑）。
+    若要做 OTA 升级包: ./scripts/make-release.sh 24.21.0
