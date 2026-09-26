@@ -24,7 +24,13 @@
   - `adb install -r` 新包 → `INSTALL_FAILED_UPDATE_INCOMPATIBLE`；
   - **设备自我升级**（本项目 A'/自有 OTA 的关键前提）彻底不成立；
   - 增量升级、灰度推送等一切依赖"应用身份稳定"的机制都不成立。
-- CI 现在有门禁：`fast-apk` 的 **Gate — verify APK signing identity** —— 配了 keystore 却仍是 debug 签名会**硬红**；完全没配则给醒目 warning（开发包可用，**不可发布**）。
+- CI 的门禁是 `scripts/verify-apk-signing.sh`（唯一实现，三条链路同调；注入侧配套
+  `scripts/inject-apk-keystore.sh`）。三档结果：
+  - 配了 keystore → 把 APK 内证书的 SHA-256 指纹与注入锚点**逐指纹比对**，不符即**硬红**
+    （只判 "CN=Android Debug" 查不出「签成了另一把 key」，那种包照样装不上去）；
+  - 发布链路（`build-apk` / `release-admin` 的 repack）带 `--require-stable`：debug 身份、
+    没配 keystore、锚点自身是 debug 三种情况都**硬红**，产物不会进 apk-latest；
+  - 日常链路（`fast-apk`）允许 debug 档，但会打 `::warning:: 开发签名（不可发布）`。
 
 ---
 
@@ -40,7 +46,9 @@ base64 -w0 keys/release.keystore > /tmp/ks.b64
 # ③ 写入 GitHub secrets（仓库 → Settings → Secrets and variables → Actions）
 #    ANDROID_KEYSTORE_BASE64   = $(cat /tmp/ks.b64)
 #    ANDROID_KEYSTORE_PASSWORD = <keystore 口令>
-#    DSH_KEY_ALIAS             = <别名，默认 dsh>
+#    ANDROID_KEY_ALIAS         = <别名，默认 dsh>
+#    ANDROID_KEY_PASSWORD      = <key 口令，与 store 口令相同时可留空由脚本兜底>
+#    后两个可省；缺省时 scripts/inject-apk-keystore.sh 按 dsh / =store 口令兜底。
 ```
 
 **备份（强制）**：把 `keys/release.keystore` 与口令存进离线密码库。
@@ -60,7 +68,8 @@ base64 -w0 keys/release.keystore > /tmp/ks.b64
 
 ## 5. 自检清单（发布前）
 
-- [ ] `fast-apk` 的签名门禁输出 `[ok] 稳定签名（非 debug）`
+- [ ] 签名门禁输出 `APK 证书指纹与注入锚点一致`（配了 keystore 时）；
+      发布链路必须带 `--require-stable` 跑过，只输出「非 debug 签名」说明本轮**没有锚点可比**
 - [ ] `OTA_PRIVATE_KEY_PEM` 已配置且 `Verify kernel baseline bundle` 全绿
 - [ ] `keys/release.keystore` + 口令已离线备份
 - [ ] 用**同一签名**的旧包做过一次 `adb install -r` 覆盖安装验证
