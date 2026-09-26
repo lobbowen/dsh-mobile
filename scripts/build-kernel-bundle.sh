@@ -11,7 +11,7 @@
 #
 #  前置：
 #    - 私钥 keys/ota-private.pem 已就位（scripts/keygen.sh 生成；CI 由 secret 注入）。
-#    - 公钥锚点 app/src/main/assets/ota-public.pem 已焊接（设备端验签用）。
+#    - 公钥锚点 container/app/src/main/assets/ota-public.pem 已焊接（设备端验签用）。
 #
 #  产物（release/）：
 #    kernel-<version>.zip        OTA 下发的内核包
@@ -29,5 +29,9 @@ if [ ! -f "$ROOT/keys/ota-private.pem" ]; then
   echo "[build-kernel-bundle] 私钥缺失: $ROOT/keys/ota-private.pem（先跑 ./scripts/keygen.sh 或注入 CI secret）" >&2
   exit 1
 fi
+
+# 签名之前先确认这把私钥导出的公钥就是 APK 焊着的那一份：不配对的签名照样能生成，
+# 但设备端只会把包判成 signature-invalid —— 判据只住 verify-ota-anchor.sh。
+bash "$ROOT/scripts/verify-ota-anchor.sh" --private "$ROOT/keys/ota-private.pem"
 
 exec node "$ROOT/container/engine/bin/build-bundle.js" "$SRC" "$VER" "$ABI" "$URL_BASE"
