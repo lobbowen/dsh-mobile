@@ -66,6 +66,13 @@
 | `kernel-<version>` | `kernel-<v>.zip` · `kernel-manifest.json` · `kernel-feed-<v>.zip` | 版本化（可追溯） |
 | `kernel-<channel>` | `kernel-manifest.json` · 本次 `kernel-<v>.zip` | 通道滚动**归档**（CI 版本前进门禁读这里；GitHub 在设备网络不可达，不是设备入口） |
 
+> 上面这些资产名就是设备/门禁真正去读的字符串，而 gh 的资产名**取上传文件的
+> basename**（`file#标签` 里 `#` 后面只是 label，不改名）。所以"换一个包投出去"必须
+> 先把副本改成目标名字再交，写进 `#` 后面不算数 —— 2026-09-26 repack 就是这么把
+> `apk-latest/app-debug.apk` 投成 `app-signed.apk`、latest 地址当场 404。
+> 「确保 Release 在 → 覆盖上传（含孤立资产回退）→ 回读逐字节确认」只住
+> `scripts/gh-release-upload.sh`，四条发布链路都调它，判据不在 workflow 里抄第二份。
+
 设备入口在对象存储上，同样是按通道滚动；配置来自 `container/app/src/main/assets/kernel-feed.json`：
 ```
 <baseUrl>/kernel-<channel>/kernel-manifest.json?t=<ms>   ← 判断有没有更新（?t= 由代码无条件拼上，见 kernel-ota.md §2.1）
