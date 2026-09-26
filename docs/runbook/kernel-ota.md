@@ -29,6 +29,12 @@
 ④ 真机验证通过 → 再触发 kernel-ota：version=<同版本> channel=stable publish=true（提升）
 ```
 
+**③ 那句「按通道前进」只在真读到线上 manifest 时才成立。** 取数的三态分类唯一住在
+`scripts/read-release-asset.sh`：退 0=取到 / 退 10=该通道 Release 或该资产确实没有（= 首次发布，合法）/
+退 2=看不清（网络、鉴权、限流）。退 2 与「manifest 取到了却读不出 version」都**判红不发布** ——
+旧写法是降成 `::warning` 然后照发，等于 GitHub 抖一下门禁就地不存在而流水线全绿
+（2026-09-26 定罪，判据表见 `docs/runbook/versioning.md` §3）。
+
 **产物与稳定 URL**：
 
 | 用途 | URL |
