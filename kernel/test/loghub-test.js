@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// 系统日志框架回归（docs/LOGGING-SINGLETON-AUDIT.md / SYSTEM-LOGGING-ARCHITECTURE.md）：
+// 系统日志框架回归（src/platform/loghub.js）：
 //  - 装配键契约：supervisor 用短键 ctlPorts/daemonLogs {router,lan}，EventHub 内部长键 which('router-daemon')
 //    必须映射正确（曾致 daemon 事件永不入聚合的空跑）
 //  - daemon 事件经 ctl eventsTail 增量入聚合（首拉建基线不回溯）
