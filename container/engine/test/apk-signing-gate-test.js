@@ -41,9 +41,11 @@ const PEM = '-----BEGIN CERTIFICATE-----\nMIIBFakeFakeFake\n-----END CERTIFICATE
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'apk-signing-gate-'));
 const BIN_KT = path.join(tmp, 'bin-kt');
+const BIN_KT_BAD = path.join(tmp, 'bin-kt-bad');
 const BIN_OS = path.join(tmp, 'bin-os');
+const BIN_CORE = path.join(tmp, 'bin-core');
 const SDK = path.join(tmp, 'sdk');
-[BIN_KT, BIN_OS, path.join(SDK, 'build-tools', '35.0.0')].forEach((d) => fs.mkdirSync(d, { recursive: true }));
+[BIN_KT, BIN_KT_BAD, BIN_OS, BIN_CORE, path.join(SDK, 'build-tools', '35.0.0')].forEach((d) => fs.mkdirSync(d, { recursive: true }));
 
 // 假 keytool：只认 :env 形态（参数是环境变量名）；口令被明文传上命令行就当场报出来。
 fs.writeFileSync(path.join(BIN_KT, 'keytool'), [
@@ -82,7 +84,13 @@ fs.writeFileSync(path.join(BIN_KT, 'keytool'), [
 ].join('\n'));
 fs.chmodSync(path.join(BIN_KT, 'keytool'), 0o755);
 
-// 假 openssl：验-apk-signing 读不到 keytool 时的退路（CI 容器里真 openssl 有、keytool 没有）。
+// 读不出锚点的 keytool：stdout 为空、退非零。宿主对「keytool 在但读不出」的处置是
+// 退 openssl（CT 为空才走退路），这一档不能靠「本机恰好没装 JDK」来触发 ——
+// 2026-09-26 的 CI 容器就有真 keytool，跟着镜像 PATH 跑会把退路档变成运气档。
+fs.writeFileSync(path.join(BIN_KT_BAD, 'keytool'), '#!/usr/bin/env bash\nexit 1\n');
+fs.chmodSync(path.join(BIN_KT_BAD, 'keytool'), 0o755);
+
+// 假 openssl：验-apk-signing 读不到锚点指纹时的退路。
 fs.writeFileSync(path.join(BIN_OS, 'openssl'), [
   '#!/usr/bin/env bash',
   'case "$*" in',
@@ -92,6 +100,17 @@ fs.writeFileSync(path.join(BIN_OS, 'openssl'), [
   '',
 ].join('\n'));
 fs.chmodSync(path.join(BIN_OS, 'openssl'), 0o755);
+
+// 「keytool 根本不在 PATH」这一档（注入侧的 command -v 守卫）要自己造环境：
+// 只放行宿主在这条路径上真会用到的外部命令，keytool 不在名单里。
+// 名单若缺项（镜像没 coreutils）由下面的夹具断言明说，而不是让档位断言莫名变红。
+const BARE_TOOLS = ['base64', 'mkdir', 'rm', 'cat', 'env', 'printf', 'grep', 'sed'];
+for (const n of BARE_TOOLS) {
+  for (const d of ['/usr/local/bin', '/usr/bin', '/bin']) {
+    const p = path.join(d, n);
+    if (fs.existsSync(p)) { fs.symlinkSync(p, path.join(BIN_CORE, n)); break; }
+  }
+}
 
 const APK = path.join(tmp, 'app.apk');
 fs.writeFileSync(APK, 'PK');
@@ -120,12 +139,15 @@ const CERT = path.join(tmp, 'keys/release.cert');
 fs.mkdirSync(path.dirname(CERT), { recursive: true });
 fs.writeFileSync(CERT, PEM);
 
-// PATH 组装：kt=有假 keytool，os=有假 openssl。
+// PATH 组装：kt=有假 keytool，ktd=有读不出锚点的假 keytool，os=有假 openssl，
+// bare=只用 BIN_CORE（构造「keytool 不在场」档，此时系统 PATH 完全不可见）。
 function run(script, args, o = {}) {
   const parts = [];
   if (o.kt) parts.push(BIN_KT);
+  if (o.ktd) parts.push(BIN_KT_BAD);
   if (o.os) parts.push(BIN_OS);
-  parts.push('/usr/local/bin', '/usr/bin', '/bin');
+  if (o.bare) parts.push(BIN_CORE);
+  else parts.push('/usr/local/bin', '/usr/bin', '/bin');
   const env = {
     PATH: parts.join(':'),
     ANDROID_HOME: o.sdk === null ? undefined : (o.sdk || SDK),
@@ -158,7 +180,10 @@ const ver = (extra, o = {}) => run(VERIFY, [APK, ...(extra || [])], o);
     r.rc === 2 && r.out.includes('不是没配'), JSON.stringify({ rc: r.rc }));
 }
 {
-  const r = inj({ KS_B64: Buffer.from('KEystoreFake').toString('base64'), KS_PASS: 'rightpass' });
+  check('夹具：bare PATH 备齐 base64/mkdir/rm（缺了就没有「keytool 不在场」这一档可验）',
+    ['base64', 'mkdir', 'rm'].every((n) => fs.existsSync(path.join(BIN_CORE, n))),
+    '镜像里没有 coreutils 里的这几个命令，造不出裸 PATH');
+  const r = inj({ KS_B64: Buffer.from('KEystoreFake').toString('base64'), KS_PASS: 'rightpass' }, { bare: true });
   check('inject：keytool 不可用 → 退 2（核验不成就不许继续构建）',
     r.rc === 2 && r.out.includes('keytool 不可用'), JSON.stringify({ rc: r.rc, out: r.out.slice(0, 120) }));
 }
@@ -251,8 +276,8 @@ const ver = (extra, o = {}) => run(VERIFY, [APK, ...(extra || [])], o);
   const r = ver(['--cert', CERT], { kt: true });
   check('verify：APK 指纹 == 锚点指纹 → 退 0（强档：证明「就是这把 key」）',
     r.rc === 0 && r.out.includes('与注入锚点一致'), JSON.stringify({ rc: r.rc, out: r.out.slice(0, 160) }));
-  const r2 = ver(['--cert', CERT], { os: true });
-  check('verify：没有 keytool 时退到 openssl 读锚点，结论不变',
+  const r2 = ver(['--cert', CERT], { os: true, ktd: true });
+  check('verify：keytool 在但读不出锚点 → 退 openssl 读，结论不变（退路条件是可观测的空输出，不是「本机没装 JDK」）',
     r2.rc === 0 && r2.out.includes('与注入锚点一致'), JSON.stringify({ rc: r2.rc, out: r2.out.slice(0, 160) }));
 }
 {
