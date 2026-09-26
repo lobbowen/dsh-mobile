@@ -135,6 +135,14 @@ const RULES = [
     owners: ['kernelota/KernelManager.kt'],
     why: '暂存命名只在 KernelManager.STAGING_INFIX 声明一次，建名/认名都由它派生',
   },
+  {
+    // BORN 判据的落盘名：写端（:node boot 循环入口）与认端（:main 监督者）各写一遍字面量，
+    // 改一边就得到"永远没出生"的假空壳 —— 于是监督者会把健康内核反复清账重建。
+    name: ':node 出生标记文件名',
+    re: /"node\.birth"/,
+    owners: ['lifecycle/ContainerSupervisor.kt'],
+    why: '出生标记命名只在 ContainerSupervisor.NODE_BIRTH_FILE 声明一次，:node 经 nodeBirthFile() 取路径',
+  },
 ];
 
 // 零容忍写法：不是「v1 词汇」而是**已定罪的假动作**，在任何地方（含注释）出现即失败。
@@ -165,6 +173,11 @@ const DEAD = [
   // 「不许被杀」，被杀后的正解是定罪（ResidencyAudit），不是再拽一次。
   // 这套词汇（含注释）任何地方再出现即失败：想回到多链路兜底，先改这条判据并给出理由。
   { name: '被否决的进程外复活边', re: /\bSelfHeal\b|SelfHealJobService|JobScheduler|JobService|JobInfo|BIND_JOB_SERVICE|setPeriodic\s*\(/ },
+  // 空壳 :node（真机 2026-09-26 定罪）的第一版"修复"是监督者在复活路径上向 :node 补投一条
+  // start 命令 —— 用户否决：那是拿重试伪装正常，把跨层职责倒过来糊。正解是 :node 在
+  // onCreate 自己出生 + 监督者按 BORN 判据把非法态清账重建（见下方出生链结构性判据）。
+  // 这条补投写法（含注释里的示例）任何地方再出现即失败：要回到那套，先改本条并给理由。
+  { name: '监督者向 :node 补投 start 命令', re: /startService\(\s*Intent\([^)]*NodeRuntimeService/ },
 ];
 
 // ---- 常驻链的边（真机 2026-09-26 定罪：锁屏后 App 被清 = 这些边一条都不存在）----
@@ -486,6 +499,120 @@ const vacuous = RULES.filter((r) => ownedCount.get(r.name) === 0)
 const blank = FORBIDDEN.filter((f) => !f.re.test(f.sample))
   .map((f) => f.name + ' 的正则连自身样本 "' + f.sample + '" 都匹配不上 → pattern 写坏了');
 
+// ---- 出生链（真机 2026-09-26 定罪「空壳 :node」）----
+// 为什么这一组不许用整文件正则计数：`scheduleBootLoop()` 在 onStartCommand 里本来就有一次调用，
+// 整文件计数在"出生只挂在 onStartCommand"的旧写法下照样绿 —— 那是空转门禁。
+// 所以按**函数体**取证：定位函数签名 → 花括号配对切正文 → 只在正文里找该在的调用。
+function skipKotlinString(text, qi) {
+  if (text[qi + 1] === '"' && text[qi + 2] === '"') {
+    const end = text.indexOf('"""', qi + 3);
+    return end < 0 ? text.length : end + 2;
+  }
+  for (let j = qi + 1; j < text.length; j++) {
+    if (text[j] === '\\') j++;
+    else if (text[j] === '"') return j;
+  }
+  return text.length;
+}
+// 切函数正文：从签名的左花括号到与之配对的右花括号（跳过字符串/字符/注释里的花括号）。
+function kotlinBlock(text, sigRe) {
+  const m = sigRe.exec(text);
+  if (!m) return null;
+  let i = text.indexOf('{', m.index + m[0].length - 1);
+  if (i < 0) return null;
+  let depth = 0;
+  for (; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"') { i = skipKotlinString(text, i); continue; }
+    if (c === "'") { const e = text.indexOf("'", i + 1); i = e < 0 ? text.length : e; continue; }
+    if (c === '/' && text[i + 1] === '/') { const nl = text.indexOf('\n', i); i = nl < 0 ? text.length : nl; continue; }
+    if (c === '/' && text[i + 1] === '*') { const end = text.indexOf('*/', i + 2); i = end < 0 ? text.length : end + 1; continue; }
+    if (c === '{') depth++;
+    else if (c === '}') { depth--; if (depth === 0) return text.slice(m.index, i + 1); }
+  }
+  return null;
+}
+// 切**签名段**（匹配起点到左花括号之前）：参数表里的不变量（如判据的入参维度）不在正文里，
+// 用 kotlinBlock 取正文去查必然查不到 —— 那是假红，也是空转。
+function kotlinHead(text, sigRe) {
+  const m = sigRe.exec(text);
+  if (!m) return null;
+  const open = text.indexOf('{', m.index + m[0].length - 1);
+  return open < 0 ? null : text.slice(m.index, open);
+}
+
+const BIRTH_LINK_CHECKS = [
+  {
+    name: ':node 在 onCreate 自出生（谁创建我，我都出生）',
+    rel: 'runtime/NodeRuntimeService.kt',
+    sig: /override fun onCreate\s*\(\s*\)\s*\{/,
+    need: /scheduleBootLoop\s*\(\s*\)/,
+    // 自证：同一段正文里必然存在的另一句 —— 提取器截断/错位时它就不在，判据立刻 FAIL 而不是空转。
+    proof: /writeNodePidFile\s*\(\s*\)/,
+    why: 'BIND_AUTO_CREATE 复活只跑 onCreate，ROM 的 cached-kill 之后不会重投 start 命令 —— 出生挂在 onStartCommand 上就得到"进程在、内核从没起"的空壳',
+  },
+  {
+    name: 'boot 循环入口盖出生标记（BORN 写端）',
+    rel: 'runtime/NodeRuntimeService.kt',
+    sig: /private fun bootLoop\s*\(\s*\)\s*\{/,
+    need: /writeNodeBirthMark\s*\(\s*\)/,
+    why: '监督者的 BORN 判据要有读得到的事实：循环一跑就落本进程 pid，否则空壳与健康内核无从区分',
+  },
+  {
+    name: '监督者把 BORN 事实喂进判据（读端接线）',
+    rel: 'lifecycle/ContainerSupervisor.kt',
+    sig: /private val tick: Runnable/,
+    // 只钉不变量「decide 的参数里有 born」，不钉 positional 写法：改成具名实参、换参数顺序
+    // 都不该红（那是实现细节）；把 born 整条摘掉才红（那才是本门禁要守的）。
+    need: /decide\([^)]*\bborn\b/,
+    proof: /birthMarkMatches\(/,
+    why: 'born 不进判据 = 三态退化成 POWER 一维，空壳继续被误判成健康（本门禁要抓的就是这个）',
+  },
+  {
+    name: '出生标记文件由单一常量源给出（读写不得各拼字面量）',
+    rel: 'lifecycle/ContainerSupervisor.kt',
+    sig: /companion object/,
+    need: /fun nodeBirthFile\(/,
+    proof: /NODE_BIRTH_FILE\s*=\s*"node\.birth"/,
+    why: '写端（:node）与认端（:main）共用同一取径；两边各拼一遍文件名 = 一次改名就得到永久"没出生"的假空壳',
+  },
+  {
+    name: 'BORN 是判据签名的一等输入（不许退回 POWER 单维）',
+    rel: 'lifecycle/NodeWatchdogPolicy.kt',
+    sig: /fun decide\(/,
+    part: 'head',
+    need: /born: Boolean/,
+    proof: /pidRecordAgeMs: Long/,
+    why: '空壳（进程在、boot 循环没跑）与卡死、断连是三件事，判据缺 BORN 维就会把第一件判成健康',
+  },
+  {
+    name: '空壳态进常驻通知的状态出口',
+    rel: 'lifecycle/ContainerSupervisor.kt',
+    sig: /private fun statusLine\s*\(\s*\)\s*:\s*String\s*\{/,
+    need: /运行时未出生/,
+    why: '不许把空壳写成"运行时在线"：状态不真是本产品唯一对用户的承诺',
+  },
+];
+
+const birthFails = [];
+for (const c of BIRTH_LINK_CHECKS) {
+  const abs = path.join(PKG, c.rel);
+  let text = null;
+  try { text = fs.readFileSync(abs, 'utf8'); } catch { /* 缺失下面报 FAIL */ }
+  if (text === null) { birthFails.push(c.name + ' → 读不到 ' + c.rel); continue; }
+  const body = c.part === 'head' ? kotlinHead(text, c.sig) : kotlinBlock(text, c.sig);
+  if (body === null) { birthFails.push(c.name + ' → ' + c.rel + ' 里定位不到' + (c.part === 'head' ? '签名段 ' : '函数体 ') + c.sig + '（签名写法变了，判据失去覆盖面）'); continue; }
+  if (c.proof && !c.proof.test(body)) { birthFails.push(c.name + ' → ' + c.rel + ' 的函数体提取自证失败（连必然在的 ' + c.proof + ' 都没了 = 提取截断）'); continue; }
+  if (!c.need.test(body)) birthFails.push(c.name + ' → ' + c.rel + ' 的函数体内找不到 ' + c.need + '（' + c.why + '）');
+}
+// 反向自证：判据必须**能红**。给一段"出生只挂在 onCreate 之外"的样本正文，提取器要能切出它、
+// 且判据必须判它不合格 —— 两头都对不上才是可用的门禁（只验正样本 = 正则写坏也照样绿）。
+const RED_PROOF_SRC = 'class X {\n override fun onCreate() {\n super.onCreate()\n promoteToForeground()\n writeNodePidFile()\n }\n}\n';
+const redBlock = kotlinBlock(RED_PROOF_SRC, BIRTH_LINK_CHECKS[0].sig);
+const birthBlank = [];
+if (redBlock === null) birthBlank.push('出生链提取器连样本都切不出 → kotlinBlock 写坏了');
+else if (/scheduleBootLoop\s*\(\s*\)/.test(redBlock)) birthBlank.push('出生链判据形同虚设：负样本（onCreate 里没有 scheduleBootLoop）竟被判为合格');
+
 let failed = false;
 // 扫描本身也不许空转：包根下的 .kt 数量低于地板值 = 目录结构变了而门禁还在"零违规"。
 const MIN_SCANNED_KT = 30;
@@ -519,6 +646,16 @@ if (blank.length) {
   console.log('FAIL 零容忍规则形同虚设（正则连自己的样本都匹配不上）：');
   blank.forEach((v) => console.log('  ' + v));
 }
+if (birthFails.length) {
+  failed = true;
+  console.log('FAIL 出生链断了（真机 2026-09-26 定罪「空壳 :node」：rebind 复活出来的进程从没跑过 boot 循环）：');
+  birthFails.forEach((v) => console.log('  ' + v));
+}
+if (birthBlank.length) {
+  failed = true;
+  console.log('FAIL 出生链判据形同虚设（自证双向失败）：');
+  birthBlank.forEach((v) => console.log('  ' + v));
+}
 if (dagFails.length) {
   failed = true;
   console.log('FAIL 依赖图不变式被破坏（spec §2.1 规则 2/3）：');
@@ -541,4 +678,5 @@ if (failed) {
 console.log('PASS 判据单一真值：' + RULES.length + ' 条规则在归属层内均有命中，归属层外零复写，v1 模型词汇零残留');
 console.log('PASS 依赖图不变式：' + dagMeta.join('；'));
 console.log('PASS 常驻链：' + KEEP_ALIVE_EDGES.length + ' 条边全在位；通知 id ' + notifIds.size + ' 个全仓唯一');
+console.log('PASS 出生链：' + BIRTH_LINK_CHECKS.length + ' 处按函数体/签名段取证全在位（写端 onCreate 自出生 → 出生标记落盘 → 判据 BORN 维 → 读端接线 → 状态出口），负样本判为不合格');
 console.log('结果: 1 passed, 0 failed');
