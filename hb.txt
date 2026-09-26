@@ -1,14 +1,14 @@
 CI_HEARTBEAT
-beat : 9
-time : Sat Sep 26 04:24:43 UTC 2026
+beat : 10
+time : Sat Sep 26 04:25:30 UTC 2026
 stage: 7/9 NODE-BUILD (longest, V8 compile)
 run  : 36217430866
 sha  : 4bb4c2a8ed274943db8c01191842d57436cd9722
-mem  : avail=14.1GB
+mem  : avail=14.4GB
 cgmax: n/a
-load : 3.21 2.22 1.02
-logsize: 3852610
-objs   : 133
+load : 3.10 2.33 1.12
+logsize: 4065341
+objs   : 238
 oomhits: 0
 0
-lastprog:   /usr/local/lib/android/sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang++ -o /tmp/tmp.UtnV87z5lq/node/out/Release
+lastprog:   /usr/bin/clang++ -o /tmp/tmp.UtnV87z5lq/node/out/Release/obj.host/icutools/deps/icu-small/source/tools/toolutil/ucln_tu.o ../deps/icu-small/source/tools/toolu
