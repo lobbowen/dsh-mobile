@@ -1,14 +1,14 @@
 CI_HEARTBEAT
-beat : 14
-time : Sat Sep 26 04:28:36 UTC 2026
+beat : 15
+time : Sat Sep 26 04:29:22 UTC 2026
 stage: 7/9 NODE-BUILD (longest, V8 compile)
 run  : 36217430866
 sha  : 4bb4c2a8ed274943db8c01191842d57436cd9722
-mem  : avail=14.1GB
+mem  : avail=14.2GB
 cgmax: n/a
-load : 3.05 2.70 1.49
-logsize: 4637981
-objs   : host=542 target=1975
+load : 3.02 2.74 1.56
+logsize: 4941909
+objs   : 159
 oomhits: 0
 0
-lastprog:   /usr/local/lib/android/sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang -o /tmp/tmp.UtnV87z5lq/node/out/Release/o
+lastprog:   /usr/bin/clang++ -o /tmp/tmp.UtnV87z5lq/node/out/Release/obj.host/gen-regexp-special-case/deps/v8/src/regexp/gen-regexp-special-case.o ../deps/v8/src/regexp/g
