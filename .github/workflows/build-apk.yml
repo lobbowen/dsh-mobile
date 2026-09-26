@@ -181,6 +181,11 @@ jobs:
       # 校验 OTA 公钥锚点已焊接进 APK（设备端验签唯一信任源，见 base-spec §8）。
       # 锚点 container/app/src/main/assets/ota-public.pem 应随仓库提交；若提供 OTA_PUBLIC_KEY
       # secret（PEM 文本）则以其为准覆盖，便于私钥轮换后重焊。
+      # 判据（存在 / 可解析 / 算法必须是 Ed25519）只住 scripts/verify-ota-anchor.sh 一份：
+      # 这里原先的写法是「openssl 退码 0 就算有效，否则打一条 ::warning:: 继续出包」——
+      # 坏锚点被焊进 APK 后，所有设备对每个内核包都判 signature-invalid，而这条链是绿的。
+      # 且「退码 0」并不回答算法问题：RSA 公钥一样能被 openssl pkey -pubin 读成功。
+      # （与签名私钥的**配对**校验在 kernel-ota 那条链，只有它拿得到私钥。）
       # ---------------------------------------------------------------------------
       - name: Ensure welded OTA public key anchor
         id: anchor
@@ -193,12 +198,8 @@ jobs:
             printf '%s' "$OTA_PUBLIC_KEY" > "$ANCHOR"
             echo "anchor written from OTA_PUBLIC_KEY secret"
           fi
-          if [ ! -f "$ANCHOR" ]; then
-            echo "::error::缺少 $ANCHOR（OTA 公钥锚点）；请先 commit 或提供 OTA_PUBLIC_KEY secret"
-            exit 1
-          fi
-          echo "anchor present: $(wc -c < "$ANCHOR") bytes"
-          openssl pkey -pubin -in "$ANCHOR" -noout 2>/dev/null && echo "anchor is a valid SPKI public key" || echo "::warning::anchor 不是有效 PEM 公钥"
+          bash scripts/ensure-tool.sh openssl openssl
+          bash scripts/verify-ota-anchor.sh --anchor "$ANCHOR"
 
       # ---------------------------------------------------------------------------
       # 校验本 workflow 自身：重复键之类的结构错误会被 GitHub 直接拒绝加载，
