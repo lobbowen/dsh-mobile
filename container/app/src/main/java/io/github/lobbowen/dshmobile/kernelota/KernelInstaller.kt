@@ -154,8 +154,9 @@ object KernelInstaller {
             )
         }
 
-        // ---- 3) 解包到临时目录（同名 .tmp-* 保证不污染正式目录）----
-        val tmp = File(km.kernelDir(version).parentFile, "$version.tmp-${android.os.Process.myPid()}-${System.currentTimeMillis()}")
+        // ---- 3) 解包到临时目录（暂存命名唯一出处 = KernelManager.stagingDirName；
+        //      开机清扫器按同一判据认它，安装被杀也不会留下无人认领的尸体）----
+        val tmp = File(km.kernelDir(version).parentFile, KernelManager.stagingDirName(version))
         tmp.deleteRecursively()
         tmp.mkdirs()
         try {

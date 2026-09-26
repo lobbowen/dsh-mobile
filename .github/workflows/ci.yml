@@ -199,13 +199,15 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon :app:testDebugUnitTest
           # BUILD SUCCESSFUL 不等于「跑了测试」：一个测试都没匹配上时 Gradle 照样绿。
-          # 因此从 XML 结果实名核对执行计数与本波新增的判据用例，改名/删测试必须连同这里一起改。
+          # 因此从 XML 结果实名核对执行计数与**已定罪的判据用例**，改名/删测试必须连同这里一起改。
           RES="container/app/build/test-results/testDebugUnitTest"
           ls "$RES"/*.xml >/dev/null || { echo "FAIL: 没有任何单测结果 XML（$RES）"; exit 1; }
           TOTAL=$(grep -ho 'tests="[0-9]*"' "$RES"/*.xml | grep -o '[0-9]\+' | awk '{s+=$1} END {print s+0}')
           echo "单测执行数：$TOTAL"
           [ "$TOTAL" -ge 8 ] || { echo "FAIL: 单测执行数 $TOTAL 低于地板 8，说明测试被静默跳过"; exit 1; }
-          for T in 保活锚从登记表推导_不是手写第二张清单 冲刺首项必须是必要项_其余不得挡在前面 需要人点的待选项仍然要问; do
+          # K2 定罪的三条口径（半包假红 / 尸体无人认领 / 误删已装内核）各点名一条判据用例：
+          # 用例被改名或整条删掉时，这里必须红 —— 否则修好的判据可以静默消失。
+          for T in 保活锚从登记表推导_不是手写第二张清单 冲刺首项必须是必要项_其余不得挡在前面 需要人点的待选项仍然要问 零字节空壳是唯一真失败 有内容的半包只陈列不判红 建名与认名往返一致 指针文件与正式版本目录绝不认成暂存 诊断落盘的总结论把未知算成不通过; do
             grep -rq "$T" "$RES" || { echo "FAIL: 单测「$T」没有执行记录"; exit 1; }
           done
 

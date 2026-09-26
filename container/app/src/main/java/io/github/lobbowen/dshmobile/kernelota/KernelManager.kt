@@ -47,15 +47,55 @@ class KernelManager(private val context: Context) {
 
     fun currentVersion(): String? = store.currentVersion()
 
-    /** 已安装（落盘）的内核版本目录名。 */
+    /** 已安装（落盘）的内核版本目录名。暂存目录不算装过：一次被杀的安装留下的
+     *  `<ver>.tmp-*` 既没验过入口也不可用，混进这份名单就等于把半成品说成候选版本。 */
     fun installedVersions(): List<String> {
         if (!kernelRoot.exists()) return emptyList()
         return kernelRoot.list()?.filter {
-            it != "CURRENT" && File(kernelRoot, it).isDirectory
+            it != "CURRENT" && !isStagingDir(it) && File(kernelRoot, it).isDirectory
         }?.sorted() ?: emptyList()
     }
 
     fun kernelDir(version: String): File = File(kernelRoot, version)
+
+    /** 内核落盘根目录（`files/kernel`）。布局归属本类，别处不要再拼一次 `"kernel"` ——
+     *  自检与状态存储都问这里要，字面量只留一处。 */
+    fun kernelRootDir(): File = kernelRoot
+
+    /** 开机清扫安装暂存目录，返回 (清掉的, 删不掉的)。
+     *
+     * 为什么此刻删是安全的：安装只能由本进程在 OTA 之后发起，而本函数在 boot 序列里、
+     * 任何安装动作之前跑 —— 此刻还在的 `<ver>.tmp-<pid>-<ts>` 只可能是**上次安装被杀**
+     * 留下的尸体（真机 2026-09-26 实测：`0.1.0-android.12.tmp-*` 长期驻留、无人认领，
+     * 一次失败的安装往设备上留了几十 MB 且界面零痕迹）。
+     * 只认暂存命名：正式版本目录与 CURRENT/FLOOR/PENDING 指针一律不碰。
+     * 结果必须上屏（不静默）——删掉的东西不说删了多少，等于没删。
+     * 返回 (清掉的, 删不掉的)：**只报成功清单会把"删除失败"洗成"本来就没有"**，
+     * 所以调用方按第二格判红绿。 */
+    fun sweepStaleStaging(): Pair<List<String>, List<String>> {
+        val stale = try { kernelRoot.list()?.filter { isStagingDir(it) }?.sorted() ?: emptyList() } catch (_: Throwable) { emptyList() }
+        val gone = stale.filter { File(kernelRoot, it).deleteRecursively() }
+        return gone to stale.filterNot { gone.contains(it) }
+    }
+
+    companion object {
+        /** 暂存目录 infix。建名与认名共用这一个字面量（[STAGING_RE] 由它生成），
+         *  否则改了安装器就漏了清扫器 —— 那正是本次要修的失效形态。 */
+        private const val STAGING_INFIX = ".tmp-"
+
+        private val STAGING_RE: Regex by lazy { Regex(".+" + Regex.escape(STAGING_INFIX) + "\\d+-\\d+") }
+
+        /** 安装暂存目录名 = `<版本>.tmp-<pid>-<毫秒>`。唯一出处：KernelInstaller 用它建，
+         *  [isStagingDir] 用它认。 */
+        fun stagingDirName(
+            version: String,
+            pid: Int = android.os.Process.myPid(),
+            atMs: Long = System.currentTimeMillis(),
+        ): String = version + STAGING_INFIX + pid + "-" + atMs
+
+        /** 这个名字是不是安装暂存。指针文件、正式版本目录都必须认成 false。 */
+        fun isStagingDir(name: String): Boolean = STAGING_RE.matches(name)
+    }
 
     /**
      * 内核入口脚本路径 —— **这是一个脚本，用法上不是可执行二进制**。

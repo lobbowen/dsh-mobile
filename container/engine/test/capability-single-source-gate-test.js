@@ -117,6 +117,24 @@ const RULES = [
     owners: ['native/NativeAssetRegistry.kt'],
     why: 'libnode.so 的落点只在 NativeAssetRegistry 登记，其余各处经 resolve() 取',
   },
+  {
+    // K2 定罪（2026-09-26 真机报告）：半包判据与暂存判据各有两个消费方（下载器写、
+    // 自检与开机清扫读）。字面量抄第二遍的那一方不会跟着改名走 —— 于是清扫器永远
+    // 扫不到尸体（files/kernel/0.1.0-android.12.tmp-* 长期驻留），自检把设计内的
+    // 可续传半包读成"没有"。命名与判据同源，改名必须一处改完。
+    name: '下载半包后缀',
+    re: /"\.part"/,
+    owners: ['kernelota/ResumableDownloader.kt'],
+    why: '半包命名只在 ResumableDownloader.PART_SUFFIX 声明一次，自检/清扫一律问 isPartialFile',
+  },
+  {
+    // 同上：建名方（KernelInstaller）与认名方（开机清扫、installedVersions 排除）必须
+    // 共用一个 infix。两侧各写一遍 = 一次安装失败留下的尸体没人认领，还被当成候选版本。
+    name: '安装暂存目录 infix',
+    re: /"\.tmp-"/,
+    owners: ['kernelota/KernelManager.kt'],
+    why: '暂存命名只在 KernelManager.STAGING_INFIX 声明一次，建名/认名都由它派生',
+  },
 ];
 
 // 零容忍写法：不是「v1 词汇」而是**已定罪的假动作**，在任何地方（含注释）出现即失败。

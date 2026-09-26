@@ -96,7 +96,9 @@ object KernelSelfCheck {
         }
 
         // ④ 本地内核状态（CURRENT / FLOOR / PENDING）
-        val store = KernelStateStore(File(ctx.filesDir, "kernel"))
+        //   目录布局归 KernelManager，这里只经它取（不再自己拼 "kernel" 字面量）。
+        val km = KernelManager(ctx)
+        val store = KernelStateStore(km.kernelRootDir())
         val cur = store.currentVersion()
         val floor = store.floorVersion()
         val pend = store.pending()
@@ -137,19 +139,17 @@ object KernelSelfCheck {
             out += SelfCheckReport.Item("policy", true, "OTA 裁定", desc)
         }
 
-        // ⑥ 下载半包（续传进度）
+        // ⑥ 下载半包 / 安装暂存（判据是纯逻辑，见 SelfCheckReport.partialItem）
+        //   这里只负责**采事实**：谁是半包由 ResumableDownloader.isPartialFile 说一次，
+        //   谁算暂存由 KernelManager.isStagingDir 说一次 —— 自检不自己拼字符串。
         val parts = try {
-            (ctx.cacheDir.listFiles() ?: emptyArray()).filter { it.name.endsWith(".zip.part") }
-        } catch (_: Throwable) { emptyList<File>() }
-        // 语义修正（真机实测）：「无半包」是**干净状态**，不该标成未知；
-        // 只有"存在半包"才值得注意（说明下载被中断过，虽然续传是预期行为）。
-        out += SelfCheckReport.Item(
-            "partial",
-            parts.isEmpty(),
-            "下载半包",
-            if (parts.isEmpty()) "无半包（没有中断过的下载）"
-            else "存在半包（会被续传，非错误）：" + parts.joinToString(", ") { it.name + "=" + it.length() + "B" },
-        )
+            (ctx.cacheDir.listFiles() ?: emptyArray()).filter { ResumableDownloader.isPartialFile(it.name) }
+                .map { it.name to it.length() }
+        } catch (_: Throwable) { emptyList() }
+        val staging = try {
+            (km.kernelRootDir().listFiles() ?: emptyArray()).filter { KernelManager.isStagingDir(it.name) }.map { it.name }
+        } catch (_: Throwable) { emptyList() }
+        out += SelfCheckReport.partialItem(parts, staging)
 
         // 原先这里还有第 ⑦ 项「ADB 通道」（手抄一份 state.json 存在性判断）。自检的职责是
         // **内核包本身**是否健康，通道属设备能力事实 —— 两处各判一次正是「自检说绿、首页说红」
@@ -162,7 +162,7 @@ object KernelSelfCheck {
         val items = run(ctx)
         val text = SelfCheckReport.format(items)
         try {
-            RuntimeDiagnostics.append(ctx, "selfcheck", SelfCheckReport.failed(items) == 0, "设备端自检", text)
+            RuntimeDiagnostics.append(ctx, "selfcheck", SelfCheckReport.overallOk(items), "设备端自检", text)
         } catch (_: Throwable) { }
         return text
     }

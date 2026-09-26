@@ -68,6 +68,9 @@ class NodeRuntimeService : Service() {
     @Volatile private var keepRunning = true
     /** 设备事实类探针（预置体检/写路径/PTY）每进程只跑一次。 */
     @Volatile private var probesDone = false
+
+    /** 暂存清扫的每进程一次闸门：boot 可以重试，重复扫只会把同一件事写进诊断好几遍。 */
+    @Volatile private var stagingSwept = false
     private var portUp = false
     private var healthUp = false
 
@@ -217,6 +220,31 @@ class NodeRuntimeService : Service() {
             // 1b) OTA      → CURRENT 缺失则**首次安装**；存在则按需**升级**
             // 1c) 仍无内核 → 回落探针模式（把"未安装"如实记为状态，不伪造内核）
             val km = KernelManager(this)
+
+            // 1a′) 开机清扫安装暂存（每进程一次，且必须在任何安装动作之前）：
+            // 上次安装被杀留下的 `<ver>.tmp-*` 在这一刻不可能是活的（安装只由本进程在
+            // OTA 之后发起）。真机 2026-09-26 实测到 `0.1.0-android.12.tmp-*` 长期驻留：
+            // 既占空间，又被 installedVersions() 当成候选版本（现按暂存命名排除）。
+            // 删了什么一律上屏，不做静默清理。
+            if (!stagingSwept) {
+                stagingSwept = true
+                val sweep = try { km.sweepStaleStaging() } catch (e: Throwable) {
+                    RuntimeDiagnostics.append(this, "kernel-tmp", false, "暂存清扫异常", "${e::class.java.simpleName}: ${e.message}")
+                    null
+                }
+                if (sweep != null) {
+                    val (gone, stuck) = sweep
+                    val head = when {
+                        stuck.isNotEmpty() -> "安装暂存残留删不掉 ${stuck.size} 个（已清 ${gone.size} 个）"
+                        gone.isNotEmpty() -> "清掉上次被杀安装的残留 ${gone.size} 个"
+                        else -> "无安装暂存残留"
+                    }
+                    RuntimeDiagnostics.append(
+                        this, "kernel-tmp", stuck.isEmpty(), head,
+                        (gone.map { "已清 $it" } + stuck.map { "删不掉 $it" }).joinToString()
+                    )
+                }
+            }
 
             // 1b) 远端内核 OTA：查一次 feed，有更新就自动升级。
             //
@@ -528,19 +556,15 @@ class NodeRuntimeService : Service() {
         RuntimeDiagnostics.append(this, "ptyprobe", null, "PTY 探针结果", r.toString())
     }
 
+    /**
+     * 写探针：只测**我们自己真正会写的位置**。
+     *
+     * 判据必须区分「坏」与「本就不该写/测不到」：Android 应用进程写 /tmp 必然 EACCES，
+     * 探它等于制造一次固定假红。外部私有目录在部分机型拿不到（返回 null），那是**未知**，
+     * 也不能伪造一个路径去探 —— 未知不算通过，但必须如实是未知。
+     */
     private fun probeFilesystemWrites() {
-        val targets = linkedMapOf(
-            "files" to File(filesDir, ".dsh-write-probe"),
-            "cache" to File(cacheDir, ".dsh-write-probe"),
-            "external" to (getExternalFilesDir(null)?.let { File(it, ".dsh-write-probe") } ?: File("<null>")),
-            "/tmp" to File("/tmp/.dsh-write-probe"),
-            "dsh-home" to File(File(filesDir, ".dsh"), ".write-probe")
-        )
-        for ((label, f) in targets) {
-            if (!f.absolutePath.startsWith("/")) {
-                RuntimeDiagnostics.append(this, "probe", false, "写探针 $label", "路径不可用")
-                continue
-            }
+        fun probe(label: String, f: File) {
             val r = try {
                 f.parentFile?.mkdirs()
                 f.writeText("probe")
@@ -555,6 +579,18 @@ class NodeRuntimeService : Service() {
             } else {
                 RuntimeDiagnostics.append(this, "probe", false, "写探针 $label 失败", "$r ${f.absolutePath}")
             }
+        }
+        val targets = linkedMapOf(
+            "files" to File(filesDir, ".dsh-write-probe"),
+            "cache" to File(cacheDir, ".dsh-write-probe"),
+            "dsh-home" to File(File(filesDir, ".dsh"), ".write-probe")
+        )
+        for ((label, f) in targets) probe(label, f)
+        val ext = try { getExternalFilesDir(null) } catch (_: Throwable) { null }
+        if (ext == null) {
+            RuntimeDiagnostics.append(this, "probe", null, "写探针 external", "本机未提供外部私有目录，无法判定")
+        } else {
+            probe("external", File(ext, ".dsh-write-probe"))
         }
     }
 

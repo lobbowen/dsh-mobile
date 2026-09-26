@@ -34,6 +34,14 @@ object ResumableDownloader {
 
     enum class Result { DONE, PARTIAL, FAILED }
 
+    /** 半包后缀：命名规则的唯一出处。调用方一律 `dest.name + PART_SUFFIX`，
+     *  自检/清扫一律问 [isPartialFile] —— 别处再手写一次 `.part` 就是第二把尺子，
+     *  改一次名就有一个判据静默失配（真机案底：`$PREFIX` 的字面量漂移）。 */
+    const val PART_SUFFIX = ".part"
+
+    /** 这个名字是不是半包。只看文件名、不碰磁盘，所以自检采事实时不必再拼一次后缀。 */
+    fun isPartialFile(name: String): Boolean = name.endsWith(PART_SUFFIX)
+
     data class Outcome(val result: Result, val detail: String?, val partBytes: Long)
 
     fun download(
