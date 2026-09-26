@@ -70,6 +70,9 @@ class ContainerSupervisor : Service() {
     @Volatile private var controlPlaneUp = false
     /** BORN 态读数：当前 :node 进程的 boot 循环是否真的跑起来过（状态出口与判据同源）。 */
     @Volatile private var born = false
+    /** 三态是否至少采过一次。转前台与状态刷新共用同一句正文，故必须有个「还没采到」的说法，
+     *  不能把默认值当结论播出去（真机判据 3 定罪 D9 的另一半）。 */
+    @Volatile private var readingsCollected = false
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
@@ -117,8 +120,10 @@ class ContainerSupervisor : Service() {
 
     private fun promoteToForeground() {
         try {
-            // 第一拍读数还没采，正文先用「此刻已经确定」的东西：有定罪结论就写在最前面。
-            startForeground(NOTIF_ID, buildNotification(ResidencyAudit.interruption() ?: "状态采集中…"))
+            // 转前台**不另写正文**：通知 1004 的正文唯一作者是 statusLine()（定罪段已由它排在最前）。
+            // 真机判据 3 定罪的 D9 就是这里曾直接写 ResidencyAudit.interruption()：
+            // :node 越不出生、ensureRunning 被戳得越密，每戳一次盖一次，三态结论永远上不了屏。
+            startForeground(NOTIF_ID, buildNotification(statusLine()))
         } catch (t: Throwable) {
             RuntimeDiagnostics.append(
                 this, "supervisor", false, "转前台失败（不影响 binder 监督边）",
@@ -217,6 +222,7 @@ class ContainerSupervisor : Service() {
         } catch (_: Throwable) {
             false
         }
+        readingsCollected = true
         try {
             (getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager)
                 .notify(NOTIF_ID, buildNotification(statusLine()))
@@ -226,6 +232,9 @@ class ContainerSupervisor : Service() {
 
     private fun statusLine(): String {
         val runtime = when {
+            // 第一拍之前 born/controlPlaneUp 都只是默认值，把它们当结论播 = 把「未知」说成「未出生」。
+            // 读数一旦采过就不再退回：:node 反复重启期间 tick 一直在跑，退回会让空壳态重新变得看不见。
+            !readingsCollected -> "状态采集中…"
             controlPlaneUp -> "运行时在线"
             // 空壳单独一说：进程在、boot 循环没跑过，此刻正被按 [NodeWatchdogPolicy] 清账重建。
             // 绝不写成「运行时在线」糊过去 —— 状态不真是本产品唯一对用户的承诺。

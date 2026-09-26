@@ -1,8 +1,8 @@
 {
   "$comment": "壳（APK）分发身份的单一事实源。两条独立版本流的定义见 docs/adr/0004-dual-version-streams.md。",
   "shell": {
-    "versionName": "1.1.6",
-    "versionCode": 8,
+    "versionName": "1.1.7",
+    "versionCode": 9,
     "bridgeProtocol": 1
   }
 }

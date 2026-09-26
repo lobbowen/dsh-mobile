@@ -110,7 +110,8 @@ main 历史的 commit（2026-09-26 16:12 实证，见执行案 D8）。
 
 | 项 | 状态 |
 |---|---|
-| 三态判据（POWER/BORN/ONLINE）+ `onCreate` 自出生 + 出生标记单源 + 空壳上屏 | **已落**（壳 1.1.6(8)，含 JVM 单测与门禁出生链 6 处取证） |
+| 三态判据（POWER/BORN/ONLINE）+ `onCreate` 自出生 + 出生标记单源 | **已落并真机自证**（壳 1.1.6(8)；含 JVM 单测与门禁出生链 6 处取证；真机 cached-kill 注入 t+4s 复活、t+11s 端口复听） |
+| 空壳上屏（¬BORN 必须出现在常驻通知上） | 1.1.6(8) **真机判失败**：常驻通知 1004 有两个正文写者，`promoteToForeground()` 每次投递都盖掉三态结论（执行案 D9）⇒ 正文改单写者 = `statusLine()`，随壳 1.1.7(9) 出，**复点前本项不算落地** |
 | ARCHITECTURE §1.1 铁律 2 废止改写 | 已随本 ADR 改写 |
 | C2 desired==actual 状态机、通道 LIVE 后自动首次开机 | 未做（执行案 P1 之后） |
 | C1 adopt-or-start、runtime.json schema 3 握手 | 未做（执行案 P1，先决实验在前） |
