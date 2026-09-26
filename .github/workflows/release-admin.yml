@@ -599,23 +599,21 @@ jobs:
       - name: Sign APK
         run: |
           set -euo pipefail
-          # 用仓库 Actions secret 里的 keystore（若有），否则生成一个临时 debug 签名。
-          # 说明：本包仅用于自测，debug 签名足够；要长期升级可换成固定 keystore。
+          # repack 的默认发布目标就是 apk-latest（下一步）——那是存量设备的更新通道。
+          # 一次性 debug 密钥重签的包会把稳定签名的装机群打成 INSTALL_FAILED_UPDATE_INCOMPATIBLE，
+          # 所以这里**没有兜底**：缺 keystore = 判红。原先的「debug 签名足够」是 repack
+          # 还只用于自测、没接发布通道时代的遗物（2026-09-26 收口，与 fast-apk 的
+          # 「配了 keystore 却出 debug 签名 → 硬红」同一判据方向）。
           KS="$RUNNER_TEMP/release.keystore"
-          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
-            echo "== 使用仓库配置的 keystore =="
-            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$KS"
-            KS_PASS="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
-            KS_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}"
-            KS_KEYPASS="${{ secrets.ANDROID_KEY_PASSWORD }}"
-          else
-            echo "== 未配置 keystore，生成本次专用的 debug 签名 =="
-            keytool -genkeypair -v -keystore "$KS" \
-              -storepass android -keypass android \
-              -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US" >/dev/null 2>&1
-            KS_PASS=android; KS_ALIAS=androiddebugkey; KS_KEYPASS=android
+          if [ -z "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "::error::未配置 ANDROID_KEYSTORE_BASE64 —— repack 会发布到 apk-latest，禁止临时 debug 签名兜底"
+            exit 1
           fi
+          echo "== 使用仓库配置的 keystore =="
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$KS"
+          KS_PASS="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+          KS_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}"
+          KS_KEYPASS="${{ secrets.ANDROID_KEY_PASSWORD }}"
 
           APKSIGNER="$(bash scripts/pick.sh --last apksigner "$ANDROID_HOME/build-tools" -name apksigner -type f)"
           "$APKSIGNER" sign \
