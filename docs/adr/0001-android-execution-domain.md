@@ -97,7 +97,7 @@ renameat2 NOREPLACE: available
 | P1 | `libdshposix` 收敛（flock/publish/pty/image） | 单一 .so + 单一加载器；旧三件退役 |
 | P2 | `$PREFIX`（bash/coreutils/rg） | DSH bash 工具**无任何补丁**可用；`glob/grep` 无补丁可用 |
 | P3 | Agent 描述符 + DSH adapter | 内核对 DSH 零硬编码；可挂第二个 Agent |
-| P4 | 图像/PTY 原生件（自有 codec、node-pty android 构建） | `read_image`/图片附件、终端可用 |
+| P4 | 图像/PTY 原生件（自有 codec、node-pty android 构建） | `read_image`/图片附件、终端可用。读数只认 `nativeCaps` 对应格的 `ok=true`（投放结局 applied 不算过，见 P4 证伪记录） |
 | P5 | 退役 shim 层 | `guard/native/*-shim.js` 与 `.dsh-orig` 归零 |
 
 ## 6. 被否决的方案
@@ -133,7 +133,7 @@ renameat2 NOREPLACE: available
     于是这道门禁恰好测不到 `run_code` 的真实形态。能力件（`$PREFIX` 下的 bash/rg）
     按同一判据重编属后续工作。
 - 终端：node-pty 无 wasm/回退路径，必须 NDK 交叉编译。已在 fast-apk.yml 落地构建步骤（API 24 取 forkpty、去 `-lutil`、node-gyp + node 头），产物 `libdshpty.so` 经 `PrefixProvisioner` 落到 `$PREFIX/lib/pty.node`，再由内核投放到 `node-pty/prebuilds/android-arm64/pty.node`；上游配方失败只降级终端能力。
-- 图片：已按「补真实依赖」解决（见下），不再是降级项。
+- 图片：**仍是降级项。** 本节 2026-09-23 写的「已按补真实依赖解决」已于 2026-09-26 被真机证伪，见下「P4 证伪记录」。
 
 ### P4 结论（2026-09-23 复核）
 
@@ -149,6 +149,35 @@ renameat2 NOREPLACE: available
 
 - 用自研 `sharp` 兼容包替换依赖（属替换实现，破坏依赖契约）→ 否决。
 - 把图像处理搬到 HostBridge/Bitmap 再做替换包 → 同上，且引入跨进程旁路 → 否决。
+
+### P4 证伪记录（2026-09-26 真机，环境报告 §4.2）
+
+上面「图片：补给 `@img/sharp-wasm32` 即解决」这句结论**作废**。真机实测：
+
+- 依赖树里确实有 `@img/colour` 与 `@img/sharp-wasm32`（补装那一步成功了），**没有** `@img/sharp-android-arm64`；
+- 而 `sharp@0.35.4` 仍加载失败。失败路径本身还盖掉了真因：`sharp/dist/sharp.cjs:115` 直接对
+  `err.code` 调 `.endsWith("MODULE_NOT_FOUND")`，此处 `err.code === undefined` → 表层报
+  `reading 'endsWith'`，实际是「找不到本平台二进制」。
+- 影响面不止 `read_image`：`dsh-attachment`、`dsh-compaction-image-offload` 等图片链路共用 sharp。
+
+「Android 走不进 sharp 硬编码 switch、只能靠 wasm 回退」这段分析仍然成立；被证伪的是**下一步**：
+补装完成后没有任何人对「sharp 能不能加载」做一次观测，于是投放结局（applied）被当成能力结论写进了
+本 ADR。缺的不是细心，是一层判据 —— 补装成功与能力可用之间当时零可见证据。
+
+**口径修正（2026-09-26 起）**：原生件有两个正交结论 —— 投放结局 `nativeUnits`
+（applied/already/skipped/blocked/failed，只说「动没动过手」）与能力结论 `nativeCaps`
+（true/false/null，未知绝不算通过）。判据以数据形式住在 `kernel/src/guard/native/supply-table.json`
+每格的 `verify`，唯一执行器是 `capability-probe.js`，探针跑在**被检的那份 node** 的子进程里；
+以「文件在不在」作结论已被 `native-supply-gate-test.js` 禁用（那正是本节假绿的形状）。
+本 ADR 此后不再写「某能力已解决」，除非引用那格 `ok=true` 的出处（面板 / `native_capability` 事件）。
+
+**待办**：真机跑一次核验，读 sharp-image 那格到底是 `false`（绑定坏了，要另找供给路径）还是
+`null`（探针没条件跑，先修环境）。在读到该读数之前，图片项按降级项对待。
+
+**同期更正（2026-09-26）**：`ADR-0002` 的 P2 曾记「未解决：疑因内核 env 缺 `LD_LIBRARY_PATH`，
+复核即可关闭」—— 复核已做，结论是**没有这条缺口**：`libsharp.so` 的 `DT_NEEDED` 全为
+android-arm64，且它由 node 以 `dlopen(RTLD_LAZY)` 加载（不走 exec 路径）。所以 wasm 回退不通
+与执行域选择无关，本条从 ADR-0002 的待办里作废，归口到上面的 sharp-image 探针读数。
 
 ### P4 补充：read_image 的 EACCES（2026-09-23 定位并修复）
 

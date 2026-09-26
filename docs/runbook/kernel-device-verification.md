@@ -113,14 +113,34 @@ adb shell run-as io.github.lobbowen.dshmobile cat files/diagnostics.txt
 
 ---
 
-## 9. 验证通过后的两件事（别忘）
+## 9. 原生件能力核验（投放 ≠ 能力）
+
+| 项 | 内容 |
+|---|---|
+| **触发** | 装完/升级完 DSH 后重启内核（安装那一轮必核验一次），或在面板上等 `/status` 刷新一轮 |
+| **看哪里** | ① 面板 DSH 卡片第二排「能力…」；② `<DSH_SUPERVISOR_HOME>/native-manifest.json` 的 `nativeCaps`（内核重启后仍能看到上次结论）；③ `<DSH_SUPERVISOR_HOME>/events/guard.events.log` 里的 `native_capability` |
+| **判据** | `ok=true` 才是可用；`false` = 探针跑起来了而判据不过（能力确实坏了）；`null` = 探针没条件跑 / 判据待做 / 免检 —— **未知，不算通过** |
+| **与投放结局对照** | 同一格在 `nativeUnits` 里完全可能是 `applied`，那只代表「我们补装动过手」。两排不一致是设计如此，读能力以 `nativeCaps` 为准 |
+| **为什么重要** | 真机 2026-09-26：`sharp-image` 报 applied（`@img/sharp-wasm32` 就在依赖树里）而 sharp 取不到绑定，`read_image` 全灭，界面上零痕迹 —— ADR-0001 P4 因此把「已解决」写了出去（现已作废） |
+
+判据本体（每格一段交给**被检那份 node** 跑的 JS）住在 `kernel/src/guard/native/supply-table.json`
+的 `units[].verify`，执行器唯一：`capability-probe.js`。改判据就是改表，CI 逐格盯得住
+（`native-supply-gate-test.js`）。当前表里 `node-pty` 那格按拍板挂起到终端批次，面板恒读「未知」——
+那不是 bug，别替它报通过。
+
+**回传要求**：任何一格是 `false` 或 `null`，把该格 `detail` 原文带回来 —— 它就是探针的完整结论。
+面板上 `detail` 挂在 chip 的 `title`（桌面浏览器悬停可见）；手机上直接看上面 ② 那份 `native-manifest.json`。
+
+---
+
+## 10. 验证通过后的两件事（别忘）
 
 1. **提升到生产通道**：跑 `kernel-ota`，`channel=stable`、同版本（门禁允许同版本重发）、`rollout_percent` 从小比例开始；
 2. **把设备通道改回 stable**：`assets/kernel-feed.json` 的 `"channel": "canary"` → `"stable"`，并重新出 APK。
 
 > 顺序不能反：stable 通道现在**还没有** manifest，先改会 404。
 
-## 10. 请回传给我的
+## 11. 请回传给我的
 
 - `provisioning.json` 全文；
 - `diagnostics.txt` 里含 `kernel-ota` / `kernel-commit` / `kernel-rollback` / `health` / `process` 的行；

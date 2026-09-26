@@ -25,6 +25,24 @@ export interface NativeUnitOutcome {
   at?: string;
 }
 
+/** 能力核验三态。与投放结局正交：applied 只说明「我们动过手」，true 才说明「用户能用」。
+ *  null = 探针没条件跑 / 判据待做 / 免检 —— **UI 绝不可把 null 渲染成通过**（真机 2026-09-26：
+ *  sharp 报 applied 而绑定取不到，read_image 全灭）。 */
+export interface NativeCapOutcome {
+  id: string;
+  ok: boolean | null;
+  detail?: string | null;
+  at?: string;
+}
+
+export interface NativeCapsReport {
+  overall: boolean | null;
+  units: Record<string, NativeCapOutcome>;
+  /** 整批未执行的原因（非容器形态、根不可达、核验异常）。 */
+  note?: string;
+  at?: string;
+}
+
 export interface NativeDshStatus {
   installed: boolean;
   version?: string | null;
@@ -37,6 +55,8 @@ export interface NativeDshStatus {
   task?: unknown;
   /** 本轮进程的实际投放结局；null/缺席 = 本轮还没跑过（不是「全部正常」）。 */
   nativeUnits?: Record<string, NativeUnitOutcome> | null;
+  /** 与 nativeUnits 必须同时读：那是第二个结论（能力通不通）。null = 本轮没核验过。 */
+  nativeCaps?: NativeCapsReport | null;
 }
 
 export interface DshVersionInfo {

@@ -119,15 +119,15 @@ if (table) {
   check('表非空（零条处置等于门禁空转）', units.length > 0, units.length + ' 条');
 
   for (const u of units) {
-    check('处置须写明为什么: ' + u.id, typeof u.why === 'string' && u.why.length >= 20);
-    if (u.disposition === 'supplied-by-us') {
+    check('处置须写明为什么: ' + u.id, typeof u.why === 'string' && u.why.length >= 20);    if (u.disposition === 'supplied-by-us') {
       check('投放实现文件在场: ' + u.id, !!u.impl && fs.existsSync(path.join(ROOT, u.impl)), u.impl || '（缺 impl）');
     }
     if (u.disposition === 'npm-auto') {
       check('npm-auto 须写明证据: ' + u.id, typeof u.evidence === 'string' && u.evidence.length >= 20);
     }
     if (u.disposition === 'runtime-check') {
-      check('runtime-check 须写明谁在真机核验: ' + u.id, typeof u.check === 'string' && u.check.length >= 20);
+      check('runtime-check 必须有可执行判据（不再写「人去真机跑一条命令」）: ' + u.id,
+        !!(u.verify && typeof u.verify.node === 'string' && u.verify.node.length >= 20), u.id);
     }
     if (u.disposition === 'waived') {
       const w = u.waiver || {};
@@ -139,6 +139,88 @@ if (table) {
       }
     }
   }
+
+  // ── 能力判据（真机 2026-09-26 定罪的第二结论）───────────────────────────────
+  // 投放结局（applied/already/blocked/failed）说的是「我们动过手没有」，不是「用户能不能用」。
+  // 案底：sharp 那一格报 applied —— @img/sharp-wasm32 就在依赖树里 —— 而 sharp 自己取不到
+  // 绑定（第三方源码 dist/sharp.cjs:103 的 wasm 回退 require 失败后被 :115 的
+  // `err.code.endsWith` TypeError 掩盖了真因），read_image 全灭。ADR-0001 P4 当时写的
+  // 「图片：已按补真实依赖解决」因此是假结论。判据拆到每格 verify，就是为了下一次不再用
+  // 「文件在不在」当「能力通不通」。
+  const VERIFY_EXITS = ['node', 'deferred', 'notApplicable'];
+  // 被禁的判据形状：以「文件/目录在场」作结论。注意这是**判据层**的禁令，
+  // 投放实现里 existsSync 是正当的幂等检查 —— 所以扫的是 verify.node，不是 impl。
+  const FILE_SHAPED = /existsSync|statSync|readFileSync|readdirSync|realpathSync|lstatSync/;
+  const MARKER = /DSH_PROBE_PASS/;
+  let executableCriteria = 0;
+  for (const u of units) {
+    const v = u.verify;
+    if (!v || typeof v !== 'object') {
+      check('每格必须有能力判据或明确不核验: ' + u.id, false, 'verify 缺失 —— 供给表退化成「投放=可用」的老口径');
+      continue;
+    }
+    const exits = VERIFY_EXITS.filter((k) => v[k] !== undefined && v[k] !== '' && v[k] !== null);
+    check('判据出口唯一（三个键只能给一个）: ' + u.id, exits.length === 1, exits.join('+'));
+    if (exits.length !== 1) continue;
+    const kind = exits[0];
+    if (kind === 'node') {
+      executableCriteria++;
+      check('判据是可执行判据而非口号: ' + u.id, typeof v.node === 'string' && v.node.length >= 40, String(v.node).length + ' 字');
+      check('判据须写明什么算通: ' + u.id, typeof v.criterion === 'string' && v.criterion.length >= 15);
+      // 判据不得由「文件在不在」得出 —— 那正是被证伪的那种绿。对照组先行：
+      // 正则若连明显的 existsSync 写法都匹配不上，这条规则就是永不红的死规则。
+      check('对照组：文件在场判据能命中被禁写法', FILE_SHAPED.test("if (fs.existsSync(target)) process.stdout.write('DSH_PROBE_PASS')"), 'hit');
+      const shaped = FILE_SHAPED.exec(v.node);
+      check('判据不以文件在场作结论: ' + u.id, !shaped, shaped ? '命中 ' + shaped[0] : '');
+      // 空转判据：脚本从不失败（没有 throw / exit(1) 通路）就恒打标记，等于没装锁。
+      check('判据有失败出口: ' + u.id, /throw|process\.exit/.test(v.node),
+        '没有 throw 也没有非零退出 = 任何状态都算通过');
+      check('判据打通过标记: ' + u.id, MARKER.test(v.node));
+      const markerCount = (v.node.match(/DSH_PROBE_PASS/g) || []).length;
+      check('通过标记只出现一次（多处=有一条路径不打标记也算过）: ' + u.id, markerCount === 1, markerCount + ' 处');
+    }
+    if (kind === 'deferred') {
+      const w = v.deferred || {};
+      const dates = [w.verifiedAt, w.expiresAt].every((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d));
+      check('待做判据须有 followUp 与到期日: ' + u.id, dates && !!w.followUp, JSON.stringify(w));
+      if (dates) {
+        check('待做判据未过期: ' + u.id + '（' + w.expiresAt + '）', new Date(w.expiresAt + 'T23:59:59Z') >= new Date(),
+          '挂起到期还没做探针：要么补判据，要么把这条能力如实标为不可用');
+      }
+    }
+    if (kind === 'notApplicable') {
+      check('不核验须写明为什么: ' + u.id, typeof v.notApplicable === 'string' && v.notApplicable.length >= 20, u.id);
+      // 我们自己在投的件没有「不需要验」这条路 —— 那是把假绿改写成口头豁免。
+      check('供给件不得免检: ' + u.id, u.disposition !== 'supplied-by-us',
+        'disposition=supplied-by-us 却给 notApplicable');
+    }
+  }
+  // 自证：判据层不能整体空转（若有人把 node 脚本全删成 notApplicable，上面的逐条检查照样全绿）。
+  check('至少 5 格有可执行能力判据（否则判据层已空转）', executableCriteria >= 5, executableCriteria + ' 格');
+  // 单一真值：通过标记只许住在「定义处」与「表」两处，别处再写一遍就是第二把尺子。
+  const markerOwners = ['supply-table.json', 'capability-probe.js'];
+  for (const f of fs.readdirSync(NATIVE_DIR)) {
+    if (!/\.(js|json)$/.test(f)) continue;
+    const src = fs.readFileSync(path.join(NATIVE_DIR, f), 'utf8');
+    const hits = (src.match(/DSH_PROBE_PASS/g) || []).length;
+    const allowed = markerOwners.includes(f);
+    if (allowed) continue;
+    check('通过标记不在归属文件之外复写: ' + f, hits === 0, hits + ' 处');
+  }
+  for (const f of markerOwners) {
+    check('标记归属文件确实在打标（零命中=判据接线被拆）: ' + f,
+      fs.readFileSync(path.join(NATIVE_DIR, f), 'utf8').includes('DSH_PROBE_PASS'));
+  }
+  // 接线自证：manager 必须把核验结论作为**第二个**出口摊开（status + 清单），
+  // 而不是只存在内存里等人发现。缺任一处 = 结论又在人脑里。
+  const mgrSrc = fs.readFileSync(path.join(NATIVE_DIR, 'manager.js'), 'utf8');
+  check('manager 有核验入口', /verifyNativeCapabilities\s*\(/.test(mgrSrc), '找不到 verifyNativeCapabilities');
+  check('核验结论进 status()', /nativeCaps:/.test(mgrSrc.slice(mgrSrc.indexOf('status()'), mgrSrc.indexOf('/* ═══════ 版本检测'))),
+    'status() 未暴露 nativeCaps —— 面板读不到就等于没有第二结论');
+  check('核验结论随安装清单落盘', /nativeCaps: caps/.test(mgrSrc), '_recordManifest 未写 nativeCaps');
+  // 反向：投放结局不得被写成能力结论（那两个词的语义已经分开，混用即定罪复发）。
+  check('投放结局词汇未被扩成能力词', !/status:\s*'(ok|pass|available|working)'/.test(mgrSrc),
+    'nativeUnits 里出现能力性 status = 又造了一把尺子');
 
   // 反向：目录里的投放实现必须都挂在表上 —— 新写垫片不登记就红。
   const impls = fs.readdirSync(NATIVE_DIR).filter((f) => IMPL_SUFFIX.test(f));

@@ -45,6 +45,11 @@ class NativeManager {
     this.manifestFile = path.join(this.stateDir, 'native-manifest.json');
     this.dshHome = path.join(os.homedir(), AGENT.homeDirName); // 被管控 Agent 的数据目录（守卫数据另置）
     this.npmRoot = opts.npmRoot || null;    // npm 全局根（测试可注入隔离目录）
+    // 能力核验（与投放结局正交）：null = 本轮还没核过 —— 与 nativeUnits 同一个口径，
+    // 绝不从 manifest 回填上一进程的结论（把「不知道」伪装成「正常」是第二种假绿）。
+    this.nativeCaps = null;
+    this._capsRan = false;
+    this._supplyUnitsCache = null;
     // npm 可执行的解析入口（**依赖注入**，默认经跨平台解析）。
     // 为什么必须可注入（2026-09-12 事故）：
     // 我写 P1-F 行为测试时用「patch 模块导出」的方式替换 npmBin，
@@ -142,6 +147,9 @@ class NativeManager {
       // 本轮进程的实际投放结局（每条自带 at）。null = 本轮还没跑过投放 ——
       // 不从 manifest 回填旧值：把上次进程的结局当成本轮的，就是把「未知」伪装成「正常」。
       nativeUnits: this.nativeUnits || null,
+      // 能力核验结论（三态，null=未知）。与上面那行**必须同时读**：nativeUnits 说动过手，
+      // nativeCaps 说能不能用。只读前者就会把 sharp 那种「件在树里而绑定取不到」读成正常。
+      nativeCaps: this.nativeCaps || null,
       // 统一任务视图（若注册表存在）
       task: activeTask ? this.tasks.view(activeTask) : null,
     };
@@ -244,7 +252,11 @@ class NativeManager {
     this._applyLaunchCommand(npmRoot);
     // 投放单元跑一次并把结局随清单落盘：面板/取证在内核重启后仍能看到上次供给状态，
     // 不必等下一次 spawn 才把内存填回来。
-    const units = this.ensureNativeUnits(npmRoot);
+    // 刚装完的这一轮必须重新核（覆盖安装/重装 dsh 会重建 node_modules，能力随时可能变）：
+    // 走 ensureNativeUnits 的第二个参数，而不是在它之后再补一轮 —— 每格一个有界子进程，
+    // 重复跑就是把开销挂在安装路径上换同一个结论。
+    const units = this.ensureNativeUnits(npmRoot, true);
+    const caps = this.nativeCaps;
     const bin = this.binPath();
     let pkgDir = null;
     try { pkgDir = path.join(npmRoot, this.config.packageName); } catch {}
@@ -256,6 +268,7 @@ class NativeManager {
       packageDir: pkgDir || null,
       dshHome: this.dshHome,
       nativeUnits: units,
+      nativeCaps: caps,
       // 只保留显式/继承认领的数据路径；绝不默认写入 ~/.dsh 全部用户数据（防误删凭据/会话）
       dataPaths: claim || [],
     });
@@ -372,14 +385,88 @@ class NativeManager {
   }
 
   /** 跑完全部投放单元（安装/升级/回滚后与每次 spawn 前各一次；恒幂等）。
-   * 返回本轮内存结局表；调用方（_recordManifest）负责随清单落盘。 */
-  ensureNativeUnits(rootOverride) {
+   * 返回本轮内存结局表；调用方（_recordManifest）负责随清单落盘。
+   * 注意这里只是**投放**结论；「能力通不通」是正交的第二个结论，见 verifyNativeCapabilities。 */
+  ensureNativeUnits(rootOverride, freshCaps) {
     this.ensureRequireBuiltinShim(rootOverride);
     this.ensureFlockShim(rootOverride);
     this.ensureRipgrepPackage(rootOverride);
     this.ensureSharpWasm(rootOverride);
     this.ensureNodePtyPrebuild(rootOverride);
+    // 每进程一次：投放每轮都跑（幂等且廉价），核验要起子进程，只在第一轮补。
+    // 不在这里无条件跑：本方法在每次 spawn 前被调用，把五六个有界子进程挂在启动路径上
+    // 换不来新信息 —— 除第一轮外，磁盘状态没被动过。
+    // 例外：刚装完/升级完的那一轮传 freshCaps=true，投放结局是新写的，核验必须跟着新。
+    this.verifyNativeCapabilities(freshCaps);
     return this.nativeUnits || {};
+  }
+
+  /* ═══════ 能力核验（与投放正交的第二结论）═══════ */
+  /** 把供给表每格的 verify 交给**被检的那份 node** 跑一次，得到「能力通不通」。
+   * 为什么必须有第二结论（真机 2026-09-26 定罪）：投放结局的四个词（applied/already/
+   * blocked/failed）全都在说「我们动过手没有」。sharp 那一格报 applied —— @img/sharp-wasm32
+   * 在依赖树内 —— 而 sharp 取不到绑定、read_image 全灭。把投放当能力就是把尺子的刻度
+   * 当成量出来的结果；判据现在写在供给表里，本方法只是唯一的执行器。
+   * 三态：true=探针退 0 且带标记 / false=探针跑起来而判据不过 / null=探针没条件跑或该格
+   * 待做、不适用。**null 不是通过**：overall 里未知既不算绿也不掩盖红。
+   * 恒不抛（不变量 C2：核验是观察，观察不得否决被观察的那次运行）。
+   * @param {boolean} [fresh] 安装/升级刚完成时传 true —— 那一轮的投放结局是新写的，核验必须跟上
+   * @returns {object|null} 本轮核验汇总（null = 本轮还没跑过） */
+  verifyNativeCapabilities(fresh) {
+    if (this._capsRan && !fresh) return this.nativeCaps;
+    this._capsRan = true;
+    let res;
+    try {
+      const ctx = this._unitContext();
+      if (ctx.skip) {
+        // 非容器形态/根不可达：每格都是「我们不知道」，而不是一片空白 —— 空白在内核重启后
+        // 与「全通」在面板上长得一样，那是第二种假绿。
+        const units = {};
+        for (const u of this._supplyUnits()) {
+          units[u.id] = { id: u.id, ok: null, detail: '核验未执行：' + ctx.skip.reason, at: new Date().toISOString() };
+        }
+        res = { overall: null, units, note: ctx.skip.reason };
+      } else {
+        const units = require('./capability-probe').probeUnits(this._supplyUnits(), {
+          nodeBin: ctx.contract.nodePath || process.execPath,
+          packageDir: path.join(ctx.root, this.config.packageName),
+        });
+        res = { overall: require('./capability-probe').overall(units), units };
+      }
+    } catch (e) {
+      res = { overall: null, units: {}, note: '核验异常（结果未知，不算通过）: ' + e.message };
+      this.logger.warn && this.logger.warn('原生件能力核验异常: ' + e.message);
+    }
+    res.at = new Date().toISOString();
+    const prev = this.nativeCaps;
+    this.nativeCaps = res;
+    if (!prev || prev.overall !== res.overall) {
+      if (this.events) {
+        const failed = Object.keys(res.units).filter((k) => res.units[k].ok === false);
+        const unknown = Object.keys(res.units).filter((k) => res.units[k].ok === null);
+        this.events.append('native_capability', {
+          overall: res.overall, failed, unknown,
+          details: failed.concat(unknown).reduce((m, k) => ((m[k] = res.units[k].detail), m), {}),
+        });
+      }
+      if (res.overall === false) this.logger.warn && this.logger.warn('原生件能力核验有红灯（见 native_capability 事件）');
+    }
+    return res;
+  }
+
+  /** 供给表的单元清单（判据的事实源，读一次缓存）。
+   * 读不到就返回空数组并记 warn —— 核验会空转，但空转由门禁钉死（表非空 + 每格须有 verify），
+   * 不在运行时伪造结论。 */
+  _supplyUnits() {
+    if (!this._supplyUnitsCache) {
+      try {
+        this._supplyUnitsCache = require('./supply-table.json').units || [];
+      } catch (e) {
+        this.logger.warn && this.logger.warn('供给表读不到，能力核验无从执行: ' + e.message);
+        this._supplyUnitsCache = [];
+      }
+    }
+    return this._supplyUnitsCache;
   }
 
   /** 垫片类单元的 impl 返回**逐目录**结果（安装树里可能有多份副本）→ 折叠成一条结局。
@@ -447,7 +534,8 @@ class NativeManager {
 
   /** Android 走 sharp 的 wasm 回退：把 @img/sharp-wasm32 补给 DSH 树（真实依赖，非替代实现）。
    * 前置：容器契约 + DSH 树内确有 sharp。幂等；结局一律进 _unitOutcome。
-   * 注：投放成功 ≠ 能力可用 —— sharp 是否真能 require 到该包由能力判据另算（见供给表 runtime-check）。
+   * 注：投放成功 ≠ 能力可用 —— 这一格报了 applied 也不代表 sharp 取得到绑定；
+   * 能力结论只由供给表 verify + verifyNativeCapabilities 给（真机 2026-09-26 的定罪原文）。
    * @param {string} [rootOverride] 显式 npm 全局根 */
   ensureSharpWasm(rootOverride) {
     const ctx = this._unitContext(rootOverride);
