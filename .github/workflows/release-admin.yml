@@ -248,33 +248,11 @@ jobs:
                 echo "  sha256: $(sha256sum "$APK" | awk '{print $1}')" >> "$OUT"
 
                 echo >> "$OUT"
-                echo "  [2/3] APK 内 lib/ 条目" >> "$OUT"
-                unzip -l "$APK" | grep 'lib/' >> "$OUT" 2>&1 || echo "  (无 lib/ 条目 —— 严重异常)" >> "$OUT"
-
-                echo >> "$OUT"
-                echo "  [3/3] 逐项核对清单 .github/native-assets.txt" >> "$OUT"
-                MISS=""
-                for a in $(grep -v '^[[:space:]]*#' .github/native-assets.txt | grep -v '^[[:space:]]*$' | tr -d '\r'); do
-                  n=$(unzip -l "$APK" | grep -c "lib/${ABI}/$a" || true)
-                  if [ "$n" -ge 1 ]; then
-                    echo "    [ok]   lib/${ABI}/$a" >> "$OUT"
-                  else
-                    echo "    [FAIL] lib/${ABI}/$a 不在 APK 内" >> "$OUT"
-                    MISS="$MISS $a"
-                  fi
-                done
-                if [ -n "$MISS" ]; then
-                  echo >> "$OUT"
-                  echo "  结果: ✗ 缺少$MISS" >> "$OUT"
-                  echo "        APK 装到真机会因缺符号/缺运行时而失败。" >> "$OUT"
-                else
-                  echo >> "$OUT"
-                  echo "  结果: ✓ 清单内资产全部在 APK 内" >> "$OUT"
-                fi
-
-                echo >> "$OUT"
-                echo "  --- 压缩方式（Stored=未压缩 / Defl=压缩） ---" >> "$OUT"
-                unzip -v "$APK" | awk '$NF ~ /lib\// {print "    " $NF "  " $2 "  " $3 "  " $4}' >> "$OUT" 2>&1 || true
+                echo "  [2/3+3/3] APK 原生件审计（判据唯一实现 scripts/verify-apk-native.sh 的 --report 模式）" >> "$OUT"
+                echo "            报告通道【永不判红】：同样的条目逐条打成 [ok]/[MISSING]/[FAIL] 事实。" >> "$OUT"
+                # 本 case 块没有 set -e，仍显式吞退码：报告不许中断后面的 ELF 取证段。
+                bash scripts/verify-apk-native.sh "$APK" "$ABI" --report 2>&1 \
+                  | sed 's/^/  /' >> "$OUT" || true
 
                 echo >> "$OUT"
                 echo "  --- 独立校验：解出 libnode.so 的 ELF 形态（exec 四道关） ---" >> "$OUT"
@@ -707,7 +685,9 @@ jobs:
             echo
             echo "=== lib/ 内容 ==="
             if [ -f /tmp/app-signed.apk ]; then
-              unzip -l /tmp/app-signed.apk 2>/dev/null | grep 'lib/' || echo "(无 lib/ 条目)"
+              # 同一条审计的唯一实现（--report = 永不判红，这里只取它的 lib/ 段）
+              bash scripts/verify-apk-native.sh /tmp/app-signed.apk arm64-v8a --report 2>/dev/null \
+                | sed -n '/lib\/ 下的条目/,/^$/p' | sed 's/^/  /' || echo "(unzip 读不出条目清单)"
             fi
             echo
             echo "=== 签名方案 ==="
