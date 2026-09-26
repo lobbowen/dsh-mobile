@@ -976,95 +976,16 @@ if [ "$MISMATCH" -ne 0 ]; then
 fi
 echo "    [ok] 产物与清单一致（$(ls "$OUT_DIR"/*.so | wc -l) 项）"
 
-# ---- 依赖闭环自检：libnode.so 需要的每个 .so 都必须在本目录里备齐 ----
-# 这是本脚本最重要的一道护栏。做法：读 ELF 的 NEEDED 列表，逐个核对。
-#   · bionic 自带的（libc/libm/libdl/liblog/libz 等）由系统提供，跳过；
-#   · 其余（尤其 libc++_shared.so）必须由我们随包提供。
-# 之所以要自动化：这类问题在【编译期毫无征兆】，只有装到真机上才会暴露，
-#   而一轮 CI 要 3 小时 —— 人工核对极易漏，必须让脚本自己兜住。
-echo "==> 依赖闭环自检"
-READELF="$( { ls "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin/llvm-readelf 2>/dev/null || true; } | head -1)"
-MISSING=""
-# 系统库白名单从 scripts/native-deps.txt 读取（不再硬编码在 case 语句里）。
-# 这份名单是 NativeAssetRegistry（随包库）之外的补充说明，二者职责不同：
-#   名单内的 = 系统提供，跳过；名单外的 = 必须随包，必须存在。
-DEPS_LIST="$ROOT/scripts/native-deps.txt"
-if [ ! -f "$DEPS_LIST" ]; then
-  echo "==> [error] 找不到系统库白名单: $DEPS_LIST"
-  exit 1
-fi
-# 读入为空格分隔串（供 case 匹配），并剔除注释与空行
-SYSTEM_LIBS="$( { grep -v '^[[:space:]]*#' "$DEPS_LIST" | grep -v '^[[:space:]]*$' || true; } | tr '\n' ' ')"
-if [ -z "$SYSTEM_LIBS" ]; then
-  echo "==> [error] $DEPS_LIST 里没有任何库名（是不是被清空了？）"
-  exit 1
-fi
-echo "    系统库白名单: $DEPS_LIST（$(echo "$SYSTEM_LIBS" | wc -w) 项）"
-if [ -n "$READELF" ]; then
-  NEEDED="$({ "$READELF" -d "$OUT_DIR/$OUT_NAME" 2>/dev/null || true; } | awk '/NEEDED/{gsub(/[\[\]]/,"",$NF); print $NF}')"
-  # 读不出 NEEDED 就当没有依赖，这条自检会全绿放行 —— 空转比红危险得多，宁可中止。
-  if [ -z "$NEEDED" ]; then
-    echo "==> [error] 读不出 $OUT_DIR/$OUT_NAME 的 DT_NEEDED，依赖闭环自检无从进行。"
-    exit 1
-  fi
-  for lib in $NEEDED; do
-    if echo " $SYSTEM_LIBS " | grep -q " $lib "; then
-      echo "    [ok] $lib （bionic/系统提供）"
-    elif [ -f "$OUT_DIR/$lib" ]; then
-      echo "    [ok] $lib （已随包提供）"
-    else
-      echo "    [FAIL] $lib 被 node 依赖，但 $OUT_DIR 下没有它！"
-      MISSING="$MISSING $lib"
-    fi
-  done
-else
-  echo "    [warn] 找不到 llvm-readelf，跳过依赖检查"
-fi
-if [ -n "$MISSING" ]; then
-  echo "==> [error] 缺少运行期依赖:$MISSING"
-  echo "           这些库在 Android 系统里不存在，必须随 APK 打包，"
-  echo "           否则真机启动会报 'cannot locate symbol'。"
-  exit 1
-fi
-
-# ---- 产物级依赖自解析断言 ----
-# 判据只有一份实现：scripts/verify-runtime-elf.sh（构建/固化/打包三处共用）。
-# 上面「依赖闭环自检」证明 libc++_shared.so 就在本目录，所以这里对 libnode.so
-# 的 RUNPATH 判定不会是空转 —— 它一定命中「依赖同目录随包库」这一条。
+# ---- 产物形态门禁：架构 / 16KB 对齐 / 解释器 / 依赖闭环 / 同目录自解析 ----
+# 判据只有一份实现：scripts/verify-runtime-elf.sh（构建/固化/打包/重打包共用同一份，
+# 2026-09-27 收口）。本脚本原先在这里自己写了「DT_NEEDED 闭环 + linker64 解释器 +
+# 16KB 对齐」三项，且后两项只打 [info]/[warn] 不判红 —— 同一条事实在 pin 那侧是硬红，
+# 于是「构建期说没事、固化期判它有罪」，而构建期才是唯一还能便宜重编的时机。
+# 严格度分歧就此消除：五项全硬红，白名单只住 scripts/native-deps.txt（由宿主读取）。
 # 与进编译前的 make -n 断言配对：那一道保证「node 本体那次链接里有」，这一道保证
 # 「产物真的有」，中间任何一环（ld 版本、链接顺序、段裁剪）都可能丢。
-echo "==> 依赖自解析断言（DT_RUNPATH 含 \$ORIGIN）"
-READELF="$READELF" bash "$ROOT/scripts/verify-runtime-elf.sh" "$OUT_DIR"
-
-# ---- 自检：确认产物能满足「在 /data/app lib dir 里被执行」的全部前提 ----
-# 说明：这里的检查要分清「硬条件」和「提示信息」，不要误杀。
-#   · 关键认知修正：被改名为 lib*.so 的这个文件【并不是真的共享库】。
-#     系统不会去 dlopen/加载它，只是在安装 APK 时把它从 lib/<abi>/ 目录
-#     解压到文件系统上（因为 extractNativeLibs=true）。之后我们直接 exec 它。
-#     所以「必须是 linker64 解释器」并不是系统强制的前提，只是个一致性提示。
-#   · 真正的硬条件是：文件存在于 lib/<abi>/ 且解压落盘 —— 由打包配置保证。
-echo "==> 产物自检"
-file -b "$OUT_DIR/$OUT_NAME" | sed 's/^/    file: /'
-"$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin/llvm-readelf -l "$OUT_DIR/$OUT_NAME" 2>/dev/null \
-  | grep -i "interpreter\|LOAD" | head -6 | sed 's/^/    /' || true
-if "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin/llvm-readelf -l "$OUT_DIR/$OUT_NAME" 2>/dev/null \
-     | grep -q "interpreter.*linker64"; then
-  echo "    [ok] 解释器为 Android linker64（bionic 动态链接，可正常 exec）"
-else
-  echo "    [info] 未检出 linker64 解释器。这不一定是问题："
-  echo "           该文件本质是普通 ELF 可执行文件，被系统当作 native lib 解压落盘后直接 exec，"
-  echo "           并非作为共享库加载。若是静态链接的二进制，同样可以执行。"
-  echo "           但 Node 正常应为 bionic 动态链接 —— 若非预期，请核对 android-configure 参数。"
-fi
-# 16KB 页对齐：Android 15+ 的要求。注意这条对「可执行 ELF」依然有意义 ——
-# 15+ 的设备若页大小是 16KB，4KB 对齐的可执行文件可能无法被内核加载（ELIBBAD）。
-if "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin/llvm-readelf -l "$OUT_DIR/$OUT_NAME" 2>/dev/null \
-     | grep -qE "0x4000"; then
-  echo "    [ok] 检出 16KB (0x4000) 对齐的 LOAD 段（满足 Android 15+ 要求）"
-else
-  echo "    [warn] 未检出 16KB 对齐 LOAD 段。Android 15+ 在 16KB 页设备上可能"
-  echo "           返回 ELIBBAD/Exec format error；NDK r27+ 默认应满足，若为旧 NDK 请升级后重编。"
-fi
+echo "==> 产物形态门禁（scripts/verify-runtime-elf.sh）"
+bash "$ROOT/scripts/verify-runtime-elf.sh" "$OUT_DIR"
 
 echo "==> 完成。文件: $OUT_DIR/$OUT_NAME"
 echo "    下一步: ./gradlew assembleDebug 即可把该 Node 打进 APK（首启离线可跑）。"
