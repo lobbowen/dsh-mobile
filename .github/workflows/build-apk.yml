@@ -797,11 +797,25 @@ jobs:
           fi
           SIZE="$(du -h "$APK" | cut -f1)"
           echo "APK 大小: $SIZE"
+          # ── 版本门禁（VERSION-GATE 2/4：判据 scripts/verify-apk-version-gate.sh，取数外壳
+          #    scripts/check-apk-release-version.sh）─────────────────────────────
+          # 为什么这条链路上原来没有门禁：它是手动触发（3 小时全量），写的时候只想着「能不能发出」，
+          # 没人比较过版本号 —— 而从旧 run 的分支再跑一次就能把 latest 发成一个更旧的 versionCode，
+          # 已升级设备从此收不到任何更新，且不可逆。通道固定 explicit：这条路只有人按才走。
+          # 本步只有 `set -o pipefail`（没有 -e），所以门禁必须显式判 rc，不能指望命令失败自动中止。
+          if ! bash scripts/check-apk-release-version.sh version.json "$TAG" explicit; then
+            echo "::error title=版本门禁::上一条已说明原因 —— 本次不发布。"
+            exit 1
+          fi
           # tag 固定为 apk-latest：存在则更新，不存在则创建。
           gh release view "$TAG" >/dev/null 2>&1 \
             || gh release create "$TAG" --title "DSH Mobile APK (latest)" \
                  --notes "自动构建产物，持续覆盖更新。"
           gh release upload "$TAG" "$APK#app-debug.apk" --clobber
+          # 清单与 APK 必须同批上传：否则 latest 的 version.json 说的不是 latest 那个包，
+          # 下一次门禁就是拿假读数比真产物（版本化归档 v<versionName> 仍只由 fast-apk 写，
+          # 这条链路的产物由 Actions artifact 保留）。
+          gh release upload "$TAG" version.json --clobber
           echo "=== 发布完成 ==="
           gh release view "$TAG" --json url,assets 2>/dev/null || true
           echo "下载地址: https://github.com/${{ github.repository }}/releases/download/${TAG}/app-debug.apk"

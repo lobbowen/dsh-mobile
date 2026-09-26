@@ -398,6 +398,19 @@ jobs:
           TAG="${{ inputs.tag }}"
           echo "== 发布到 Release tag: $TAG =="
 
+          # ── 版本门禁（VERSION-GATE 3/4：判据 scripts/verify-apk-version-gate.sh）───────
+          # 这条链路发的是**另一个 run** 的 APK，所以比较基准取那个 run 的提交里的清单（第 4 个参数），
+          # 而不是本 workflow 自己 checkout 的那份 —— 否则发的包和读出的版本对不上，门禁成了自证。
+          # 只判滚动通道：显式指定的其它 tag 是人自己开的新地址，不覆盖任何已交付的东西。
+          # VG_SRC_DIR 让门禁把**它判定读到的那份清单**留一份出来，下面直接上传那一份：
+          # 「校验的清单」与「发布的清单」因此是同一个字节串，不是两次各自取数。
+          MANIFEST=""
+          if [ "$TAG" = "apk-latest" ]; then
+            VG_SRC_DIR=/tmp/channel-manifest \
+              bash scripts/check-apk-release-version.sh version.json "$TAG" explicit "${{ steps.get.outputs.run_id }}"
+            MANIFEST=/tmp/channel-manifest/version.json
+          fi
+
           # tag 固定（默认 apk-latest）：存在则更新，不存在则创建。
           # 这样下载网址是稳定的，不必每轮去查新地址。
           if gh release view "$TAG" --repo '${{ github.repository }}' >/dev/null 2>&1; then
@@ -412,6 +425,15 @@ jobs:
 
           gh release upload "$TAG" /tmp/app-debug.apk#app-debug.apk \
             --repo '${{ github.repository }}' --clobber
+          # 覆盖 latest 就必须同时把它的版本清单换成**这个包自己**那份，否则 latest 的
+          # version.json 描述的是上一个包 —— 下一次门禁拿假读数比真产物。
+          # gh 的资产名取 file 的 basename（# 后面只是 label），所以 MANIFEST 是门禁留出来的
+          # 真名叫 version.json 的文件，取数只在 scripts/check-apk-release-version.sh 一处。
+          if [ -n "$MANIFEST" ]; then
+            gh release upload "$TAG" "$MANIFEST" \
+              --repo '${{ github.repository }}' --clobber
+            echo "[version] latest 清单已同步为判定用的那份（来源 run ${{ steps.get.outputs.run_id }}）"
+          fi
 
           echo
           echo "=== 发布完成 ==="
@@ -615,6 +637,17 @@ jobs:
           [ -n "$TAG" ] || TAG="apk-latest"
           echo "== 发布到 tag: $TAG =="
 
+          # ── 版本门禁（VERSION-GATE 4/4：判据 scripts/verify-apk-version-gate.sh）───────
+          # repack 改的是包内字节（注入 libc++_shared.so）但**不换版本号**，所以这里比较的是
+          # 「来源 run 那份清单」与线上：同版本在显式通道放行正是本条链路的正当用法（重投修复过的包），
+          # 而把 latest 换成一个更旧的号仍然判红。清单同批同步，理由与 publish 模式那条一样。
+          MANIFEST=""
+          if [ "$TAG" = "apk-latest" ]; then
+            VG_SRC_DIR=/tmp/repack-manifest \
+              bash scripts/check-apk-release-version.sh version.json "$TAG" explicit "${{ steps.src.outputs.run_id }}"
+            MANIFEST=/tmp/repack-manifest/version.json
+          fi
+
           if gh release view "$TAG" --repo '${{ github.repository }}' >/dev/null 2>&1; then
             if gh release view "$TAG" --repo '${{ github.repository }}' --json assets \
                  --jq '.assets[].name' | grep -qx 'app-debug.apk'; then
@@ -628,6 +661,12 @@ jobs:
               --repo '${{ github.repository }}' \
               --title "Node Container APK ($TAG)" \
               --notes "repack from run ${{ steps.src.outputs.run_id }}：注入 libc++_shared.so，修复 cannot locate symbol。"
+          fi
+
+          if [ -n "$MANIFEST" ]; then
+            gh release upload "$TAG" "$MANIFEST" \
+              --repo '${{ github.repository }}' --clobber
+            echo "[version] latest 清单已同步为判定用的那份（来源 run ${{ steps.src.outputs.run_id }}）"
           fi
 
           echo "== 发布完成 =="

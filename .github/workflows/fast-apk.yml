@@ -748,30 +748,20 @@ jobs:
               --notes "Android 原生 Node 容器 APK（由 fast-apk 构建，运行时来自 ${{ env.runtime-tag }}）。"
           fi
 
-          # ── versionCode 单调门禁 ──────────────────────────────────────────────
-          # 为什么必须拦：versionCode 回退 = 已升级的设备**永远收不到**新版本，
-          # 且不可逆（只能卸载重装）。宁可发不出去，也不能发一个"更旧"的号。
-          # 注意：gh 的 -O 是**文件路径**（不是目录），且目标已存在时会直接报错。
-          # 所以：建一个临时目录，`-O` 指向其下**尚不存在**的文件。
-          # （这一步连续踩了两次：mktemp 建文件 → 冲突；/tmp 目录传给 -O → 仍冲突。
-          #   两次都是 CI 日志暴露的，本地无从发现 —— 也正因如此失败必须**可见**。）
-          PREVDIR="$(mktemp -d)"
-          if gh release download "$TAG" -p version.json -O "$PREVDIR/version.json" --repo '${{ github.repository }}' 2>"$PREVDIR/err"; then
-            PVC="$(node -p "require('$PREVDIR/version.json').shell.versionCode" 2>/dev/null || echo 0)"
-            echo "[version] 已发布 versionCode=$PVC，本次=$VC"
-            if [ "$VC" -lt "$PVC" ]; then
-              echo "::error title=versionCode 回退::本次 $VC < 已发布 $PVC —— 已升级的设备将永远收不到新版本。请 bump version.json 的 shell.versionCode（见 docs/runbook/versioning.md）。"
-              exit 1
-            fi
-            if [ "$VC" -eq "$PVC" ]; then
-              echo "[version] 同版本重发（versionCode=$VC，latest 滚动通道允许）"
-            else
-              echo "[version] 版本前进（$PVC → $VC）"
-            fi
+          # ── 版本门禁（VERSION-GATE 1/4：判据 scripts/verify-apk-version-gate.sh，取数外壳
+          #    scripts/check-apk-release-version.sh）─────────────────────────────
+          # 通道怎么定：只有「合并到分支后自动出包」是 auto —— 那条路没人看着，最能把
+          # 「改了 APK 却没 bump 版本」咽下去。`fast-*` tag 与人点的 workflow_dispatch 都是
+          # explicit（显式要求原地重传，正当用途是「投递本身坏了」）。
+          # 注意 dispatch 不一定给出 tag 形态的 GITHUB_REF_TYPE（它跟着被选中的 ref），
+          # 所以先按 event_name 判，再看 ref_type —— 与 release-admin 里 `${GITHUB_REF_TYPE} = tag`
+          # 只在 tag 触发时成立是同一条事实（那里靠它解析 publish-<run_id>）。
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            VCHANNEL=explicit
           else
-            echo "::warning title=versionCode 门禁未生效::未能取到已发布的 version.json，本次跳过单调性检查。gh 错误如下："
-            cat "$PREVDIR/err" || true
+            VCHANNEL=auto
           fi
+          bash scripts/check-apk-release-version.sh version.json "$TAG" "$VCHANNEL"
 
           # ── 覆盖上传（含孤立资产回退）────────────────────────────────────────
           # 注意：gh 的 `file#label` 里 # 后面是 **label**，资产名取 file 的 basename。

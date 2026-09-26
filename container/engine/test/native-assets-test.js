@@ -618,6 +618,89 @@ if (fs.existsSync(PICK_SH)) {
     flagFirst.rc === 0 && flagFirst.out.includes('35.0.1'), JSON.stringify(flagFirst));
 }
 
+// ── apk-latest 的版本门禁：判据只住 scripts/verify-apk-version-gate.sh，四个发布口共用 ──
+// 为什么要在 CI 里跑它：写 apk-latest 的四条链路（fast-apk / build-apk / release-admin 的
+// publish 与 repack）里，只有 fast-apk 会在每次合并后被真实触发，其余三条要么几十分钟起步、
+// 要么按需才跑。把「比较版本号」留在各条 workflow 里 = 只有被触发过的那份才是真的在判。
+const VGATE = path.join(ROOT, 'scripts', 'verify-apk-version-gate.sh');
+check('版本门禁宿主脚本存在', fs.existsSync(VGATE));
+if (fs.existsSync(VGATE)) {
+  const vTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vgate-'));
+  const vk = (rel, vc) => {
+    const p = path.join(vTmp, rel);
+    fs.writeFileSync(p, JSON.stringify({ shell: { versionName: '9.9.9', versionCode: vc } }));
+    return p;
+  };
+  const v8 = vk('new8.json', 8), v7 = vk('pub7.json', 7), v6 = vk('new6.json', 6), vSame = vk('same.json', 7);
+  const vBad = path.join(vTmp, 'bad.json');
+  fs.writeFileSync(vBad, '{"shell":{"versionName":"7"}}');
+  const vNotInt = path.join(vTmp, 'notint.json');
+  fs.writeFileSync(vNotInt, '{"shell":{"versionCode":"7-beta"}}');
+  const runV = (args) => {
+    const r = spawnSync('bash', [VGATE, ...args], { encoding: 'utf8' });
+    return { rc: r.status === null ? -1 : r.status, out: String(r.stdout || '').trim(), err: String(r.stderr || '') };
+  };
+
+  const up = runV([v8, v7, 'auto']);
+  check('版本门禁：前进放行并打出两端的数', up.rc === 0 && up.out.includes('版本前进（7 → 8）'), JSON.stringify(up));
+  // 同版本这一格**只按通道分叉**，两侧都跑：只测「显式放行」就等于把自动通道的红写成了装饰。
+  const sameExplicit = runV([vSame, v7, 'explicit']);
+  check('版本门禁：同版本 + 显式通道放行（修复投递/重传是正当用途）',
+    sameExplicit.rc === 0 && sameExplicit.out.includes('同版本重发'), JSON.stringify(sameExplicit));
+  const sameAuto = runV([vSame, v7, 'auto']);
+  check('版本门禁：同版本 + 自动通道判红（动了 APK 内容就必须 bump）',
+    sameAuto.rc === 1 && sameAuto.err.includes('versioning.md'), JSON.stringify(sameAuto));
+  const backAuto = runV([v6, v7, 'auto']);
+  const backExplicit = runV([v6, v7, 'explicit']);
+  check('版本门禁：回退两种通道都判红（不可逆，显式通道也不放过）',
+    backAuto.rc === 1 && backExplicit.rc === 1
+      && backAuto.err.includes('不可逆') && backExplicit.err.includes('不可逆'),
+    JSON.stringify({ auto: backAuto.rc, explicit: backExplicit.rc }));
+  const firstExplicit = runV([v8, '-', 'explicit']);
+  check('版本门禁：线上无清单 + 显式通道放行（首次发布）',
+    firstExplicit.rc === 0 && firstExplicit.out.includes('显式通道放行'), JSON.stringify(firstExplicit));
+  const firstAuto = runV([v8, '-', 'auto']);
+  check('版本门禁：线上无清单 + 自动通道判红（不许把「不知道线上是什么」发成正常）',
+    firstAuto.rc === 1, JSON.stringify(firstAuto));
+  // 退 2 = 「无从校验」，与退 1「判红」分开：调用方两种都不许发，但红点位置不同。
+  check('版本门禁：本次清单缺 versionCode → 退 2（无从校验不放行）',
+    runV([vBad, v7, 'auto']).rc === 2, JSON.stringify(runV([vBad, v7, 'auto'])));
+  check('版本门禁：versionCode 非整数 → 退 2（字符串比较会把 10 判成小于 9）',
+    runV([vNotInt, v7, 'auto']).rc === 2, JSON.stringify(runV([vNotInt, v7, 'auto'])));
+  check('版本门禁：线上清单坏了 → 退 2（清单丢失不等于首次发布）',
+    runV([v8, vBad, 'explicit']).rc === 2, JSON.stringify(runV([v8, vBad, 'explicit'])));
+  check('版本门禁：本次清单文件不存在 → 退 2',
+    runV([path.join(vTmp, 'nope.json'), v7, 'auto']).rc === 2);
+  check('版本门禁：通道词不认 → 退 2（少一个通道就等于自动走放行那侧）',
+    runV([v8, v7, 'sometimes']).rc === 2);
+
+  // 接线：三条会写 apk-latest 的 workflow 必须都调宿主；且任何一份都不许再自己比较版本号。
+  const VG_FILES = ['fast-apk.yml', 'build-apk.yml', 'release-admin.yml'];
+  // 只认**命令行形态**的调用（行首可有 `if !`），注释里提一句脚本名不算接线 ——
+  // 否则改天谁把调用删掉、只留着那行解释性注释，这条门禁照样绿。
+  const VCALL = /^[^\S\n]*(?:if\s+!\s+)?bash\s+scripts\/check-apk-release-version\.sh\s+.*"\$TAG"/m;
+  for (const f of VG_FILES) {
+    const src = fs.readFileSync(path.join(ROOT, '.github/workflows', f), 'utf8');
+    check(`版本门禁接线：${f} 真的调用取数外壳`, VCALL.test(src), '找不到 bash scripts/check-apk-release-version.sh … "$TAG" 的调用行');
+    check(`版本门禁内联复写清零：${f} 不再自己比 versionCode`,
+      !/-lt\s+"\$PVC"|-eq\s+"\$PVC"|-lt\s+"\$VC"|-eq\s+"\$VC"/.test(src),
+      '同一判据出现第二份拷贝 = 缺陷（门禁法 §7.1）');
+    // 「取来源 run 那份清单」也只能有一处：调用点自己抄一次 gh 取数，就会发出
+    // 一份和门禁判定用不同源的清单（两次取数可以各自漂移）。出口是 VG_SRC_DIR。
+    check(`版本门禁取数复写清零：${f} 不自己取线上/来源清单`,
+      !src.includes('contents/version.json?ref='),
+      '取数应走 scripts/check-apk-release-version.sh 的 VG_SRC_DIR 出口');
+  }
+  // 对照组自证：把注释里的脚本名当成接线，正是这条门禁要抓的失效形态 —— 拿一份「只有注释、
+  // 没有调用」的样本验它会红，再拿真调用验它不会误红。
+  check('版本门禁接线断言自证：只有注释提及 → 判红',
+    !VCALL.test('  # 判据 scripts/verify-apk-version-gate.sh\n  # bash scripts/check-apk-release-version.sh version.json "$TAG" auto\n'));
+  check('版本门禁接线断言自证：真调用行（含 if ! 包裹）→ 放行',
+    VCALL.test('          bash scripts/check-apk-release-version.sh version.json "$TAG" "$VCHANNEL"')
+      && VCALL.test('          if ! bash scripts/check-apk-release-version.sh version.json "$TAG" explicit; then'));
+  fs.rmSync(vTmp, { recursive: true, force: true });
+}
+
 // 运行期探针必须与 run_code 同形：裸环境。补 LD_LIBRARY_PATH = 给被测对象装脚手架。
 const PREPARER_KT = path.join(
   ROOT, 'container/app/src/main/java/io/github/lobbowen/dshmobile/native/NativePreparer.kt'
