@@ -1,15 +1,15 @@
 CI_HEARTBEAT
-beat : 2
-time : Sat Sep 26 04:19:18 UTC 2026
+beat : 3
+time : Sat Sep 26 04:20:05 UTC 2026
 stage: 7/9 NODE-BUILD (longest, V8 compile)
 run  : 36217430866
 sha  : 4bb4c2a8ed274943db8c01191842d57436cd9722
-mem  : avail=14.4GB
+mem  : avail=14.5GB
 cgmax: n/a
-load : 0.75 0.25 0.09
-logsize: 4450
+load : 2.43 0.75 0.27
+logsize: 1708631
 objs   : 0
 0
 oomhits: 0
 0
-lastprog: ==> 应用 aligned_alloc 补丁（API 24 < 28，bionic 无该函数）: test/cctest/test_crypto_clienthello.cc   patched: aligned_alloc -> memalign (1 occurrenc
+lastprog:   /usr/local/lib/android/sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang -o /tmp/tmp.UtnV87z5lq/node/out/Release/o
