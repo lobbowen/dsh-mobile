@@ -34,15 +34,18 @@ import java.io.File
  * 用户随时能在通知栏看到运行时/通道现在是什么情况，而不是靠打开界面猜。
  *
  * 职责单一：持有运行时实例宿主（:node / NodeRuntimeService）的 binder 连接，
- * 按 [NodeWatchdogPolicy] 判据处置它的死亡与卡死。能力桥（HostBridgeService）、
+ * 按 [NodeWatchdogPolicy] 判据处置它的死亡、卡死与空壳。能力桥（HostBridgeService）、
  * 采集（ScreenCaptureService）等**不再兼任**监督 —— 监督者与桥混住曾导致两个架构
  * 错误：桥被杀时监督陪葬；桥的重拉逻辑与内核的 boot 循环互相踩（真机 2026-09-25 定罪链）。
  *
  * 监督分两半、各归其位（ADR-0006 / ARCHITECTURE §1）：
  *  - **进程级复活**归本服务（:main）：bindService(:node, BIND_AUTO_CREATE) 持一条 binder 边。
- *    :node 死 → AMS 回调 onServiceDisconnected → 立即 rebind，随之重建进程并重投
- *    started-service 的 onStartCommand。这条边要求 :node.onBind 返回**真 binder**
- *    （返回 null 会被当 null-binding，既不保活也无断开回调）。
+ *    :node 死 → AMS 回调 onServiceDisconnected → 立即 rebind。**rebind 只会重建进程、
+ *    只跑 onCreate，不会重投 started-service 的 onStartCommand**（真机 2026-09-26 证伪，
+ *    见 [NodeWatchdogPolicy] 头注）—— 所以运行时实例的 boot 循环由 :node 自己在
+ *    onCreate 出生，本服务只监督「有没有出生」，绝不在死亡路径上补投 start 命令。
+ *    这条边还要求 :node.onBind 返回**真 binder**（返回 null 会被当 null-binding，
+ *    既不保活也无断开回调）。
  *  - **子进程退避重启**留在 :node 自家 boot 循环：那是"进程活着但内核起不来"，
  *    父监子进程是正常职责，不需要跨进程发号施令。
  *
@@ -65,6 +68,8 @@ class ContainerSupervisor : Service() {
     private var lastNotifyMs = 0L
     /** 控制面在线读数：与首页同源（[CapabilityEvidenceCollector.controlPlaneUp]），别处不再判一遍。 */
     @Volatile private var controlPlaneUp = false
+    /** BORN 态读数：当前 :node 进程的 boot 循环是否真的跑起来过（状态出口与判据同源）。 */
+    @Volatile private var born = false
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
@@ -74,10 +79,11 @@ class ContainerSupervisor : Service() {
         override fun onServiceDisconnected(name: ComponentName) {
             // :node 进程死亡 → 立刻 rebind（后台合法；绝不调 startForegroundService，
             // :main 刚从 HANS 解冻时不满足 FGS-start 前台要求，真机 ANR 栈实锤）。
+            // rebind 只重建进程并跑 onCreate —— 出生（boot 循环）由 :node 自己在 onCreate 发起。
             markConnected(false)
             RuntimeDiagnostics.append(
                 this@ContainerSupervisor, "supervisor", null,
-                ":node 进程断开 → rebind 重拉起", "实例状态随进程同归于尽，重建后 :node 自会重写进程记录"
+                ":node 进程断开 → rebind 重拉起", "实例状态随进程同归于尽，重建后 :node 自重写进程记录并自出生"
             )
             handler?.post { bindNode() }
         }
@@ -124,6 +130,8 @@ class ContainerSupervisor : Service() {
     private fun markConnected(connected: Boolean) {
         bound = connected
         strikes = 0
+        // 新进程（或重绑后的未知进程）一律从"没出生"起算，由下一拍读标记裁决。
+        born = false
         lastStateChangeMs = SystemClock.elapsedRealtime()
     }
 
@@ -161,16 +169,23 @@ class ContainerSupervisor : Service() {
         try {
             // 进程记录由 :node 在 onCreate 即写（早于任何子进程 spawn），
             // 所以"慢启动"不会攒 strikes；攒到只可能是 :node 进程本身卡死/记录丢失。
-            if (bound) { if (nodeAlive()) strikes = 0 else strikes++ } else strikes = 0
+            val record = if (bound) readNodeRecord() else null
+            if (bound) { if (record != null) strikes = 0 else strikes++ } else strikes = 0
+            born = birthMarkMatches(record)
             val now = SystemClock.elapsedRealtime()
-            when (NodeWatchdogPolicy.decide(bound, strikes, lastStateChangeMs, lastForceStopMs, now)) {
+            // 时间戳不可解 → 年龄按 0：判据宁可少清一次账，也不许凭一个未知数杀进程。
+            val pidRecordAgeMs =
+                if (record == null || record.wroteAtMs < 0) 0L else (now - record.wroteAtMs).coerceAtLeast(0L)
+            val shell = record != null && !born && pidRecordAgeMs >= NodeWatchdogPolicy.BORN_GIVEUP_MS
+            when (NodeWatchdogPolicy.decide(bound, strikes, born, pidRecordAgeMs, lastStateChangeMs, lastForceStopMs, now)) {
                 is NodeWatchdogPolicy.Decision.Wait -> if (!bound) bindNode()
                 NodeWatchdogPolicy.Decision.EscalateStop -> {
                     lastForceStopMs = now
                     RuntimeDiagnostics.append(
                         this, "supervisor", false,
-                        ":node 无响应，清账重建",
-                        "bound=$bound strikes=$strikes —— stopService + unbind/rebind"
+                        if (shell) ":node 空壳（进程在、boot 循环从未跑起）→ 清账重建"
+                        else ":node 无响应，清账重建",
+                        "bound=$bound strikes=$strikes born=$born pidAge=${pidRecordAgeMs}ms —— stopService + unbind/rebind"
                     )
                     try { stopService(Intent(this, NodeRuntimeService::class.java)) } catch (_: Throwable) {}
                     try { unbindService(connection) } catch (_: Throwable) {}
@@ -210,7 +225,13 @@ class ContainerSupervisor : Service() {
     }
 
     private fun statusLine(): String {
-        val runtime = if (controlPlaneUp) "运行时在线" else "运行时未响应"
+        val runtime = when {
+            controlPlaneUp -> "运行时在线"
+            // 空壳单独一说：进程在、boot 循环没跑过，此刻正被按 [NodeWatchdogPolicy] 清账重建。
+            // 绝不写成「运行时在线」糊过去 —— 状态不真是本产品唯一对用户的承诺。
+            !born -> "运行时未出生"
+            else -> "运行时未响应"
+        }
         val chan = AdbChannelProbe.cached()
         val channel = when (chan.outcome) {
             ProbeOutcome.LIVE -> "通道通"
@@ -223,16 +244,32 @@ class ContainerSupervisor : Service() {
     }
 
     /** 读 :node 写的进程记录：pid 在 /proc 存在**且** cmdline 与落盘一致才算活
-     *  （只查存在会把"pid 被回收给别的进程"误判成 :node 还活着）。 */
-    private fun nodeAlive(): Boolean = try {
+     *  （只查存在会把"pid 被回收给别的进程"误判成 :node 还活着）。
+     *  顺带带回落盘时刻 —— 「有进程没出生」判据的年龄基准，不再各读一遍文件。 */
+    private fun readNodeRecord(): NodeRecord? = try {
         val lines = File(filesDir, NODE_PID_FILE).readText().trim().split("\n")
-        val pid = lines[0].toIntOrNull() ?: return false
+        val pid = lines[0].toIntOrNull() ?: return null
         val procCmd = File("/proc/$pid/cmdline").readBytes()
             .toString(Charsets.UTF_8).trimEnd('\u0000')
-        procCmd.isNotEmpty() && (lines.size < 2 || procCmd == lines[1])
+        if (procCmd.isEmpty() || (lines.size >= 2 && procCmd != lines[1])) null
+        else NodeRecord(pid, lines.getOrNull(2)?.toLongOrNull() ?: -1L)
     } catch (_: Throwable) {
-        false
+        null
     }
+
+    /** BORN 判据：出生标记里的 pid 必须**等于当前进程记录的 pid** —— 沿用上一轮进程留下的
+     *  标记会把新进程判成已出生，那正是本判据要抓的空壳。记录缺失即 false。 */
+    private fun birthMarkMatches(record: NodeRecord?): Boolean {
+        val pid = record?.pid ?: return false
+        return try {
+            nodeBirthFile(this@ContainerSupervisor).readText().trim().toIntOrNull() == pid
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /** node.pid 一次读取的结果（pid + 落盘时刻，elapsedRealtime 语义；<0 = 时间戳不可解）。 */
+    private class NodeRecord(val pid: Int, val wroteAtMs: Long)
 
     override fun onDestroy() {
         // 走到这里 = 系统给了正常收尾的机会，留 clean 戳；强杀不会走到这里，于是下次启动定罪。
@@ -268,6 +305,8 @@ class ContainerSupervisor : Service() {
         const val TAG = "ContainerSupervisor"
         /** :node 进程记录文件名（:node 写、本服务读，同一常量源）。 */
         const val NODE_PID_FILE = "node.pid"
+        /** :node 出生标记文件名（boot 循环入口写、本服务读；与 node.pid 同一常量源）。 */
+        const val NODE_BIRTH_FILE = "node.birth"
         private const val NOTIF_ID = 1004
         private const val REQ_OPEN = 41
         /** 状态通知的刷新节拍（比监督节拍慢一档，见 [refreshStatusNotice]）。 */
@@ -277,7 +316,8 @@ class ContainerSupervisor : Service() {
          *  绝不用 startForegroundService：调用点多在后台（:node onCreate / 桥 onCreate /
          *  Application），满足不了 5s FGS 契约反而炸宿主 —— 本服务自己在 onStartCommand 里
          *  转前台，投递方式因此无所谓。
-         *  失败只记日志：互保闭环的其它边（BootReceiver / 无障碍连接 / 解锁广播 / 周期任务）会再试。 */
+         *  失败只记日志：互保闭环的其它边（BootReceiver / 无障碍连接 / 桥 onCreate /
+         *  :node onCreate 与每次 boot 尝试 / Application 与解锁亮屏广播）会再戳。 */
         fun ensureRunning(context: Context) {
             try {
                 context.startService(Intent(context, ContainerSupervisor::class.java))
@@ -288,6 +328,9 @@ class ContainerSupervisor : Service() {
 
         /** :node 侧写进程记录复用此路径（同一常量源，别处不得再拼一次字面量）。 */
         fun nodePidFile(context: Context): File = File(context.filesDir, NODE_PID_FILE)
+
+        /** :node 出生标记复用此路径（同一常量源；写者只有 :node 的 boot 循环入口）。 */
+        fun nodeBirthFile(context: Context): File = File(context.filesDir, NODE_BIRTH_FILE)
 
         /** :node 自身进程名（写入 node.pid 第二行，供本服务 cmdline 一致性核对）。 */
         fun selfCmdline(): String = try {

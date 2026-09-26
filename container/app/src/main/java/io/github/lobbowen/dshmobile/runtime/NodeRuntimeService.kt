@@ -39,6 +39,9 @@ import org.json.JSONObject
  *  - 本进程自身的死活**不归自己管**：由 :main 的 [ContainerSupervisor] 经 binder
  *    边监督并复活。旧设计里重拉逻辑住在本进程（supervisorLoop 与尸体同进程，
  *    :node 一死全归零）—— 真机 2026-09-25 定罪的根病，不得回潮。
+ *    反过来，**出生归自己**：监督者的复活只会重建进程（onCreate），不会重投 start
+ *    命令，所以 boot 循环必须由 onCreate 自发起（真机 2026-09-26 的"空壳 :node"就是
+ *    这条边界画反了的样子）。
  *
  * "每一步都可观测"是本服务的硬性设计目标：真机环境千差万别（SELinux 策略、
  * ROM 定制、页大小），一旦启动失败，必须能从屏幕上直接看出失败在哪一环、
@@ -109,6 +112,12 @@ class NodeRuntimeService : Service() {
         writeNodePidFile()
         // 互保闭环的 :node 边：我活着就要确保监督者在（我死时得有人收尸重拉）。
         ContainerSupervisor.ensureRunning(this)
+        // **出生**在这里，不等 onStartCommand（真机 2026-09-26 定罪）：监督者那条 binder 边
+        // 用 BIND_AUTO_CREATE 复活本进程时只跑 onCreate —— cached-kill 之后 AMS 不会重投
+        // start 命令，旧写法（boot 循环只由 onStartCommand 触发）于是产出"进程在、通知在、
+        // pid 在、内核从没起"的空壳，还被监督者按 POWER 判成健康。谁创建我，我就自己出生；
+        // onStartCommand 仍保留同一次调用（多条边共享这个幂等闸门）。
+        scheduleBootLoop()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -136,8 +145,8 @@ class NodeRuntimeService : Service() {
         }
     }
 
-    /** 幂等闸门：BootReceiver / 监督者 bind / START_STICKY 重投 / UI 按钮可能反复
-     *  戳本服务，但 boot 循环**至多一条** —— 真机 2026-09-22 实锤双循环共享
+    /** 幂等闸门：onCreate（自出生）/ BootReceiver / START_STICKY 重投 / UI 按钮可能反复
+     *  触发本方法，但 boot 循环**至多一条** —— 真机 2026-09-22 实锤双循环共享
      *  nodeProcess/healthUp，把活内核误判成死 → 反复 spawn 必死进程 → 紧循环闪屏。 */
     @Synchronized
     private fun scheduleBootLoop() {
@@ -156,8 +165,12 @@ class NodeRuntimeService : Service() {
     /**
      * 子进程守护循环（父监子，:node 的分内事；进程级复活归 :main 监督者）。
      * 退避判据全部收敛在 [SupervisorPolicy]，CI 钉死。
+     *
+     * 入口第一件事 = 盖出生标记：监督者的 BORN 判据问的是"这个进程的 boot 循环跑起来过吗"，
+     * 不是"内核起来了吗"（后者是 ONLINE，由 :node 自己退避重试，不许跨进程清账）。
      */
     private fun bootLoop() {
+        writeNodeBirthMark()
         var restartCount = 0
         while (keepRunning) {
             val ok = bootKernelOnce()
@@ -501,6 +514,22 @@ class NodeRuntimeService : Service() {
         } catch (e: Throwable) {
             RuntimeDiagnostics.append(
                 this, "init", false, "node.pid 写入失败（监督者将退化为纯 binder 边监督）",
+                "${e::class.java.simpleName}: ${e.message}"
+            )
+        }
+    }
+
+    /**
+     * 出生标记落盘（[ContainerSupervisor] 的 BORN 判据）：只写**本进程 pid**，
+     * 由 boot 循环入口写一次 —— 写盘失败不致命（监督者会按空壳清账重建，
+     * 那比"永远看不出没出生"诚实），所以只上屏不抛。
+     */
+    private fun writeNodeBirthMark() {
+        try {
+            ContainerSupervisor.nodeBirthFile(this).writeText(ContainerSupervisor.selfPid().toString())
+        } catch (e: Throwable) {
+            RuntimeDiagnostics.append(
+                this, "init", false, "出生标记 node.birth 写入失败（监督者会把本进程当空壳清账）",
                 "${e::class.java.simpleName}: ${e.message}"
             )
         }

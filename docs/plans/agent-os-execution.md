@@ -1,0 +1,101 @@
+# Agent OS 执行案（唯一在途方案）
+
+状态：**执行中**。决策依据 = ADR-0008（域模型与 init 权威）+ ADR-0006（常驻边界）。
+全仓在途方案文档**只许这一份**（放在 `docs/plans/`）；要开新轨先把它收口或并入。
+
+## 1. 轨道总览
+
+| 轨 | 内容 | 状态 | 量 |
+|---|---|---|---|
+| **P0** | C1 出生收口：`onCreate` 自出生 + 三态判据 + 空壳上屏 + 门禁出生链 | 本 PR（壳 1.1.6(8)） | 0.5d + 1 壳 + 1 机 |
+| **PC-0** | 命名表 / 目标树终稿 / CI paths 对照表 / `capability`⇄`permissions` 裁决阅读 | 待做 | 0.5–1d |
+| **PC-1** | D1+D2 搬家：`guard`⇄`supervisor` 双词汇合并 + `container/engine`→`hosttools` | 待做 | 2 壳 |
+| **PC-2** | Kotlin 六域包制重排（含组件名迁移 + a11y 注册串自校正） | 待做 | 2–3 壳 + 1 机 |
+| **PC-3** | `NodeRuntimeService` 860 行上帝文件拆分（machine / supply 分离） | 待做 | 1d + 1 壳 |
+| **PC-4** | D5 桌面残项逐项引用定罪与删/耦 | 待做 | 1–2d |
+| **P1** | init 权威成文：adopt-or-start（先决实验）+ runtime.json schema 3 握手 + C2 状态机 | 待做 | 3d + 2 壳 + 2 机 |
+| **P2** | 多运行时（python/go 以「供给单元 + 受管对象类」注册，安卓侧零改动 = 验收判据） | 排后 | 4–6d（调研占 6 成），不承诺工期 |
+| **P3** | 工作连续性（I2 欠账：受管任务 checkpoint-resume） | 排后 | 0.5d 设计 + 2–3d + 1 机 |
+
+**P0 与 PC 的顺序（2026-09-26 已拍板）**：P0 先以现状路径上小 PR，让真机当天就脱离
+「退后台即永久断服」；搬家 PR 再把它原样搬进 `machine/`。不为搬家让线上继续带病。
+
+## 2. 现仓「波动源」定罪清单（2026-09-26 逐项亲眼取证）
+
+| # | 罪状 | 证据 | 处置 |
+|---|---|---|---|
+| D1 | **双词汇生命周期权威**：`kernel/src/supervisor.js`（顶层）⇄ `kernel/src/guard/`（目录）⇄ `guard/supervisor/*.js`（mixin 视图）三套名字指同一权威 | `ls kernel/src`、`ls kernel/src/guard` 实拍 | PC-1：合并为单一 `init/`，旧名进死词汇门禁 |
+| D2 | **`container/engine` 名不副实**：目录里是发布工具链（`src/sign.js`、`verify.js`、`ota-engine.js`、`kernel-bundle.js`、`zip.js`、`keys.js`、`runtime-json.js`）+ 契约夹具（`test/boot-fixture.js`），与「运行时引擎」无关，L-C/L-D 真身在 Kotlin `runtime/` | `ls container/engine/src` 实拍 | PC-1：改名 `hosttools/`，与 test 夹具分家 |
+| D3 | **Kotlin 顶层散文件 + 特权双包**：`MainActivity`/`NodeContainerApp`/`ProvisioningProbe`/`RuntimeDiagnostics` 裸在包根；`capability/`（CapabilityCatalog 单源）与 `permissions/`（PermissionCatalog/Center/LifecycleChecks）并存 | `ls …/dshmobile/*.kt`、`ls …/permissions/` 实拍 | PC-2：六域包制收编；capability⇄permissions 职责线**先读文件裁决再合并**（不许印象定罪） |
+| D4 | **`NodeRuntimeService.kt` 860 行上帝文件**：预置体检/写探针/OTA/暂存清扫/装配/spawn/轮询/退避/诊断转发混住 | 本轮通读全文 | PC-3：按 ADR-0008 §2 拆 machine / supply / kernelota |
+| D5 | **死残待判**：`kernel/src/platform/os/browser.js` 等桌面域文件仍被 `platform/os/index.js`、`guard/supervisor/settings-view.js` require | grep 引用实拍 | PC-4：**删前逐项引用计数 + 真机域运行证明**；若该代码路径在 Android 运行期会被触达，先解耦再删（不许砍能力迁就缺陷） |
+| D6 | **根目录半拉子文档**：仓根平铺方案 md，且被 `layout-manifest-test` 的 rootAllow 判红；`system/README.md` 指向不存在的 `docs/ADR-001`（实际在 `docs/adr/0001-*`） | 本轮 `node test/layout-manifest-test.js` 实跑 FAIL + head 实拍 | 本 PR：方案文档一律进 `docs/plans/`，决策进 `docs/adr/`；stale 引用修复入门禁 |
+| D7 | **`system/` 目录本体无罪**：Tier S（特权系统服务形态）集成契约，与 Tier A 垫片路径并存的刻意设计 | `system/README.md` | 保留，只修引用 |
+
+## 3. 目标树（发布维 L0/L1/L2 不动，职责维六域落目录）
+
+```
+dsh-mobile/
+├─ host/                        # 发布维 L0（原 container/；Gradle 模块名仍 app）
+│  ├─ app/src/main/java/io/github/lobbowen/dshmobile/
+│  │  ├─ machine/               # 机器域：NodeRuntimeService(拆分后)+NodeWatchdogPolicy+ContainerSupervisor
+│  │  ├─ privilege/             # 特权/驱动域：capability+permissions 裁决后的唯一入口 + adb/配对
+│  │  ├─ bridge/                # 能力总线（HostBridgeService 系）
+│  │  ├─ supply/                # 供给域：native/ + kernelota/ + Prefix 装配
+│  │  ├─ observability/         # 观测域：RuntimeDiagnostics + ResidencyAudit + 探针出口
+│  │  └─ onboarding/            # 界面（原 ui/ + MainActivity + NodeContainerApp）
+│  ├─ hosttools/                # 原 engine/：发布工具链 + 契约夹具
+│  └─ native/                   # C 探针件（flock/posix/ptyprobe，原位）
+├─ runtime/                     # 发布维 L1（原 kernel/）= init 权威唯一载体
+│  ├─ init/                     # D1 合并：supervisor.js + guard/* → init/{lifecycle,supply,proc,monitor}
+│  ├─ platform/                 # 安卓专属客户端层（host-bridge client、state-root、env-catalog）
+│  ├─ workloads/                # 原 domains/ + adapters/（D5 裁决后保留或删）
+│  ├─ api/                      # 控制面路由
+│  └─ ui/                       # 面板
+├─ system/                      # Tier S 契约（保留，修引用）
+└─ docs/{adr,contracts,runbook,plans}/
+```
+
+**两条硬规矩（防"搬家搬出第二现场"）**
+
+1. **只搬不改语义**：搬家 PR 的判据 = `git diff --stat` 全为 rename + 引用点路径更新，
+   行为性 diff 零行；CI 四关（gates / app-tests / container / kernel）绿是唯一验收标准。
+2. **旧名清零**：搬完的同轮，旧目录名/旧包名/双词汇进 `capability-single-source-gate` 死词汇表
+   （手法先例：被否决的进程外复活边、监督者补投 startService），并给每条死词汇自带
+   "活样本自证"（判据方法学 v3：正样本必须命中、负样本必须判不合格）。
+
+## 4. 组件改名的真机代价与解法
+
+安卓按**组件名**记账：无障碍注册串 = `pkg/.lifecycle.DshAccessibilityService`
+（2026-09-25 实证 `settings put` 可经 S0 通道静默写入且跨覆盖安装在册）。
+⇒ 包制重排导致类 FQN 变化的代价**不是人工重授权**，而是升级首启机器域 reconcile 里加一步
+「a11y 注册串指向当前 FQN 校正」（写进 C2 合同，5 行级，判据走既有 Evidence 通道）。
+Device Owner 在本机已判死（ColorOS several-users），无该记账迁移问题。
+manifest `android:name` 保持相对类名写法：改一处不扩散（「同一事实单源」门禁条文覆盖）。
+
+## 5. CI paths 地雷审计（每次搬家的前置动作）
+
+在册血案：单 bump `version.json` 不触发任何 job；`ci.yml` 的 paths 白名单只含
+`container/**`、`kernel/**`、`docs/contracts/**`、`scripts/**`、`.github/native-assets.txt`、
+`.github/workflows/**`（`docs/adr/**`、`ARCHITECTURE.md` 不在内）。
+目录改名前逐条列 `grep -rn "container/\|kernel/\|engine/" .github/workflows/ scripts/` 的命中点，
+产出旧 glob → 新 glob 对照表；搬家 PR 必须同时改 workflow，并**当场验证 job 真的跑了**
+（判据：job 数齐备 + 关键 step 非 skipped）。这不是可选项，是合入判据。
+
+## 6. 「彻底」的定义（完成判据，缺一不叫做完）
+
+1. 旧目录/旧包/旧词汇全仓 grep 零命中（门禁死词汇表在册 + 活样本自证）。
+2. 每个状态文件单一写者；跨域读取只经合同常量（`NODE_PID_FILE`/`NODE_BIRTH_FILE` 手法推广到全部，
+   门禁扫裸路径字面量）。
+3. 六域各有 ADR 段落（起点 ADR-0008），`ARCHITECTURE.md` §1.1 旧五层表退役为新树的一节。
+4. 在途方案文档全仓至多一份（本文件）。
+5. 真机判据：搬家完成的那版 APK，退后台 30min × 3 次，每次恢复 ≤2 拍且 a11y/通道零人工重授。
+
+## 7. P0 验收判据（本 PR 收口用）
+
+1. JVM 单测：三态判据双向对照（空壳必升级、已出生绝不折腾、三条升级路径共吃冷却、阈值自洽）。
+2. 门禁：`capability-single-source-gate` 出生链 6 处按函数体/签名段取证在位；反向自证负样本判不合格。
+3. 真机：面板/通知在 `:node` 空壳时显示「运行时未出生」而不是「运行时在线」。
+4. 真机：退后台被 cached-kill 后，**不点图标**、仅靠监督者 rebind 即恢复控制面（`/proc/net/tcp`
+   端口 3080/36360 复听）；恢复耗时 ≤2 个监督拍。
+5. 边界不变：强停（`am force-stop`）后保持沉默，只由 `ResidencyAudit` 定罪可见。

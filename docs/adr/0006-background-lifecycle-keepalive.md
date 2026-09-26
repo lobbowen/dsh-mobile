@@ -45,10 +45,16 @@
      → bindService(:node, BIND_AUTO_CREATE) 持一条 binder 边
        （:node.onBind 必须返回真 binder —— 返回 null 是 null-binding，既不保活也无断开回调）
      → onServiceDisconnected（= :node 进程死亡，实测无障碍也保不住 :node）
-        → 立即 rebind（后台合法，AMS 重建进程并重投 onStartCommand）
-     → 卡死（binder 边在但 node.pid 进程记录连丢 3 拍）
-        → stopService + unbind/rebind 清账，且带 60s 冷却
-        → binder 断开则先给 AMS 30s 自愈预算，超时才清账
+        → 立即 rebind（后台合法。**2026-09-26 证伪修订**：rebind 只重建进程并跑 onCreate，
+          **不会**重投 started-service 的 onStartCommand —— 旧文本此处写的是"随之重建进程
+          并重投 onStartCommand"，那是空壳 :node 定罪的源头）
+     → 每拍三态裁决（ADR-0008 §4 C1）：POWER=进程记录在 / BORN=node.birth 属于该 pid /
+        ONLINE=控制面可达（只进状态出口，不做清账判据）
+     → 卡死（进程记录连丢 3 拍）**或空壳**（POWER ∧ ¬BORN 超 30s）**或**断开超 30s 自愈预算
+        → stopService + unbind/rebind 清账，三条升级路径共用 60s 冷却
+     → 出生触发点 = :node 的 onCreate 自发起 boot 循环（幂等闸门 scheduleBootLoop 现成）；
+        **不引入**"监督者向 :node 补投 startService"的补生边（用户 2026-09-26 判为架构失衡，
+        已钉成 capability-single-source-gate 的死词汇）
      → 每次被戳都 ensureBridge()：L-A 确保 L-B（桥归监督者拉起，BootReceiver 不再直启）
        判据 = lifecycle/NodeWatchdogPolicy（纯逻辑，CI 钉死）
 ```
