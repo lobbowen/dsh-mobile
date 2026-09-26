@@ -582,6 +582,11 @@ jobs:
           bash scripts/verify-runtime-elf.sh /tmp/repack-libs
 
       - name: Sign APK
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KS_KEYPASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           # repack 的默认发布目标就是 apk-latest（下一步）——那是存量设备的更新通道。
@@ -589,26 +594,37 @@ jobs:
           # 所以这里**没有兜底**：缺 keystore = 判红。原先的「debug 签名足够」是 repack
           # 还只用于自测、没接发布通道时代的遗物（2026-09-26 收口，与 fast-apk 的
           # 「配了 keystore 却出 debug 签名 → 硬红」同一判据方向）。
-          KS="$RUNNER_TEMP/release.keystore"
-          if [ -z "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
-            echo "::error::未配置 ANDROID_KEYSTORE_BASE64 —— repack 会发布到 apk-latest，禁止临时 debug 签名兜底"
+          #
+          # 解码 + keytool 核验 + 锚点导出收口到 scripts/inject-apk-keystore.sh（与另两条链路
+          # 同一份实现）。这里额外解决的是 secret 的落点：以前四个 secret 被 ${{ }} 直接内插进
+          # 【步骤正文】，GitHub 会把展开后的整段脚本打回日志（secret 掩码只护得住已登记值），
+          # 现在 secret 只进步骤 env，脚本按环境变量名读取。
+          # apksigner 那一侧仍用 pass: —— 它的 env:/file: 形态本仓没有可查证的先例，
+          # 不拿发布链路去猜（猜错的代价是 repack 整条路红，且只有真跑过才知道）。
+          rc=0
+          bash scripts/inject-apk-keystore.sh "$RUNNER_TEMP/keys" || rc=$?
+          if [ "$rc" = 10 ]; then
+            echo "::error title=未配置 ANDROID_KEYSTORE_BASE64::repack 会发布到 apk-latest，禁止临时 debug 签名兜底"
             exit 1
           fi
+          [ "$rc" = 0 ] || exit 1
+          KS="$RUNNER_TEMP/keys/release.keystore"
           echo "== 使用仓库配置的 keystore =="
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$KS"
-          KS_PASS="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
-          KS_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}"
-          KS_KEYPASS="${{ secrets.ANDROID_KEY_PASSWORD }}"
 
           APKSIGNER="$(bash scripts/pick.sh --last apksigner "$ANDROID_HOME/build-tools" -name apksigner -type f)"
           "$APKSIGNER" sign \
             --ks "$KS" --ks-pass "pass:$KS_PASS" \
-            --ks-key-alias "$KS_ALIAS" --key-pass "pass:$KS_KEYPASS" \
+            --ks-key-alias "${KS_ALIAS:-dsh}" --key-pass "pass:$KS_KEYPASS" \
             --min-sdk-version 24 --max-sdk-version 35 \
             --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
             --out /tmp/app-signed.apk /tmp/app-injected.apk
 
           "$APKSIGNER" verify --verbose /tmp/app-signed.apk
+          # 签完再走同一道身份门禁：重签出来的包必须与注入锚点逐指纹一致，且不得是 debug
+          # 身份。以前这里只有 `verify --verbose`（它只回答「签名结构有效吗」，不回答
+          # 「是哪把 key 签的」），别名取错或 keystore 换过都会照常投给存量设备。
+          bash scripts/verify-apk-signing.sh /tmp/app-signed.apk \
+            --require-stable --cert "$RUNNER_TEMP/keys/release.cert"
           ls -la /tmp/app-signed.apk
 
       - name: Publish to Release
