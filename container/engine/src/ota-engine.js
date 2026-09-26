@@ -2,7 +2,12 @@
 
 // 内核 OTA 引擎（单写入者 = 容器）。对齐 docs/contracts/base-spec.md §5 通道一。
 //
-// 设备端流程：poll manifest → download zip → sha256 校验 → 解包取 kernel.json →
+// 这份是**构建/校验库**，不是设备上跑的那条链：真机流程由 Kotlin 编排、验签在
+// container/app/src/main/assets/node/kernel-verify.js（KernelInstaller 刻意不复用本文件）。
+// 所以「manifest 文档自身的签名」这一问只在那边判（挡住重放旧 manifest），本文件收到的是
+// 已解析的 manifest 条目，无文档可验 —— 拿本文件的 ok:true 当设备端判据的覆盖证据是错的。
+//
+// 校验顺序：poll manifest → download zip → sha256 校验 → 解包取 kernel.json →
 //   验签(焊死公钥) → engines.node 比对固定运行时 → requires ⊆ 设备能力 →
 //   原子解包到 files/kernel/<new>/ → 切 CURRENT 指针(tmp+rename) → 杀旧 :node、spawn 新。
 // 坏包永不生效：任一校验不过直接抛错，绝不切指针。
@@ -18,7 +23,7 @@ class OtaEngine {
   constructor({ baseDir, httpGet, publicKeyPem, capabilities, runtime, protocol, log }) {
     this.baseDir = baseDir;                 // files/（应用沙箱）
     this.httpGet = httpGet;                 // (url) => Promise<Buffer>
-    this.publicKeyPem = publicKeyPem;       // 焊死公钥（设备端唯一信任源）
+    this.publicKeyPem = publicKeyPem;       // 与 APK 锚点同一把公钥，但由调用方注入（本文件不读 assets）
     this.capabilities = capabilities || [];  // 设备已预置能力 token
     this.runtime = runtime || { node: process.version };
     // 壳实现的桥协议版本（ADR-0004 §3）。调用方必须显式传入；
