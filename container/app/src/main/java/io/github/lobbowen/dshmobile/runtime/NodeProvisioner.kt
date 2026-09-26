@@ -34,7 +34,7 @@ object NodeProvisioner {
     const val NPM_GLOBAL_DIR_NAME = ".npm-global"
 
     /** 建 `$HOME/.npmrc` 并钉住 prefix；文件已在则原样交回，绝不覆盖。
-     *  npm 的默认 prefix 指向 node 安装目录（这里 = 只读的 /data/app/*/lib），
+     *  npm 的默认 prefix 指向 node 安装目录（这里 = 只读的 /data/app/…/lib），
      *  guest 里 dsh 自己起的 npm 没有内核那份 npm_config_prefix，只有 .npmrc 管得住。
      *  用户改过 .npmrc（换 registry/代理）就是这台机器的既定事实，开机抹平它不可接受。 */
     fun ensureNpmPrefixRc(context: Context): File? {

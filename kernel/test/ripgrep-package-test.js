@@ -14,6 +14,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
+// workflow 只能经 _workflow 读（行尾归一化），裸 readFileSync 由 workflow-parse W4 判红。
+const W = require(path.join(__dirname, '_workflow.js'));
 const { PKG, ensureRipgrepPackage } = require(path.join(ROOT, 'src', 'guard', 'native', 'ripgrep-package'));
 
 const results = [];
@@ -83,7 +85,7 @@ check('链接位被普通文件占据 -> 重投为符号链接', (() => {
 try {
   const impl = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'native', 'ripgrep-package.js'), 'utf8');
   const bridgeVer = (/version:\s*'(\d[\d.]+)'/.exec(impl) || [])[1] || null;
-  const wf = fs.readFileSync(path.join(ROOT, '..', '.github', 'workflows', 'fast-apk.yml'), 'utf8');
+  const wf = W.readWorkflow('fast-apk.yml', path.join(ROOT, '..'));
   const cargoVer = (/cargo install[^\n]*--version\s+([\d.]+)[^\n]*\bripgrep\b/.exec(wf) || [])[1] || null;
   check('桥接包版本 = CI 编 ripgrep 的那份', !!cargoVer && !!bridgeVer && bridgeVer === cargoVer,
     '配方 ' + cargoVer + ' / 桥接包 ' + bridgeVer);

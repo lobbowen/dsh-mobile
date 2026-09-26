@@ -332,7 +332,7 @@ class NodeRuntimeService : Service() {
             )
             RuntimeDiagnostics.append(this, "runtime", true, "runtime.json 已写入（schema 2）", "home=${filesDir.absolutePath}")
             // npm 的可写全局前缀：npm 的默认 prefix 指向 node 安装目录
-            // （这里是只读的 /data/app/*/lib），guest 里 dsh 自己跑 `npm install -g` 必
+            // （这里是只读的 /data/app/…/lib），guest 里 dsh 自己跑 `npm install -g` 必
             // EACCES/EROFS。内核 spawn 的 npm 靠 npm_config_prefix 撑着，dsh 自起的没有
             // 那份 env —— 只有 $HOME/.npmrc 能覆盖它（HOME=filesDir 由 GuestAdapter 定）。
             // 已存在则**不动**：用户改过 .npmrc（换 registry/代理）不该每次开机被抹平。
