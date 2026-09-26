@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # 随包原生 ELF 的「能否自己把自己链接起来」校验 —— 判据的唯一实现。
-# 构建期（build-node-android.sh）、固化期（release-admin.yml pin）、打包期
-# （fast-apk.yml Gate）三处共用同一份，避免同一件事写三份各改各的。
+# 调用点（少一个就留一个放行口子）：构建 build-node-android.sh；打包 fast-apk.yml
+# 与 build-apk.yml 的 pre-gradle Gate；固化 release-admin.yml 的 pin；
+# 重打包 release-admin.yml 的 repack。
 #
 # 判据只有一条：一个 ELF 若 DT_NEEDED 了同目录里我们随包投放的库
 # （当前就是 libc++_shared.so），它就必须自带 DT_RUNPATH 且值里有 $ORIGIN。

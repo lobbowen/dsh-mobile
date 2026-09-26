@@ -445,7 +445,7 @@ Android linker 查找依赖库的目录**只有三个**：
 |---|---|
 | 链接期 | `scripts/build-node-android.sh` 导出 `LDFLAGS_target`：`-Wl,--enable-new-dtags -Wl,-rpath,'$$ORIGIN'`（两层 `$$` 是 bash→make→sh 三段展开的必然写法） |
 | 构建期 | 同脚本用 `make -n` 断言展开结果真的是 `$ORIGIN`（三层 `$` 转义错了会静默变成 `RIGIN`），编完再调 `verify-runtime-elf.sh` 验产物 |
-| 固化期 / 打包期 | `scripts/verify-runtime-elf.sh`（同一份判据）被 `release-admin.yml` 的 pin 校验和 `fast-apk.yml` 的 Gate 各调一次；缺 `readelf` 时退出码 2，宁红不猜 |
+| 固化期 / 打包期 / 重打包期 | `scripts/verify-runtime-elf.sh`（同一份判据）有四个出口：`fast-apk.yml` 的 Gate、`build-apk.yml` 的 pre-gradle Gate、`release-admin.yml` 的 pin 校验与 repack 校验；缺 `readelf` 时退出码 2，宁红不猜。`build-apk.yml` 那一次是必需的：命中 node 缓存时构建脚本整步 skipped，只有它覆盖「复用二进制再出包」这条路。`repack` 那一次也是必需的：它只换签名与注入库，libnode 本体来自任意一次历史构建 —— 不查就会把修复前的包重签成"最新可安装包" |
 | 运行期 | `NativePreparer.probe` 在**清空环境**下 exec 探针 —— 与 `run_code` 同形，跑绿才是真绿 |
 
 `$ORIGIN` 的可靠性不是引来的说法，是 2026-09-26 在自己设备上验的：自造
