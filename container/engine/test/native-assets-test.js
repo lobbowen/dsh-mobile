@@ -899,6 +899,82 @@ if (fs.existsSync(SERVER_JS)) {
   );
 }
 
+// ── ⑨ 判据副本收口（门禁法①）：工具安装探测 / 版本事实源读法各留唯一宿主 ──
+// 为什么要在这里跑宿主脚本而不是只 grep 调用点：这三条链里只有 fast-apk 会被高频触发，
+// 「副本已删 + 宿主行为正确」如果只在偶尔跑的 workflow 里才第一次被验证，等于没验证。
+const ENSURE_TOOL = path.join(ROOT, 'scripts', 'ensure-tool.sh');
+check('工具安装探测宿主 scripts/ensure-tool.sh 存在', fs.existsSync(ENSURE_TOOL));
+if (fs.existsSync(ENSURE_TOOL)) {
+  const eTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ensure-'));
+  const bin = path.join(eTmp, 'bin');
+  fs.mkdirSync(bin, { recursive: true });
+  // PATH 里只放一个假 readelf、不放 sudo：走了安装分支必然 command-not-found，
+  // 所以「退出 0 且 stdout 空」只可能来自"工具已在 → 完全不碰 apt"这一条路。
+  fs.writeFileSync(path.join(bin, 'readelf'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+  const okRun = spawnSync('bash', [ENSURE_TOOL, 'readelf', 'binutils'], { encoding: 'utf8', env: { PATH: bin } });
+  check('ensure-tool：工具已在 → 退出 0 且无任何安装动作',
+    okRun.status === 0 && String(okRun.stdout).trim() === '',
+    JSON.stringify({ rc: okRun.status, out: okRun.stdout, err: String(okRun.stderr).slice(0, 120) }));
+  const empty = path.join(eTmp, 'empty');
+  fs.mkdirSync(empty, { recursive: true });
+  const miss = spawnSync('bash', [ENSURE_TOOL, 'readelf', 'binutils'], { encoding: 'utf8', env: { PATH: empty } });
+  check('ensure-tool：工具缺失 → 报"缺少"并尝试安装（安装不可得时如实非零，不静默放行）',
+    miss.status !== 0 && miss.stdout.includes('缺少 readelf'),
+    JSON.stringify({ rc: miss.status, out: miss.stdout, err: String(miss.stderr).slice(0, 120) }));
+  const noargs = spawnSync('bash', [ENSURE_TOOL], { encoding: 'utf8' });
+  check('ensure-tool：缺参数 → 非零并打 usage', noargs.status !== 0,
+    JSON.stringify({ rc: noargs.status }));
+  fs.rmSync(eTmp, { recursive: true, force: true });
+}
+
+const RNV = path.join(ROOT, 'scripts', 'read-node-versions.sh');
+check('版本事实源读取宿主 scripts/read-node-versions.sh 存在', fs.existsSync(RNV));
+if (fs.existsSync(RNV)) {
+  const truth = JSON.parse(fs.readFileSync(
+    path.join(ROOT, 'container/app/src/main/assets/node-versions.json'), 'utf8'));
+  // cwd 故意设到子目录：宿主按自身位置定位仓库根，不依赖 cwd（三条链的 working-directory 不同）。
+  const runR = (args) => {
+    const r = spawnSync('bash', [RNV, ...args], { encoding: 'utf8', cwd: path.join(ROOT, 'container') });
+    return { rc: r.status, out: String(r.stdout || '').trim(), err: String(r.stderr || '') };
+  };
+  const def = runR(['default']);
+  check('read-node-versions：default 与 JSON 一致（cwd 无关）',
+    def.rc === 0 && def.out === String(truth.default), JSON.stringify(def));
+  const abi = runR(['abi']);
+  check('read-node-versions：abi 与 JSON 一致',
+    abi.rc === 0 && abi.out === String(truth.abi), JSON.stringify(abi));
+  const bad = runR(['no-such-key']);
+  check('read-node-versions：未知键 → 退 1 带诊断（不许拿空串当版本）',
+    bad.rc === 1 && bad.err.includes('FAIL'), JSON.stringify({ rc: bad.rc, err: bad.err.slice(0, 120) }));
+  const nok = runR([]);
+  check('read-node-versions：缺键参数 → 非零', nok.rc !== 0, JSON.stringify({ rc: nok.rc }));
+}
+
+// 收口不许被"再抄一份"回退：workflow 里禁止再出现内联 binutils 安装探测 / 内联 node-versions 读法；
+// YAML 校验只允许一份实现（validate-workflows.py 已删）且被三条会跑它的链同调。
+{
+  const wfDir = path.join(ROOT, '.github/workflows');
+  const wfs = fs.readdirSync(wfDir).filter((f) => f.endsWith('.yml'))
+    .map((f) => ({ name: f, src: fs.readFileSync(path.join(wfDir, f), 'utf8') }));
+  const PROBE_RE = /apt-get install[^\n]*binutils/;
+  check('内联探测判据双向自证：旧形态必被抓、宿主调用不误伤（对照组）',
+    PROBE_RE.test('sudo apt-get update -qq && sudo apt-get install -y -qq binutils')
+      && !PROBE_RE.test('bash scripts/ensure-tool.sh readelf binutils'));
+  const probeBack = wfs.filter((w) => PROBE_RE.test(w.src)).map((w) => w.name);
+  check('workflow 无内联 binutils 安装探测回潮（唯一宿主 ensure-tool.sh）',
+    probeBack.length === 0, probeBack.join(','));
+  const READ_RE = /python3 -c [^\n]*node-versions\.json/;
+  check('node-versions 内联读法判据自证 + 无回潮（读取只走 read-node-versions.sh）',
+    READ_RE.test('V="$(python3 -c "import json; print(json.load(open(\'container/app/src/main/assets/node-versions.json\'))[\'default\'])")"')
+      && !READ_RE.test('V="$(bash scripts/read-node-versions.sh default)"')
+      && wfs.filter((w) => READ_RE.test(w.src)).map((w) => w.name).length === 0);
+  const vCallers = wfs.filter((w) => /python3 scripts\/validate-workflow\.py/.test(w.src)).map((w) => w.name).sort();
+  check('严格 YAML 校验被 ci/fast-apk/build-apk 三链同调',
+    JSON.stringify(vCallers) === JSON.stringify(['build-apk.yml', 'ci.yml', 'fast-apk.yml']), vCallers.join(','));
+  check('宽松校验器 validate-workflows.py 已删（实现唯一）',
+    !fs.existsSync(path.join(ROOT, 'scripts', 'validate-workflows.py')));
+}
+
 const METHODS_JS = path.join(ROOT, 'container/engine/src/bridge/methods.js');
 if (fs.existsSync(METHODS_JS)) {
   const js = fs.readFileSync(METHODS_JS, 'utf8');
