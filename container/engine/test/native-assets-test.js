@@ -977,6 +977,40 @@ if (fs.existsSync(RNV)) {
     !fs.existsSync(path.join(ROOT, 'scripts', 'validate-workflows.py')));
 }
 
+// ── ⑨c workflow 表达式 token 门禁自证（2026-09-27 定罪）────────────────────────
+// run: 块的 shell 注释里写下一个空的 GitHub 表达式，会让 Actions 拒掉【整份】workflow：
+// 表现是红色 + 0 个 job + 没有步骤日志，publish/repack/pin/admin 四条运维通道一起哑。
+// PyYAML 对此毫无反应，所以 ci.yml 里那道 YAML 校验当时是全绿的 —— 门禁看不见错误形态，
+// 就等于没有门禁。这里把判据本身钉成【能红】：坏夹具必被抓，YAML 层的同串不许误伤。
+{
+  const vw = (args) => spawnSync('python3',
+    [path.join(ROOT, 'scripts/validate-workflow.py'), ...args], { encoding: 'utf8', cwd: ROOT });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vw-expr-'));
+  const TOK = '${{' + ' }}';   // 拼出来，免得这份测试自己成为被扫的对象
+  // 夹具：run 块里的 shell 注释 / YAML 层的注释 / 合法表达式，三种落点只差位置。
+  const wf = (name, body) => {
+    const p = path.join(dir, name);
+    fs.writeFileSync(p, ['name: t', 'on:', '  workflow_dispatch:', 'jobs:', '  a:',
+      '    runs-on: ubuntu-latest', '    steps:', '      - name: s'].concat(body).join('\n') + '\n');
+    return p;
+  };
+  const inRun = wf('in-run.yml', ['        run: |', '          # 历史说明里出现了 ' + TOK + '，GitHub 会去替换它']);
+  const openTok = wf('open.yml', ['        run: |', '          echo "${{ steps.a.outputs.b']);
+  const good = wf('good.yml', ['        run: |', '          echo "${{ github.repository }}"']);
+  const yamlComment = path.join(dir, 'yaml-comment.yml');
+  fs.writeFileSync(yamlComment, ['name: t', 'on:', '  workflow_dispatch:',
+    '# ' + TOK + ' 待在 YAML 注释里，GitHub 看不到它', 'jobs:', '  a:', '    runs-on: ubuntu-latest',
+    '    steps:', '      - name: s', '        run: echo hi', ''].join('\n'));
+  const rBad = vw([inRun]), rOpen = vw([openTok]), rYaml = vw([yamlComment]), rGood = vw([good]);
+  check('表达式门禁真能红：run 块注释里的空表达式被抓',
+    rBad.status !== 0 && rBad.stdout.includes('空表达式'), JSON.stringify({ rc: rBad.status, out: rBad.stdout.slice(0, 160) }));
+  check('表达式门禁真能红：没闭合的 ${{ 被抓',
+    rOpen.status !== 0 && rOpen.stdout.includes('没有闭合'), JSON.stringify({ rc: rOpen.status, out: rOpen.stdout.slice(0, 160) }));
+  check('不误伤（对照组）：YAML 注释里的同串、以及合法表达式都放行',
+    rYaml.status === 0 && rGood.status === 0,
+    JSON.stringify({ yaml: rYaml.status, good: rGood.status, out: rYaml.stdout.slice(0, 160) }));
+}
+
 // ── ⑨b APK 原生件审计收口（门禁法①）：三份漂移副本 → scripts/verify-apk-native.sh ──
 // 定罪（2026-09-27 复算）：fast-apk 全量硬红 / build-apk 只查清单且 lib/ 零条目只 echo
 // 不红、不查内核(ADR-0005)/npm/小体积件 / release-admin diag 刻意只出报告。
