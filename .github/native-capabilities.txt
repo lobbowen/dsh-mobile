@@ -1,0 +1,22 @@
+# 小体积原生能力件清单 —— 由构建 / 打包审计脚本与测试共同读取
+#
+# ⚠ 本文件由 scripts/gen-native-assets.js 生成，**请勿手改**。
+#   来源：container/app/src/main/java/io/github/lobbowen/dshmobile/native/NativeAssetRegistry.kt
+#        的 CAPABILITY（外加注册表外的 node-pty，见生成器内的说明）。
+#   CI 会运行生成器并 `git diff --exit-code` 校验。
+#
+# 格式：<档位> <libName> <id>；空行与 # 开头的行忽略。
+# 档位 = NativeExecutable.buildTier：
+#   self-c    自有 C，NDK 现编 —— 编不出来即环境问题 ⇒ 缺件硬红
+#   upstream  上游源码配方 —— $PREFIX 依赖它且无回退 ⇒ 缺件硬红
+#   soft      上游配方有不确定性 —— 缺件只降级（不判红），不陪葬其它能力
+
+# --- self-c ---
+self-c libdshflock.so flock
+self-c libdshposix.so posix
+self-c libdshptyprobe.so ptyprobe
+# --- upstream ---
+upstream libbash.so bash
+upstream libdshrg.so ripgrep
+# --- soft ---
+soft libdshpty.so node-pty

@@ -62,4 +62,18 @@ data class NativeExecutable(
 
     /** 该资产的已知约束（给人看的自由文本）。 */
     val note: String = "",
+
+    /**
+     * 供给档位 —— 它**怎么来的**，以及缺件时该判红还是降级。
+     *
+     * 取值（闭集，消费方按此分档，见 `scripts/verify-apk-native.sh`）：
+     *  · `"self-c"`   自有 C，NDK 现编。**必产**：编不出来就是环境问题 ⇒ 硬红。
+     *  · `"upstream"` 上游源码配方（bash / ripgrep）。`$PREFIX` 依赖它们且**无回退** ⇒ 硬红。
+     *  · `"soft"`     上游预编译/配方有不确定性（node-pty、PTY 探针）。缺件只**降级**，不陪葬其它能力。
+     *
+     * 为什么要有它：这三档原先只以"注释 + 三段 for 循环"的形式住在 `verify-apk-native.sh` 里，
+     * 于是"包里有哪些小件、各自什么失败语义"又多了一份手抄。现在它是注册表的一个字段，
+     * 由 `scripts/gen-native-assets.js` 投影成 `.github/native-capabilities.txt` 供 shell/测试读取。
+     */
+    val buildTier: String = "self-c",
 )

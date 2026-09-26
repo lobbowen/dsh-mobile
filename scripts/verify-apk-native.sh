@@ -151,29 +151,36 @@ else
 fi
 
 # --- 小体积原生件（刻意不登记 native-assets.txt 的那批）---
-# 自有 C 编译失败即环境问题 ⇒ 硬红；bash/rg 来自上游源码配方但 $PREFIX 无回退 ⇒ 硬红；
-# node-pty 配方缺席只降级：缺件时垫片逐字回退原语义，不该让其它能力陪葬。
+# 清单是**数据**：.github/native-capabilities.txt（由 scripts/gen-native-assets.js 从注册表
+# 的 NativeExecutable.buildTier 派生）—— 本脚本不再手抄"有哪些小件、各自什么失败语义"。
+# 档位语义：self-c / upstream ⇒ 缺件硬红；soft ⇒ 缺件只降级（不判红，不陪葬其它能力）。
 echo
 echo "--- 小体积原生件 ---"
-for b in libdshflock.so libdshposix.so libdshptyprobe.so; do
-  has_exact "lib/${ABI}/$b" && echo "[ok] lib/${ABI}/$b" \
-    || note_missing "lib/${ABI}/$b" "自有 C，必产（编译失败即环境问题）"
-done
-for b in libbash.so libdshrg.so; do
-  has_exact "lib/${ABI}/$b" && echo "[ok] lib/${ABI}/$b" \
-    || note_missing "lib/${ABI}/$b" "\$PREFIX 依赖它，无回退路径"
-done
-if has_exact "lib/${ABI}/libdshpty.so"; then
-  echo "[ok] lib/${ABI}/libdshpty.so"
-else
-  # 软失败【不进 MISSING】：缺它只降级终端 PTY，判红会把无关构建一起拦死。
-  DEGRADED="$DEGRADED lib/${ABI}/libdshpty.so"
-  if [ "$REPORT" = "1" ]; then
-    echo "  [soft-absent] lib/${ABI}/libdshpty.so —— 终端 PTY 降级"
+CAPS="$(cd "$(dirname "$0")/.." && pwd)/.github/native-capabilities.txt"
+[ -f "$CAPS" ] || { echo "[error] 缺少 $CAPS —— 小件清单是派生物，不能没有它。"; exit 1; }
+CAP_N=0
+while read -r TIER LIB _ID; do
+  case "$TIER" in ''|'#'*) continue ;; esac
+  CAP_N=$((CAP_N + 1))
+  if has_exact "lib/${ABI}/$LIB"; then
+    echo "[ok] lib/${ABI}/$LIB"
+  elif [ "$TIER" = "soft" ]; then
+    # 软失败【不进 MISSING】：缺它只降级终端 PTY，判红会把无关构建一起拦死。
+    DEGRADED="$DEGRADED lib/${ABI}/$LIB"
+    if [ "$REPORT" = "1" ]; then
+      echo "  [soft-absent] lib/${ABI}/$LIB —— 终端 PTY 降级"
+    else
+      echo "::warning title=能力降级::lib/${ABI}/$LIB 不在 APK —— 终端 PTY 不可用"
+    fi
   else
-    echo "::warning title=能力降级::lib/${ABI}/libdshpty.so 不在 APK —— 终端 PTY 不可用"
+    case "$TIER" in
+      self-c)   note_missing "lib/${ABI}/$LIB" "自有 C，必产（编译失败即环境问题）" ;;
+      upstream) note_missing "lib/${ABI}/$LIB" "\$PREFIX 依赖它，无回退路径" ;;
+      *)        note_missing "lib/${ABI}/$LIB" "未知档位「$TIER」—— 清单或本脚本坏了" ;;
+    esac
   fi
-fi
+done < "$CAPS"
+[ "$CAP_N" -gt 0 ] || { echo "[error] $CAPS 里一条小件都没有 —— 循环会什么都不检查就放行。"; exit 1; }
 
 # --- npm 基础环境（缺了面板装不了任何 Agent，核心能力不是可选增强）---
 echo
