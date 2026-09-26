@@ -34,7 +34,8 @@ class BootReceiver : BroadcastReceiver() {
             action == Intent.ACTION_MY_PACKAGE_REPLACED
         ) {
             Log.i(TAG, "BootReceiver: $action -> 拉起 ContainerSupervisor（+ :node 兜底边）")
-            // 监督者是普通 started service（刻意不占通知位）→ 普通 startService。
+            // 监督者自己会在 onStartCommand 里转前台（常驻状态通知 1004），所以这里
+            // 普通 startService 即可 —— 开机窗口用 startForegroundService 反而可能被 ROM 拒。
             // 若被后台启动限制拒：下一行 :node 兜底边被拉起后，其 onCreate 会再戳一次。
             startQuietly(context, Intent(context, ContainerSupervisor::class.java), bootSafe = false)
             // 兜底边是**前台服务**（有通知 1001）→ O+ 必须 startForegroundService。
