@@ -21,6 +21,10 @@ on:
       - 'kernel/**'
       - 'docs/contracts/**'
       - 'scripts/**'
+      # 与上面 push 的清单**必须对称**：.github/native-assets.txt 是 NativeAssetRegistry 的投影，
+      # container job 会重跑 gen-native-assets.js 并 `git diff --exit-code` 它。只改这一份清单的 PR
+      # 若被 paths 挡在门外，等于「线上下载清单被人改错」这条路只能等合进 main 才第一次被检查。
+      - '.github/native-assets.txt'
       - '.github/workflows/**'
   workflow_dispatch: {}
 
