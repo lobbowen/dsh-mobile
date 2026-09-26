@@ -740,17 +740,18 @@ jobs:
             echo "::error title=版本门禁::上一条已说明原因 —— 本次不发布。"
             exit 1
           fi
-          # tag 固定为 apk-latest：存在则更新，不存在则创建。
-          gh release view "$TAG" >/dev/null 2>&1 \
-            || gh release create "$TAG" --title "DSH Mobile APK (latest)" \
-                 --notes "自动构建产物，持续覆盖更新。"
-          gh release upload "$TAG" "$APK#app-debug.apk" --clobber
-          # 清单与 APK 必须同批上传：否则 latest 的 version.json 说的不是 latest 那个包，
+          # tag 固定为 apk-latest：存在则覆盖、不存在则创建。整段「确保在 → 覆盖 → 事后
+          # 逐字节确认」的判据只住 scripts/gh-release-upload.sh 一处（含同名资产记录还在、
+          # 后端对象已孤立时的「按名删旧记录再传」回退）。
+          # APK 与 version.json 同批上传：否则 latest 的 version.json 说的不是 latest 那个包，
           # 下一次门禁就是拿假读数比真产物（版本化归档 v<versionName> 仍只由 fast-apk 写，
           # 这条链路的产物由 Actions artifact 保留）。
-          gh release upload "$TAG" version.json --clobber
+          # 本步没有 set -e（见上方版本门禁那条注释），所以显式判宿主退出码。
+          bash scripts/gh-release-upload.sh "$TAG" \
+            --title "DSH Mobile APK (latest)" --notes "自动构建产物，持续覆盖更新。" \
+            "$APK" version.json \
+            || { echo "::error title=发布失败::上方宿主已说明哪一步没成 —— 不许把这一步当发布成功。"; exit 1; }
           echo "=== 发布完成 ==="
-          gh release view "$TAG" --json url,assets 2>/dev/null || true
           echo "下载地址: https://github.com/${{ github.repository }}/releases/download/${TAG}/app-debug.apk"
           # 把网址写进 ci-ok 便于外部读取
           echo "APK_URL=https://github.com/${{ github.repository }}/releases/download/${TAG}/app-debug.apk" >> "$GITHUB_OUTPUT"
