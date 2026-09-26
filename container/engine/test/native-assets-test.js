@@ -313,19 +313,44 @@ if (fs.existsSync(BUILD_SH)) {
 }
 
 const VALIDATOR_SH = path.join(ROOT, 'scripts/verify-runtime-elf.sh');
-// 只断言校验器在场并被三处调用（下面那个循环）。它自己能不能红，不靠本文件
+// 只断言校验器在场并被各入口调用（下面那个循环）。它自己能不能红，不靠本文件
 // 的正则自证 —— 那又是一层「注释当证据」。真判据在 CI 里对真实产物跑一次。
 check('⑤ 共用校验器 scripts/verify-runtime-elf.sh 存在', fs.existsSync(VALIDATOR_SH));
 
-// 三处调用点（构建 / 固化 / 打包）都要接上同一判据，漏一处就留一个放行口子。
-for (const wf of [
-  '.github/workflows/fast-apk.yml',
-  '.github/workflows/release-admin.yml',
-]) {
+// 每一个能把原生产物放进可分发东西的入口，都必须接上同一判据。
+// 期望次数写在表里：release-admin 有两个各自独立的出口（pin 固化运行时 / repack 重打包发 APK），
+// 只接一个就留一个口子 —— 断言次数而不是断言「出现过」，否则第二个出口被人删掉也不会红。
+// 构建期那一处在 build-node-android.sh 里（上面的 ⑤ 已断言）。
+const VALIDATOR_CALLERS = [
+  ['.github/workflows/fast-apk.yml', 1],
+  ['.github/workflows/build-apk.yml', 1],
+  ['.github/workflows/release-admin.yml', 2],
+];
+for (const [wf, want] of VALIDATOR_CALLERS) {
   const p = path.join(ROOT, wf);
-  if (!fs.existsSync(p)) continue;
-  check(`${wf} 调用 verify-runtime-elf.sh`, /verify-runtime-elf\.sh/.test(stripHashComments(fs.readFileSync(p, 'utf8'))));
+  const exists = fs.existsSync(p);
+  check(`${wf} 存在`, exists, '调用点清单不能指向不存在的文件 —— 文件没了这条断言就空转');
+  if (!exists) continue;
+  const hits = (stripHashComments(fs.readFileSync(p, 'utf8'))
+    .match(/verify-runtime-elf\.sh/g) || []).length;
+  check(
+    `${wf} 调用 verify-runtime-elf.sh >= ${want} 次`,
+    hits >= want,
+    `实际命中 ${hits} 次（期望 >= ${want}）：少一个出口就少一道判据`
+  );
 }
+
+// build-apk 的 node 缓存不许有前缀回退：key 变了说明编译脚本动过，回退命中拿到的是
+// 旧脚本的产物 —— 本轮变更恰好是链接标志，旧产物没有 $ORIGIN，上机即死，
+// 而流程看起来和正常命中一模一样。不许用兜底把必然的失败伪装成缓存命中。
+const BUILD_APK_YML = path.join(ROOT, '.github/workflows/build-apk.yml');
+const fallbackHits = (stripHashComments(fs.readFileSync(BUILD_APK_YML, 'utf8'))
+  .match(/restore-keys\s*:/g) || []).length;
+check(
+  'build-apk 的 node 缓存没有 restore-keys 前缀回退',
+  fallbackHits === 0,
+  `命中 ${fallbackHits} 处 restore-keys（期望 0）：回退命中会拿旧脚本的二进制冒充缓存命中`
+);
 
 // 运行期探针必须与 run_code 同形：裸环境。补 LD_LIBRARY_PATH = 给被测对象装脚手架。
 const PREPARER_KT = path.join(

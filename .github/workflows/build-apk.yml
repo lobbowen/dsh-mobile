@@ -382,10 +382,11 @@ jobs:
       # GitHub Actions 的 cache 本质上也不是增量缓存，它只做整份条目的
       # 精确匹配 / 前缀回退，缓存中间态并不能带来真正的增量编译。
       #
-      # restore-keys：本轮 key 未命中时按前缀回退到最近一次缓存。这里刻意
-      # 用同前缀，好处是换了编译脚本时仍能拿到旧二进制作为"应急兜底"；
-      # 但因为 key 变了就说明编译脚本动过，脚本改动很可能影响产物正确性，
-      # 所以【命中回退缓存时额外打一条醒目警告】，不静默使用。
+      # 没有 restore-keys（2026-09-26 删掉前缀回退）：回退命中意味着编译脚本
+      # 已经变过、这份二进制是旧脚本的产物，而它看起来和命中一样。本轮的变更
+      # 正是链接标志 —— 旧产物没有 DT_RUNPATH=$ORIGIN，在 run_code 的空环境里
+      # 必然 CANNOT LINK。留着回退，就等于把"必然上机即死"伪装成"缓存命中、
+      # 跳过 3~4 小时"。脚本改了就重编，代价是机时，换来的是包里的东西可信。
       # ---------------------------------------------------------------------------
       - name: Cache compiled Node binary
         id: nodecache
@@ -393,8 +394,6 @@ jobs:
         with:
           path: /tmp/dsh-node-cache
           key: node-android-${{ steps.nodever.outputs.tag }}-${{ hashFiles('scripts/build-node-android.sh') }}
-          restore-keys: |
-            node-android-${{ steps.nodever.outputs.tag }}-
 
       - name: Restore cached Node binary if present
         id: restorenode
@@ -404,7 +403,6 @@ jobs:
           # （不是 assets！原因见 build-node-android.sh 里的 W^X 说明）
           mkdir -p container/app/src/main/jniLibs/arm64-v8a
           DEST="container/app/src/main/jniLibs/arm64-v8a/libnode.so"
-          EXACT_KEY="node-android-${{ steps.nodever.outputs.tag }}-${{ hashFiles('scripts/build-node-android.sh') }}"
           if [ -f /tmp/dsh-node-cache/node ]; then
             cp -f /tmp/dsh-node-cache/node "$DEST"
             chmod +x "$DEST"
@@ -474,18 +472,11 @@ jobs:
               echo "        与 APK 的 arm64-v8a 不匹配，拒绝使用（本步骤失败以阻止出包）。"
               exit 1
             fi
-            # 区分「精确命中」与「前缀回退命中」。后者意味着编译脚本已变更，
-            # 这个二进制是旧脚本的产物，可能不是我们真正想要的 —— 必须警告。
+            # 无 restore-keys ⇒ 能走到这里只可能是精确命中，即当前编译脚本的产物。
+            # （此前这里是"回退命中打一条 warn 继续用"，见上方 Cache 步骤的说明。）
+            echo "[ok] 精确命中：复用的二进制由当前 build-node-android.sh 产出。"
             SAVED_KEY="$(cat /tmp/dsh-node-cache/.cache-key 2>/dev/null || echo '<unknown>')"
-            if [ "$SAVED_KEY" = "${EXACT_KEY}:${GITHUB_RUN_ID}" ] || [ "${SAVED_KEY%:*}" = "$EXACT_KEY" ]; then
-              echo "[ok] 精确命中（编译脚本与 Node 版本均未变），复用的二进制即当前脚本的产物。"
-            else
-              echo "[warn] 回退命中（前缀匹配）：编译脚本或 Node 版本可能已变更。"
-              echo "       当前脚本对应的 key: $EXACT_KEY"
-              echo "       缓存实际的 key    : $SAVED_KEY"
-              echo "       本二进制来自较早的编译，若怀疑产物不是最新脚本的结果，"
-              echo "       可强制重编：把 build 脚本里任意一处改一个字符即可（key 随之变化）。"
-            fi
+            echo "       缓存条目 key: $SAVED_KEY"
           else
             echo "cache-hit=no" >> "$GITHUB_OUTPUT"
             echo "[miss] 无缓存产物，需要完整编译 Node（预计 3~4 小时）。"
@@ -599,6 +590,16 @@ jobs:
           # 预知运行时随机串，故仅说明装配位置）。
           echo "    装配位置: /data/app/.../<pkg>-.../lib/arm64-v8a/libnode.so"
           echo "    运行期由 applicationInfo.nativeLibraryDir 定位并 exec。"
+
+          # 形态之外还要过依赖自解析判据：命中缓存时 build-node-android.sh 根本不跑，
+          # 那条链路上的产物级校验也就没跑，而本 workflow 会把包直接发到 apk-latest。
+          # 判据只有一份实现（scripts/verify-runtime-elf.sh），与 fast-apk/pin 同源。
+          echo "=== 依赖自解析门禁（DT_RUNPATH 含 \$ORIGIN）==="
+          command -v readelf >/dev/null 2>&1 || {
+            echo "[info] 缺少 readelf，安装 binutils …"
+            sudo apt-get update -qq && sudo apt-get install -y -qq binutils
+          }
+          bash scripts/verify-runtime-elf.sh container/app/src/main/jniLibs/arm64-v8a
 
       - name: Inject release keystore (optional, for stable signing)
         id: signing

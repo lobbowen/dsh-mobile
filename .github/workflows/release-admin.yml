@@ -453,8 +453,12 @@ jobs:
     timeout-minutes: 40
 
     steps:
+      # 判据（scripts/verify-runtime-elf.sh）要随 main 演进：repack-* tag 上那份脚本
+      # 可能是历史版本，用它校验等于用旧尺子量新产物。
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Resolve source run id
         id: src
@@ -539,6 +543,32 @@ jobs:
           print('[ok] CRC 全部通过')
           PY
           python3 /tmp/verify.py
+
+          # 上面的 verify.py 只回答「条目在不在、CRC 好不好」——那是**打包**层面的完整性。
+          # 装到真机上跑不跑得起来是另一件事：libnode.so 依赖同目录的 libc++_shared.so，
+          # 而 dsh run_code 从空环境起子进程，补不到 LD_LIBRARY_PATH，
+          # 本体必须自带含 $ORIGIN 的 DT_RUNPATH。repack 完全可能被人拿来重签一个
+          # 「修复之前」的包 —— 那种包条目齐全、CRC 正确、签名也没问题，装上就是 CANNOT LINK。
+          # 判据与构建期/打包期/pin 同源（scripts/verify-runtime-elf.sh），这里不再自己写一份。
+          echo "== 依赖自解析门禁（DT_RUNPATH 含 \$ORIGIN）=="
+          command -v readelf >/dev/null 2>&1 || {
+            echo "[info] 缺少 readelf，安装 binutils …"
+            sudo apt-get update -qq && sudo apt-get install -y -qq binutils
+          }
+          rm -rf /tmp/repack-libs && mkdir -p /tmp/repack-libs
+          python3 - <<'PY'
+          import os, zipfile
+          z = zipfile.ZipFile('/tmp/app-injected.apk')
+          out = '/tmp/repack-libs'
+          n = 0
+          for i in z.infolist():
+              if i.filename.startswith('lib/arm64-v8a/') and i.filename.endswith('.so'):
+                  with open(os.path.join(out, os.path.basename(i.filename)), 'wb') as f:
+                      f.write(z.read(i))
+                  n += 1
+          print('[ok] 解出 %d 个 arm64-v8a 原生库' % n)
+          PY
+          bash scripts/verify-runtime-elf.sh /tmp/repack-libs
 
       - name: Sign APK
         run: |
