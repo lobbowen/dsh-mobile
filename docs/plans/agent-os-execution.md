@@ -7,7 +7,7 @@
 
 | 轨 | 内容 | 状态 | 量 |
 |---|---|---|---|
-| **P0** | C1 出生收口：`onCreate` 自出生 + 三态判据 + 空壳上屏 + 门禁出生链 | 已合入 main（`07faed6`，壳 1.1.6(8)），CI 绿；真机判据 §7-3/4/5 挂起（设备未接入） | 0.5d + 1 壳 + 1 机 |
+| **P0** | C1 出生收口：`onCreate` 自出生 + 三态判据 + 空壳上屏 + 门禁出生链 | 已合入 main（`07faed6`，壳 1.1.6(8)），CI 绿；真机判据 **4、5 已过**（01:2x 实跑，见 §7 收口状态），**判据 3 真机判失败 = D9** ⇒ P0 未收口 | 0.5d + 1 壳 + 1 机 + 判据 3 补修 1 壳 |
 | **PC-0** | 命名表 / 目标树终稿 / CI paths 对照表 / `capability`⇄`permissions` 裁决阅读 | 待做 | 0.5–1d |
 | **PC-1** | D1+D2 搬家：`guard`⇄`supervisor` 双词汇合并 + `container/engine`→`hosttools` | 待做 | 2 壳 |
 | **PC-2** | Kotlin 六域包制重排（含组件名迁移 + a11y 注册串自校正） | 待做 | 2–3 壳 + 1 机 |
@@ -32,6 +32,8 @@
 | D6 | **根目录半拉子文档**：仓根平铺方案 md，且被 `layout-manifest-test` 的 rootAllow 判红；`system/README.md` 指向不存在的 `docs/ADR-001`（实际在 `docs/adr/0001-*`） | 本轮 `node test/layout-manifest-test.js` 实跑 FAIL + head 实拍 | 本 PR：方案文档一律进 `docs/plans/`，决策进 `docs/adr/`；stale 引用修复入门禁 |
 | D7 | **`system/` 目录本体无罪**：Tier S（特权系统服务形态）集成契约，与 Tier A 垫片路径并存的刻意设计 | `system/README.md` | 保留，只修引用 |
 | D8 | **交付通道无单一写者**（2026-09-26 夜间事故，2026-09-27 复核）：`fast-apk` 从**任意 ref** 都能写共享发布通道，未合入 main 的分支字节被原地投成用户手里的下载地址 | 实证：16:12–16:13 分支 commit `090abbd`（领先 main 18 个 commit）经 run #185 同时覆盖 `apk-latest` 与 `v1.1.6`，`ci-ok.txt` 落 `sha : 090abbd`；成因三处逐行复核 —— `fast-apk.yml` 全文无 `github.ref_name` 校验（发布步骤 `:730`、`TAG="apk-latest"` `:736`、版本化归档 `VTAG="v$VN"` `:796`），版本门禁放行同号换字节（`verify-apk-version-gate.sh:77`），两条合起来 = 任何分支都能顶掉线上 | 归 **P2b**（另一工作区正收敛门禁/`fast-apk.yml`/`scripts`，本轮不碰）：发布步骤加「`GITHUB_SHA` 必须是 main head」硬失败 + 门禁活样本；合同条文已进 ADR-0008 §4 C4。本轮治标**已完成并复核**：fast-apk run #188（`main` / `9d530d3`，21 步全绿，含 step 17 签名门与 step 20 发布）后，Releases API 实读 `apk-latest/app-debug.apk` 与 `v1.1.6/app-debug-1.1.6+8.apk` digest 相同 = `sha256:8466cdaa67b6a4b03…`（53406521 字节），`ci-ok.txt` 现记 `sha : 9d530d3` + 同值 `apk_sha`（污染版是 `25c117d…` / 53406529 字节 / `090abbd`）；**同一破口 8 分钟后再次点火**：16:30:59 分支 `ws-p2b-audit`（`a6c9fafb`）dispatch fast-apk run #189，只因它自己红在 step 18「Audit APK contents」（发布步 `:730` 没有 `if:`，前一步红则后续整步不跑）才没顶掉通道 —— 挡住事故的是别人的门禁判红，不是这条链有设计 |
+| D9 | **常驻通知（NOTIF_ID 1004）有两个内容写者**（2026-09-27 真机判据 3 定罪）：`promoteToForeground()` 每次 `onStartCommand` 都用 `ResidencyAudit.interruption() ?: "状态采集中…"` 覆盖正文（`ContainerSupervisor.kt:100` 投递 → `:118-124`，覆盖语句在 `:121`），而三态结论只由 `refreshStatusNotice()`/`statusLine()`（`:209-243`，`NOTIFY_MS = 20_000L` 在 `:313`）发布 ⇒ **拉起风暴里后者的节拍永远赢不过前者**。为什么必然成风暴：`ensureRunning` 是普通 `startService`（`:321-327`），而它的调用点包含「`:node` 每次 boot 尝试」（注释 `:316-320` 自证）⇒ :node 越是不出生就越频繁地戳，戳一次盖一次，屏幕上恒定只剩定罪段。罪不在 throttle，在**同一 id 两套正文** | 真机注入 `POWER ∧ ¬BORN ∧ ¬ONLINE` 后 40s 内通知从未印「运行时未出生」，且定罪段时长数字 40s 冻结；logcat 无「监督拍异常」⇒ 非抛异常（判据 3 实跑记录见 §7 收口状态） | 补修（壳 1.1.7(9)）：1004 的正文**单写者** = `statusLine()`，`promoteToForeground()` 只负责转前台不再另写文案；首拍读数未采集时 `statusLine()` 自己如实说「状态采集中…」。判据仍走 §7-3，另加一条 JVM 单测：连续 `onStartCommand` 后正文必须含三态结论 |
+| D10 | **内核 stdout/stderr 转发线程未捕获 `InterruptedIOException`**：`forward()` 在裸 `Thread { }` 里 `bufferedReader().use { r -> r.forEachLine { … } }`（`NodeRuntimeService.kt:627-632`），任一异常沿默认 `UncaughtExceptionHandler` 上抛 ⇒ 拆内核管道（`close()`）与读线程抢 FD，抛 `read interrupted by close() on another thread`，**整个 `:node` 进程 FATAL** | 真机 crash buffer 实证：`FATAL EXCEPTION: Thread-2/Thread-3 · Process: …:node · java.io.InterruptedIOException: read interrupted by close() on another thread`，栈尾实名 `kotlin.io.TextStreamsKt.forEachLine(ReadWrite.kt:163)` → `NodeRuntimeService.forward$lambda$11(NodeRuntimeService.kt:632)`；01:07:46 / 01:11:13（两条）/ 01:12:13（两条）共 5 次、三个不同 pid（22169 / 26037 / 27052），stdout 与 stderr 两条转发线程都会炸 ⇒ **不是我这轮手动杀进程才有的罕见竞态，内核每次被拆管都炸一次整进程** | 独立小修（可与 D9 同 PR）：两处都要，缺一仍是撞运气 ——① 拆管顺序：先让读线程退出再 `close()`；② 语义更正：`InterruptedIOException("read interrupted by close()…")` 是 libcore 对「另一线程关掉了 FD」的**正常**信号，按 EOF 处理并静默收尾，不当故障上抛。判据 = 反复拆/起内核后 crash buffer 零新增、`:node` 不 FATAL，只按 `SupervisorPolicy` 退避重启内核 |
 
 ## 3. 目标树（发布维 L0/L1/L2 不动，职责维六域落目录）
 
@@ -101,9 +103,23 @@ manifest `android:name` 保持相对类名写法：改一处不扩散（「同�
    端口 3080/36360 复听）；恢复耗时 ≤2 个监督拍。
 5. 边界不变：强停（`am force-stop`）后保持沉默，只由 `ResidencyAudit` 定罪可见。
 
-**收口状态（2026-09-27）**：判据 1、2 的代码随 `07faed6` 进 main；CI 侧实读 run #214（head `9d530d3`）
-四个 job：`container` / `kernel` / `app-tests` 全 success，`kernel-release` skipped（paths 无关，
-skipped ≠ 红）。门禁输出 `PASS 出生链：6 处按函数体/签名段取证全在位…负样本判为不合格`。
-判据 3、4、5 **全部挂起，非代码原因**：本机 `adb devices` 为空、`lsusb` 无 OPPO `22d9` 设备，
-手机未接入 —— 需要接线并确认 USB 调试，才能装机跑这三条。
-P0 因此**不算交付完成**：合入 ≠ 上线，上线 = 真机判据 3–5 逐条复点。
+**收口状态（2026-09-27 凌晨，真机 PLP120 / 无线 adb `192.168.3.74:43519`）**：
+
+- 判据 1、2 的代码随 `07faed6` 进 main；CI 侧实读 run #214（head `9d530d3`）四个 job：
+  `container` / `kernel` / `app-tests` 全 success，`kernel-release` skipped（paths 无关，
+  skipped ≠ 红）。门禁输出 `PASS 出生链：6 处按函数体/签名段取证全在位…负样本判为不合格`。**通过**。
+- 装机实读：`dumpsys package` = versionName 1.1.6 / versionCode 8；干净态
+  `:node=11159` 且 `node.birth` == `node.pid` == 11159，端口 3080/36360 在 LISTEN ⇒ 出生链在真机成立。
+- **判据 4 通过**：退后台后用 `run-as <pkg> kill -9 <pid>` 以 app uid 精确杀 :node 22944
+  （**`am kill` 杀不掉 bound service，拿它注入等于没注入** —— 本轮第一次实测 55s 零变化即此因）；
+  不点图标：t+4s 新 :node 25205 在册、`node.birth` 重写、t+11s 两端口复听。
+  贴着「≤2 拍」边界，采样粒度 3s，因此这条读数是**下界不是精确耗时**。
+- **判据 5 通过**：`am force-stop` 后 96s 内零进程、零 LISTEN 端口（沉默，无任何进程外复活边）；
+  重开应用后定罪段如实显示「上次存活到 01:16:44，中断 3 分 28 秒」。
+- **判据 3 失败（→ D9）**：注入 `rm -f node.birth; mkdir node.birth` 并每拍杀 libnode，
+  造出 `POWER ∧ ¬BORN ∧ ¬ONLINE`（先 `rm -f` 是必须的：`mkdir` 撞已存在的文件会失败 = 注入根本没生效，
+  本轮第一次实测就因此看到假的「运行时未响应」）；t+4s…t+40s 每 3s 抓一次通知，
+  **通知从未出现「运行时未出生」**，且定罪段里的「中断 3 分 28 秒」40s 不动；
+  logcat 无「监督拍异常」⇒ tick 没抛异常，是**内容被另一个写者盖掉**。
+  机制见 D9。**⇒ P0 不算交付完成**：断服根因已被 `node.birth` 单源治好（判据 4 成立），
+  但「空壳必须上屏」这条产品判据未成立，需一笔补修（壳 1.1.7(9)）+ 重发布 + 复点。
