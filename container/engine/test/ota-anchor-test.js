@@ -172,13 +172,14 @@ const mk = (name, content) => {
 }
 
 // ---------------------------------------------------------------------------
-// ⑤ 回潮门禁：两条 CI 链不许再各写一半判据
+// ⑤ 回潮门禁：CI 链与本地签名脚本不许再各写一半判据
 // ---------------------------------------------------------------------------
 const WF = {
   build: path.join(ROOT, '.github/workflows/build-apk.yml'),
   ota: path.join(ROOT, '.github/workflows/kernel-ota.yml'),
   fast: path.join(ROOT, '.github/workflows/fast-apk.yml'),
 };
+const BUNDLE = path.join(ROOT, 'scripts/build-kernel-bundle.sh');
 /** 剥掉整行注释：注释里提这些串是交代历史，不是判据。 */
 function stripComments(src) {
   return src.split('\n').filter((l) => !/^\s*(#|\/\/)/.test(l)).join('\n');
@@ -195,12 +196,22 @@ function stripComments(src) {
     const calls = (code.match(/bash "?\S*verify-ota-anchor\.sh/g) || []).length;
     check(`⑤ ${what} 调用宿主恰好 1 次`, calls === 1, `实际 ${calls} 次`);
   }
-  // 只有 kernel-ota 拿得到私钥：配对那一问必须带 --private，别处不许假装查过。
-  check('⑤ 带 --private 的调用只有一处（配对判据归签名链，其余两处无从配对）',
+  // 私钥只有签名链拿得到：workflow 里只许 kernel-ota 带 --private，别处不许假装查过。
+  check('⑤ 带 --private 的调用只在 kernel-ota（其余两链无从配对）',
     (src.ota.match(/--private/g) || []).length === 1 &&
     (src.build.match(/--private/g) || []).length === 0 &&
     (src.fast.match(/--private/g) || []).length === 0,
     '在没有私钥的地方写配对判据 = 要么空转要么误红');
+  // CI 之外的手工/fork 路径也用同一份脚本签名，配对判据必须长在脚本里而非只长在 CI 上。
+  const bundle = fs.existsSync(BUNDLE) ? stripComments(fs.readFileSync(BUNDLE, 'utf8')) : '';
+  check('⑤ 对照组：build-kernel-bundle.sh 在（扫描目标不能指向不存在的文件）', !!bundle);
+  const bundleCalls = (bundle.match(/verify-ota-anchor\.sh/g) || []).length;
+  check('⑤ build-kernel-bundle.sh 调用宿主恰好 1 次且带 --private',
+    bundleCalls === 1 && /--private/.test(bundle), `实际 ${bundleCalls} 次`);
+  check('⑤ 配对判据排在真正签名那一步之前（不配对就不签）',
+    bundle.includes('verify-ota-anchor.sh') &&
+      bundle.indexOf('verify-ota-anchor.sh') < bundle.indexOf('build-bundle.js'),
+    '顺序反了 = 先签出一个没人能验的包再报错');
   const hostSrc = fs.readFileSync(HOST, 'utf8');
   for (const [what, re] of [
     ['锚点缺失判据', /锚点缺失或为空/],
