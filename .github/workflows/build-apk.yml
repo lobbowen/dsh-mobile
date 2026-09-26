@@ -466,21 +466,13 @@ jobs:
                 fi
               fi
             done
-            # 复用缓存二进制时做一次形态校验。
-            # 注意：这里【不】强制要求 linker64 解释器 —— 该文件本质是普通 ELF
-            # 可执行文件，被系统当 native lib 解压落盘后直接 exec，并非作为共享库
-            # 加载，所以理论上静态链接也能跑。真正要防的是「缓存里存的是远古形态
-            # 的产物」（比如最初那版 assets 用的东西）；用体积和多架构特征做粗筛。
-            if file -b "$DEST" | grep -qiE "ARM aarch64|aarch64"; then
-              echo "[ok] 架构为 aarch64，与 arm64-v8a 匹配。"
-            else
-              echo "[error] 缓存中的二进制不是 aarch64：$(file -b "$DEST")"
-              echo "        与 APK 的 arm64-v8a 不匹配，拒绝使用（本步骤失败以阻止出包）。"
-              exit 1
-            fi
+            # 复用缓存的二进制不在这里判形态：下面的 pre-gradle Gate 对 jniLibs 目录
+            # 跑唯一宿主 scripts/verify-runtime-elf.sh（架构/16KB/解释器/闭环/自解析五项），
+            # 且它在 gradle 之前 —— 缓存命中时 Node 编译整步 skipped，两道判据之间没有
+            # 长耗时步骤。此处原先自己抄了一条 `file | grep aarch64`，是同一事实的第二份实现。
             # 无 restore-keys ⇒ 能走到这里只可能是精确命中，即当前编译脚本的产物。
             # （此前这里是"回退命中打一条 warn 继续用"，见上方 Cache 步骤的说明。）
-            echo "[ok] 精确命中：复用的二进制由当前 build-node-android.sh 产出。"
+            echo "[ok] 精确命中：复用的二进制由当前 build-node-android.sh 产出（形态由下游 Gate 判）。"
             SAVED_KEY="$(cat /tmp/dsh-node-cache/.cache-key 2>/dev/null || echo '<unknown>')"
             echo "       缓存条目 key: $SAVED_KEY"
           else
@@ -584,24 +576,19 @@ jobs:
             exit 1
           fi
           file -b "$DEST" | sed 's/^/file: /'
-          # 关键前提：必须是 aarch64 的 ELF，否则装到 arm64 设备上无法执行。
-          # （不强制 linker64 解释器：该文件是普通 ELF 可执行文件，系统只是把它
-          # 当 native lib 解压落盘，并非作为共享库加载。）
-          if ! file -b "$DEST" | grep -qiE "aarch64"; then
-            echo "[error] 该产物不是 aarch64 ELF，与 APK 的 arm64-v8a 不匹配。"
-            exit 1
-          fi
-          echo "[ok] 门禁通过：产物形态正确，可以进入 gradle 打包。"
+          echo "[ok] 门禁通过：产物就位，可以进入 gradle 打包。"
           # 明确记录：真机上它将被解压到 nativeLibraryDir，路径于此可见（构建期无法
           # 预知运行时随机串，故仅说明装配位置）。
           echo "    装配位置: /data/app/.../<pkg>-.../lib/arm64-v8a/libnode.so"
           echo "    运行期由 applicationInfo.nativeLibraryDir 定位并 exec。"
 
-          # 形态之外还要过依赖自解析判据：命中缓存时 build-node-android.sh 根本不跑，
+          # 就位之外还要过形态判据：命中缓存时 build-node-android.sh 根本不跑，
           # 那条链路上的产物级校验也就没跑，而本 workflow 会把包直接发到 apk-latest。
-          # 判据只有一份实现（scripts/verify-runtime-elf.sh），与 fast-apk/pin 同源；
+          # 判据只有一份实现（scripts/verify-runtime-elf.sh：架构 / 16KB 对齐 /
+          # 解释器 / DT_NEEDED 闭环 / DT_RUNPATH 含 $ORIGIN 五项），与 fast-apk/pin/repack
+          # 同源；这里原先另抄了一条 `file | grep aarch64`，已删。
           # 工具安装探测同样收口（scripts/ensure-tool.sh），不再各抄一份。
-          echo "=== 依赖自解析门禁（DT_RUNPATH 含 \$ORIGIN）==="
+          echo "=== ELF 形态门禁（scripts/verify-runtime-elf.sh）==="
           bash scripts/ensure-tool.sh readelf binutils
           bash scripts/verify-runtime-elf.sh container/app/src/main/jniLibs/arm64-v8a
 
