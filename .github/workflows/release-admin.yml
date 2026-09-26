@@ -893,7 +893,9 @@ jobs:
           echo
           echo "=== 4) 动态依赖闭环 ==="
           # 遍历 DT_NEEDED，除 bionic 提供的系统库外，其余必须由随包文件提供。
-          NEEDED="$(readelf -d libnode.so 2>/dev/null | awk '/NEEDED/ {gsub(/[\[\]]/,"",$5); print $5}')"
+          NEEDED="$({ readelf -d libnode.so 2>/dev/null || true; } | awk '/NEEDED/ {gsub(/[\[\]]/,"",$5); print $5}')"
+          # 空清单 = 下面的闭环循环一条都不跑就走到 [ok]，那是空转放行。读不出来就拒绝固化。
+          [ -n "$NEEDED" ] || { echo "[error] 读不出 libnode.so 的 DT_NEEDED，依赖闭环无从进行，拒绝固化。"; exit 1; }
           echo "NEEDED 列表："
           echo "$NEEDED" | sed 's/^/  /'
           MISSING=""

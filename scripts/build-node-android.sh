@@ -347,7 +347,10 @@ PY
   fi
   echo "    [ok] 已无 aligned_alloc 调用点（注释中的说明文字已排除）"
   # 自动断言：memalign 必须能在 API ${ANDROID_API} 下真链接（--no-undefined 是硬校验）。
-  NDKBIN_FOR_CHECK="$(ls -d "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin 2>/dev/null | head -1)"
+  # 本脚本这类赋值里的 `|| true` 不可省：pipefail 之下 ls 无匹配返回 2，裸赋值会被
+  # set -e 在紧接着的那行判空之前就把脚本静默终止 —— 判空里的诊断永远轮不到说话。
+  # 同类写法在下方还有几处，统一由 container 测试的静态门禁钉住，不逐处重复注释。
+  NDKBIN_FOR_CHECK="$( { ls -d "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin 2>/dev/null || true; } | head -1)"
   if [ -n "$NDKBIN_FOR_CHECK" ] && [ -x "$NDKBIN_FOR_CHECK/aarch64-linux-android${ANDROID_API}-clang" ]; then
     cat > "$WORK/memalign_probe.c" <<'PROBE'
 #include <malloc.h>
@@ -417,7 +420,7 @@ fi
 # 候选顺序：环境变量显式指定 > 系统 clang > 系统 gcc > NDK clang（最后手段）
 HOST_CC="${CC_host:-}"
 HOST_CXX="${CXX_host:-}"
-NDK_HOST_BIN="$(ls -d "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin 2>/dev/null | head -1)"
+NDK_HOST_BIN="$( { ls -d "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin 2>/dev/null || true; } | head -1)"
 
 # 宿主编译器可用性探针：必须能「编译并链接」一段用到 C++ 标准库 + 原子操作的代码。
 # 只测能不能产出 x86-64 是不够的 —— 那正是 NDK clang 当初骗过断言的原因。
@@ -581,11 +584,31 @@ echo "    [ok] 宿主编译器校验通过（非 android 工具链，且实测�
 DRY_LOG="${TMPDIR:-/tmp}/dsh-node-make-n.log"
 # make -n 只展开不执行；node 的 Makefile 图大，退出码偶有非零（缺规则之类），
 # 那不影响我们判链接行 —— 真正执行时会由 make 本身报错。
-make -n > "$DRY_LOG" 2>&1 || true
+# 退出码要记下来而不是 `|| true` 一吞了之：取证段得区分「make 压根没展开出东西」
+# 和「展开了但链接行里没有 -rpath」，这两种红的处置完全不同。
+MAKE_N_RC=0
+make -n > "$DRY_LOG" 2>&1 || MAKE_N_RC=$?
 EXPECTED_RPATH="-Wl,-rpath,'${DOLLAR}ORIGIN'"
-RPATH_SEEN="$(grep -o -- '-Wl,-rpath,[^ ]*' "$DRY_LOG" | sort -u | tr '\n' ' ')"
-echo "==> 校验展开后的链接参数: LDFLAGS.target=$(sed -n 's/^LDFLAGS\.target[[:space:]]*?*=[[:space:]]*//p' out/Makefile | head -1)"
-echo "    make -n 里出现的 -rpath 实文: ${RPATH_SEEN:-<无>}"
+# 里面那个 `|| true` 是这一段的要害，不是装饰。本脚本开了 pipefail，grep 零命中返回 1，
+# 于是裸赋值会被 set -e 在打印任何取证之前终止脚本 —— 上一轮 CI 就是这么红的：
+# 日志停在上一句 [ok]，断言块一个字都没输出，分不清是「gyp 没采纳 LDFLAGS_target」
+# 还是「我的判据写错了」。取证在前、判定在后，红了也要能自己说明为什么红。
+RPATH_SEEN="$( { grep -o -- '-Wl,-rpath,[^ ]*' "$DRY_LOG" || true; } | sort -u | tr '\n' ' ')"
+# 计数用 `grep -c` 而不是 `grep | head -1`：head 读够就退，上游可能吃到 SIGPIPE，
+# pipefail 之下这又是一次「诊断还没打印人就没了」。
+RPATH_LINES="$(grep -c -- '-rpath' "$DRY_LOG" || true)"
+LDFLAGS_TARGET_IN_MK="$(sed -n 's/^\(LDFLAGS\.target[[:space:]]*?*[=:][[:space:]]*\)/\1/p' out/Makefile)"
+
+echo "==> 进编译前取证（红也要红得能自证）"
+echo "    make -n: 退出码=$MAKE_N_RC  展开行数=$(wc -l < "$DRY_LOG")  日志=$DRY_LOG"
+echo "    out/Makefile 里 LDFLAGS* 原文行:"
+{ grep -n '^LDFLAGS' out/Makefile || true; } | sed -n '1,10p' | cut -c1-300 | sed 's/^/      /'
+echo "    out/Makefile 中含 -rpath 的行数: $(grep -c -- '-rpath' out/Makefile || true)"
+echo "    make -n 展开中含 -rpath 的行数: ${RPATH_LINES:-0}"
+echo "    make -n 展开里的 -rpath 实文: ${RPATH_SEEN:-<无>}"
+echo "    make -n 日志末尾 15 行:"
+tail -n 15 "$DRY_LOG" | cut -c1-300 | sed 's/^/      /'
+echo "==> 校验展开后的链接参数: $LDFLAGS_TARGET_IN_MK"
 case " $RPATH_SEEN " in
   *" $EXPECTED_RPATH "*)
     echo "    [ok] 链接行含 $EXPECTED_RPATH"
@@ -603,7 +626,9 @@ case " $RPATH_SEEN " in
   *)
     echo "==> [error] make -n 展开结果里根本没有 -rpath —— LDFLAGS_target 未被 gyp 采纳。"
     echo "            期望: $EXPECTED_RPATH"
-    echo "            可显式导出 LDFLAGS_target 后重跑本脚本定位。"
+    echo "            make -n 退出码=$MAKE_N_RC（非零则先按上面的日志末尾判断展开本身有没有失败）"
+    echo "            上方取证段列出 out/Makefile 的 LDFLAGS* 原文；若那里有 -rpath 而展开里没有，"
+    echo "            说明链接规则用的是另一个变量（如 LDFLAGS.host 或 -Wl 拼写差异），按原文改判据。"
     exit 1
     ;;
 esac
@@ -863,7 +888,7 @@ chmod +x "$OUT_DIR/$OUT_NAME"
 #   从别的 NDK 拿可能因 ABI/符号版本不一致而再次失败。
 # ---------------------------------------------------------------------------
 echo "==> 打包 libc++_shared.so（node 运行时的动态依赖，系统不提供）"
-LIBCXX_SRC="$(ls "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so 2>/dev/null | head -1)"
+LIBCXX_SRC="$( { ls "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so 2>/dev/null || true; } | head -1)"
 if [ -z "$LIBCXX_SRC" ] || [ ! -f "$LIBCXX_SRC" ]; then
   echo "==> [error] 在 NDK 里找不到 libc++_shared.so，无法连带打包。"
   echo "           查找路径: $ANDROID_NDK/toolchains/llvm/prebuilt/*/sysroot/usr/lib/aarch64-linux-android/"
@@ -915,7 +940,7 @@ echo "    [ok] 产物与清单一致（$(ls "$OUT_DIR"/*.so | wc -l) 项）"
 # 之所以要自动化：这类问题在【编译期毫无征兆】，只有装到真机上才会暴露，
 #   而一轮 CI 要 3 小时 —— 人工核对极易漏，必须让脚本自己兜住。
 echo "==> 依赖闭环自检"
-READELF="$(ls "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin/llvm-readelf 2>/dev/null | head -1)"
+READELF="$( { ls "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin/llvm-readelf 2>/dev/null || true; } | head -1)"
 MISSING=""
 # 系统库白名单从 scripts/native-deps.txt 读取（不再硬编码在 case 语句里）。
 # 这份名单是 NativeAssetRegistry（随包库）之外的补充说明，二者职责不同：
@@ -926,14 +951,19 @@ if [ ! -f "$DEPS_LIST" ]; then
   exit 1
 fi
 # 读入为空格分隔串（供 case 匹配），并剔除注释与空行
-SYSTEM_LIBS="$(grep -v '^[[:space:]]*#' "$DEPS_LIST" | grep -v '^[[:space:]]*$' | tr '\n' ' ')"
+SYSTEM_LIBS="$( { grep -v '^[[:space:]]*#' "$DEPS_LIST" | grep -v '^[[:space:]]*$' || true; } | tr '\n' ' ')"
 if [ -z "$SYSTEM_LIBS" ]; then
   echo "==> [error] $DEPS_LIST 里没有任何库名（是不是被清空了？）"
   exit 1
 fi
 echo "    系统库白名单: $DEPS_LIST（$(echo "$SYSTEM_LIBS" | wc -w) 项）"
 if [ -n "$READELF" ]; then
-  NEEDED="$("$READELF" -d "$OUT_DIR/$OUT_NAME" 2>/dev/null | awk '/NEEDED/{gsub(/[\[\]]/,"",$NF); print $NF}')"
+  NEEDED="$({ "$READELF" -d "$OUT_DIR/$OUT_NAME" 2>/dev/null || true; } | awk '/NEEDED/{gsub(/[\[\]]/,"",$NF); print $NF}')"
+  # 读不出 NEEDED 就当没有依赖，这条自检会全绿放行 —— 空转比红危险得多，宁可中止。
+  if [ -z "$NEEDED" ]; then
+    echo "==> [error] 读不出 $OUT_DIR/$OUT_NAME 的 DT_NEEDED，依赖闭环自检无从进行。"
+    exit 1
+  fi
   for lib in $NEEDED; do
     if echo " $SYSTEM_LIBS " | grep -q " $lib "; then
       echo "    [ok] $lib （bionic/系统提供）"
