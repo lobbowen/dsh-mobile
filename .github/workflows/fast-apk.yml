@@ -612,8 +612,7 @@ jobs:
         #   · 完全没配 → 醒目 warning（开发包可用，但**不可发布**），并指向运维手册
         run: |
           set -euo pipefail
-          APK="$(find container/app/build/outputs/apk/debug -name '*.apk' -type f | head -1)"
-          [ -n "$APK" ] || { echo "::error::未找到 APK"; exit 1; }
+          APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)"
           APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)"
           [ -n "$APKSIGNER" ] || APKSIGNER="apksigner"
           DN="$("$APKSIGNER" verify --print-certs "$APK" 2>/dev/null | grep -i 'certificate DN' | head -1 || true)"
@@ -632,7 +631,7 @@ jobs:
       - name: Audit APK contents
         run: |
           set -euo pipefail
-          APK="$(find container/app/build/outputs/apk/debug -name '*.apk' -type f | head -1)"
+          APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)"
           echo "APK: $APK  ($(stat -c%s "$APK") 字节)"
 
           echo "--- lib/ 下的条目 ---"
@@ -732,7 +731,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          APK="$(find container/app/build/outputs/apk/debug -name '*.apk' -type f | head -1)"
+          APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)"
           TAG="apk-latest"
           VN="$(node -p "require('./version.json').shell.versionName")"
           VC="$(node -p "require('./version.json').shell.versionCode")"
