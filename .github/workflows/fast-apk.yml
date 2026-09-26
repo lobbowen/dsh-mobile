@@ -97,16 +97,17 @@ jobs:
           # 优先用显式传入的 input（workflow_dispatch 时）；tag 触发或 push 触发
           # 时 inputs 为空，则从 assets 清单里读 —— 这样"清单说用什么版本"
           # 与"实际下载哪份运行时"永远一致，不会出现两处硬编码各自漂移。
+          # 读取口唯一：scripts/read-node-versions.sh（ci.yml 内核 job 同源，门禁法①）。
           V="${{ inputs.node_version }}"
           if [ -z "$V" ]; then
-            V="$(python3 -c "import json; print(json.load(open('container/app/src/main/assets/node-versions.json'))['default'])")"
+            V="$(bash scripts/read-node-versions.sh default)"
             echo "从 assets/node-versions.json 读到版本: $V"
           else
             echo "使用显式指定的版本: $V"
           fi
           A="${{ inputs.abi }}"
           if [ -z "$A" ]; then
-            A="$(python3 -c "import json; print(json.load(open('container/app/src/main/assets/node-versions.json'))['abi'])")"
+            A="$(bash scripts/read-node-versions.sh abi)"
             echo "从 assets/node-versions.json 读到 ABI: $A"
           else
             echo "使用显式指定的 ABI: $A"
@@ -117,8 +118,10 @@ jobs:
           echo "ABI=$A"          >> "$GITHUB_ENV"
 
       - name: Validate workflow files (fail fast on YAML/syntax errors)
-        # 单一实现：scripts/validate-workflows.py（ci.yml 也调它）
-        run: python3 scripts/validate-workflows.py
+        # 唯一实现：scripts/validate-workflow.py（严格版，默认扫全部 workflow；ci.yml 同调。
+        # 原先严格版只挂在 build-apk 这条几小时一跑的链上，日常链拿的是 safe_load 宽松判据 ——
+        # 重复 key / on.push 覆盖这类坑要等出包链才第一次被看住，发现成本倒挂。）
+        run: python3 scripts/validate-workflow.py
 
       # 注意：引擎门禁与「原生资产清单生成」门禁已迁到 ci.yml（统一门禁）。
       # 本 workflow 只负责出包，不再重复跑测试。
@@ -282,11 +285,9 @@ jobs:
           # 含 $ORIGIN 的 DT_RUNPATH。不查这一条就会放行「只有靠调用方补
           # LD_LIBRARY_PATH 才跑得起来」的产物 —— 而 dsh run_code 清空环境，那条路
           # 在真机上必然 CANNOT LINK。判据与 NativePreparer.probe 的裸环境探针同形。
-          # readelf 由 binutils 提供；"工具没装"和"产物不合格"是两回事，缺就先装。
-          command -v readelf >/dev/null 2>&1 || {
-            echo "[info] 缺少 readelf，安装 binutils …"
-            sudo apt-get update -qq && sudo apt-get install -y -qq binutils
-          }
+          # readelf 由 binutils 提供；"工具没装"和"产物不合格"是两回事，缺就先装
+          # （唯一宿主 scripts/ensure-tool.sh，判据本身只住 verify-runtime-elf.sh）。
+          bash scripts/ensure-tool.sh readelf binutils
           bash scripts/verify-runtime-elf.sh "$D"
 
       - name: Build libdshflock.so + libdshposix.so (NDK 原生桥)
