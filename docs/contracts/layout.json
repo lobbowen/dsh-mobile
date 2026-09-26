@@ -17,6 +17,7 @@
     "gradle.properties",
     "settings.gradle.kts",
     "build.gradle.kts",
+    "version.json",
     "_archive"
   ],
   "layers": {
