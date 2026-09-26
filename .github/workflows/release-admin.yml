@@ -776,9 +776,10 @@ jobs:
 
           rm -rf /tmp/pin && mkdir -p /tmp/pin/dl /tmp/pin/out
 
-          # 该 run 的 Node 二进制以 artifact 形式挂在 job 上。
-          # 名字见 build-node.yml 的 upload 步骤；下载整个 artifact 再挑文件，
-          # 比按名字猜更稳（名字一旦调整这里不会静默漏文件）。
+          # 该 run 挂着的 artifact 就是那个 APK（build-apk.yml 的 upload 步只投
+          # android-node-container-apk，裸 .so 从 APK 的 lib/arm64-v8a/ 里取）。
+          # 这里下载全部 artifact 再按文件名挑，比按 artifact 名硬编码更稳：
+          # 名字一旦调整，这里不会静默漏文件，而是走到「找不到 libnode.so」判红。
           echo "== 下载 artifact 列表 =="
           gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/artifacts" \
             --jq '.artifacts[].name' | tee /tmp/pin/artifact-names.txt
@@ -975,7 +976,7 @@ jobs:
             # YAML 结构（本文件在这一点上踩过坑：报 "could not find expected ':'"）。
             # 需要换行就用 \n 转义，交给 shell 展开。
             NOTES="预编译的 Node ${VERSION} 安卓原生运行时（bionic 链接，arm64-v8a）。\n\n"
-            NOTES="${NOTES}来源：build-node 运行 ${{ steps.resolve.outputs.run_id }}\n\n"
+            NOTES="${NOTES}来源：build-apk 运行 ${{ steps.resolve.outputs.run_id }}\n\n"
             NOTES="${NOTES}包含：\n"
             NOTES="${NOTES}- libnode.so —— Node 可执行文件（经 jniLibs 通道落盘到 nativeLibraryDir）\n"
             NOTES="${NOTES}- libc++_shared.so —— 运行期动态依赖，符号由它提供\n"

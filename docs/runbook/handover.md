@@ -209,13 +209,11 @@ android-node-container/
 
 | workflow | 触发 | 用途 | 耗时 |
 |---|---|---|---|
-| `fast-apk.yml` | `main` push（8 条 paths）+ `fast-*` tag | **日常出包**（复用缓存的 Node） | ~5 分钟 |
-| `build-apk.yml` | `main` push（7 条 paths-ignore） | 全量发布包（含 Node 交叉编译） | **2~3 小时** |
+| `fast-apk.yml` | `main` push（paths 白名单）+ `fast-*` tag | **日常出包**（复用固化的 Node 运行时） | ~5 分钟 |
+| `ci.yml` | `main`/`master` push（paths 白名单）、PR、`v*` tag | 跑测试与门禁，**不出包**（JS/kernel/app 单测 + 原生资产校验） | 分钟级 |
+| `build-apk.yml` | 仅 `workflow_dispatch`（push 触发已删，见文件内注释） | 全量发布包（含 Node 交叉编译） | **2~3 小时** |
 | `kernel-ota.yml` | `kernel-ota-*` tag | 签内核包 + 产 feed + 发 Release | 分钟级 |
-| `pin-node.yml` | `pin-node-*` tag | 固化 Node 产物版本 | 分钟级 |
-| `publish-apk.yml` | `publish-*` tag | 发布 APK | 分钟级 |
-| `repack-apk.yml` | `repack-*` tag | 重打包（注入 libc++ 等） | 分钟级 |
-| `admin.yml` | `admin-*` tag | 运维通道（见下） | 秒级 |
+| `release-admin.yml` | `pin-node-*` / `publish-*` / `repack-*` / `admin-*` tag，或 dispatch 选 `mode` | 固化 Node 产物 / 发布 APK / 重打包（注入 libc++ 等）/ 运维通道（见下） | 秒~分钟级 |
 
 ### 7.1 admin 回执通道（沙箱环境的关键工具）
 

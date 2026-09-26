@@ -294,6 +294,8 @@ if (fs.existsSync(BUILD_SH)) {
   // 后者在这个 gyp 生成器里没有任何规则引用 —— run 36216072106 实测 out/Makefile 只有
   // `LDFLAGS.target ?= $(LDFLAGS)`（目标侧取裸 LDFLAGS）与 `LDFLAGS.host ?= $(LDFLAGS_host)`
   // （只有宿主侧认 _host 后缀），92715 行展开里 -rpath 出现 0 次：那几轮 export 完全空转。
+  // 换命令行变量后同一份展开实测：-rpath 出现 21 次，且 `-o …/Release/node` 那 3 行配方里就带着
+  // `-Wl,-rpath,'$ORIGIN'`（run 36217430866）—— 所以这条判据钉的是被验过的机制，不是又一猜测。
   // 所以这里既钉住正确写法，也反向钉住死钩子别被「顺手」改回去。
   const ldOverride = (shCode.match(/LDFLAGS_TARGET_OVERRIDE="[^"]*"/g) || []).join(' | ');
   check(
@@ -367,9 +369,11 @@ for (const [wf, want] of VALIDATOR_CALLERS) {
   );
 }
 
-// build-apk 的 node 缓存不许有前缀回退：key 变了说明编译脚本动过，回退命中拿到的是
-// 旧脚本的产物 —— 本轮变更恰好是链接标志，旧产物没有 $ORIGIN，上机即死，
-// 而流程看起来和正常命中一模一样。不许用兜底把必然的失败伪装成缓存命中。
+// build-apk 的 node 缓存不许有前缀回退：key 是 node-android-<版本>-<hashFiles(构建脚本)>，
+// key 变了就说明脚本动过，此时前缀回退命中拿到的是**旧脚本的产物** —— 而脚本承载的正是
+// 链接标志本身（`LDFLAGS.target=-Wl,-rpath,'$$ORIGIN'`），旧产物没有 $ORIGIN，
+// 在 dsh run_code 的空环境里上机即死，而流程看起来和正常命中一模一样。
+// 也就是说：回退命中会把「脚本没生效」伪装成「缓存命中」。宁可不缓存，也不许拿旧二进制充数。
 const BUILD_APK_YML = path.join(ROOT, '.github/workflows/build-apk.yml');
 const fallbackHits = (stripHashComments(fs.readFileSync(BUILD_APK_YML, 'utf8'))
   .match(/restore-keys\s*:/g) || []).length;

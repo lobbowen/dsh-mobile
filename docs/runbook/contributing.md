@@ -93,7 +93,7 @@ git push origin refs/tags/fast-verify-1        # 手动跑一次 fast-apk
 git push origin refs/tags/pin-node-latest      # 固化最近一次成功的 build-apk 产物
 git push origin refs/tags/pin-node-<run_id>    # 固化指定 run 的产物
 
-# ---- 管理（admin.yml）----
+# ---- 管理（release-admin.yml 的 admin job）----
 git push origin refs/tags/admin-status-<run_id>   # 查 run 状态 + artifact
 git push origin refs/tags/admin-logs-<run_id>     # ★ 拉失败日志
 git push origin refs/tags/admin-release           # 查 Release 附件指纹
@@ -226,7 +226,7 @@ put("LD_LIBRARY_PATH", libSearchPath)
 
 ## 9. 一句话总结
 
-> **改 App 代码走 fast-apk（分钟级）；只有动 Node 编译脚本才走 build-node（小时级）。
+> **改 App 代码走 fast-apk（分钟级）；只有动 Node 编译脚本才走 build-apk（小时级）。
 > 拿不准就问自己：这会改变 libnode.so 吗？**
 
 ## 注释规范

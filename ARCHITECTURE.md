@@ -193,7 +193,7 @@ val NODE = NativeExecutable(
 | 4. libc | `DT_NEEDED` 只能是 bionic / 随包库 | **不能** |
 
 第 2/3/4 关在装机后无法补救，所以必须在**打包期**用 readelf 校验。
-`pin-node.yml` 已经做了这三项校验；这也是「A 全内置工具链」方案
+`release-admin.yml` 的 `pin` job 已经做了这三项校验；这也是「A 全内置工具链」方案
 （aapt2 等 x86-64 + glibc 的 Google 官方产物）被判定不可行的直接原因 ——
 它在第 2/3/4 关全部失败，只剩 QEMU user-mode + 随包 amd64 glibc 一条路，
 而那在 SELinux 受限的 `untrusted_app` 域里没有公开成功先例。
@@ -616,8 +616,8 @@ aarch64）在 GitHub 免费 runner 上要 **2~3 小时**。
 | 改动内容 | 走哪条 workflow | 耗时 |
 |---|---|---|
 | `assets/**`（server.js）、`**/*.kt`、布局、`build.gradle.kts` | **`fast-apk.yml`** | 分钟级 |
-| `scripts/build-node-android.sh`、Node 版本变更 | `build-node.yml` | 2~3 小时 |
-| 只想把已有产物发到 Release | `publish-apk.yml` | 几分钟 |
+| `scripts/build-node-android.sh`、Node 版本变更 | `build-apk.yml`（只有 `workflow_dispatch`） | 2~3 小时 |
+| 只想把已有产物发到 Release | `release-admin.yml`（`mode: publish`） | 几分钟 |
 
 `fast-apk.yml` 不编译 Node —— 它从固定的 Release
 （`node-runtime-<version>-<abi>`）下载预编译的 `libnode.so` +
@@ -625,15 +625,20 @@ aarch64）在 GitHub 免费 runner 上要 **2~3 小时**。
 
 ### 预编译产物是怎么来的
 
-`pin-node.yml` 负责**固化**：从某次成功的 `build-node` 运行里取出两个 `.so`，
-逐项校验后发布为不可变 Release。
+`release-admin.yml` 的 `pin` job 负责**固化**（触发方式：推 `pin-node-<run_id>` /
+`pin-node-latest` tag，或 `workflow_dispatch` 选 `mode: pin`）：从某次成功的
+`build-apk` 运行里取出两个 `.so`，逐项校验后发布为不可变 Release。
 
 校验项（任一不过即失败，绝不放行坏产物）：
 
 1. ELF 架构必须是 `ARM aarch64`
 2. 解释器必须指向 `/system/bin/linker64`（否则是 glibc 链接，真机无法 exec）
-3. 全部 `LOAD` 段必须 `0x4000` 对齐（Android 15+ 要求，16KB 页）
+3. 必须**存在** `0x4000` 对齐的 `LOAD` 段（Android 15+ 要求，16KB 页）。
+   判据不是「全部段都 0x4000 对齐」—— ELF 允许不同段用不同对齐值，
+   拿后者当门槛是在校验规范并不要求的东西，只会制造假失败。
 4. `DT_NEEDED` 依赖闭环：非 bionic 库必须随包提供
+5. 同目录依赖能否自解析：`DT_RUNPATH` 含 `$ORIGIN`（第 3 节；判据实现在
+   `scripts/verify-runtime-elf.sh`，构建/固化/打包三处共用同一份）
 
 产物含 `manifest.json`（sha256 / 大小 / 来源 run），
 让"这个 APK 用的是哪份运行时"可追溯。
@@ -709,7 +714,7 @@ aarch64）在 GitHub 免费 runner 上要 **2~3 小时**。
 ### 查看 CI 状态与日志
 
 维护环境（沙箱）无法访问 `api.github.com`，所有 API 操作通过 **tag 触发
-`admin.yml`** 完成，结果写到 `ci-admin` 分支：
+`release-admin.yml` 的 `admin` job** 完成，结果写到 `ci-admin` 分支：
 
 ```bash
 # 查 run 状态 + artifact
@@ -735,13 +740,15 @@ git push origin refs/tags/admin-cancelall
 
 1. **确认有可用的预编译运行时**：
    ```
-   Actions → Pin Node runtime → Run workflow（run_id 留空 = 自动取最近成功的一次）
+   git push origin refs/tags/pin-node-latest        # 或 pin-node-<run_id>
    ```
-   产物落在 Release `node-runtime-<version>-arm64`。
+   （等价于在 Actions 里对 `release-admin.yml` 选 `mode: pin`；沙箱环境点不了网页，
+   所以 tag 是唯一可用的触发手段。`run_id` 留空/latest = 自动取最近一次成功运行。）
+   产物落在 Release `node-runtime-<version>-arm64-v8a`。
 
-2. **日常出包**：推 `app/**` 的改动即可，`fast-apk.yml` 自动跑。
+2. **日常出包**：推 `container/app/**` 的改动即可，`fast-apk.yml` 自动跑。
 
 3. **只有当 `build-node-android.sh` 或 Node 版本变了**，才需要跑
-   `build-node.yml`（2~3 小时），跑完记得再 `pin-node` 一次把新产物固化。
+   `build-apk.yml`（2~3 小时，只有手动触发），跑完再 `pin-node` 一次把新产物固化。
 
 4. **首次在任何新设备上验证时**，先看诊断面板的 `exec-probe` 与 `port`。
