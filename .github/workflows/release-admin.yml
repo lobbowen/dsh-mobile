@@ -399,34 +399,22 @@ jobs:
             MANIFEST=/tmp/channel-manifest/version.json
           fi
 
-          # tag 固定（默认 apk-latest）：存在则更新，不存在则创建。
-          # 这样下载网址是稳定的，不必每轮去查新地址。
-          if gh release view "$TAG" --repo '${{ github.repository }}' >/dev/null 2>&1; then
-            echo "Release $TAG 已存在，将覆盖资产。"
-          else
-            echo "Release $TAG 不存在，创建中…"
-            gh release create "$TAG" \
-              --repo '${{ github.repository }}' \
-              --title "DSH Mobile APK (latest)" \
-              --notes "Android 原生 Node 容器 APK。来源 run: ${{ steps.get.outputs.run_id }}"
-          fi
-
-          gh release upload "$TAG" /tmp/app-debug.apk#app-debug.apk \
-            --repo '${{ github.repository }}' --clobber
+          # tag 固定（默认 apk-latest）：下载网址稳定，不必每轮去查新地址。
+          # 「确保 Release 在 → 覆盖上传（含孤立资产回退）→ 回读确认字节数」全部在
+          # scripts/gh-release-upload.sh 里，本链路只交代内容。
           # 覆盖 latest 就必须同时把它的版本清单换成**这个包自己**那份，否则 latest 的
           # version.json 描述的是上一个包 —— 下一次门禁拿假读数比真产物。
-          # gh 的资产名取 file 的 basename（# 后面只是 label），所以 MANIFEST 是门禁留出来的
-          # 真名叫 version.json 的文件，取数只在 scripts/check-apk-release-version.sh 一处。
+          # 资产名取 file 的 basename（`#` 后面只是 label），所以 MANIFEST 必须是门禁
+          # 留出来的、真名叫 version.json 的那份文件；取数只在 check-apk-release-version.sh 一处。
+          EXTRA=(/tmp/app-debug.apk)
           if [ -n "$MANIFEST" ]; then
-            gh release upload "$TAG" "$MANIFEST" \
-              --repo '${{ github.repository }}' --clobber
-            echo "[version] latest 清单已同步为判定用的那份（来源 run ${{ steps.get.outputs.run_id }}）"
+            EXTRA+=("$MANIFEST")
+            echo "[version] latest 清单将与 APK 同批覆盖（来源 run ${{ steps.get.outputs.run_id }}）"
           fi
-
-          echo
-          echo "=== 发布完成 ==="
-          gh release view "$TAG" --repo '${{ github.repository }}' --json url,assets \
-            --jq '.assets[] | "\(.name)  \(.size) bytes  \(.url)"' || true
+          bash scripts/gh-release-upload.sh "$TAG" \
+            --title "DSH Mobile APK (latest)" \
+            --notes "Android 原生 Node 容器 APK。来源 run: ${{ steps.get.outputs.run_id }}" \
+            "${EXTRA[@]}"
           echo
           echo "下载地址:"
           echo "https://github.com/${{ github.repository }}/releases/download/${TAG}/app-debug.apk"
@@ -647,30 +635,23 @@ jobs:
             MANIFEST=/tmp/repack-manifest/version.json
           fi
 
-          if gh release view "$TAG" --repo '${{ github.repository }}' >/dev/null 2>&1; then
-            if gh release view "$TAG" --repo '${{ github.repository }}' --json assets \
-                 --jq '.assets[].name' | grep -qx 'app-debug.apk'; then
-              gh release delete-asset "$TAG" app-debug.apk \
-                --repo '${{ github.repository }}' --yes
-            fi
-            gh release upload "$TAG" /tmp/app-signed.apk#app-debug.apk \
-              --repo '${{ github.repository }}' --clobber
-          else
-            gh release create "$TAG" /tmp/app-signed.apk#app-debug.apk \
-              --repo '${{ github.repository }}' \
-              --title "Node Container APK ($TAG)" \
-              --notes "repack from run ${{ steps.src.outputs.run_id }}：注入 libc++_shared.so，修复 cannot locate symbol。"
-          fi
-
+          # repack 换的是包内字节，但投出去必须用设备真正去读的那个**资产名**：
+          # gh 的资产名取 file 的 basename（`#` 后面只是 label）—— 旧写法把
+          # /tmp/app-signed.apk 投成了 app-signed.apk、还把 app-debug.apk 先删了，
+          # latest 的下载地址当场 404。所以先改名进临时目录再交出去，
+          # 「线上真有了这个名字、字节也对」由宿主事后回读确认。
+          STAGE="$(mktemp -d)"
+          cp /tmp/app-signed.apk "$STAGE/app-debug.apk"
+          EXTRA=("$STAGE/app-debug.apk")
           if [ -n "$MANIFEST" ]; then
-            gh release upload "$TAG" "$MANIFEST" \
-              --repo '${{ github.repository }}' --clobber
-            echo "[version] latest 清单已同步为判定用的那份（来源 run ${{ steps.src.outputs.run_id }}）"
+            EXTRA+=("$MANIFEST")
+            echo "[version] latest 清单将与重签包同批覆盖（来源 run ${{ steps.src.outputs.run_id }}）"
           fi
-
-          echo "== 发布完成 =="
-          gh release view "$TAG" --repo '${{ github.repository }}' --json url,assets \
-            --jq '"\(.url)\n" + (.assets[] | "  \(.name)  \(.size) bytes")'
+          bash scripts/gh-release-upload.sh "$TAG" \
+            --title "Node Container APK ($TAG)" \
+            --notes "repack from run ${{ steps.src.outputs.run_id }}：注入 libc++_shared.so，修复 cannot locate symbol。" \
+            "${EXTRA[@]}"
+          rm -rf "$STAGE"
 
       - name: Report to ci-ok
         if: always()
@@ -1011,38 +992,26 @@ jobs:
 
           echo "TAG=$TAG" >> "$GITHUB_ENV"
 
+          # 这一格只负责【政策告警】：固化 tag 的语义是不可变，已存在就该提升版本而不是重传。
+          # 「不存在就创建 / 存在就覆盖 / 传完回读确认」是判据，住 scripts/gh-release-upload.sh。
           if gh release view "$TAG" --repo '${{ github.repository }}' >/dev/null 2>&1; then
-            echo "[warn] Release $TAG 已存在。"
-            echo "       该 tag 的语义是【不可变】—— 同一版本+ABI 的二进制不应被替换，"
-            echo "       否则已发布的 APK 与它所依赖的运行时版本就对不上了。"
-            echo "       如需固化的新产物，请提升 version。此处仅更新资产内容以备重发。"
-          else
-            echo "创建 Release $TAG"
-            # 注意：--notes 的值必须写成【单行】。
-            # YAML 块标量（run: |）里出现跨行字符串时，续行一旦顶格就会破坏
-            # YAML 结构（本文件在这一点上踩过坑：报 "could not find expected ':'"）。
-            # 需要换行就用 \n 转义，交给 shell 展开。
-            NOTES="预编译的 Node ${VERSION} 安卓原生运行时（bionic 链接，arm64-v8a）。\n\n"
-            NOTES="${NOTES}来源：build-apk 运行 ${{ steps.resolve.outputs.run_id }}\n\n"
-            NOTES="${NOTES}包含：\n"
-            NOTES="${NOTES}- libnode.so —— Node 可执行文件（经 jniLibs 通道落盘到 nativeLibraryDir）\n"
-            NOTES="${NOTES}- libc++_shared.so —— 运行期动态依赖，符号由它提供\n"
-            NOTES="${NOTES}- manifest.json / SHA256SUMS —— 校验与溯源\n\n"
-            NOTES="${NOTES}本资产为不可变引用：fast-apk.yml 按此 tag 下载，不再重编 Node。"
-            gh release create "$TAG" \
-              --repo '${{ github.repository }}' \
-              --title "Node ${VERSION} runtime for Android ${ABI} (prebuilt)" \
-              --notes "$(printf '%b' "$NOTES")"
+            echo "::warning title=固化 tag 已存在::$TAG 的语义是【不可变】—— 同一版本+ABI 的二进制不应被替换，否则已发布的 APK 与它所依赖的运行时版本就对不上；如需固化的新产物请提升 version。本次仅更新资产内容以备重发。"
           fi
-
-          gh release upload "$TAG" \
-            libnode.so libc++_shared.so manifest.json SHA256SUMS \
-            --repo '${{ github.repository }}' --clobber
-
-          echo
-          echo "=== 固化完成 ==="
-          gh release view "$TAG" --repo '${{ github.repository }}' \
-            --json assets --jq '.assets[] | "\(.name)  \(.size) bytes"'
+          # 注意：--notes 的值必须写成【单行】。
+          # YAML 块标量（run: |）里出现跨行字符串时，续行一旦顶格就会破坏
+          # YAML 结构（本文件在这一点上踩过坑：报 "could not find expected ':'"）。
+          # 需要换行就用 \n 转义，交给 shell 展开。
+          NOTES="预编译的 Node ${VERSION} 安卓原生运行时（bionic 链接，arm64-v8a）。\n\n"
+          NOTES="${NOTES}来源：build-apk 运行 ${{ steps.resolve.outputs.run_id }}\n\n"
+          NOTES="${NOTES}包含：\n"
+          NOTES="${NOTES}- libnode.so —— Node 可执行文件（经 jniLibs 通道落盘到 nativeLibraryDir）\n"
+          NOTES="${NOTES}- libc++_shared.so —— 运行期动态依赖，符号由它提供\n"
+          NOTES="${NOTES}- manifest.json / SHA256SUMS —— 校验与溯源\n\n"
+          NOTES="${NOTES}本资产为不可变引用：fast-apk.yml 按此 tag 下载，不再重编 Node。"
+          bash scripts/gh-release-upload.sh "$TAG" \
+            --title "Node ${VERSION} runtime for Android ${ABI} (prebuilt)" \
+            --notes "$(printf '%b' "$NOTES")" \
+            libnode.so libc++_shared.so manifest.json SHA256SUMS
 
       - name: Report to ci-ok
         env:

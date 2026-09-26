@@ -610,15 +610,10 @@ jobs:
           VAPK="app-debug-${VN}+${VC}.apk"
           echo "[version] 本次发布 $VN (versionCode=$VC) → $VAPK"
 
-          # 固定 tag、每轮覆盖：latest 下载网址稳定。
-          if gh release view "$TAG" --repo '${{ github.repository }}' >/dev/null 2>&1; then
-            echo "Release $TAG 已存在，覆盖资产。"
-          else
-            gh release create "$TAG" \
-              --repo '${{ github.repository }}' \
-              --title "DSH Mobile APK (latest)" \
-              --notes "Android 原生 Node 容器 APK（由 fast-apk 构建，运行时来自 ${{ env.runtime-tag }}）。"
-          fi
+          # 先改名再交出去：gh 的资产名取 file 的 basename（`#` 后面只是 label，不改名），
+          # 所以"版本化资产名"只能靠这份临时目录里的副本实现。
+          VDIR="$(mktemp -d)"
+          cp "$APK" "$VDIR/$VAPK"
 
           # ── 版本门禁（VERSION-GATE 1/4：判据 scripts/verify-apk-version-gate.sh，取数外壳
           #    scripts/check-apk-release-version.sh）─────────────────────────────
@@ -635,51 +630,25 @@ jobs:
           fi
           bash scripts/check-apk-release-version.sh version.json "$TAG" "$VCHANNEL"
 
-          # ── 覆盖上传（含孤立资产回退）────────────────────────────────────────
-          # 注意：gh 的 `file#label` 里 # 后面是 **label**，资产名取 file 的 basename。
-          # 所以"版本化资产名"必须靠**先改名再上传**实现，不能写进 # 后面。
-          #
-          # --clobber 在「同名资产记录在、但后端对象孤立/损坏」时会 404
-          # （2026-09-23 实证：Release 在、asset 按 id 访问 404 → clobber 必失败）。
-          upload() {
-            local src="$1"
-            local name
-            name="$(basename "$src")"
-            if ! gh release upload "$TAG" "$src" --repo '${{ github.repository }}' --clobber; then
-              echo "::warning title=clobber 失败::回退为按名字删资产后重传（$name）"
-              gh api "repos/${{ github.repository }}/releases/tags/$TAG" \
-                --jq ".assets[] | select(.name==\"$name\") | .id" 2>/dev/null \
-                | while read -r id; do
-                    [ -n "$id" ] && gh api -X DELETE "repos/${{ github.repository }}/releases/assets/$id"
-                  done || true
-              gh release upload "$TAG" "$src" --repo '${{ github.repository }}'
-            fi
-          }
-
-          VDIR="$(mktemp -d)"
-          cp "$APK" "$VDIR/$VAPK"
-
-          upload "$APK"            # 稳定别名 → app-debug.apk（latest 地址永久不变）
-          upload "version.json"    # 版本清单 → version.json（下次发布的单调性输入）
+          # ── 覆盖上传（含孤立资产回退 + 发布后逐字节确认）────────────────────
+          # 判据只住 scripts/gh-release-upload.sh：同名资产记录还在、后端对象却孤立时
+          # --clobber 会 404（2026-09-23 实证），回退成「按名字删旧记录再普通上传」；
+          # 上传命令退 0 也不算数，宿主会回读清单比对字节数才报 [ok]。
+          # latest 下载网址要稳定，所以固定 tag、每轮覆盖。
+          bash scripts/gh-release-upload.sh "$TAG" \
+            --title "DSH Mobile APK (latest)" \
+            --notes "Android 原生 Node 容器 APK（由 fast-apk 构建，运行时来自 ${{ env.runtime-tag }}）。" \
+            "$APK" version.json
 
           # 版本化资产进**独立 tag**（v<versionName>），**不放**滚动 latest：
           # 否则 latest 会随每次发布无限堆积历史 APK（滚动通道只该有"当前"）。
           VTAG="v$VN"
-          if gh release view "$VTAG" --repo '${{ github.repository }}' >/dev/null 2>&1; then
-            gh release upload "$VTAG" "$VDIR/$VAPK" --repo '${{ github.repository }}' --clobber
-          else
-            gh release create "$VTAG" "$VDIR/$VAPK" \
-              --repo '${{ github.repository }}' \
-              --title "DSH Mobile $VN" \
-              --notes "版本化归档：versionName=$VN，versionCode=$VC。滚动别名见 apk-latest。"
-          fi
+          bash scripts/gh-release-upload.sh "$VTAG" \
+            --title "DSH Mobile $VN" \
+            --notes "版本化归档：versionName=$VN，versionCode=$VC。滚动别名见 apk-latest。" \
+            "$VDIR/$VAPK"
 
           rm -rf "$VDIR"
-
-          echo
-          echo "=== 已发布 ==="
-          gh release view "$TAG" --repo '${{ github.repository }}' --json assets \
-            --jq '.assets[] | "  \(.name)  \(.size) 字节  digest=\(.digest // "n/a")"'
           echo
           echo "下载地址:"
           echo "  https://github.com/${{ github.repository }}/releases/download/${TAG}/app-debug.apk   （latest 别名）"

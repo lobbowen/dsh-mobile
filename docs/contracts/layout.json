@@ -195,6 +195,7 @@
     "validate-workflow.py": "cross",
     "attach-and-publish.sh": "cross",
     "inject-apk-keystore.sh": "cross",
-    "verify-apk-signing.sh": "cross"
+    "verify-apk-signing.sh": "cross",
+    "gh-release-upload.sh": "cross"
   }
 }
