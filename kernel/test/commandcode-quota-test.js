@@ -18,30 +18,13 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x ? '  ← ' + x : '')); };
 
 const { ProxyProvider } = require(path.join(ROOT, 'src', 'domains', 'router', 'providers', 'proxy'));
+const { PROXY_APPS } = require(path.join(ROOT, 'src', 'domains', 'router', 'proxy-apps'));
 
-// 反代 app：commandcode 型 quota 定义（与生产 proxy-apps.js 一致）
-const CC_APP = {
-  id: 'commandcode',
-  name: 'Command Code Proxy',
-  pkg: 'commandcode-api-proxy',
-  healthPath: '/health', modelPath: '/v1/models', upstream: 'https://api.commandcode.ai',
-  repo: null, registry: 'commandcode-api-proxy',
-  // 2026-09-12 校正：fixture 必须与生产配置（proxy-apps.js）**逐键一致** ——
-  // 此前缺 `subscriptionsPath` 与 `monthlyCapUsd`，而两者在 `quota-strategies.js`
-  // 里**都被消费**（:106 拉订阅期、:124 推导月用量百分比）。
-  // 于是本测试一直在跑「回退分支」（无 subscriptionsPath → 用常量路径；
-  // 无 monthlyCapUsd → monthly 为 null），**从未覆盖生产的真实路径**。
-  // 这类「fixture 与生产配置漂移」会给出虚假的覆盖信心。
-  quota: {
-    type: 'commandcode-billing',
-    apiBase: 'https://api.commandcode.ai',
-    creditsPath: '/alpha/billing/credits',
-    subscriptionsPath: '/alpha/billing/subscriptions',
-    windowMap: { rolling: 'fiveHour', weekly: 'weekly', monthly: null },
-    monthlyCapUsd: 10,
-  },
-  real: true,
-};
+// 反代 app 定义直接从生产注册表实取（2026-09-26 收口「逐键一致」口头上帝：
+// 此前这里是手抄 fixture，注释宣称与 proxy-apps.js 一致但无任何机械强制，
+// 漂移只会静默发生）。本测试只 mock credits/subscriptions 两个 URL，
+// registry/version 检查不在 mock 路径上，整条配置可原样使用。
+const CC_APP = PROXY_APPS.commandcode;
 
 function mkProvider() {
   const pp = new ProxyProvider({ id: 'p-cc', name: 'CC', kind: 'proxy', proxyAppId: 'commandcode', app: CC_APP, logger: { info(){}, warn(){}, error(){} }, events: null, dist: null, onPersist: () => {} });
