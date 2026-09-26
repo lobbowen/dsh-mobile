@@ -97,6 +97,37 @@ console.log('== W4 禁止裸读 .github/workflows ==');
   check('W4 无裸 fs.readFileSync 读 workflow', offenders.length === 0, offenders.join(', '));
 }
 
+// ── W5 引用仓内脚本的 job 必须自己检出仓库 ──
+// 案底（2026-09-27 真踩）：release-admin 的 publish job 少一步 actions/checkout，
+// 而它第 2 步就 `bash scripts/pick.sh …` → 退 127，整条手工发布链是坏的。
+// 同文件的 repack / pin 都有 checkout，所以「别的口能跑」完全不能推出「这个口能跑」——
+// 判据只能按 job 逐个取证，不能按文件计数。
+const SCRIPT_USE = /(?:bash|sh|node|python3?|\.\/)\s*\S*scripts\/[\w.+-]+/;
+const CHECKOUT = /uses:\s*actions\/checkout@/;
+/** 纯判据：给定 `[[job 名, job 正文]]`，返回「用了仓内脚本但没检出仓库」的 job 名。 */
+function checkoutGaps(entries) {
+  return entries.filter(([, body]) => SCRIPT_USE.test(body) && !CHECKOUT.test(body)).map(([n]) => n);
+}
+console.log('== W5 用 scripts/ 的 job 必须有 checkout ==');
+{
+  // 判据自身先自证：负样本必被抓，正对照不许误伤（写坏了没人知道 = 空转闸）。
+  const neg = checkoutGaps([['ghost', '\n      - run: bash scripts/pick.sh apk /tmp\n']]);
+  check('W5-a 负样本被抓（用 scripts/ 无 checkout）', JSON.stringify(neg) === '["ghost"]', JSON.stringify(neg));
+  const pos = checkoutGaps([['ok', '\n      - uses: actions/checkout@v4\n      - run: bash scripts/pick.sh apk /tmp\n']]);
+  check('W5-b 正对照不误伤', pos.length === 0, JSON.stringify(pos));
+
+  const root = path.join(ROOT, '..');
+  const dir = path.join(root, '.github', 'workflows');
+  const gaps = [];
+  for (const f of fs.readdirSync(dir).filter((x) => /\.ya?ml$/.test(x))) {
+    const entries = W.jobsOf(W.readWorkflow(f, root)).filter(([n]) => n !== 'on' && n !== 'workflow_dispatch' && n !== 'push');
+    for (const j of checkoutGaps(entries)) gaps.push(f + '#' + j);
+    // 切分本身也要自证：每个文件至少切出一个 job，否则「零违规」是空转出来的。
+    if (entries.length === 0) gaps.push(f + '#（一个 job 都没切出来 → 切分正则失效）');
+  }
+  check('W5 全部 workflow 的每个 job：用 scripts/ 者必 checkout', gaps.length === 0, gaps.join(', '));
+}
+
 const failed = results.filter((r) => !r);
 console.log(String.fromCharCode(10) + '结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');
 process.exit(failed.length ? 1 : 0);

@@ -328,6 +328,16 @@ jobs:
       actions: read         # 列取/下载本仓库的 artifact
 
     steps:
+      # 本 job 的每一步都靠仓内脚本取数（scripts/pick.sh 选 APK、check-apk-release-version.sh
+      # 判版本）。没有这一步时它们全部不存在 —— 真机案底 2026-09-27：publish run 36254334150
+      # 在第 2 步就 `bash: scripts/pick.sh: No such file or directory` 退 127，
+      # 而这条判据只在本 job 被真实调用时才暴露（repack / pin 各自有 checkout，所以一直没红）。
+      # 取 main 而不是触发 ref：与 repack 同理由 —— 判据要随 main 演进，不能是历史那份尺子。
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
       - name: Resolve target run and download artifact
         id: get
         env:
