@@ -129,5 +129,11 @@ manifest `android:name` 保持相对类名写法：改一处不扩散（「同�
   **同型复现（01:38，脚本 `/tmp/t11.sh`、日志 `/tmp/t11.log`）**：`:node=1816` 全程稳定（POWER）、
   `birth=[]`（¬BORN），t+6/12/18/24s 四个采样点正文均为裸定罪段，清理后立刻回到
   `:node=2911 birth=2911 · 运行时在线 · 通道通 · :node 已绑定` ⇒ 非偶发，是稳定判据失败。
-  **⇒ P0 不算交付完成**：断服根因已被 `node.birth` 单源治好（判据 4 成立），
-  但「空壳必须上屏」这条产品判据未成立，需一笔补修（壳 1.1.7(9)）+ 重发布 + 复点。
+  **⇒ P0 仍未收口**：断服根因已被 `node.birth` 单源治好（判据 4 成立），
+  但「空壳必须上屏」这条产品判据在 1.1.6(8) 上未成立。补修（D9 正文单写者 + D10 转发线程不致命）
+  已随 PR #92 合入 main=`7afa06d5`，**壳 1.1.7(9) 已上线**：
+  `apk-latest/version.json` 带 `?t=` 读回 = 1.1.7 / versionCode 9，
+  `apk-latest/app-debug.apk` 与 `v1.1.7/app-debug-1.1.7+9.apk` 同 53,406,864B /
+  `sha256:d60a290accb7dd815…`。CI 实证：`container 430 PASS / 0 FAIL`（出生链 6 处、常驻链 8 边、
+  通知 id 6 个全仓唯一）、`app-tests BUILD SUCCESSFUL + 单测执行数 143`、`kernel` success、
+  `kernel-release` skipped。**判据 3 在 1.1.7(9) 上的复点尚未做** —— 复点通过前本轨不收口。
