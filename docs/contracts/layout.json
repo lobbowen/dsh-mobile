@@ -120,7 +120,7 @@
       "from": "dsh-android-kernel",
       "to": "kernel",
       "kind": "dir",
-      "expectFiles": 236
+      "expectFiles": 234
     },
     {
       "from": "docs/ADR-001-android-execution-domain.md",

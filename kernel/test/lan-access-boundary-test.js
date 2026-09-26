@@ -28,15 +28,9 @@
 //   E-d  DNS-rebinding（Host=evil.com）→ 仍 DENY
 //   E-e  公网 IP Host（8.8.8.8）→ 仍 DENY
 //   E-f  边界正确：172.32.x（非私有）与 172.15.x（非私有）→ DENY
-// ── E-h：自 defects-batch-f 的 K6 归并过来的三条唯一用例 ──
-check('E-h IPv6 回环 Host（[::1]:port）→ ALLOW', allow({ host: '[::1]:' + PORT }) === true);
-check('E-h localhost Host → ALLOW', allow({ host: 'localhost:' + PORT }) === true);
-check('E-h 同源但异端口 Origin → DENY',
-  allow({ host: '127.0.0.1:' + PORT, origin: 'http://127.0.0.1:36361' }) === false);
-check('E-h 畸形 Origin（不可解析）→ DENY',
-  allow({ host: '127.0.0.1:' + PORT, origin: 'not a url' }) === false);
-
 //   E-g  判定复用 identity 的同一份实现（不重写第二份 RFC1918）
+//   E-h  自 defects-batch-f 的 K6 归并来的三条唯一用例（IPv6/localhost Host、
+//        同源异端口 Origin、畸形 Origin）—— 归并时不能丢
 // ═══════════════════════════════════════════════════════════════════════════
 
 const path = require('node:path');
@@ -46,7 +40,11 @@ const ROOT = path.join(__dirname, '..');
 const { originAllowed } = require(path.join(ROOT, 'src', 'api', 'index.js'));
 const identity = require(path.join(ROOT, 'src', 'api', 'identity.js'));
 
-const PORT = '36360';
+// 端口落在**安全段** 28300-28399：避开 Linux 动态范围 32768-60999。
+// 原为 36360（动态段内）—— T1 只匹配"明确端口语境"的字面量，所以它一直没被抓到；
+// 这是潜在违规，随本次一并归位。
+const PORT = '28360';
+const OTHER_PORT = '28361';
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 const allow = (h) => originAllowed({ headers: h }, PORT);
@@ -84,6 +82,14 @@ check('E-f 边界：172.32.x（非私有）→ DENY', allow({ host: '172.32.0.1:
 check('E-f 边界：172.15.x（非私有）→ DENY', allow({ host: '172.15.0.1:' + PORT }) === false);
 check('E-f 边界：11.x（非私有）→ DENY', allow({ host: '11.0.0.1:' + PORT }) === false);
 check('E-f 边界：192.169.x（非私有）→ DENY', allow({ host: '192.169.0.1:' + PORT }) === false);
+
+// ── E-h：自 defects-batch-f 的 K6 归并来的三条唯一用例（归并时不能丢）──
+check('E-h IPv6 回环 Host（[::1]:port）→ ALLOW', allow({ host: '[::1]:' + PORT }) === true);
+check('E-h localhost Host → ALLOW', allow({ host: 'localhost:' + PORT }) === true);
+check('E-h 同源但异端口 Origin → DENY',
+  allow({ host: '127.0.0.1:' + PORT, origin: 'http://127.0.0.1:' + OTHER_PORT }) === false);
+check('E-h 畸形 Origin（不可解析）→ DENY',
+  allow({ host: '127.0.0.1:' + PORT, origin: 'not a url' }) === false);
 
 // ── E-g：复用同一份实现（防「再写一份 RFC1918」）──
 check('E-g identity 导出 isPrivateIpv4', typeof identity.isPrivateIpv4 === 'function');
