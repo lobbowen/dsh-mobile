@@ -30,13 +30,18 @@
 
 > `versionCode` 是**单调整数**，只增不减（Android 升级判定用它）；`versionName` 是给人看的 semver。
 
+> 这条 bump 规矩从 2026-09-26 起有牙了：动了 `container/app/**` 却没 bump 的合并，`fast-apk`
+> 会在发布步骤判红（自动通道不许同版本重发）。所以「连注释都算改了 APK 内容」这一类的补救是
+> **补 bump 再合**，不是推 `fast-*` tag 把同号的字节换掉 —— 后者会让已装机的设备以为"没有更新"。
+> 同版本重发只留给一种正当用途：投递本身坏了（资产孤立/签名错/传错包），走显式通道。
+
 ## 3. CI 门禁（都在 CI 侧，本地不执行任何东西）
 
 | 门禁 | 位置 | 拦的是 |
 |---|---|---|
 | workflow YAML 校验 | `ci.yml` + `fast-apk` → `scripts/validate-workflows.py` | workflow 写坏（GitHub 表现是"0 个 job"，伪装成"没触发"） |
 | 跨层版本校验 | `ci.yml` → `scripts/gen-version.js --check` | 事实源缺失/非法；`protocol.js` 与 `version.json` 协议号**漂移**；内核要求协议 > 壳实现协议 |
-| 壳 versionCode 单调 | `fast-apk` 发布步骤 | 回退 → 已升级设备永远收不到新版本 |
+| 壳 versionCode 单调 + 同版本通道分叉 | 判据 `scripts/verify-apk-version-gate.sh`，取数 `scripts/check-apk-release-version.sh`；四个发布口（`fast-apk` / `build-apk` / `release-admin` 的 publish 与 repack）各自调用 | 回退 → 已升级设备永远收不到新版本；**自动通道同号换字节** → 下载地址指向的东西变了而版本号没说谎的能力没了 |
 | 内核版本唯一 | `kernel-ota` 发布步骤 | 版本复用 → 设备端判为"无更新" → **静默不生效** |
 
 ## 4. 发布物
@@ -72,7 +77,9 @@
 ## 6. 自检清单
 
 - [ ] `ci.yml` 的跨层版本校验绿（日志里有 `[version] ... protocol shell vN / kernel requires vN`）
-- [ ] `fast-apk` 日志出现 `[version] 本次发布 x.y.z (versionCode=N)`，且 Release 三资产齐全
+- [ ] `fast-apk` 日志出现 `[version] 本次发布 x.y.z (versionCode=N)` **和** `[version] 版本前进（M → N）`
+      （只有前者、没有后者 = 门禁被绕过；同版本在自动通道应当**判红**而不是静默发出去）
+- [ ] `apk-latest` 三资产齐全：`app-debug.apk`、`version.json`，版本化归档在 `v<versionName>` 那个 tag 上
 - [ ] 只更新内核时：`kernel-ota` 成功，且**壳版本未变**
 - [ ] `kernel-<channel>` 归档与 CDN 通道目录（`<base>/kernel-<channel>/kernel-manifest.json?t=<ms>`）指向同一最新内核
 - [ ] 设备 `provisioning.json` 的 `appVersion` / `kernelVersion` / `bridgeProtocol` 三者自洽
