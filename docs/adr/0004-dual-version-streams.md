@@ -36,7 +36,7 @@
 
 | 流 | 门禁 | 拦的是 |
 |---|---|---|
-| 壳 | `fast-apk` 发布前比对已发布 `version.json`，`本次 < 已发布` → 硬红 | 已升级设备收不到新版本 |
+| 壳 | 判据 `scripts/verify-apk-version-gate.sh`（四个发布口共用：`fast-apk` / `build-apk` / `release-admin` 的 publish 与 repack）：回退一律硬红，**同版本只有显式通道放行** | 已升级设备收不到新版本；同号换字节让 latest 地址指向的东西变了而版本号看不出来（正是上面那句「静默不生效」在壳流的形态） |
 | 内核 | `kernel-ota` 发布前检查 `kernel-<version>` Release 是否已存在 → 已存在即硬红 | 版本复用导致设备永不更新 |
 
 ## 3. 兼容契约（内核声明，壳校验）
