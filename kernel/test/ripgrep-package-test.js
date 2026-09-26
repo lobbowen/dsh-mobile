@@ -79,20 +79,22 @@ check('链接位被普通文件占据 -> 重投为符号链接', (() => {
 })());
 
 // ── 版本号不许自编：设备上的 rg 是 CI 用 cargo 交叉编出来的那一份，桥接包声明的版本
-// 必须是同一格。事实源 = .github/workflows/fast-apk.yml 的 `cargo install --version <x> … ripgrep`。
+// 必须是同一格。事实源 = **构建实现脚本**里的 `cargo install --version <x> … ripgrep`。
+// （2026-09-27：该命令从 fast-apk.yml 抽到 scripts/build-native-capabilities.sh，抽出理由见其
+//  头注释。测试随之改读脚本 —— 否则会因「只是搬了位置」而假红。）
 // 读不到配方/解析不出版本一律 FAIL —— 那样这条判据就是在空转，等于没装锁。
 // 取实现源码里的常量而非落盘产物：静态对账，不依赖上面那次投放跑没跑成。
 try {
   const impl = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'native', 'ripgrep-package.js'), 'utf8');
   const bridgeVer = (/version:\s*'(\d[\d.]+)'/.exec(impl) || [])[1] || null;
-  const wf = W.readWorkflow('fast-apk.yml', path.join(ROOT, '..'));
-  const cargoVer = (/cargo install[^\n]*--version\s+([\d.]+)[^\n]*\bripgrep\b/.exec(wf) || [])[1] || null;
+  const sh = fs.readFileSync(path.join(ROOT, '..', 'scripts', 'build-native-capabilities.sh'), 'utf8');
+  const cargoVer = (/cargo install[^\n]*--version\s+([\d.]+)[^\n]*\bripgrep\b/.exec(sh) || [])[1] || null;
   check('桥接包版本 = CI 编 ripgrep 的那份', !!cargoVer && !!bridgeVer && bridgeVer === cargoVer,
     '配方 ' + cargoVer + ' / 桥接包 ' + bridgeVer);
   check('对照组：配方写法变了要红（判据认得真实那一行）',
     !!(/cargo install[^\n]*--version\s+([\d.]+)[^\n]*\bripgrep\b/.exec('RUN cargo install --locked --version 14.1.1 ripgrep --target aarch64-linux-android') || [])[1]);
 } catch (e) {
-  check('fast-apk.yml 可读（版本对账的前提）', false, e.message);
+  check('构建实现脚本可读（版本对账的前提）', false, e.message);
 }
 
 fs.rmSync(TMP, { recursive: true, force: true });
