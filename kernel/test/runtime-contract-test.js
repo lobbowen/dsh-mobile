@@ -84,6 +84,27 @@ fs.writeFileSync(path.join(SUP, 'runtime.json'), JSON.stringify({
 const ig = rc.npmInvocation('FALLBACK');
 check('R-2 npmEntry 不可用时退回 npmPath', ig.bin === NPM && ig.args.length === 0, JSON.stringify(ig));
 
+// R-7 prefix 格（$PREFIX = 能力件的家：bin/{bash,rg}、lib/pty.node）。
+// 可选键、不升 schema；缺席必须读出 null 而不是猜一个 —— 投放单元曾因拿不到容器环境
+// 里的 PREFIX 又自行兜底，结果 rg/pty 静默停摆一整代（真机 2026-09-26 定罪）。
+const PREFIX_DIR = path.join(TMP, 'usr');
+fs.writeFileSync(path.join(SUP, 'runtime.json'), JSON.stringify({
+  schema: 2, writtenBy: 'test',
+  nodePath: NODE, nodeBinDir: NODE_DIR, npmPath: NPM, npmEntry: ENTRY, prefix: PREFIX_DIR,
+}), null, 2);
+check('R-7 prefix 格解析进契约', rc.read().prefix === PREFIX_DIR, JSON.stringify(rc.read()));
+check('R-7 prefixRoot() 返回契约值', rc.prefixRoot() === PREFIX_DIR, String(rc.prefixRoot()));
+fs.writeFileSync(path.join(SUP, 'runtime.json'), JSON.stringify({
+  schema: 2, writtenBy: 'test', nodePath: NODE, nodeBinDir: NODE_DIR, npmPath: NPM, npmEntry: ENTRY,
+}), null, 2);
+check('R-7 旧容器无 prefix 格 → null（缺口如实，不兜底猜路径）', rc.read().prefix === null && rc.prefixRoot() === null);
+fs.rmSync(path.join(SUP, 'runtime.json'), { force: true });
+check('R-7 无契约 → prefixRoot() 不抛、返回 null', rc.prefixRoot() === null);
+fs.writeFileSync(path.join(SUP, 'runtime.json'), JSON.stringify({
+  schema: 2, writtenBy: 'test',
+  nodePath: NODE, nodeBinDir: NODE_DIR, npmPath: NPM, npmEntry: ENTRY, minNode: 'v22.12.0',
+}), null, 2);
+
 // schema 1 兼容（只有顶层旧键）。
 fs.writeFileSync(path.join(SUP, 'runtime.json'), JSON.stringify({ schema: 1, nodePath: NODE, nodeVersion: 'v22.12.0', minNode: 'v22.12.0' }), null, 2);
 const c1 = rc.read();
@@ -103,6 +124,9 @@ check('R-4 dist/index.js 用契约注入环境（PATH/prefix）', /runtimeContra
 const nm = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'native', 'manager.js'), 'utf8');
 check('R-4 manager.js 用契约解析 npm', /runtimeContract\.npmInvocation\(/.test(nm), 'ok');
 check('R-4 manager.js node 探测走契约', /runtimeContract\.nodeBin\(/.test(nm), 'ok');
+// 投放单元的 $PREFIX 只能来自契约：read() 在场 = _unitContext 走的是 runtime.json，
+// 不是进程环境（native-supply-gate 另有死词汇判据兜另一半）。
+check('R-4 manager.js 投放前置读契约', /runtimeContract\.read\(\)/.test(nm), 'ok');
 const ec = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'env-catalog.js'), 'utf8');
 check('R-4 env-catalog 用契约读 minNode', /runtime-contract/.test(ec), 'ok');
 check('R-4 env-catalog npm 探测走契约', /rc\.npmInvocation\(/.test(ec), 'ok');

@@ -98,6 +98,25 @@ const RULES = [
     owners: ['runtime/NodeRuntimeService.kt', 'MainActivity.kt'],
     why: '运行时的死活归监督链（ContainerSupervisor + :node 自家 boot 循环）；开场界面只给「看启动日志」，不给拆内核的按钮',
   },
+  {
+    // 报告 2026-09-26 §六1 的病根就是「guest 里 npm 的落点有两把尺子」：内核按
+    // npm_config_prefix 装、容器按 .npmrc 钉、shell 里看到的却是只读的 /data/app/*/lib。
+    // 目录名只许住 NodeProvisioner（内核侧那份同名事实由
+    // kernel/test/npm-contract-chain-test.js 逐字对账，不是第二把尺子）。
+    name: 'npm 全局前缀目录名',
+    re: /"\.npm-global"/,
+    owners: ['runtime/NodeProvisioner.kt'],
+    why: '.npmrc 与 npm root -g 必须指向同一个目录名，第二处字面量=第二把尺子',
+  },
+  {
+    // node 二进制在哪 = 一个事实，且它带着随重装变号的 /data/app/~~<随机段>。
+    // 谁再自己拼一次 "libnode.so"，那次拼接就不会跟着重装走（真机案底：旧路径
+    // 变死路径 → ENOENT 冷静期死循环）。要路径就问 NativeAssetRegistry.NODE。
+    name: 'node 二进制的文件名',
+    re: /"libnode\.so"/,
+    owners: ['native/NativeAssetRegistry.kt'],
+    why: 'libnode.so 的落点只在 NativeAssetRegistry 登记，其余各处经 resolve() 取',
+  },
 ];
 
 // 零容忍写法：不是「v1 词汇」而是**已定罪的假动作**，在任何地方（含注释）出现即失败。

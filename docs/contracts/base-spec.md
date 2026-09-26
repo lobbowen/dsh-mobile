@@ -42,8 +42,8 @@
 | Node 版本 | `24.21.0`（arm64-v8a） |
 | 平台 | android-35 |
 | C++ 运行时 | 容器内 `libc++_shared.so`（native 模块必须链接它） |
-| **npm 客户端** | **运行时可用**（npm 11.19.0 纯 JS，随 APK `assets/npm/` 投放；W^X 下由 node 代跑 `npm-cli.js`，调用形态见 `runtime.json` 的 `npmEntry`）。边界：安装一律 `--ignore-scripts`（容器无 sh 可 spawn）；`git:`/需编译的 native 依赖不支持；全局前缀固定 `$HOME/.npm-global`（`npm_config_prefix` 显式注入） |
-| 运行时交接文件 | `<DSH_SUPERVISOR_HOME>/supervisor/runtime.json`（**容器写、内核读**，schema 2）：`nodePath`（libnode.so 绝对路径）、`nodeBinDir`、`npmPath`、`npmEntry`（npm-cli.js 绝对路径，**新增可选键**：缺失时内核退回 ambient npm）、`minNode`。内核侧解析入口唯一：`src/platform/runtime-contract.js`（`npmInvocation()`/`nodeBin()`/`npmEnv()`） |
+| **npm 客户端** | **运行时可用**（npm 11.19.0 纯 JS，随 APK `assets/npm/` 投放；由 node 代跑 `npm-cli.js` —— npm 是纯 JS，调用通路只有这一条，形态见 `runtime.json` 的 `npmEntry`）。边界：安装一律 `--ignore-scripts`（容器无 sh 可 spawn）；`git:`/需编译的 native 依赖不支持；全局前缀固定 `$HOME/.npm-global`（内核侧 `npm_config_prefix` 显式注入，容器侧启动时写 `$HOME/.npmrc`，两处目录名由 `kernel/test/npm-contract-chain-test.js` 逐字对账） |
+| 运行时交接文件 | `<DSH_SUPERVISOR_HOME>/supervisor/runtime.json`（**容器写、内核读**，schema 2）：`nodePath`（libnode.so 绝对路径）、`nodeBinDir`、`npmPath`、`npmEntry`（npm-cli.js 绝对路径，**可选键**：缺失时内核退回 ambient npm）、`prefix`（`$PREFIX` 根 = `files/usr`，**可选键**：能力件真名的家，`bin/{bash,rg}` 与 `bin/node`（→ libnode.so 的符号链接）、`lib/pty.node`；内核原生件投放单元的唯一取件路径，缺失即判 `blocked` 并上屏，不再静默跳过）、`minNode`。内核侧解析入口唯一：`src/platform/runtime-contract.js`（`npmInvocation()`/`nodeBin()`/`npmEnv()`/`prefixRoot()`） |
 | 内置构建链 | **无**（已实测证伪：Google Maven 无 aarch64 版 aapt2，见 ARCHITECTURE.md §2.3）。`build` 组语义为「从本地 feed 安装已签名内核」（A''，见本契约 §3.6） |
 | 进程模型 | `NodeRuntimeService`（前台 `START_STICKY`）spawn 独立 `:node` 进程加载内核入口 |
 

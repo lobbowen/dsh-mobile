@@ -15,6 +15,16 @@ export type DshPhase =
 export type NativeInstallState =
   | "uninstalled" | "installing" | "installed" | "uninstalling" | string;
 
+/** 原生件投放单元的结局。skipped = 本就不该投（PC/无该依赖）；
+ *  blocked = 容器形态却缺前置，是供给缺口；两者语义不同，UI 不许合并显示。 */
+export type NativeUnitStatus = "applied" | "already" | "skipped" | "blocked" | "failed";
+
+export interface NativeUnitOutcome {
+  status: NativeUnitStatus;
+  reason?: string | null;
+  at?: string;
+}
+
 export interface NativeDshStatus {
   installed: boolean;
   version?: string | null;
@@ -25,6 +35,8 @@ export interface NativeDshStatus {
   lastInstall?: { version?: string; error?: string } | null;
   lastUninstall?: unknown;
   task?: unknown;
+  /** 本轮进程的实际投放结局；null/缺席 = 本轮还没跑过（不是「全部正常」）。 */
+  nativeUnits?: Record<string, NativeUnitOutcome> | null;
 }
 
 export interface DshVersionInfo {

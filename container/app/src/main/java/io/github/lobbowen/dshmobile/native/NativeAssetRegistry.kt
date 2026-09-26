@@ -55,10 +55,15 @@ object NativeAssetRegistry {
      * Node 运行时。
      *
      * 它**实际是一个可执行文件**（有 `PT_INTERP = /system/bin/linker64`），
-     * 只是被改名为 `lib*.so` 以借道 `jniLibs` 打包通道，从而落进 `exec_type` 目录。
+     * 只是被改名为 `lib*.so` 以借道 `jniLibs` 打包通道 —— 该通道是系统唯一会自动
+     * 解压落地的目录，省掉一次首启解压 116MB。
      *
-     * 这层「改名把戏」是 W^X 约束下的唯一出路：Android 10+ 不允许从 `filesDir`
-     * execve，`jniLibs` 通道是系统唯一愿意解压到可执行目录的入口。
+     * 旧注释在此写「这是 W^X 约束下的唯一出路，Android 10+ 不允许从 filesDir execve」，
+     * 与 ADR-0001 (b)/D1 冲突：我们把 targetSdk 钉在 28 换的就是 app home 可 exec，
+     * `PrefixProvisioner` 往 `files/usr/bin` 放的 bash/rg/node 全依赖这条能力。
+     * 「借道 jniLibs」因此是**省事**而非**唯一**；真·唯一约束是依赖：libnode 的
+     * `DT_RUNPATH=$ORIGIN` 要求 `libc++_shared.so` 与它同目录，见 verify-runtime-elf.sh。
+     * 域内 exec 的自证归 ADR-0001 P0 的 domain-probe（还没跑）。
      */
     val NODE = NativeExecutable(
         id = "node",

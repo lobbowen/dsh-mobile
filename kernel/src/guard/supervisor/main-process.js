@@ -83,8 +83,7 @@ class MainProcess {
   }
 
   /** 安卓容器启动形态整备（仅契约在场时生效，PC 逐字不变）：
-   * ① 投放两个第三方依赖垫片：node-addon-require-builtin、node-addon-system/flock
-   * （两者都无 android-arm64 预编译件，属依赖供给，不改 DSH）；
+   * ① 跑完全部原生件投放单元（ensureNativeUnits：依赖垫片、rg/pty/wasm 供给）；
    * ② 在 node 与脚本入口之间注入 --expose-internals，位置必须在脚本前。
    * 恒幂等：命令已含该 flag 不再重复插入；非 node 代跑形态（args[0] 非 .js）不动。 */
   _androidLaunchReady(command) {
@@ -104,20 +103,12 @@ class MainProcess {
         command = command.slice();
         command[0] = curNode;
       }
-      if (this.nativeManager && typeof this.nativeManager.ensureRequireBuiltinShim === 'function') {
-        this.nativeManager.ensureRequireBuiltinShim();
-      }
-      if (this.nativeManager && typeof this.nativeManager.ensureFlockShim === 'function') {
-        this.nativeManager.ensureFlockShim();
-      }
-      if (this.nativeManager && typeof this.nativeManager.ensureRipgrepPackage === 'function') {
-        this.nativeManager.ensureRipgrepPackage();
-      }
-      if (this.nativeManager && typeof this.nativeManager.ensureSharpWasm === 'function') {
-        this.nativeManager.ensureSharpWasm();
-      }
-      if (this.nativeManager && typeof this.nativeManager.ensureNodePtyPrebuild === 'function') {
-        this.nativeManager.ensureNodePtyPrebuild();
+      if (this.nativeManager && typeof this.nativeManager.ensureNativeUnits === 'function') {
+        // 投放单元是**副作用**，不得有能力否决下面的 flag 注入：旧实现是五段裸调用
+        // 共用外层 try，任一个抛错就退回原命令 —— 变成分层倒置（环境自愈决定启动形态）。
+        try { this.nativeManager.ensureNativeUnits(); } catch (e) {
+          this.logger && this.logger.warn('原生件投放异常（不影响本轮启动）: ' + e.message);
+        }
       }
       if (command.includes('--expose-internals') || !String(command[1] || '').endsWith('.js')) return command;
       const out = command.slice();

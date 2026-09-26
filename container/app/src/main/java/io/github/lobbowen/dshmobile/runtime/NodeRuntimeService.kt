@@ -257,9 +257,10 @@ class NodeRuntimeService : Service() {
             // 旧实现只有两态，把"只落地一半"也说成"尚未安装成功"，排查方向被带偏。
             val res = KernelResolution.resolve(kVersion, entry?.absolutePath, entry != null && entry.exists())
             val hasKernel = res.state == KernelResolution.State.READY
-            // 不变式守护：内核入口是【脚本】，必须交给 node 解释执行。
-            // 它落在 filesDir（app_data_file），W^X 禁止 execve —— 直接 ProcessBuilder
-            // 它在真机上必然 error=13。这个断言把「注释与实现矛盾」的雷变成可执行检查。
+            // 不变式守护：内核入口是【脚本】，必须交给 node 解释执行，且必须落在 filesDir
+            // 子树内（内核 OTA 的落盘布局）。旧注释把这条说成「W^X 禁止 execve 所以不能直接跑」——
+            // 与 ADR-0001 (b)/D1 冲突（我们钉 targetSdk=28 正是为了 app home 可 exec），
+            // 域内自证归 domain-probe；断言本身不依赖那个解释，照旧成立。
             if (hasKernel && kVersion != null) {
                 try {
                     km.assertNotDirectlyExecutable(kVersion)
@@ -322,14 +323,25 @@ class NodeRuntimeService : Service() {
             // ---- 4) 写 runtime.json（schema 2，容器写内核读） ----
             // minNode 单源：就是随包清单里的 Node 版本（上方 version），不再手写字面量。
             writeRuntimeJson(
-                home = filesDir.absolutePath,
                 nodePath = nodeBin.absolutePath,
                 nodeBinDir = nodeBin.parentFile!!.absolutePath,
                 npmPath = nodeBin.absolutePath,
                 npmEntry = npmCli?.absolutePath,
+                prefix = PrefixProvisioner.root(this).absolutePath,
                 minNode = version
             )
             RuntimeDiagnostics.append(this, "runtime", true, "runtime.json 已写入（schema 2）", "home=${filesDir.absolutePath}")
+            // npm 的可写全局前缀：npm 的默认 prefix 指向 node 安装目录
+            // （这里是只读的 /data/app/…/lib），guest 里 dsh 自己跑 `npm install -g` 必
+            // EACCES/EROFS。内核 spawn 的 npm 靠 npm_config_prefix 撑着，dsh 自起的没有
+            // 那份 env —— 只有 $HOME/.npmrc 能覆盖它（HOME=filesDir 由 GuestAdapter 定）。
+            // 已存在则**不动**：用户改过 .npmrc（换 registry/代理）不该每次开机被抹平。
+            val npmrc = NodeProvisioner.ensureNpmPrefixRc(this)
+            RuntimeDiagnostics.append(
+                this, "npmrc", npmrc != null,
+                if (npmrc != null) ".npmrc 前缀在册" else ".npmrc 未能写入（guest 侧 npm -g 会失败）",
+                npmrc?.absolutePath ?: "写入失败（无路径可报）"
+            )
 
             // ---- 5) 装配并 spawn（L-C/L-D 的唯一装配点 = GuestAdapter） ----
             //
@@ -347,7 +359,15 @@ class NodeRuntimeService : Service() {
             )
             val plan = if (hasKernel && kernelDir != null && entry != null) {
                 // $PREFIX 复制是**副作用**：必须先于装配执行（plan 只声明、不生产）。
-                PrefixProvisioner.provision(this)
+                // 缺件必须上屏 —— 真机 2026-09-26 报告 §五 就是「$PREFIX 里到底有没有
+                // node/rg/bash」无人可查，guest 侧只会得到「command not found」。
+                val prefixReady = PrefixProvisioner.provision(this, nodeBin)
+                val prefixMissing = PrefixProvisioner.expected - prefixReady.toSet()
+                RuntimeDiagnostics.append(
+                    this, "prefix", prefixMissing.isEmpty(),
+                    if (prefixMissing.isEmpty()) "\$PREFIX 能力件全就位" else "\$PREFIX 缺件：${prefixMissing.joinToString()}",
+                    PrefixProvisioner.root(this).absolutePath + " 已有=" + prefixReady.joinToString()
+                )
                 val nativeDir = nodeBin.parentFile!!
                 GuestAdapter.kernelPlan(
                     GuestAdapter.KernelInputs(
@@ -368,9 +388,11 @@ class NodeRuntimeService : Service() {
                 GuestAdapter.probePlan(base, script, getenv("PATH"))
             }
             //
-            // 注意 command[0] 是 nodeBin（nativeLibraryDir 下的 libnode.so，唯一可 exec 的东西），
-            // entry 是**脚本参数**、不是被 exec 的目标 —— 它落在 filesDir（app_data_file），
-            // W^X 禁止 execve。把两者顺序写反必在真机上 error=13。
+            // command[0] 恒为 nodeBin，entry 是**脚本参数**、不是被 exec 的目标。
+            // 本行旧版把这条理由写成「filesDir 被 W^X 禁止 execve」——那是 targetSdk≥29 的规矩，
+            // 而本产品刻意钉 targetSdk=28 换的就是 app home 可 exec（ADR-0001 (b)/D1），
+            // 上一条 $PREFIX 放的 bash/rg/node 全依赖这条能力。两句不能同时为真：域内自证
+            // 归 ADR-0001 P0 的 domain-probe（还没跑），在它出结果前不许拿 W^X 当结论用。
             // 不变式由 km.assertNotDirectlyExecutable() 守护。
             val pb = ProcessBuilder(plan.command).directory(plan.cwd)
             // 环境以 plan 为**完整事实**：先清空继承环境，两侧（内核/探针）同一契约，
@@ -734,7 +756,7 @@ class NodeRuntimeService : Service() {
 
     private fun getenv(k: String): String? = System.getenv(k)
 
-    private fun writeRuntimeJson(home: String, nodePath: String, nodeBinDir: String, npmPath: String, npmEntry: String?, minNode: String) {
+    private fun writeRuntimeJson(nodePath: String, nodeBinDir: String, npmPath: String, npmEntry: String?, prefix: String, minNode: String) {
         val dir = File(filesDir, "supervisor")
         dir.mkdirs()
         val obj = JSONObject().apply {
@@ -746,6 +768,11 @@ class NodeRuntimeService : Service() {
             // 保持 schema=2 是刻意的：OTA 下来的旧内核读到未知字段会忽略，
             // 而 bump schema 会让它们直接拒读契约（新 APK + 旧内核是常态）。
             if (npmEntry != null) put("npmEntry", npmEntry)
+            // prefix：$PREFIX 根（能力件的家，bin/{bash,rg,node} · lib/pty.node）。恒为
+            // PrefixProvisioner.root 的路径，只**声明位置**、不保证此刻已 provision。
+            // 内核投放单元曾以容器环境变量找它 —— 本服务从未导出过那个键，rg/pty 因此
+            // 静默停摆一整代（真机 2026-09-26）。环境里不加同名键：一份事实只留一处。
+            put("prefix", prefix)
             put("minNode", minNode)
             put("writtenBy", "android-node-container")
         }

@@ -17,16 +17,18 @@ import org.json.JSONObject
  * - 内核（L1）经签名 OTA 热更新。
  * 二者互不替代。
  *
- * dsh-supervisor 是【脚本】，不是可执行的二进制 —— 不要试图 exec 它：
- * 它落在 `filesDir`（label = `app_data_file`），**SELinux W^X 禁止 execve**，
- * 正确用法是把它当**参数**交给 node：`ProcessBuilder(nodeBin.absolutePath,
- * entry.absolutePath, "daemon")`（见 NodeRuntimeService 的启动链）。
- * 这与 `libnode.so` **刻意不同** —— 后者是真正要被 exec 的 ELF，必须放在
- * `nativeLibraryDir`（label = `exec_type`），即 `jniLibs/<abi>/`。
+ * dsh-supervisor 是【脚本】，用法上必须当**参数**交给 node 解释：
+ * `ProcessBuilder(nodeBin.absolutePath, entry.absolutePath, "daemon")`（见
+ * NodeRuntimeService 的启动链）。这与 `libnode.so` **刻意不同** —— 后者是真正要被
+ * exec 的 ELF，放在 `nativeLibraryDir`（jniLibs 免解压的落点）。
+ * 旧注释在此写的理由是「filesDir 的 W^X 禁止 execve」，那句与 ADR-0001 (b)/D1 冲突：
+ * 本产品钉 targetSdk=28 换的就是 app home 可 exec（`$PREFIX` 的 bash/rg/node 全靠它）。
+ * 域内自证归 ADR-0001 P0 的 domain-probe，在它出结果前这里只主张「入口是脚本，
+ * 由 node 解释」这条与 SELinux 无关的事实。
  *
  * 历史上的类注释误写成「由 :node 进程 exec」，与实现矛盾。这是埋着的雷：
- * 照注释去 `ProcessBuilder(entry.absolutePath)` 必在真机上以
- * `error=13, Permission denied` 失败。本注释即为修正，并加了运行时断言守护。
+ * 照注释去 `ProcessBuilder(entry.absolutePath)` 就直接走了解释器之外的通路，而本
+ * 产品从未为「脚本能否被内核直接 exec」立过判据。本注释即为修正，并加了运行时断言守护。
  */
 class KernelManager(private val context: Context) {
 
@@ -56,24 +58,24 @@ class KernelManager(private val context: Context) {
     fun kernelDir(version: String): File = File(kernelRoot, version)
 
     /**
-     * 内核入口脚本路径 —— **这是一个脚本，不是可执行二进制**。
+     * 内核入口脚本路径 —— **这是一个脚本，用法上不是可执行二进制**。
      *
-     * 它位于 `filesDir`（`app_data_file`），SELinux W^X 禁止 execve。
-     * 必须交给 node 解释执行：`ProcessBuilder(nodeBin, entryPath(v), "daemon")`。
-     *
+     * 它必须交给 node 解释执行：`ProcessBuilder(nodeBin, entryPath(v), "daemon")`。
      * 调用 [assertNotDirectlyExecutable] 可在开发期抓住误用。
      */
     fun entryPath(version: String): File = File(kernelDir(version), "bin/dsh-supervisor")
 
     /**
-     * 断言 [entryPath] 不会被直接 exec —— 该路径在 `app_data_file` 下，W^X 会拒绝。
+     * 断言 [entryPath] 仍在 filesDir 子树内 —— 这是内核 OTA 落盘布局的自洽检查，
+     * 也是「入口当参数交给 node」这条用法的前提（布局被破坏时它可能落到别处，
+     * 而装配链按 filesDir 假设写死了）。
      *
      * 初衷：类注释曾与实现矛盾（写「由 :node 进程 exec」而实际落 filesDir），
      * 这是典型的「埋雷」型缺陷 —— 后人照注释写代码就必崩。把不变式写成可执行
      * 断言，比注释更难被忽略。
      *
      * 注意断言的是**目录归属**（唯一可靠的静态判据），不是文件权限位：
-     * `File.canExecute()` 对 `app_data_file` 也返回 true，在此完全不可信。
+     * `File.canExecute()` 在这里只反映 +x 位，与域内能不能真 exec 无关，不可信。
      *
      * @throws IllegalStateException 该路径竟然不在 filesDir 子树内（布局被破坏）
      */
