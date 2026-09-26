@@ -1,0 +1,188 @@
+=== CI failure diagnostics ===
+run : https://github.com/lobbowen/dsh-mobile/actions/runs/36216072106
+node: 24.21.0
+ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+ANDROID_NDK: /usr/local/lib/android/sdk/ndk/29.0.14206865
+
+=== step outcomes (success/failure/skipped) ===
+wfvalidate  : success
+hbstart     : success
+ping        : success
+checkout    : success
+setup-java  : success
+sdk-env     : success
+sdk-install : success
+host-deps   : success
+node-tag    : success
+sync-json   : success
+node-cache  : success
+node-restore: success
+node-reused : no (yes=跳过重编)
+node-build  : failure
+signing     : skipped
+gradle-build: skipped
+
+=== sdk-install.log (filtered tail 60, license noise removed) ===
+
+
+
+
+
+13. Changes to the License Agreement
+
+13.1 Google may make changes to the License Agreement as it distributes new versions of the GDK. When these changes are made, Google will make a new version of the License Agreement available on the website where the GDK is made available.
+
+14. General Legal Terms
+
+
+14.2 You agree that if Google does not exercise or enforce any legal right or remedy which is contained in this License Agreement (or which Google has the benefit of under any applicable law), this will not be taken to be a formal waiver of Google's rights and that those rights or remedies will still be available to Google.
+
+14.3 If any court of law, having the jurisdiction to decide on this matter, rules that any provision of this License Agreement is invalid, then that provision will be removed from this License Agreement without affecting the rest of this License Agreement. The remaining provisions of this License Agreement will continue to be valid and enforceable.
+
+
+
+14.6 The rights granted in this License Agreement may not be assigned or transferred by either you or Google without the prior written approval of the other party. Neither you nor Google shall be permitted to delegate their responsibilities or obligations under this License Agreement without the prior written approval of the other party.
+
+
+November 19, 2013
+---------------------------------------
+---------------------------------------
+
+By clicking on the “Accept” button, downloading, installing, or otherwise using the Evaluation Materials (defined below), you agree to be bound by the terms of this Agreement effective as of the date you click “Accept” (the “Effective Date”), and if doing so on behalf of an entity, you represent that you are authorized to bind the entity to the terms and conditions of this Agreement. If you do not agree to be bound by the terms and conditions of this Agreement, do not download, install, or use the Evaluation Materials.
+
+1. DEFINITIONS. These terms shall have the following meanings:
+
+
+
+1.3 “Evaluation Materials" means, collectively, the Evaluation Software (in source and/or object code form) and documentation (including, without limitation, any design documents, specifications, reference manuals, and other related materials) related to the Evaluation Software as made available to Recipient.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+10. GENERAL.
+
+
+
+
+
+
+
+
+
+---------------------------------------
+
+Loading package information...                                                  Loading local repository...                                                     [                                       ] 3% Loading local repository...        [                                       ] 3% Fetch remote repository...         [=                                      ] 3% Fetch remote repository...         [=                                      ] 4% Fetch remote repository...         [=                                      ] 5% Fetch remote repository...         [==                                     ] 5% Fetch remote repository...         [==                                     ] 6% Fetch remote repository...         [==                                     ] 7% Fetch remote repository...         [==                                     ] 7% Computing updates...               [===                                    ] 8% Computing updates...               [===                                    ] 10% Computing updates...              [=======================================] 100% Computing updates...             
+
+
+=== node-build.log :: ALL error lines (grep -n) ===
+
+=== node-build.log :: context around FIRST error (40 lines before/after) ===
+(no 'error:' line found; see tail below)
+
+=== node-build.log :: context around LAST error (40 lines before/after) ===
+(no 'error:' line found; see tail below)
+
+=== node-build.log (tail 200, warnings filtered out) ===
+==> 克隆 Node.js v24.21.0 源码
+Cloning into '/tmp/tmp.DXd6KduM2A/node'...
+Note: switching to '955266bfdd854cd280dffd47548673914484e4c0'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+Updating files:  31% (14374/46277)Updating files:  32% (14809/46277)Updating files:  33% (15272/46277)Updating files:  34% (15735/46277)Updating files:  35% (16197/46277)Updating files:  36% (16660/46277)Updating files:  37% (17123/46277)Updating files:  38% (17586/46277)Updating files:  39% (18049/46277)Updating files:  40% (18511/46277)Updating files:  41% (18974/46277)Updating files:  42% (19437/46277)Updating files:  43% (19900/46277)Updating files:  44% (20362/46277)Updating files:  45% (20825/46277)Updating files:  46% (21288/46277)Updating files:  47% (21751/46277)Updating files:  48% (22213/46277)Updating files:  49% (22676/46277)Updating files:  50% (23139/46277)Updating files:  51% (23602/46277)Updating files:  52% (24065/46277)Updating files:  53% (24527/46277)Updating files:  54% (24990/46277)Updating files:  55% (25453/46277)Updating files:  56% (25916/46277)Updating files:  57% (26378/46277)Updating files:  58% (26841/46277)Updating files:  59% (27304/46277)Updating files:  60% (27767/46277)Updating files:  61% (28229/46277)Updating files:  62% (28692/46277)Updating files:  63% (29155/46277)Updating files:  64% (29618/46277)Updating files:  65% (30081/46277)Updating files:  66% (30543/46277)Updating files:  67% (31006/46277)Updating files:  68% (31469/46277)Updating files:  69% (31932/46277)Updating files:  70% (32394/46277)Updating files:  70% (32846/46277)Updating files:  71% (32857/46277)Updating files:  72% (33320/46277)Updating files:  73% (33783/46277)Updating files:  74% (34245/46277)Updating files:  75% (34708/46277)Updating files:  76% (35171/46277)Updating files:  77% (35634/46277)Updating files:  78% (36097/46277)Updating files:  79% (36559/46277)Updating files:  80% (37022/46277)Updating files:  81% (37485/46277)Updating files:  82% (37948/46277)Updating files:  83% (38410/46277)Updating files:  84% (38873/46277)Updating files:  85% (39336/46277)Updating files:  86% (39799/46277)Updating files:  87% (40261/46277)Updating files:  88% (40724/46277)Updating files:  89% (41187/46277)Updating files:  90% (41650/46277)Updating files:  91% (42113/46277)Updating files:  92% (42575/46277)Updating files:  93% (43038/46277)Updating files:  94% (43501/46277)Updating files:  95% (43964/46277)Updating files:  96% (44426/46277)Updating files:  97% (44889/46277)Updating files:  98% (45352/46277)Updating files:  99% (45815/46277)Updating files: 100% (46277/46277)Updating files: 100% (46277/46277), done.
+==> 应用 bionic backtrace 补丁: deps/v8/src/base/debug/stack_trace_posix.cc
+patched: deps/v8/src/base/debug/stack_trace_posix.cc
+29:#define HAVE_EXECINFO_H 1
+34:#undef HAVE_EXECINFO_H
+35:#define HAVE_EXECINFO_H 0
+38:#if HAVE_EXECINFO_H
+81:#if HAVE_EXECINFO_H
+127:#endif  // HAVE_EXECINFO_H
+142:#if HAVE_EXECINFO_H
+197:#endif  // HAVE_EXECINFO_H
+393:#if HAVE_EXECINFO_H
+406:#if HAVE_EXECINFO_H
+==> 应用 V8 trap-handler 补丁: deps/v8/src/trap-handler/trap-handler.h
+  patched: neutralised 1 #if + 6 #elif
+  [ok] conditional directives balanced (depth=0)
+  [ok] semantic check: x64-host/arm64-target -> V8_TRAP_HANDLER_SUPPORTED = false (trap handler disabled)
+  neutralised branches: 7
+==> 应用 aligned_alloc 补丁（API 24 < 28，bionic 无该函数）: test/cctest/test_crypto_clienthello.cc
+  patched: aligned_alloc -> memalign (1 occurrence)
+    [ok] 已无 aligned_alloc 调用点（注释中的说明文字已排除）
+    [ok] memalign 在 API 24 下可链接（--no-undefined 校验通过）
+==> 挑选宿主编译器（逐个实测）
+    [ok] host-cxx -> /usr/bin/clang++ (x86-64, C++20 + stdlib + atomics 全部可用)
+==> 宿主编译器确定: CXX_host=/usr/bin/clang++  CC_host=/usr/bin/clang
+==> 宿主工具链: CC_host=/usr/bin/clang  CXX_host=/usr/bin/clang++  AR_host=/usr/bin/ar  LDFLAGS_host= -latomic
+==> 目标侧链接标志: LDFLAGS_target= -Wl,--enable-new-dtags -Wl,-rpath,'$$ORIGIN'
+==> 运行官方 android-configure (NDK /usr/local/lib/android/sdk/ndk/29.0.14206865 + API 24 + arch arm64)
+Node.js configure: Found Python 3.12.3...
+WARNING: --openssl-no-asm will result in binaries that do not take advantage
+         of modern CPU cryptographic instructions and will therefore be slower.
+         Please refer to BUILDING.md
+INFO: Using floating patch "tools/icu/patches/78/source/i18n/dtfmtsym.cpp" from "tools/icu"
+WARNING: warnings were emitted in the configure phase
+INFO: configure completed successfully
+Node.js android configure: Found Python 3.12.3...
+[92mInfo: [0mConfiguring for arm64...
+==> 校验 out/Makefile 中的宿主工具链:
+    CC.host  = /usr/bin/clang
+    CXX.host = /usr/bin/clang++
+    [ok] 宿主编译器校验通过（非 android 工具链，且实测能编 C++ 头）
+==> 进编译前取证（红也要红得能自证）
+    make -n: 退出码=0  展开行数=92715  日志=/tmp/dsh-node-make-n.log
+    out/Makefile 里 LDFLAGS* 原文行:
+      48:LDFLAGS.target ?= $(LDFLAGS)
+      62:LDFLAGS.host ?= $(LDFLAGS_host)
+    out/Makefile 中含 -rpath 的行数: 0
+    make -n 展开中含 -rpath 的行数: 0
+    make -n 展开里的 -rpath 实文: <无>
+    make -n 日志末尾 15 行:
+      # Fixup path as in (1).
+      sed -e "s|^setup-isolate-full.o|/tmp/tmp.DXd6KduM2A/node/out/Release/obj.target/v8_init/deps/v8/src/init/setup-isolate-full.o|" /tmp/tmp.DXd6KduM2A/node/out/Release/.deps//tmp/tmp.DXd6KduM2A/node/out/Release/obj.target/v8_init/deps/v8/src/init/setup-isolate-full.o.d.raw >> /tmp/tmp.DXd6KduM2A/node/o
+      # Add extra rules as in (2).
+      # We remove slashes and replace spaces with new lines;
+      # remove blank lines;
+      # delete the first line and append a colon to the remaining lines.
+      sed -e 's|\\||' -e 'y| |\n|' /tmp/tmp.DXd6KduM2A/node/out/Release/.deps//tmp/tmp.DXd6KduM2A/node/out/Release/obj.target/v8_init/deps/v8/src/init/setup-isolate-full.o.d.raw | grep -v '^$'                             | sed -e 1d -e 's|$|:|' >> /tmp/tmp.DXd6KduM2A/node/out/Release/.deps//tmp/tmp.DXd6Kd
+      rm /tmp/tmp.DXd6KduM2A/node/out/Release/.deps//tmp/tmp.DXd6KduM2A/node/out/Release/obj.target/v8_init/deps/v8/src/init/setup-isolate-full.o.d.raw
+      rm -f /tmp/tmp.DXd6KduM2A/node/out/Release/obj.target/tools/v8_gypfiles/libv8_init.a ar-file-list; mkdir -p `dirname /tmp/tmp.DXd6KduM2A/node/out/Release/obj.target/tools/v8_gypfiles/libv8_init.a`
+      : >/tmp/tmp.DXd6KduM2A/node/out/Release/obj.target/tools/v8_gypfiles/libv8_init.a.ar-file-list
+      printf "%s\n" >>/tmp/tmp.DXd6KduM2A/node/out/Release/obj.target/tools/v8_gypfiles/libv8_init.a.ar-file-list /tmp/tmp.DXd6KduM2A/node/out/Release/obj.target/v8_init/deps/v8/src/init/setup-isolate-full.o
+      ar crsT /tmp/tmp.DXd6KduM2A/node/out/Release/obj.target/tools/v8_gypfiles/libv8_init.a @/tmp/tmp.DXd6KduM2A/node/out/Release/obj.target/tools/v8_gypfiles/libv8_init.a.ar-file-list
+      rm 366f51978a84d7b8ef7f91707123be485db342b74cd1183f545e51ad1d4d0741.intermediate 65bb8a4d50d794038a5e0cd07dbba1fc76613f3baa03d1a5830e84ee24f7425a.intermediate 750f140f186909d3d80b8fed90c04226c6e9e616a282ec731a181668edb2a39c.intermediate d3ad8978a62970cdea458b7cb832fb91a61eb1301c6dae5b436be0f93a86958
+      if [ ! -r node ] || [ ! -L node ]; then \
+        ln -fs out/Release/node node; fi
+==> 校验展开后的链接参数: LDFLAGS.target ?= $(LDFLAGS)
+==> [error] make -n 展开结果里根本没有 -rpath —— LDFLAGS_target 未被 gyp 采纳。
+            期望: -Wl,-rpath,'$ORIGIN'
+            make -n 退出码=0（非零则先按上面的日志末尾判断展开本身有没有失败）
+            上方取证段列出 out/Makefile 的 LDFLAGS* 原文；若那里有 -rpath 而展开里没有，
+            说明链接规则用的是另一个变量（如 LDFLAGS.host 或 -Wl 拼写差异），按原文改判据。
+
+=== gradle-build.log (tail 150) ===
+(no gradle-build.log — failure before Gradle)
