@@ -577,10 +577,7 @@ jobs:
           # 「修复之前」的包 —— 那种包条目齐全、CRC 正确、签名也没问题，装上就是 CANNOT LINK。
           # 判据与构建期/打包期/pin 同源（scripts/verify-runtime-elf.sh），这里不再自己写一份。
           echo "== 依赖自解析门禁（DT_RUNPATH 含 \$ORIGIN）=="
-          command -v readelf >/dev/null 2>&1 || {
-            echo "[info] 缺少 readelf，安装 binutils …"
-            sudo apt-get update -qq && sudo apt-get install -y -qq binutils
-          }
+          bash scripts/ensure-tool.sh readelf binutils
           rm -rf /tmp/repack-libs && mkdir -p /tmp/repack-libs
           python3 - <<'PY'
           import os, zipfile
@@ -889,17 +886,10 @@ jobs:
           set -euo pipefail
           cd /tmp/pin/out
 
-          # readelf / file 由 binutils 提供，ubuntu-latest 上通常已有，
-          # 但不保证 —— 缺了就直接装，避免校验步骤因为工具缺失而失败。
-          # （"校验工具没装"和"产物不合格"是两回事，不该混为一谈。）
-          for t in readelf file; do
-            command -v "$t" >/dev/null 2>&1 || {
-              echo "[info] 缺少 $t，安装 binutils/file …"
-              sudo apt-get update -qq
-              sudo apt-get install -y -qq binutils file
-              break
-            }
-          done
+          # readelf / file 由 binutils/file 提供。"工具没装"与"产物不合格"分开处置的
+          # 判据已收口到唯一宿主 scripts/ensure-tool.sh（门禁法①），这里只声明缺什么装什么。
+          bash "$GITHUB_WORKSPACE/scripts/ensure-tool.sh" readelf binutils
+          bash "$GITHUB_WORKSPACE/scripts/ensure-tool.sh" file file
 
           echo "=== 1) ELF 架构 ==="
           file libnode.so libc++_shared.so

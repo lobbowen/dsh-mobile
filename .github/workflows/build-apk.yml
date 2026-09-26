@@ -599,12 +599,10 @@ jobs:
 
           # 形态之外还要过依赖自解析判据：命中缓存时 build-node-android.sh 根本不跑，
           # 那条链路上的产物级校验也就没跑，而本 workflow 会把包直接发到 apk-latest。
-          # 判据只有一份实现（scripts/verify-runtime-elf.sh），与 fast-apk/pin 同源。
+          # 判据只有一份实现（scripts/verify-runtime-elf.sh），与 fast-apk/pin 同源；
+          # 工具安装探测同样收口（scripts/ensure-tool.sh），不再各抄一份。
           echo "=== 依赖自解析门禁（DT_RUNPATH 含 \$ORIGIN）==="
-          command -v readelf >/dev/null 2>&1 || {
-            echo "[info] 缺少 readelf，安装 binutils …"
-            sudo apt-get update -qq && sudo apt-get install -y -qq binutils
-          }
+          bash scripts/ensure-tool.sh readelf binutils
           bash scripts/verify-runtime-elf.sh container/app/src/main/jniLibs/arm64-v8a
 
       - name: Inject release keystore (optional, for stable signing)
