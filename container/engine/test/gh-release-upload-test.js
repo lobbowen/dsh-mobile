@@ -269,8 +269,11 @@ const asset = (c, n) => path.join(c.ST, 'assets', n);
   const inline = wfs.filter(([, t]) => INLINE.test(t)).map(([f]) => f);
   check('workflow 无内联 Release 写操作回潮（上传判据只住宿主）', inline.length === 0, inline.join(','));
   const callers = wfs.filter(([, t]) => /scripts\/gh-release-upload\.sh/.test(t)).map(([f]) => f).sort();
-  check('上传宿主被四条链路同调（日常/全量/管理/内核）',
-    JSON.stringify(callers) === JSON.stringify(['build-apk.yml', 'fast-apk.yml', 'kernel-ota.yml', 'release-admin.yml']),
+  // 五个正当调用方：日常出包 / 全量出包 / 内核 OTA / 小件能力件固化 / 管理链。
+  // 判据是**集合相等**而非「包含」—— 多出第六个调用方必须在此显式登记，
+  // 否则「上传判据只住宿主」这条纪律会被悄悄抄出第二份。
+  check('上传宿主被五条链路同调（日常/全量/内核/小件固化/管理）',
+    JSON.stringify(callers) === JSON.stringify(['build-apk.yml', 'fast-apk.yml', 'kernel-ota.yml', 'pin-capabilities.yml', 'release-admin.yml']),
     callers.join(','));
   const ko = wfs.find(([f]) => f === 'kernel-ota.yml')[1];
   // 先展平反斜杠续行：这条链路盯的是「同一宿主被调两次、两档政策各自表达」，
