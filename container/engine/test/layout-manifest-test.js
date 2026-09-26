@@ -58,6 +58,7 @@ try {
   const movingFrom = new Set(layout.moves.map(m => m.from.split('/')[0]));
   const top = fs.readdirSync(ROOT, { withFileTypes: true }).filter(e => e.name !== '.git').map(e => e.name)
     .filter(n => !layout.rootAllow.includes(n) && !(!ENFORCE && movingFrom.has(n)));
+  if (top.length) problems.push('undeclared root entries: ' + top.join(', '));
   console.log('== summary ==');
   console.log('  pending=' + pending + ' done=' + done + ' conflict=' + conflict + ' missing=' + missing);
   console.log('  legacyForbidden present: ' + (legacy.length ? legacy.join(', ') : 'none'));
