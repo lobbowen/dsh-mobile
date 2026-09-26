@@ -25,8 +25,9 @@
 // ============================================================================
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const makeRunner = require('./harness');
 
 const { check, finish } = makeRunner('native-assets');
@@ -391,8 +392,8 @@ check(
 // grep 零命中返回 1，pipefail 把整条 pipeline 判成 1，赋值继承它，`set -e` 当场终止
 // 脚本 —— 于是 CI 日志停在上一句 [ok]，断言块一个字都没打出来（2026-09-26 那一轮
 // build-apk 红了 1m16s 就是这么红的），而且紧接着那句 `[ -z "$VAR" ] && 报原因`
-// 永不可达：伪装成「有校验」的死代码。构建脚本与 workflow 里同形态共 10 处已清掉并由此钉住
-// （`find` 打头的那一批是同一件事的另一半，尚未收口 —— 见下面 EMPTY_OK_RISKY 处的说明）。
+// 永不可达：伪装成「有校验」的死代码。构建脚本与 workflow 里同形态的 grep/ls/readelf
+// 那一批共 10 处已清掉；find 那一批共 17 处见下面 EMPTY_OK_RISKY 处的说明。两批由同一条判据钉住。
 // ---------------------------------------------------------------------------
 
 // 命令替换里的 pipeline，某一段可能因「没找到东西」返回非零 —— 只列真会这样的命令词
@@ -402,11 +403,12 @@ check(
 // 曾试着把 `"$UPPER_VAR"` 也算可疑词，结果 `sha256sum "$OUT" | cut`、
 // `find "$W" -name … | head` 一并误伤 7 处 —— 行正则分不出「段首命令词」与
 // 「参数位置」，硬判只会把门禁变成噪音源。这类只能靠人按同一判据复核。
-// 已知未收口的同形态：`find` 作为段首命令词（`APK="$(find … | head -1)"`）实测在
-// pipefail 生效的块里还有 13 处，全在 fast-apk / release-admin 两条发布路径上；
-// 本轮改的是链接标志，不夹带那条清扫 —— 加进名单会让这 13 处一起红，把两件事混成
-// 一次看不懂的失败。单列一轮：先兜底那 13 行，再把 find 加进可疑词。
-const EMPTY_OK_RISKY = /(?:^|[\s;|&(])(?:grep|egrep|fgrep|ls|readelf|llvm-readelf)(?:\s|$)/;
+// `find` 打头的那一批（`APK="$(find … | head -1)"`）与 grep 那批是同一件事的另一半：
+// 复算得 15 处在 pipefail 生效的块里、另 2 处所在块只是没开 pipefail（形态相同）。
+// 它们不再逐处补 `|| true`，而是统一走 scripts/pick.sh —— 那 17 处要的其实是
+// 「命中就取一条、没命中要带诊断地失败、多个不同内容要判红」，写成 17 份局部兜底
+// 只会各自漂移。find 由此进可疑词：裸形态一律判红。
+const EMPTY_OK_RISKY = /(?:^|[\s;|&(])(?:grep|egrep|fgrep|ls|readelf|llvm-readelf|find)(?:\s|$)/;
 // 显式容错：`|| true` / `|| :` / `|| exit` / `|| { ...; }`。
 const TOLERATED = /\|\|\s*(?:true|:|exit\b|\{)/;
 const ASSIGN_SUBST = /^[ \t]*(?:local[ \t]+|export[ \t]+)?[A-Za-z_][A-Za-z0-9_]*="\$\((.*)$/;
@@ -509,33 +511,112 @@ const MUST_HIT = [
   '          ASSETS="$(grep -v \'^[[:space:]]*#\' .github/native-assets.txt | grep -v \'^[[:space:]]*$\' | tr -d \'\\r\')"',
   '          NEEDED="$(readelf -d libnode.so 2>/dev/null | awk \'/NEEDED/ {gsub(/[\\[\\]]/,"",$5); print $5}\')"',
   '  READELF="$(ls "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin/llvm-readelf 2>/dev/null | head -1)"',
+  '          APK="$(find container/app/build/outputs/apk/debug -name \'*.apk\' -type f | head -1)"',
 ];
 const MUST_PASS = [
   'RPATH_SEEN="$( { grep -o -- \'-Wl,-rpath,[^ ]*\' "$DRY_LOG" || true; } | sort -u | tr \'\\n\' \' \')"',
   '          ASSETS="$({ grep -v \'^[[:space:]]*#\' .github/native-assets.txt | grep -v \'^[[:space:]]*$\' || true; } | tr -d \'\\r\')"',
   'FIXED="$(grep -c -- \'-rpath\' "$DRY_LOG" || true)"',
+  '          NODE_SO="$(find /tmp/pin/dl -type f -name \'libnode.so*\' | head -1 || true)"',
 ];
 const mustHit = MUST_HIT.map((l) => findSilentAbortAssignments([l]).length);
 const mustPass = MUST_PASS.map((l) => findSilentAbortAssignments([l]).length);
+// 样本条数写进断言：少了这一条，删掉一个样本仍能 every() 通过，而提示语里的数字开始说谎。
 check(
-  'pipefail 静默终止门禁的对照组：4 个真实违规形态各命中 1 处',
-  mustHit.every((n) => n === 1),
-  `实际命中 ${JSON.stringify(mustHit)}（期望全 1）：检测器失效，下面的零命中断言就成了空转`
+  'pipefail 静默终止门禁的对照组：5 个真实违规形态各命中 1 处',
+  MUST_HIT.length === 5 && mustHit.every((n) => n === 1),
+  `样本 ${MUST_HIT.length} 条、命中计数 ${JSON.stringify(mustHit)}（期望 5 条各 1）：检测器失效，下面的零命中断言就成了空转`
 );
 check(
-  'pipefail 静默终止门禁的对照组：3 个已兜底形态各命中 0 处',
-  mustPass.every((n) => n === 0),
-  `实际命中 ${JSON.stringify(mustPass)}（期望全 0）：判据过宽会把门禁变成噪音源`
+  'pipefail 静默终止门禁的对照组：4 个已兜底形态各命中 0 处',
+  MUST_PASS.length === 4 && mustPass.every((n) => n === 0),
+  `样本 ${MUST_PASS.length} 条、命中计数 ${JSON.stringify(mustPass)}（期望 4 条各 0）：判据过宽会把门禁变成噪音源`
 );
 check(
-  'pipefail 生效的脚本里没有「$(grep/ls … | …)」这种取空即静默终止的赋值',
+  'pipefail 生效的脚本里没有「$(grep/ls/find/readelf … | …)」这种取空即静默终止的赋值',
   silentAbort.length === 0,
   silentAbort.length
     ? `命中 ${silentAbort.length} 处：pipefail + set -e 之下，这一段会在下一行判空之前`
-      + '终止脚本且不打诊断，其后的错误分支永不可达\n        '
+      + '终止脚本且不打诊断，其后的错误分支永不可达。find 打头的那一类改走 scripts/pick.sh\n        '
       + silentAbort.join('\n        ')
     : '零命中'
 );
+
+// 判据把裸 find 形态判红之后，唯一的合法出口是 scripts/pick.sh。宿主脚本一旦被删，
+// 全仓调用点会在 CI 里以「bash: scripts/pick.sh: No such file」的形式红 ——
+// 但那条红出现在各发布路径深处，不如在这里红得直白。
+const PICK_SH = path.join(ROOT, 'scripts/pick.sh');
+check('scripts/pick.sh 存在（find 命中取的唯一宿主）', fs.existsSync(PICK_SH));
+if (fs.existsSync(PICK_SH)) {
+  const pick = fs.readFileSync(PICK_SH, 'utf8');
+  // 只钉调用方依赖的那一层契约：两个开关的 case 分支还在。
+  // 刻意不钉诊断文案 —— 钉字符串会把注释改动变成门禁红。
+  check(
+    'pick.sh 仍认得 --last 与 --allow-empty 两个开关（17 个调用点按这两个写法传参）',
+    /--last\)/.test(pick) && /--allow-empty\)/.test(pick)
+  );
+
+  // 宿主脚本真的跑一遍。为什么要跑：它是 17 个发布调用点唯一的出口，而那些路径要么几十分钟
+  // 起步（build-apk）、要么按需才触发（release-admin）—— 只把「调用点已换成它」当作已验证，
+  // 等于把宿主脚本自身的对错留给一次漫长的构建去发现。
+  const pickTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pick-'));
+  const mk = (rel, content) => {
+    const p = path.join(pickTmp, rel);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, content);
+    return p;
+  };
+  mk('one/a.apk', 'A');
+  mk('same/a.apk', 'A');
+  mk('same/b.apk', 'A');
+  mk('multi/a.apk', 'A');
+  mk('multi/b.apk', 'B');
+  mk('bt/34.0.0/x', 'old');
+  mk('bt/35.0.1/x', 'new');
+  fs.mkdirSync(path.join(pickTmp, 'empty'), { recursive: true });
+
+  /** 跑一次 pick.sh，把「退出码 / stdout / stderr」三样都带回来 —— 三种结局全靠它们区分。 */
+  // 用 spawnSync 不用 execFileSync：后者成功时只回 stdout，而这里一半的断言要看的是
+  // 成功路径上那行 ::warning（诊断恰恰在成功时才最有意义）。
+  const runPick = (args) => {
+    const r = spawnSync('bash', [PICK_SH, ...args], { encoding: 'utf8' });
+    return { rc: r.status === null || r.status === undefined ? -1 : r.status, out: String(r.stdout || '').trim(), err: String(r.stderr || '') };
+  };
+  const hit = runPick(['t-hit', path.join(pickTmp, 'one'), '-name', '*.apk', '-type', 'f']);
+  check('pick.sh：命中一条 → 退出 0 且 stdout 就是那条路径',
+    hit.rc === 0 && hit.out === path.join(pickTmp, 'one', 'a.apk'), JSON.stringify(hit));
+  const zero = runPick(['t-zero', path.join(pickTmp, 'empty'), '-name', '*.apk', '-type', 'f']);
+  check('pick.sh：零命中默认判红（不是打空串继续走）',
+    zero.rc === 1 && zero.out === '' && zero.err.includes('::error title=pick(t-zero)'), JSON.stringify(zero));
+  const zeroSoft = runPick(['--allow-empty', 't-soft', path.join(pickTmp, 'empty'), '-name', '*.apk', '-type', 'f']);
+  check('pick.sh：--allow-empty 把零命中降为一行 warning，交回调用方判空',
+    zeroSoft.rc === 0 && zeroSoft.out === '' && zeroSoft.err.includes('::warning title=pick(t-soft)'), JSON.stringify(zeroSoft));
+  const dup = runPick(['t-dup', path.join(pickTmp, 'same'), '-name', '*.apk', '-type', 'f']);
+  check('pick.sh：多命中但内容同一 → 无害，照常取一条（不因为条数判红）',
+    dup.rc === 0 && dup.out !== '', JSON.stringify(dup));
+  const ambig = runPick(['t-ambig', path.join(pickTmp, 'multi'), '-name', '*.apk', '-type', 'f']);
+  check('pick.sh：多命中且内容不同 → 判红并列候选（head -1 的随机顺序不许当结论）',
+    ambig.rc === 1 && ambig.err.includes('内容不同'), JSON.stringify(ambig).slice(0, 300));
+  const newest = runPick(['--last', 't-last', path.join(pickTmp, 'bt'), '-name', 'x', '-type', 'f']);
+  check('pick.sh：--last 按版本取末位（多个 build-tools / NDK 版本时取最新）',
+    newest.rc === 0 && newest.out.includes('35.0.1'), JSON.stringify(newest));
+  const partial = runPick(['--allow-empty', '--last', 't-partial',
+    path.join(pickTmp, 'no-such-root'), path.join(pickTmp, 'bt'), '-name', 'x', '-type', 'f']);
+  check('pick.sh：多根探测里某个根不存在 → 有命中就照常取，只记一行 find 部分失败',
+    partial.rc === 0 && partial.out.includes('35.0.1') && partial.err.includes('find 部分失败'),
+    JSON.stringify(partial).slice(0, 300));
+  const noargs = runPick(['t-noargs']);
+  check('pick.sh：没有传给 find 的参数（上游变量为空）→ 退出 2 直接说清',
+    noargs.rc === 2 && noargs.err.includes('t-noargs'), JSON.stringify(noargs));
+  const badlabel = runPick([]);
+  check('pick.sh：缺标签 → 退出 2（不许把开关当成标签）',
+    badlabel.rc === 2 && badlabel.err.includes('缺标签'), JSON.stringify(badlabel));
+  // 标签与开关的先后顺序不限：`pick.sh --last apksigner …` 这种顺手写法一旦按位置解析，
+  // "apksigner" 会变成第一个 find 探测根，红点就落在完全无关的地方。
+  const flagFirst = runPick(['--last', 't-order', path.join(pickTmp, 'bt'), '-name', 'x', '-type', 'f']);
+  check('pick.sh：开关写在标签前面也能正确解析',
+    flagFirst.rc === 0 && flagFirst.out.includes('35.0.1'), JSON.stringify(flagFirst));
+}
 
 // 运行期探针必须与 run_code 同形：裸环境。补 LD_LIBRARY_PATH = 给被测对象装脚手架。
 const PREPARER_KT = path.join(
