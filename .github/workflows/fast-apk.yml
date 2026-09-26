@@ -543,23 +543,15 @@ jobs:
 
       - name: Inject release keystore (optional, for stable signing)
         id: signing
-        # =====================================================================
-        #  「设备能否自我升级 APK」的唯一开关，别小看这一步。
-        # =====================================================================
-        #  未注入时 AGP 会用 runner 上现场生成的 debug keystore 签名 ——
-        #  指纹**每次都不同** ⇒ 新包覆盖安装到旧包上会
-        #  INSTALL_FAILED_UPDATE_INCOMPATIBLE ⇒ 设备自我升级走不通。
+        # 「设备能否自我升级 APK」的唯一开关。判据只有一份实现：
+        # scripts/inject-apk-keystore.sh（三档退出语义写在那份脚本的头部，这里不复述）。
+        # 本链路的【政策】是日常出档：退 10（没配密钥）可继续 —— 包本身可用，
+        # 只是不能覆盖安装到既有设备上，这件事由后面的签名门禁打 ::warning:: 说清；
+        # 退 2（配了却用不成）必须当场红，等 20 分钟后在签名步骤才炸会把真因
+        # （base64 残缺）伪装成「密码/别名不对」。
         #
-        #  这里**不 fail**（secret 未配置是常态，本地/PR 场景不需要稳定签名），
-        #  但会打醒目的 ::warning:: —— 让"这次产物不能用来升级"这件事
-        #  留在 CI 日志里，而不是靠人去猜。
-        #
-        #  secret 命名复用 release-admin.yml 的 repack job 已经用的那一组，不另立一套
-        #  （见 scripts/keygen-android-keystore.sh 头注释）。
-        #
-        #  与 OTA 内核签名（ed25519 / keys/ota-private.pem）**无关**，
-        #  两者是独立的信任根，详见 scripts/keygen-android-keystore.sh。
-        # =====================================================================
+        # secret 命名复用 release-admin repack 那一组，不另立一套；与 OTA 内核签名
+        # （ed25519）是两条独立信任根 —— 辨析见 scripts/keygen-android-keystore.sh 头注释。
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -567,38 +559,13 @@ jobs:
           KS_KEYPASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -uo pipefail
-          if [ -z "${KS_B64:-}" ]; then
-            echo "::warning title=未配置 APK 签名密钥::本次产物将使用一次性 debug 签名，\n\
-          无法覆盖安装到既有设备上（INSTALL_FAILED_UPDATE_INCOMPATIBLE）。\n\
-          若需要设备自我升级能力，请配置 ANDROID_KEYSTORE_BASE64 等 secret。"
-            echo "[dsh-signing] 跳过：未配置 ANDROID_KEYSTORE_BASE64"
-            exit 0
+          rc=0
+          bash scripts/inject-apk-keystore.sh || rc=$?
+          if [ "$rc" = 2 ]; then
+            echo "::error title=keystore 注入失败::ANDROID_KEYSTORE_BASE64 已配置但用不成（原因见上方 [error] 行）—— 不许带着坏配置继续构建。"
+            exit 1
           fi
-
-          mkdir -p keys
-          echo "$KS_B64" | base64 -d > keys/release.keystore
-          chmod 600 keys/release.keystore
-
-          # 密码经 GITHUB_ENV 传给 gradle（不写进命令行，避免出现在日志里）
-          {
-            echo "DSH_KEYSTORE_PASSWORD=${KS_PASS:-}"
-            echo "DSH_KEY_ALIAS=${KS_ALIAS:-dsh}"
-            echo "DSH_KEY_PASSWORD=${KS_KEYPASS:-${KS_PASS:-}}"
-          } >> "$GITHUB_ENV"
-
-          # 立刻核验：能读出指纹才说明密码对、文件完整。
-          # 不核验的话，密码错要等整个 APK 构建完才在 apksigner 那步炸。
-          # 立刻核验：能读出指纹才说明密码对、文件完整。
-          # 不核验的话，密码错要等整个 APK 构建完才在 apksigner 那步炸。
-          #
-          # ⚠ 正则匹配 "fingerprint" 而非 "SHA256:"（keytool 实际输出
-          #   "Certificate fingerprint (SHA-256): ..."，写 "SHA256:" 永不匹配，
-          #   会让健康路径也误报 keystore 校验失败 —— 本地实测踩到）。
-          keytool -list -keystore keys/release.keystore \
-            -storepass "${KS_PASS:-}" 2>/dev/null \
-            | grep -Ei 'fingerprint.*(sha-?256|sha1)' \
-            | sed 's/^/[dsh-signing] /' \
-            || { echo "::error title=keystore 校验失败::密码错误或文件损坏"; exit 1; }
+          [ "$rc" = 0 ] || echo "[dsh-signing] 按「未配置密钥」档继续：本次产物是 debug 签名包（不可覆盖安装到既有设备）。"
 
       - name: Build debug APK
         run: |
@@ -606,28 +573,15 @@ jobs:
           ./gradlew --no-daemon assembleDebug
 
       - name: Gate — verify APK signing identity（稳定签名）
-        # 为什么必须有：debug 签名每次构建指纹都不同 → 既有设备无法覆盖安装
-        # （INSTALL_FAILED_UPDATE_INCOMPATIBLE），"设备自我升级 / 静默升级"整条路不成立。
-        # 语义：
-        #   · 配了 keys/release.keystore 却仍是 debug 签名 → **硬红**（配置存在却没生效，是真 bug）
-        #   · 完全没配 → 醒目 warning（开发包可用，但**不可发布**），并指向运维手册
+        # 判据的唯一实现是 scripts/verify-apk-signing.sh（三档语义与动机见脚本头注释）。
+        # 本链路是日常出包：允许 debug 档（脚本自己打 ::warning::），但锚点在就必须逐指纹
+        # 比对 —— 「配了 keystore 却签成别的 key」以前查不出来。
         run: |
           set -euo pipefail
           APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)"
-          APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)"
-          [ -n "$APKSIGNER" ] || APKSIGNER="apksigner"
-          DN="$("$APKSIGNER" verify --print-certs "$APK" 2>/dev/null | grep -i 'certificate DN' | head -1 || true)"
-          echo "[dsh-signing] APK=$APK"
-          echo "[dsh-signing] ${DN:-（未取到证书 DN）}"
-          if echo "$DN" | grep -qi 'CN=Android Debug'; then
-            if [ -f keys/release.keystore ]; then
-              echo "::error title=签名未生效::检测到 keys/release.keystore，但 APK 仍是 debug 签名 —— 检查 ANDROID_KEYSTORE_PASSWORD / DSH_KEYSTORE_PASSWORD 是否注入成功。"
-              exit 1
-            fi
-            echo "::warning title=开发签名（不可发布）::未配置 ANDROID_KEYSTORE_BASE64，本次为 debug 签名；既有设备无法覆盖安装，且无自我升级能力。见 docs/runbook/release-identity.md"
-          else
-            echo "[ok] 稳定签名（非 debug）"
-          fi
+          ARGS=()
+          [ -z "${DSH_APK_CERT_FILE:-}" ] || ARGS=(--cert "$DSH_APK_CERT_FILE")
+          bash scripts/verify-apk-signing.sh "$APK" "${ARGS[@]}"
 
       - name: Audit APK contents
         # 判据的唯一实现是 scripts/verify-apk-native.sh（与 build-apk 同调，
