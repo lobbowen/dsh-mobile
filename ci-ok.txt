@@ -1,0 +1,8 @@
+BUILD_OK
+time    : Sat Sep 26 22:44:13 UTC 2026
+mode    : fast-apk (no Node rebuild)
+runtime : node-runtime-24.21.0-arm64-v8a
+sha     : 34cace2
+apk     : app-debug.apk
+apk_sha : 6333c07294cb27a8ac731bf27e938c846701ff977549eeb13d5c2892afd4af0e
+url     : https://github.com/lobbowen/dsh-mobile/releases/download/apk-latest/app-debug.apk
