@@ -1018,7 +1018,10 @@ jobs:
             echo "run     : ${{ steps.resolve.outputs.run_id }}"
             echo
             echo "== 资产 =="
-            cd /tmp/pin/out && sha256sum libnode.so libc++_shared.so
+            # 子 shell：花括号组不隔目录，这里 cd 出去会把本步的 cwd 带走，
+            # 后面的 git config 就落在 /tmp/pin/out 上（实测 fatal: not in a git directory，
+            # 于是 pin 成功也报红 run）。
+            ( cd /tmp/pin/out && sha256sum libnode.so libc++_shared.so )
           } > ci-ok.txt
 
           git config user.email "ci@workbuddy.local"
