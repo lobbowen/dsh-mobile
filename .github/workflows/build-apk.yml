@@ -605,16 +605,19 @@ jobs:
           bash scripts/ensure-tool.sh readelf binutils
           bash scripts/verify-runtime-elf.sh container/app/src/main/jniLibs/arm64-v8a
 
-      - name: Inject release keystore (optional, for stable signing)
+      - name: Inject release keystore (required for release signing)
         id: signing
         # =====================================================================
         # 「设备能否自我升级 APK」的唯一开关。
-        # =====================================================================
-        # 本 workflow 产出的是**发布版 APK**，所以这一步比 fast-apk.yml 里
-        # 更重要：没有稳定签名，发布出来的包在已装设备上根本装不上去。
+        # 判据只有一份实现：scripts/inject-apk-keystore.sh（解码 → keytool 核验 →
+        # 导出比对锚点，三档退出语义见脚本头注释）。
         #
-        # 仍然**不 fail**（secret 未配置时构建照常，便于 fork/PR 场景），
-        # 但 ::warning:: 会显式说明"本包不具备升级能力"。
+        # 本链路的【政策】比 fast-apk 严：产物发往 apk-latest（存量设备的更新通道），
+        # 「没配密钥」这一档在这里不是可用状态而是发布事故 —— 一次性 debug 签名会把
+        # 已装机群打成 INSTALL_FAILED_UPDATE_INCOMPATIBLE。所以退 10 / 退 2 一律红，
+        # 而且要在这里红：本链路含 Node 交叉编译，跑到 3 小时末端才炸最难查。
+        # （以前这里只往一个临时标记文件里【写】签名状态、全仓零个读取点，
+        #  写什么都不影响下一步照常发布，等于没有门禁。2026-09-26 收口。）
         #
         # 与 release-admin.yml 的 repack job 复用同一组 secret 名（ANDROID_KEYSTORE_BASE64 等），
         # 见 scripts/keygen-android-keystore.sh 头注释里的两把钥匙辨析。
@@ -629,41 +632,13 @@ jobs:
           # 写 stage，否则本步骤失败时诊断会显示**上一步**的名字
           # （ci-stage 是"当前进行到哪"的唯一来源，不回写就会一直停在上一步）。
           echo "7.5/9 signing" > /tmp/ci-stage
-          if [ -z "${KS_B64:-}" ]; then
-            echo "::warning title=未配置 APK 签名密钥::本次产物将使用一次性 debug 签名，\n\
-          无法覆盖安装到既有设备上（INSTALL_FAILED_UPDATE_INCOMPATIBLE）。\n\
-          发布包请配置 ANDROID_KEYSTORE_BASE64 等 secret。"
-            echo "[dsh-signing] 跳过：未配置 ANDROID_KEYSTORE_BASE64"
-            echo "NOT_SIGNED_STABLE" > /tmp/signing-state
-            exit 0
+          rc=0
+          bash scripts/inject-apk-keystore.sh || rc=$?
+          if [ "$rc" = 10 ]; then
+            echo "::error title=发布链路未配置 APK 签名密钥::本链路产物发往 apk-latest（存量设备的更新通道），没有稳定 keystore 就只能得到一次性 debug 签名 —— 禁止发布。请配置 ANDROID_KEYSTORE_BASE64 等 secret 后重跑。"
+            exit 1
           fi
-
-          mkdir -p keys
-          echo "$KS_B64" | base64 -d > keys/release.keystore
-          chmod 600 keys/release.keystore
-
-          {
-            echo "DSH_KEYSTORE_PASSWORD=${KS_PASS:-}"
-            echo "DSH_KEY_ALIAS=${KS_ALIAS:-dsh}"
-            echo "DSH_KEY_PASSWORD=${KS_KEYPASS:-${KS_PASS:-}}"
-          } >> "$GITHUB_ENV"
-
-          echo "SIGNED_STABLE" > /tmp/signing-state
-
-          # 立刻核验：能读出指纹才说明密码对、文件完整。
-          # 不核验的话，密码错要等整个 APK 构建完才在 apksigner 那步炸。
-          #
-          # 正则必须匹配 "fingerprint"，不能写 "SHA256:" ——
-          # keytool 实际输出的是：
-          # Certificate fingerprint (SHA-256): DA:35:...
-          # 而不是 "SHA256:"。实测写 grep -E "SHA256:" 会**永不匹配**，
-          # 于是连健康路径也走 || 分支报错（本地实测踩到）。
-          # 注意 "SHA-256" 中间有连字符，故用 sha-?256 兼容两种写法。
-          keytool -list -keystore keys/release.keystore \
-            -storepass "${KS_PASS:-}" 2>/dev/null \
-            | grep -Ei 'fingerprint.*(sha-?256|sha1)' \
-            | sed 's/^/[dsh-signing] /' \
-            || { echo "::error title=keystore 校验失败::密码错误或文件损坏"; exit 1; }
+          [ "$rc" = 0 ] || exit 1
 
       - name: Stage pinned npm into APK assets
         # npm 属 L0 基础环境（纯 JS，由 libnode.so 代跑，从不直接 exec）。
@@ -705,6 +680,23 @@ jobs:
           name: android-node-container-apk
           path: container/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Gate — APK 签名身份（发布必须稳定）
+        id: signgate
+        # 判据的唯一实现是 scripts/verify-apk-signing.sh。
+        # 为什么这一步必须存在而且在【发布之前】：Publish APK to Release 是
+        # `if: success()` 的无条件步骤，而它写的就是 apk-latest —— 存量设备的更新通道。
+        # 以前这条链路只往一个临时标记文件里写过一次状态（全仓零读取点），签名身份从没被核对过，
+        # 所以 debug 签名的包、甚至「配了 keystore 却签成另一把 key」的包都能投出去。
+        # --require-stable + --cert：既要求非 debug，又要求与本次注入的锚点逐指纹一致。
+        run: |
+          set -euo pipefail
+          echo "8.7/9 gate-signing" > /tmp/ci-stage
+          APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)" \
+            || { echo "[error] 没有可核验的 APK —— 门禁不许空跑"; exit 1; }
+          ARGS=(--require-stable)
+          [ -z "${DSH_APK_CERT_FILE:-}" ] || ARGS+=(--cert "$DSH_APK_CERT_FILE")
+          bash scripts/verify-apk-signing.sh "$APK" "${ARGS[@]}"
 
       # ---------------------------------------------------------------------------
       # 发布到 Release（让 APK 有一个【可直接下载】的稳定网址）。
@@ -841,6 +833,8 @@ jobs:
             echo "node-build  : ${{ steps.nodebuild.outcome }}"
             # signing 决定产物"能不能装到已有设备上"，必须登记（同 enginetests 的理由）。
             echo "signing     : ${{ steps.signing.outcome }}"
+            # signgate 是发布前的最后一道身份门禁，红在它身上 = 这个包不该投给存量设备。
+            echo "signgate    : ${{ steps.signgate.outcome }}"
             echo "gradle-build: ${{ steps.gradlebuild.outcome }}"
             echo
             # 容器引擎测试的日志：它是最可能"秒级失败"的一步，
@@ -913,6 +907,8 @@ jobs:
             echo "node-build  : ${{ steps.nodebuild.outcome }}"
             # signing 决定产物"能不能装到已有设备上"，必须登记（同 enginetests 的理由）。
             echo "signing     : ${{ steps.signing.outcome }}"
+            # signgate 是发布前的最后一道身份门禁，红在它身上 = 这个包不该投给存量设备。
+            echo "signgate    : ${{ steps.signgate.outcome }}"
             echo "gradle-build: ${{ steps.gradlebuild.outcome }}"
             echo
             if [ "${{ steps.restorenode.outputs.cache-hit }}" = "yes" ]; then
