@@ -16,6 +16,12 @@
     "referencePackage": "@koromix/koffi-linux-x64",
     "hostPackage": "@koromix/koffi-android-arm64"
   },
+  "probe": {
+    "npm": {
+      "version": "11.19.0",
+      "why": "探针必须用设备上那份 npm：设备 node 24.21.0 捆绑 npm 11.19.0（nodejs/node v24.21.0 的 deps/npm/package.json），--os/--cpu 平台覆盖要这一版才认。CI 的 setup-node 22 自带 npm 10.9.3，实测它静默忽略这两个配置 —— 两份计划各 575 项、差集为空，正是双向对照组要拦的那种绿"
+    }
+  },
   "dispositions": {
     "supplied-by-us": "上游无 android 变体，由我们的守卫把件投进安装树；必须有 impl",
     "npm-auto": "上游有 android 变体，npm 自己会装上；必须有 evidence 说明为何不需要我们动手",
@@ -69,7 +75,8 @@
       "disposition": "npm-auto",
       "hostExcludes": ["@koromix/koffi-linux-x64"],
       "deviceInstalls": ["@koromix/koffi-android-arm64"],
-      "why": "上游有 android-arm64 变体且会被自动安装；其调用点全在 process.platform === 'win32' 分支内，android 永不触达，故无需供给动作"
+      "evidence": "上游发了 android-arm64 变体且被检计划确实装了它（这一条由本门禁的 deviceInstalls 差集当场证伪）；readelf 实测其 koffi.node NEEDED 只有 libm/libdl/libc，带 napi_register_module_v1。dsh 侧全部 koffi 调用点都在 process.platform === 'win32' 分支内，android 永不触达",
+      "why": "上游有 android 变体且会被自动安装，且调用点 android 永不触达，故无需供给动作"
     },
     {
       "id": "sherpa-speech",
@@ -92,6 +99,7 @@
       "capability": "会话 SQL 查询",
       "disposition": "runtime-check",
       "hostExcludes": [],
+      "check": "真机验收项：用 APK 自带的那份 node 在 app 域里跑 node -p \"typeof require('node:sqlite').Database\"，期望 function；结论随该版 APK 的验收清单上屏，不在清单里就算未核验",
       "why": "用的是 node:sqlite 内置模块，成不成取决于我们那份交叉编译是否启用 SQLite；闭包 diff 看不见，必须由真机探针定罪"
     }
   ]
