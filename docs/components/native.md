@@ -7,7 +7,7 @@
 
 - **来源**：npm `@deepseek-ai/node-addon-system@0.1.2` 的 `src/flock.c`（该包 `files` 字段随包发布源码），逐字保留，仅添加说明文件，不改一行 C。
 - **许可**：BSD-3-Clause。
-- **用途**：安卓容器无 android-arm64 预编译件（厂商只发 linux-glibc/musl 与 darwin），而 `flock(2)` 是内核系统调用、无 JS 等价物 → 由 `fast-apk` CI 用 NDK 现编为 `libdshflock.so` 打进 APK jniLibs。
+- **用途**：安卓容器无 android-arm64 预编译件（厂商只发 linux-glibc/musl 与 darwin），而 `flock(2)` 是内核系统调用、无 JS 等价物 → 用 NDK 编为 `libdshflock.so` 打进 APK jniLibs。**编一次即固化**：见 `docs/architecture.md` §8「小件能力件」—— 首次固化后 `fast-apk` 只下载校验，不再每次现编。
 - **内核侧**：dsh 安装树的加载垫片 `kernel/src/guard/native/flock-shim.js` 指向该 `.so`。
 - **上游升级**：比对 `npm view @deepseek-ai/node-addon-system` 的 `src/flock.c` 是否变化；有变化则同步此副本并 bump 垫片、重测真机。
 

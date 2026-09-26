@@ -676,6 +676,26 @@ aarch64）在 GitHub 免费 runner 上要 **2~3 小时**。
 产物含 `manifest.json`（sha256 / 大小 / 来源 run），
 让"这个 APK 用的是哪份运行时"可追溯。
 
+### 小件能力件：同一套固化（2026-09-27 收敛）
+
+同一套机制已推广到**小件原生能力件**（`libdshflock.so` / `libdshposix.so` /
+`libdshptyprobe.so` / `libbash.so` / `libdshrg.so` / `libdshpty.so`）—— 它们此前**每次
+`fast-apk` 都现场编译**（bash 要下源码跑 `make`，node-pty 要跑 `node-gyp`）。
+
+| 环节 | 唯一实现 |
+|---|---|
+| 编一次 | `scripts/build-native-capabilities.sh`（fast-apk 与固化工作流**调同一份**） |
+| 源指纹 | `scripts/native-capabilities-fingerprint.sh` = sha256(`container/native/**` + 上面的构建脚本) |
+| 固化 | `.github/workflows/pin-capabilities.yml`（dispatch）→ 不可变 Release `native-cap-<指纹>-<abi>` |
+| 取用 | `scripts/ensure-native-capabilities.sh`：命中指纹 → 下载 + 校验 sha256 + 解包；否则回退现场编译 |
+| 记账 | `.github/native-capabilities-pin.json`（指纹 → tag / zip / sha256） |
+
+**取舍**：取用路径的每条判据（有记录 / 下得到 / sha256 对 / 件数齐）任一不满足就回退现场编译 ——
+固化机制坏了只退化成「慢」，不退化成「打不出包」。
+
+**已知缺口**：NDK 版本未钉进仓库、**不在指纹内**（runner 预装）。runner 的 NDK 大版本变更时，
+产物可能变而指纹不变 —— 要彻底确定需把 NDK 版本纳入指纹（待办）。
+
 ### 为什么用 Release 而不是 Actions cache
 
 | | Release | Actions cache |
