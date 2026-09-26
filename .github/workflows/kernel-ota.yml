@@ -247,11 +247,9 @@ jobs:
               --notes-file /tmp/notes.md
           fi
 
-          # ---- 滚动 feed：设备端只认一个**不动**的入口 ----
-          # 每次发布的 tag 是 kernel-<version>，设备端不该追着版本号跑。
-          # 所以额外把 manifest（+ 本次 zip）挂到一个固定 tag 上：
-          #   <baseUrl>/kernel-latest/kernel-manifest.json
-          # 与 apk-latest 同一个思路：版本化资产用于追溯，latest 用于稳定入口。
+          # ---- 通道滚动归档：发布方不必追着 kernel-<version> 的 tag 找当前版本 ----
+          # 设备端读的是对象存储的 <base>/kernel-<channel>/（下一步），GitHub 这一份
+          # 只做归档与本 workflow 的版本前进门禁 —— github.com 在目标网络不可达。
           if gh release view "$ROLL" --repo '${{ github.repository }}' >/dev/null 2>&1; then
             gh release upload "$ROLL" release/kernel-manifest.json \
               --repo '${{ github.repository }}' --clobber

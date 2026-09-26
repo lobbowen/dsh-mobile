@@ -54,12 +54,12 @@
 | Release | 资产 | 用途 |
 |---|---|---|
 | `kernel-<version>` | `kernel-<v>.zip` · `kernel-manifest.json` · `kernel-feed-<v>.zip` | 版本化（可追溯） |
-| **`kernel-latest`** | `kernel-manifest.json` · `kernel-<v>.zip` | **设备端唯一入口**（滚动） |
+| `kernel-<channel>` | `kernel-manifest.json` · 本次 `kernel-<v>.zip` | 通道滚动**归档**（CI 版本前进门禁读这里；GitHub 在设备网络不可达，不是设备入口） |
 
-设备端配置在 `container/app/src/main/assets/kernel-feed.json`：
+设备入口在对象存储上，同样是按通道滚动；配置来自 `container/app/src/main/assets/kernel-feed.json`：
 ```
-<baseUrl>/<releaseTag>/kernel-manifest.json      ← 判断有没有更新
-<baseUrl>/<releaseTag>/kernel-<version>.zip      ← 或 manifest.url
+<baseUrl>/kernel-<channel>/kernel-manifest.json?t=<ms>   ← 判断有没有更新（?t= 由代码无条件拼上，见 kernel-ota.md §2.1）
+<baseUrl>/kernel-<channel>/kernel-<version>.zip          ← 或 manifest.url
 ```
 
 ## 5. 设备端"我是谁"
@@ -74,7 +74,7 @@
 - [ ] `ci.yml` 的跨层版本校验绿（日志里有 `[version] ... protocol shell vN / kernel requires vN`）
 - [ ] `fast-apk` 日志出现 `[version] 本次发布 x.y.z (versionCode=N)`，且 Release 三资产齐全
 - [ ] 只更新内核时：`kernel-ota` 成功，且**壳版本未变**
-- [ ] `kernel-latest` Release 上 `kernel-manifest.json` 指向最新内核
+- [ ] `kernel-<channel>` 归档与 CDN 通道目录（`<base>/kernel-<channel>/kernel-manifest.json?t=<ms>`）指向同一最新内核
 - [ ] 设备 `provisioning.json` 的 `appVersion` / `kernelVersion` / `bridgeProtocol` 三者自洽
 
 ## 7. 一次性基线重置（只做一次，2026-09-23）

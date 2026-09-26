@@ -13,7 +13,8 @@
 | **stable** | `kernel-stable` | 生产 |
 
 - 设备通道由 `container/app/src/main/assets/kernel-feed.json` 的 `channel` 决定（默认 `stable`）。
-- 设备端 URL：`<baseUrl>/kernel-<channel>/kernel-manifest.json`。
+- 设备端 URL：`<baseUrl>/kernel-<channel>/kernel-manifest.json?t=<ms>`。`?t=` 由
+  `KernelOtaUpdater.Config.manifestUrl` 无条件拼上，人工取证必须带上，理由见 §2.1。
 - **提升（promote）**：验证通过后，用**同一个版本**再发一次到 `stable`。
   版本化归档 `kernel-<version>` **只创建一次**，提升时跳过重建（否则"同版本发两次"会被误判为错误）。
 - 版本前进门禁是**按通道**比较的：canary 可以领先 stable。
@@ -32,7 +33,7 @@
 
 | 用途 | URL |
 |---|---|
-| 判断有没有更新 | `<base>/kernel-<channel>/kernel-manifest.json` |
+| 判断有没有更新 | `<base>/kernel-<channel>/kernel-manifest.json?t=<ms>` |
 | 下载内核包 | `<base>/kernel-<channel>/kernel-<version>.zip`（或 manifest 里的 `url`） |
 
 `<base>` 由 APK 资产 `kernel-feed.json` 决定。**它必须是一个设备网络可达的对象存储/CDN**。
@@ -45,13 +46,32 @@
 > 因此发布流程是：**GitHub Release = 归档**，**对象存储 = 设备真正读取的通道**
 > （`kernel-ota` 里的 "Publish to Qiniu" 步骤；缺配置会**硬失败**，避免"发了个设备读不到的包"却显示成功）。
 
+## 2.1 manifest 必须带 cache-buster 取
+
+七牛 CDN 的边缘缓存以**完整 URL（含查询串）**为 key —— 这一点是由下面的实测反推出来的
+（同一时刻，带查询串读到新内容、不带读到旧内容，而两者回源的是同一个对象）。
+`kernel-canary/kernel-manifest.json` 这个 key 在 2026-09-24 被设备侧上传探针写过非 manifest 内容，
+之后即使源对象已被真实 manifest 覆盖，**无查询串**的那一路仍可能长期命中旧的边缘缓存：
+
+- 实测（2026-09-26）：`kernel-canary/kernel-manifest.json` → 15 字节 `{"probe":true}`；
+  同一 URL 加 `?t=<ms>` → 531 字节真实 manifest（`version=0.1.0-android.13`）。
+  同前缀的 `kernel-<version>.zip` 逐字节正常，且 CI 日志实证上传了 531 字节
+  → **源对象没坏、发布也没坏**，坏的只是那一路的边缘缓存。
+- 设备侧因此把 cache-buster 写死在 `manifestUrl`（见 `KernelOtaUpdater.kt` 的同名注释），
+  `KernelSelfCheck` 也复用同一 URL，取证路径与生产路径一致。
+- 结论：**任何人手工核验发布结果，必须带查询串**；看到 `{"probe":true}` 不代表发布失败。
+  内核 zip 相反——文件名带版本、内容不可变，可以长缓存、可以断点续传。
+- **未结案**：CI 上传 manifest 时带了 `--cache-control=60`（见 `kernel-ota.yml` 的 Publish to Qiniu），
+  那一路却仍返回旧内容。是边缘节点未遵守该头、还是被控制台侧的缓存配置覆盖，尚未查证；
+  设备侧有 cache-buster 兜住，故未继续追。若哪天要让人也能直读该 URL，先解决这个问题。
+
 ## 3. 设备侧：怎么下
 
 ```
 启动 → OTA.ensureInstalled()
         ├─ CURRENT 缺失 → 首次安装
         └─ CURRENT 存在 → 版本比较 → 需要则更新
-      ① GET <base>/kernel-<channel>/kernel-manifest.json（受 startupBudgetMs 约束）
+      ① GET <base>/kernel-<channel>/kernel-manifest.json?t=<ms>（受 startupBudgetMs 约束）
       ② isNewer(remote, CURRENT)            ← 只升不降
       ③ 下载 zip → cacheDir（**断点续传 + 重试**，见下）
       ④ 校验链：sha256 → ed25519 验签 → engines.node → requires → requiresProtocol

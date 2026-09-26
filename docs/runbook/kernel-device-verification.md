@@ -11,7 +11,7 @@
 |---|---|
 | 安装包 | `apk-latest` 的 `app-debug.apk` |
 | 设备通道 | **canary**（`assets/kernel-feed.json`: `baseUrl=https://hubcdn.zll.ink`, `channel=canary`） |
-| 已发布内核 | `0.1.0-android.11`（`https://hubcdn.zll.ink/kernel-canary/`） |
+| 已发布内核 | **别写死在本清单里**，从通道现读：`<base>/kernel-<channel>/kernel-manifest.json?t=<ms>`（`?t=` 不能省，理由见 [kernel-ota.md §2.1](kernel-ota.md)）。下文用 `<目标版本>` 指代它，落到哪条就 substituted 成实际值 |
 
 **两个观察窗口**
 
@@ -40,8 +40,8 @@ adb shell run-as io.github.lobbowen.dshmobile cat files/diagnostics.txt
 |---|---|
 | **触发** | 全新安装后首次启动（或清掉 `files/kernel/` 后启动） |
 | **看** | `diagnostics.txt` 的 `[kernel-ota]` / `[kernel-commit]` 行；`kernel/` 目录 |
-| **期望** | ① 取到 `kernel-canary/kernel-manifest.json`（**带 `?t=` cache-buster**）；② manifest **验签通过**；③ 下载 ~1.2MB 且 **sha256 一致**；④ 安装落盘；⑤ 首次健康检查通过后出现 **`[kernel-commit] 内核 0.1.0-android.11 已提交`** |
-| **落地证据** | `kernel/CURRENT` = `0.1.0-android.11`；`kernel/FLOOR` = 同值；`kernel/PENDING` **不存在**（已提交）；`provisioning.json` 的 `kernelVersion`/`kernelFloor` 均为 `0.1.0-android.11` |
+| **期望** | ① 取到 `kernel-canary/kernel-manifest.json`（**带 `?t=` cache-buster**）；② manifest **验签通过**；③ 下载 ~1.2MB 且 **sha256 一致**；④ 安装落盘；⑤ 首次健康检查通过后出现 **`[kernel-commit] 内核 <目标版本> 已提交`** |
+| **落地证据** | `kernel/CURRENT` = `<目标版本>`；`kernel/FLOOR` = 同值；`kernel/PENDING` **不存在**（已提交）；`provisioning.json` 的 `kernelVersion`/`kernelFloor` 均为 `<目标版本>` |
 
 **若失败看这里**
 
@@ -118,7 +118,7 @@ adb shell run-as io.github.lobbowen.dshmobile cat files/diagnostics.txt
 | 项 | 内容 |
 |---|---|
 | **触发** | 装完/升级完 DSH 后重启内核（安装那一轮必核验一次），或在面板上等 `/status` 刷新一轮 |
-| **看哪里** | ① 面板 DSH 卡片第二排「能力…」；② `<DSH_SUPERVISOR_HOME>/native-manifest.json` 的 `nativeCaps`（内核重启后仍能看到上次结论）；③ `<DSH_SUPERVISOR_HOME>/events/guard.events.log` 里的 `native_capability` |
+| **看哪里** | ① 面板 DSH 卡片第二排「能力…」；② `files/supervisor/native-manifest.json` 的 `nativeCaps`（内核重启后仍能看到上次结论）；③ `files/supervisor/events/guard.events.log` 里的 `native_capability` |
 | **判据** | `ok=true` 才是可用；`false` = 探针跑起来了而判据不过（能力确实坏了）；`null` = 探针没条件跑 / 判据待做 / 免检 —— **未知，不算通过** |
 | **与投放结局对照** | 同一格在 `nativeUnits` 里完全可能是 `applied`，那只代表「我们补装动过手」。两排不一致是设计如此，读能力以 `nativeCaps` 为准 |
 | **为什么重要** | 真机 2026-09-26：`sharp-image` 报 applied（`@img/sharp-wasm32` 就在依赖树里）而 sharp 取不到绑定，`read_image` 全灭，界面上零痕迹 —— ADR-0001 P4 因此把「已解决」写了出去（现已作废） |
@@ -129,7 +129,15 @@ adb shell run-as io.github.lobbowen.dshmobile cat files/diagnostics.txt
 那不是 bug，别替它报通过。
 
 **回传要求**：任何一格是 `false` 或 `null`，把该格 `detail` 原文带回来 —— 它就是探针的完整结论。
-面板上 `detail` 挂在 chip 的 `title`（桌面浏览器悬停可见）；手机上直接看上面 ② 那份 `native-manifest.json`。
+面板上 `detail` 挂在 chip 的 `title`（桌面浏览器悬停可见）；手机上直接看 ② 那份文件：
+
+```bash
+adb shell run-as io.github.lobbowen.dshmobile cat files/supervisor/native-manifest.json
+```
+
+（`supervisor/` 这一段不能省：`NativeManager` 的 `stateDir` = `dirname(config.stateFile)`，
+而 stateFile 是 `<DSH_SUPERVISOR_HOME>/supervisor/state.json` —— 见 `platform/config.js:45` 与 `supervisor.js:275`。
+设备侧 `DSH_SUPERVISOR_HOME` 就是应用 `filesDir` —— 见 `runtime/GuestAdapter.kt:90`。）
 
 ---
 
