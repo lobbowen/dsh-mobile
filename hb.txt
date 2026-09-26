@@ -1,14 +1,14 @@
 CI_HEARTBEAT
-beat : 40
-time : Sat Sep 26 04:48:44 UTC 2026
+beat : 41
+time : Sat Sep 26 04:49:30 UTC 2026
 stage: 7/9 NODE-BUILD (longest, V8 compile)
 run  : 36217430866
 sha  : 4bb4c2a8ed274943db8c01191842d57436cd9722
-mem  : avail=13.8GB
+mem  : avail=13.5GB
 cgmax: n/a
-load : 3.26 3.07 2.66
-logsize: 5859968
+load : 3.12 3.06 2.68
+logsize: 5913793
 objs   : host=901 target=2124
 oomhits: 0
 0
-lastprog:   /usr/bin/clang++ -o /tmp/tmp.UtnV87z5lq/node/out/Release/obj.host/v8_compiler/deps/v8/src/compiler/wasm-gc-operator-reducer.o ../deps/v8/src/compiler/wasm-gc-
+lastprog: 2 warnings generated.   /usr/bin/clang++ -o /tmp/tmp.UtnV87z5lq/node/out/Release/obj.host/v8_base_without_compiler/deps/v8/src/ast/ast-value-factory.o ../deps/v
