@@ -701,6 +701,102 @@ if (fs.existsSync(VGATE)) {
   fs.rmSync(vTmp, { recursive: true, force: true });
 }
 
+// ── 线上资产读取的三态分类：scripts/read-release-asset.sh（APK 与内核两条发布链共用）──
+// 为什么单独跑它：调用方拿到退码后做的事完全不同（0=比 / 10=按首次发布放行 / 2=禁止发布）。
+// 旧写法把 2 折进 10 再打一句 ::warning —— 于是「GitHub 刚才没答上来」被当成「这个通道还没发过」，
+// 门禁就地失效而流水线全绿。分类只在这一处，所以它必须能被假 gh 逐态跑红。
+const RRA = path.join(ROOT, 'scripts', 'read-release-asset.sh');
+check('线上资产读取宿主 scripts/read-release-asset.sh 存在', fs.existsSync(RRA));
+if (fs.existsSync(RRA)) {
+  const rTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rra-'));
+  // 假 gh：只看 `gh release view|download` 两条，行为由环境变量选档（不碰网络、不碰真凭据）。
+  const fakeBin = path.join(rTmp, 'bin');
+  fs.mkdirSync(fakeBin, { recursive: true });
+  fs.writeFileSync(path.join(fakeBin, 'gh'), [
+    '#!/usr/bin/env bash',
+    'set -u',
+    'sub="${2:-}"; out=""; prev=""',
+    'for a in "$@"; do [ "$prev" = "-O" ] && out="$a"; prev="$a"; done',
+    'case "${RR_FAKE:-}" in',
+    '  ok)               [ "$sub" = "download" ] && printf \'{"version":"0.1.0-android.13"}\' > "$out"; exit 0 ;;',
+    '  no_release)       [ "$sub" = "view" ] && { echo "gh: Release not found: apk-latest" >&2; exit 1; }; exit 0 ;;',
+    '  no_asset)         [ "$sub" = "download" ] && { echo "HTTP 404: Not Found" >&2; exit 1; }; exit 0 ;;',
+    '  transport)        [ "$sub" = "download" ] && { echo "error: Post \\"https://api.github.com/...\\": dial tcp: lookup api.github.com: no such host" >&2; exit 1; }; exit 0 ;;',
+    '  rate_limited)     [ "$sub" = "view" ] && { echo "HTTP 403: rate limit exceeded" >&2; exit 1; }; exit 0 ;;',
+    '  *)                exit 0 ;;',
+    'esac',
+    '',
+  ].join('\n'), { mode: 0o755 });
+
+  const runRra = (mode, dir) => spawnSync('bash', [RRA, 't-' + mode, 'apk-latest', 'version.json', dir], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: fakeBin + path.delimiter + process.env.PATH, GITHUB_REPOSITORY: 'lobbowen/dsh-mobile', RR_FAKE: mode },
+  });
+  const rcOf = (r) => (r.status === null || r.status === undefined ? -1 : r.status);
+
+  const dOk = path.join(rTmp, 'ok');
+  const ok = runRra('ok', dOk);
+  check('取数三态：线上有资产 → 退 0 且真名文件落地（调用方要读的就是这个路径）',
+    rcOf(ok) === 0 && fs.readFileSync(path.join(dOk, 'version.json'), 'utf8').includes('android.13'),
+    JSON.stringify(ok));
+  const dMiss = path.join(rTmp, 'norel');
+  const noRel = runRra('no_release', dMiss);
+  check('取数三态：Release 不存在 → 退 10（首次发布是合法状态，不是失败）',
+    rcOf(noRel) === 10, JSON.stringify(noRel));
+  const dNoAsset = path.join(rTmp, 'noasset');
+  const noAsset = runRra('no_asset', dNoAsset);
+  check('取数三态：Release 在但资产不在 → 退 10（同上，走门禁的首次发布分支）',
+    rcOf(noAsset) === 10, JSON.stringify(noAsset));
+  const dNet = path.join(rTmp, 'net');
+  const net = runRra('transport', dNet);
+  check('取数三态：gh 因网络失败 → 退 2 并打 ::error（旧实现把这一格降成 warning 后照发）',
+    rcOf(net) === 2 && net.err.includes('::error') && net.err.includes('不是「资产不存在」'),
+    JSON.stringify(net));
+  const dRate = path.join(rTmp, 'rate');
+  const rate = runRra('rate_limited', dRate);
+  check('取数三态：403 限流 → 退 2（含 4xx 字样也不算「不存在」）',
+    rcOf(rate) === 2 && rate.err.includes('::error'), JSON.stringify(rate));
+  const noRepo = spawnSync('bash', [RRA, 't-norepo', 'apk-latest', 'version.json', path.join(rTmp, 'x')], {
+    encoding: 'utf8',
+    // 真 PATH 必须留着：spawn 要找得到 bash。仓库变量置空就足以在碰 gh 之前判红。
+    env: { ...process.env, PATH: fakeBin + path.delimiter + process.env.PATH, GITHUB_REPOSITORY: '' },
+  });
+  check('取数三态：没有 GITHUB_REPOSITORY → 退 2（不许把仓库猜成默认值）',
+    rcOf(noRepo) === 2 && noRepo.err.includes('GITHUB_REPOSITORY'), JSON.stringify(noRepo));
+  const shortArgs = spawnSync('bash', [RRA, 't-few', 'apk-latest'], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: fakeBin + path.delimiter + process.env.PATH, GITHUB_REPOSITORY: 'lobbowen/dsh-mobile' },
+  });
+  check('取数三态：参数不齐 → 退 2 并打用法',
+    rcOf(shortArgs) === 2 && shortArgs.err.includes('用法'), JSON.stringify(shortArgs));
+
+  // 分类只准住一处：调用方再写一遍「404 / no assets」就等于两个真相。
+  const CLASSIFIER = /no assets|matching pattern|HTTP 404/i;
+  const scanned = ['.github/workflows/fast-apk.yml', '.github/workflows/build-apk.yml',
+    '.github/workflows/release-admin.yml', '.github/workflows/kernel-ota.yml',
+    'scripts/check-apk-release-version.sh'];
+  for (const rel of scanned) {
+    check(`取数分类复写清零：${rel} 不再自己判「不存在 vs 取不到」`,
+      !CLASSIFIER.test(stripHashComments(fs.readFileSync(path.join(ROOT, rel), 'utf8'))),
+      '该分类唯一宿主是 scripts/read-release-asset.sh（退 10 = 不存在，退 2 = 看不清）');
+  }
+  check('取数分类断言自证：违规样本确实会红',
+    CLASSIFIER.test('if grep -qiE "HTTP 404|no assets" "$DIR/err"; then'));
+  // 接线：调用点必须真有一行命令式调用。只扫「文件里出现过脚本名」= 把注释当成接线，
+  // 谁哪天删掉调用、留着那行解释，门禁照样绿（VCALL 那条钉过的同一失效形态）。
+  const RRACALL = /^[^\S\n]*bash\s+"?(?:scripts|\$\(dirname "\$0"\))\/read-release-asset\.sh/m;
+  for (const rel of ['.github/workflows/kernel-ota.yml', 'scripts/check-apk-release-version.sh']) {
+    check(`取数宿主接线：${rel} 真的调用 read-release-asset.sh`,
+      RRACALL.test(stripHashComments(fs.readFileSync(path.join(ROOT, rel), 'utf8'))),
+      '找不到 bash …/read-release-asset.sh 的调用行');
+  }
+  check('取数宿主接线断言自证：只有注释提及 → 判红',
+    !RRACALL.test('  # 分类住 scripts/read-release-asset.sh\n  # bash scripts/read-release-asset.sh k "$R" m.json "$T"\n'));
+  check('唯一宿主里三种结局都还在（退 10 与退 2 少一个就退化成旧缺陷）',
+    /exit 10/.test(fs.readFileSync(RRA, 'utf8')) && /exit 2/.test(fs.readFileSync(RRA, 'utf8')));
+  fs.rmSync(rTmp, { recursive: true, force: true });
+}
+
 // 运行期探针必须与 run_code 同形：裸环境。补 LD_LIBRARY_PATH = 给被测对象装脚手架。
 const PREPARER_KT = path.join(
   ROOT, 'container/app/src/main/java/io/github/lobbowen/dshmobile/native/NativePreparer.kt'
