@@ -39,7 +39,7 @@
 
 | 门禁 | 位置 | 拦的是 |
 |---|---|---|
-| workflow YAML 校验 | `ci.yml` + `fast-apk` → `scripts/validate-workflows.py` | workflow 写坏（GitHub 表现是"0 个 job"，伪装成"没触发"） |
+| workflow YAML 校验 | `ci.yml` + `fast-apk` + `build-apk` → `scripts/validate-workflow.py`（严格版唯一实现；宽松 safe_load 那份已删） | workflow 写坏（GitHub 表现是"0 个 job"，伪装成"没触发"）；重复 key / on.push 互相覆盖 / 非法事件名 |
 | 跨层版本校验 | `ci.yml` → `scripts/gen-version.js --check` | 事实源缺失/非法；`protocol.js` 与 `version.json` 协议号**漂移**；内核要求协议 > 壳实现协议 |
 | 壳 versionCode 单调 + 同版本通道分叉 | 判据 `scripts/verify-apk-version-gate.sh`，取数 `scripts/check-apk-release-version.sh`；四个发布口（`fast-apk` / `build-apk` / `release-admin` 的 publish 与 repack）各自调用 | 回退 → 已升级设备永远收不到新版本；**自动通道同号换字节** → 下载地址指向的东西变了而版本号没说谎的能力没了 |
 | 内核版本唯一 | 判据 `kernel-ota` 发布步骤，取数 `scripts/read-release-asset.sh` | 版本复用 → 设备端判为"无更新" → **静默不生效** |
