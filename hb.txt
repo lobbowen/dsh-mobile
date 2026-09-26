@@ -1,14 +1,14 @@
 CI_HEARTBEAT
-beat : 20
-time : Sat Sep 26 04:33:14 UTC 2026
+beat : 21
+time : Sat Sep 26 04:34:01 UTC 2026
 stage: 7/9 NODE-BUILD (longest, V8 compile)
 run  : 36217430866
 sha  : 4bb4c2a8ed274943db8c01191842d57436cd9722
-mem  : avail=13.2GB
+mem  : avail=13.8GB
 cgmax: n/a
-load : 3.00 2.88 1.89
-logsize: 5168079
-objs   : host=742 target=2124
+load : 3.00 2.90 1.94
+logsize: 5206611
+objs   : host=765 target=2124
 oomhits: 0
 0
-lastprog: 2 warnings generated.   /usr/bin/clang++ -o /tmp/tmp.UtnV87z5lq/node/out/Release/obj.host/v8_compiler/deps/v8/src/compiler/bytecode-liveness-map.o ../deps/v8/sr
+lastprog:   /usr/bin/clang++ -o /tmp/tmp.UtnV87z5lq/node/out/Release/obj.host/v8_compiler/deps/v8/src/compiler/constant-folding-reducer.o ../deps/v8/src/compiler/constant
