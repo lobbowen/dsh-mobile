@@ -1,14 +1,14 @@
 CI_HEARTBEAT
-beat : 6
-time : Sat Sep 26 04:22:24 UTC 2026
+beat : 7
+time : Sat Sep 26 04:23:10 UTC 2026
 stage: 7/9 NODE-BUILD (longest, V8 compile)
 run  : 36217430866
 sha  : 4bb4c2a8ed274943db8c01191842d57436cd9722
-mem  : avail=14.3GB
+mem  : avail=14.4GB
 cgmax: n/a
-load : 2.94 1.59 0.65
-logsize: 3162230
-objs   : host=22 target=1309
+load : 2.97 1.79 0.76
+logsize: 3328191
+objs   : 322
 oomhits: 0
 0
-lastprog:   /usr/bin/clang++ -o /tmp/tmp.UtnV87z5lq/node/out/Release/obj.host/abseil/deps/v8/third_party/abseil-cpp/absl/time/internal/cctz/src/time_zone_posix.o ../deps/
+lastprog:   /usr/local/lib/android/sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang++ -o /tmp/tmp.UtnV87z5lq/node/out/Release
