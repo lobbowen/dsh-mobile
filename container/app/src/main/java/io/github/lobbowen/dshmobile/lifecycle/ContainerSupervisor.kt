@@ -74,6 +74,18 @@ class ContainerSupervisor : Service() {
      *  不能把默认值当结论播出去（真机判据 3 定罪 D9 的另一半）。 */
     @Volatile private var readingsCollected = false
 
+    // ---- 无障碍锚的闸门守卫（复用本服务 tick，不新起闹钟/心跳）----
+    /** 已过的监督拍数，用于把锚监护降到 A11Y_MONITOR_TICKS 分之一。 */
+    private var a11yTicks = 0L
+    /** 连续自愈失败次数（绑上即清零）。到 A11Y_MAX_ATTEMPTS 后放弃，不对 AMS 连续施压。 */
+    private var a11yAttempts = 0
+    /** 指数退避的当前档位。 */
+    private var a11yBackoffMs = A11Y_BACKOFF_BASE_MS
+    /** 下一次允许尝试自愈的时刻（elapsedRealtime）。 */
+    private var a11yNextAttemptMs = 0L
+    /** 本世是否已放弃自愈（绑上即复位）。 */
+    private var a11yGaveUp = false
+
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
             markConnected(true)
@@ -198,6 +210,8 @@ class ContainerSupervisor : Service() {
                     bindNode()
                 }
             }
+            // 锚监护与本拍其它动作同线程（复用 HandlerThread，不叠加第二唤醒机制）。
+            monitorAccessibilityAnchor(now)
             refreshStatusNotice(now)
         } catch (e: Throwable) {
             Log.e(TAG, "监督拍异常（不致命，下一拍继续）", e)
@@ -227,6 +241,73 @@ class ContainerSupervisor : Service() {
             (getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager)
                 .notify(NOTIF_ID, buildNotification(statusLine()))
         } catch (_: Throwable) {
+        }
+    }
+
+    /**
+     * 无障碍锚的**闸门守卫**（预防，不是死后自愈）。
+     *
+     * 真机 2026-09-27 07:08 实证：锚在位 = OplusHansManager 打
+     * `cannot transition from R to M, importance=accessibility`（拒绝把本 uid 转出 Running）；
+     * 锚不在位 = `importance=traffic`，随时会被 o-kill。所以锚掉线是「即将被杀」的前兆，
+     * 恢复它的窗口在**被杀之前** —— 进程一旦没了，自愈再成功也换不回那一世的内核状态。
+     *
+     * 为什么挂在本服务现有 tick 上：用户 2026-09-25 明文否决叠加第二唤醒机制（闹钟/心跳）；
+     * 低频（每 [A11Y_MONITOR_TICKS] 拍）、只读缓存通道、失败退避有上限。
+     */
+    private fun monitorAccessibilityAnchor(now: Long) {
+        a11yTicks++
+        if (a11yTicks % A11Y_MONITOR_TICKS != 0L) return
+
+        if (AccessibilityAnchor.isBound(this)) {
+            // 绑上 = 闸门开着：把退避与放弃状态清干净，下一次掉线还能立刻救。
+            if (a11yAttempts > 0 || a11yGaveUp) {
+                RuntimeDiagnostics.append(
+                    this, "accessibility", true, "锚已恢复（闸门重新打开）",
+                    "此前自愈尝试 $a11yAttempts 次；锚在位时 HANS 拒绝把本 uid 转出 Running",
+                )
+            }
+            a11yAttempts = 0
+            a11yBackoffMs = A11Y_BACKOFF_BASE_MS
+            a11yNextAttemptMs = 0L
+            a11yGaveUp = false
+            return
+        }
+
+        if (a11yGaveUp || now < a11yNextAttemptMs) return
+        // 只认缓存通道读数，绝不在监督节拍里 spawn 探针（探针会拉 Node 进程）。
+        if (AdbChannelProbe.cached().outcome != ProbeOutcome.LIVE) return
+
+        val outcome = try {
+            AccessibilityAnchor.ensureBound(this, A11Y_HEAL_TIMEOUT_MS)
+        } catch (t: Throwable) {
+            HealOutcome(AnchorState.UNKNOWN, false, t::class.java.simpleName + ": " + t.message)
+        }
+        if (outcome.healed) {
+            RuntimeDiagnostics.append(
+                this, "accessibility", true, "锚自愈成功（闸门开着）", outcome.detail,
+            )
+            a11yAttempts = 0
+            a11yBackoffMs = A11Y_BACKOFF_BASE_MS
+            a11yNextAttemptMs = 0L
+            return
+        }
+        a11yAttempts++
+        RuntimeDiagnostics.append(
+            this, "accessibility", false,
+            "锚自愈未成（第 $a11yAttempts/$A11Y_MAX_ATTEMPTS 次）：" + outcome.state,
+            outcome.detail,
+        )
+        a11yNextAttemptMs = now + a11yBackoffMs
+        a11yBackoffMs = (a11yBackoffMs * 2).coerceAtMost(A11Y_BACKOFF_MAX_MS)
+        if (a11yAttempts >= A11Y_MAX_ATTEMPTS) {
+            a11yGaveUp = true
+            RuntimeDiagnostics.append(
+                this, "accessibility", false,
+                "锚自愈放弃（连续 $a11yAttempts 次）",
+                "真机实证：锚不在位 = importance=traffic，随时被 o-kill —— 这不是能靠重试掩盖的态；" +
+                    "后续只由系统重绑（无障碍设置变化 / 开机）恢复",
+            )
         }
     }
 
@@ -320,6 +401,28 @@ class ContainerSupervisor : Service() {
         private const val REQ_OPEN = 41
         /** 状态通知的刷新节拍（比监督节拍慢一档，见 [refreshStatusNotice]）。 */
         private const val NOTIFY_MS = 20_000L
+
+        /**
+         * 锚监护间隔（拍数）：5s × 8 = 40s，落在 30~60s 的目标区间。
+         * 只复用本服务 tick 同线程，不新起闹钟/心跳（用户 2026-09-25 明文否决叠加机制）。
+         */
+        private const val A11Y_MONITOR_TICKS = 8L
+
+        /**
+         * 单次 ensureBound 的下发超时。注意：通道读数若是"陈旧 LIVE"，最坏会串行下发 3 条
+         * settings 命令（每条超时 = 本值 + AdbClientRunner 的 spawn 余量），所以在**后台线程**
+         * 调用；本服务的 tick 就是 HandlerThread，不在主线程。
+         */
+        private const val A11Y_HEAL_TIMEOUT_MS = 8_000L
+
+        /** 锚自愈失败后的退避起点（之后翻倍）。40s 是「给 ROM 绑定冷却留时间」的经验档。 */
+        private const val A11Y_BACKOFF_BASE_MS = 40_000L
+
+        /** 退避上限：再长就等于放弃，不如集中记一次账。 */
+        private const val A11Y_BACKOFF_MAX_MS = 5 * 60_000L
+
+        /** 连续失败上限：到顶就停手，避免对 AMS 连续施压制造噪声。 */
+        private const val A11Y_MAX_ATTEMPTS = 5
 
         /** 拉起监督者（幂等，普通 startService）。
          *  绝不用 startForegroundService：调用点多在后台（:node onCreate / 桥 onCreate /

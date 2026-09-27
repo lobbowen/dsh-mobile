@@ -41,8 +41,39 @@ package io.github.lobbowen.dshmobile.lifecycle
  * 刻意不做：闹钟心跳等第二唤醒机制（用户 2026-09-25 拍板：保活路径已找到，
  * 叠加机制=叠加风险）。死亡后的**拉起**走 rebind（bindService 是后台合法调用；
  * 真机 ANR 栈实锤过在死亡路径上调 startForegroundService 会炸）。
+ *
+ * ----
+ *
+ * 判决代理指标（真机 2026-09-27 07:08 实证）：**锚状态就是 ColorOS 判决的状态**。
+ *   锚在位 ⟺ OplusHansManager 打 "cannot transition from R to M, importance=accessibility"
+ *   → 判决停在保护档，uid 不被 o-kill；
+ *   锚不在位 → importance=traffic → 随后 o-kill 杀掉整个 uid
+ *   （exit-info: reason=13 OTHER KILLS BY SYSTEM, description=o-kill(4008)，importance=125 照杀）。
+ * 所以「锚掉」不是一次故障，而是**判决降级**：掉出 accessibility = 即将被杀。
+ *
+ * 本设计的结论（用户 2026-09-27 拍板）：**不提供死后恢复，唯一路径是不被杀**。
+ * 被杀后拉起来的只是空壳 —— 内核重启时已把 running/pending 判 failed，agent 的工作在进程死
+ * 的那一刻就断了。真正的保护只有一条：让 ColorOS 的判决永远停在 importance=accessibility，
+ * 而锚是它的前置。恢复动作（死后拉起）因此不成立，第二唤醒机制叠上去也只是叠加风险。
+ *
+ * 进程内的持续监护归 ContainerSupervisor；本判据只把「保护必须从进程存在第一毫秒生效」写成
+ * 可判定的预算与降级判据，两边互补、不重叠。
  */
 object NodeWatchdogPolicy {
+
+    /**
+     * 保护激活预算（毫秒）：锚必须在进程存在的第一毫秒就生效；这个数值是异步激活路径
+     * （ensureBound）的硬上界，**不是**「可以晚点生效」的许可。超时 = 进程存在的前一段时间里
+     * 判决还没抬到 accessibility，本 uid 仍可能被 HANS 按 traffic 处理。
+     */
+    const val ANCHOR_ACTIVATION_BUDGET_MS = 5_000L
+
+    /**
+     * 判决降级判据（代理指标 = 锚是否在位）。true = 判决已掉出 accessibility，即将被杀。
+     * 这是**告警**判据，不是恢复触发器：本设计不提供死后恢复（见对象头注），唯一动作是
+     * 把降级如实播出（状态通知 / 诊断页），并让锚在进程存在的第一毫秒前挂上。
+     */
+    fun verdictDegraded(anchorBound: Boolean): Boolean = !anchorBound
 
     /** 轮询节奏：也是 binder 断连后 rebind 失败的重试节奏。 */
     const val ALIVE_POLL_MS = 5_000L

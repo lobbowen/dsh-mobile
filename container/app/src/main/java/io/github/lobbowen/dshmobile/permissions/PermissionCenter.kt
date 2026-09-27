@@ -9,6 +9,8 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import io.github.lobbowen.dshmobile.bridge.ScreenCaptureService
+import io.github.lobbowen.dshmobile.lifecycle.AccessibilityAnchor
+import io.github.lobbowen.dshmobile.lifecycle.AnchorState
 import io.github.lobbowen.dshmobile.lifecycle.DshAccessibilityService
 
 /**
@@ -49,6 +51,13 @@ class PermissionCenter(private val ctx: Context) {
             ContextCompat.checkSelfPermission(ctx, it) == PackageManager.PERMISSION_GRANTED
         } ?: false
     }
+
+    /**
+     * 无障碍锚的四态读法（流程层 / 诊断上屏用）。绿判据仍是上面的 [isGranted]（服务实例已连），
+     * 这里只是多给一层归因 —— 尤其 [AnchorState.LISTED_NOT_BOUND]：名单在、绑定无的**假绿**形态。
+     * 判定本身委托 [AccessibilityAnchor.state]，不在这里再写一遍。
+     */
+    fun accessibilityAnchorState(): AnchorState = AccessibilityAnchor.state(ctx)
 
     /** 无障碍是否在 Secure 设置里被勾选（只用于「已勾选但未连接」的归因文案，不是绿判据）。 */
     fun accessibilityEnabledInSettings(): Boolean =

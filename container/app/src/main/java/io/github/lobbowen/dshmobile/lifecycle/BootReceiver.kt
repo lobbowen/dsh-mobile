@@ -40,7 +40,36 @@ class BootReceiver : BroadcastReceiver() {
             startQuietly(context, Intent(context, ContainerSupervisor::class.java), bootSafe = false)
             // 兜底边是**前台服务**（有通知 1001）→ O+ 必须 startForegroundService。
             startQuietly(context, Intent(context, NodeRuntimeService::class.java), bootSafe = true)
+            // 进入本接收器 = 进程刚被系统重建：**保护要从第一毫秒生效**（预防），
+            // 不是「被杀后再拉起」（自愈）。做两件事：
+            //  · 量一次加固效果（KillAudit）：把系统退出史里的 o-kill 次数与每次的
+            //    description/reason/importance 落盘；
+            //  · 确保保护生效（AccessibilityAnchor）：锚在 = ColorOS 判决停在
+            //    importance=accessibility，锚掉 = 判决降级 = 即将被杀（机制见 NodeWatchdogPolicy 头注）。
+            // 三个 action（开机 / 快速开机 / 覆盖安装）共用这条既有分支，**不新增任何接收面**，
+            // 唤醒面因此不变；动作自己丢后台线程，绝不阻塞接收器主线程。
+            ensureProtectionActive(context)
         }
+    }
+
+    /**
+     * 让保护在进程存在的第一毫秒生效（**预防**；本设计不提供死后恢复，唯一路径是不被杀）。
+     * 全部在后台线程：查退出史是对 system_server 的 binder 调用，确保锚在位要等系统绑定 ——
+     * 在广播接收器里同步做，超时就是 ROM 判的 ANR。worker 内每步各自兜异常：后台线程的
+     * 未捕获异常会直接终止整个进程，那比「保护晚一拍生效」更糟。
+     */
+    private fun ensureProtectionActive(context: Context) {
+        val appCtx = context.applicationContext ?: context
+        Thread({
+            try {
+                runCatching { KillAudit.auditOnce(appCtx) }
+                runCatching {
+                    AccessibilityAnchor.ensureBound(appCtx, NodeWatchdogPolicy.ANCHOR_ACTIVATION_BUDGET_MS)
+                }
+            } catch (_: Throwable) {
+                // 见方法头注：吞掉一切，绝不让后台线程把异常抛到默认处理器。
+            }
+        }, "protection-active").start()
     }
 
     private fun startQuietly(context: Context, svc: Intent, bootSafe: Boolean) {

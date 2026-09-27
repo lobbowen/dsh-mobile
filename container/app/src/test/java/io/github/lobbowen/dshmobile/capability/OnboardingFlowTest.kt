@@ -10,7 +10,11 @@ import org.junit.Test
 /**
  * 开场流程 golden（docs/contracts/onboarding-flow-spec.md §2、§6）。
  *
- * 钉的是**顺序与出口**：哪一步是当前步、它给哪个动作、后面的行闭不闭嘴，以及
+ * 2026-09-27 收敛为**两行**：F1「无线配对」→ F3「进入工作台」。
+ *  - F2（通道校验）不再单独成行：通道不绿时它作为 F3 的当前读数/动作出现，顶部另有状态条；
+ *  - F4（补齐授权）不再单独成行：欠账走 [OnboardingFlow.debts]，一行文案、不给按钮。
+ *
+ * 本测试钉的是**顺序与出口**：哪一步是当前步、它给哪个动作、后面的行闭不闭嘴，以及
  * 「用户点了却什么也不会发生」的死路不许出现。判据本身由 [CapabilityDegradationTest] 钉。
  *
  * 两条不可回退的流程事实（真机定罪的直接后果）：
@@ -62,16 +66,27 @@ class OnboardingFlowTest {
     private fun actionable(e: Evidence) = OnboardingFlow.stages(e, CapabilityCatalog.evaluate(e))
         .filter { it.action != null }
 
-    @Test fun 骨架只有四行_授权冲刺不上屏() {
+    /** 原 F4 的职责，现在是折叠欠账 [OnboardingFlow.debts]。 */
+    private fun debts(e: Evidence) = OnboardingFlow.debts(CapabilityCatalog.evaluate(e))
+
+    @Test fun 骨架只有两行_通道与欠账降级为状态条与折叠文案() {
         // P0 是静默行为（flow-spec §2.1）。这里钉的是「别再把要权限做成一行卡」：
         // 曾经 F1 = 授权卡，用户开屏看到的是一排请求，而不是配对入口。
         assertEquals(
-            listOf("F1 无线配对（一次 6 位码）", "F2 校验 ADB 通道（现问端点）", "F3 进入工作台",
-                "F4 补齐剩余授权（不挡入口）"),
+            listOf("F1 无线配对（一次 6 位码）", "F3 进入工作台"),
             OnboardingFlow.SKELETON.map { "${it.id} ${it.title}" },
         )
-        // 全新安装（什么都缺）也不许有行拿 RUNTIME_DIALOG 当主行动 —— 弹窗归 P0。
+        // F2/F4 不再是阶段行：行 id 里不许再出现它们（通道读数归 F3，欠账归 debts()）。
+        assertEquals(
+            listOf(OnboardingFlow.F1, OnboardingFlow.F3),
+            OnboardingFlow.SKELETON.map { it.id },
+        )
         val fresh = OnboardingFlow.stages(ev(), CapabilityCatalog.evaluate(ev()))
+        assertTrue(
+            "阶段行里不许再有 F2/F4：" + fresh.map { it.id },
+            fresh.none { it.id == OnboardingFlow.F2 || it.id == OnboardingFlow.F4 },
+        )
+        // 全新安装（什么都缺）也不许有行拿 RUNTIME_DIALOG 当主行动 —— 弹窗归 P0。
         assertTrue(
             "开屏不许把授权请求摆成卡片动作：" + fresh.map { it.action?.kind },
             fresh.none { it.action?.kind == AcquireKind.RUNTIME_DIALOG },
@@ -107,15 +122,18 @@ class OnboardingFlowTest {
         assertEquals(OnboardingFlow.F1, actionable(e).single().id)
     }
 
-    @Test fun 凭据在册但通道没起来_当前步是通道校验() {
+    @Test fun 凭据在册但通道没起来_当前步落在F3的通道读数上() {
+        // F2 不再是阶段行：通道不绿时，它作为 F3 的当前读数与动作出现（顶部状态条同源）。
         val e = ev(
             dev = true, wireless = true, grants = NOTIF, creds = CredentialsState.PAIRED,
             channel = ChannelProbe(ProbeOutcome.DEAD, NOW, "ECONNREFUSED"),
         )
         assertEquals(StageStatus.DONE, rows(e).getValue(OnboardingFlow.F1).status)
-        assertEquals(StageStatus.FAILED, rows(e).getValue(OnboardingFlow.F2).status)
-        assertEquals(AcquireKind.AUTO, rows(e).getValue(OnboardingFlow.F2).action?.kind)
-        assertEquals(OnboardingFlow.F2, actionable(e).single().id)
+        val f3 = rows(e).getValue(OnboardingFlow.F3)
+        assertEquals(StageStatus.FAILED, f3.status)
+        assertEquals(AcquireKind.AUTO, f3.action?.kind)
+        assertEquals(CapabilityCatalog.ADB_CHANNEL, f3.actionCapId)
+        assertEquals(OnboardingFlow.F3, actionable(e).single().id)
     }
 
     @Test fun 通道读数过期_入口不许续绿() {
@@ -125,71 +143,79 @@ class OnboardingFlowTest {
             controlPlane = true, checks = listOf(CheckItem("bundle", true)),
         )
         assertFalse(OnboardingFlow.readyToEnter(CapabilityCatalog.evaluate(stale)))
-        assertEquals(OnboardingFlow.F2, actionable(stale).single().id)
+        assertEquals(OnboardingFlow.F3, actionable(stale).single().id)
     }
 
-    @Test fun 全绿读数_没有任何主行动_补齐行也说全部就位() {
+    @Test fun 全绿读数_没有主行动也不留欠账() {
         val e = ev(
             dev = true, wireless = true, grants = ENTRY_GRANTS, creds = CredentialsState.PAIRED,
             channel = LIVE, controlPlane = true, checks = listOf(CheckItem("bundle", true)),
         )
         assertTrue(actionable(e).isEmpty())
-        assertEquals(StageStatus.DONE, rows(e).getValue(OnboardingFlow.F4).status)
-        assertEquals("全部就位", rows(e).getValue(OnboardingFlow.F4).detail)
+        assertEquals(StageStatus.DONE, rows(e).getValue(OnboardingFlow.F1).status)
+        assertEquals(StageStatus.DONE, rows(e).getValue(OnboardingFlow.F3).status)
+        // 原 F4「全部就位」的语义搬家：没有主行动 = 也没有欠账。
+        assertTrue("全绿时欠账清单必须为空：" + debts(e).map { it.id }, debts(e).isEmpty())
     }
 
-    @Test fun 已配对后通知被回收_欠账落到补齐行而不是消失() {
-        // 实测优先：通道在线 + 凭据在册 = F1/F2 都绿，ROM 回收掉的授权不许把主链判红；
-        // 但它必须有人催 —— F1 已成立，所以它的认领集失效，通知发送回到 F4 清单。
+    @Test fun 已配对后通知被回收_欠账落到折叠清单而不是消失() {
+        // 实测优先：通道在线 + 凭据在册 = F1/F3 都绿，ROM 回收掉的授权不许把主链判红；
+        // 但它必须有人催 —— F1 已成立，所以它的认领集失效，通知发送回到欠账清单。
         val e = ev(
             dev = true, wireless = true, creds = CredentialsState.PAIRED, channel = LIVE,
             grants = emptySet(), controlPlane = true, checks = listOf(CheckItem("bundle", true)),
         )
         val rows = rows(e)
         assertEquals(StageStatus.DONE, rows.getValue(OnboardingFlow.F1).status)
+        assertEquals(StageStatus.DONE, rows.getValue(OnboardingFlow.F3).status)
         assertTrue(
-            "回收掉的授权不许无处可催",
-            rows.getValue(OnboardingFlow.F4).detail
-                .contains(CapabilityCatalog.titleOf(PermissionCatalog.POST_NOTIFICATIONS)),
+            "回收掉的授权不许无处可催（原 F4 的职责，现归 debts()）",
+            debts(e).any { it.id == PermissionCatalog.POST_NOTIFICATIONS },
         )
-        assertEquals(OnboardingFlow.F4, actionable(e).single().id)
+        // 主链照绿、不因回收的授权长按钮：欠账不挡入口。
+        assertTrue(actionable(e).isEmpty())
     }
 
-    @Test fun 入口三要素绿但悬浮窗缺_不挡门由补齐行接手() {
+    @Test fun 入口三要素绿但悬浮窗缺_不挡门且进欠账清单() {
         val noOverlay = ENTRY_GRANTS - PermissionCatalog.SYSTEM_ALERT_WINDOW
         val e = ev(
             dev = true, wireless = true, grants = noOverlay, creds = CredentialsState.PAIRED,
             channel = LIVE, controlPlane = true, checks = listOf(CheckItem("bundle", true)),
         )
         assertTrue("悬浮窗未授予也必须能进面板", OnboardingFlow.readyToEnter(CapabilityCatalog.evaluate(e)))
-        val f4 = rows(e).getValue(OnboardingFlow.F4)
-        assertEquals(StageStatus.CURRENT, f4.status)
-        assertEquals(PermissionCatalog.SYSTEM_ALERT_WINDOW, f4.actionCapId)
-        assertEquals(AcquireKind.USER_TAP, f4.action?.kind)
+        assertTrue(
+            "缺的授权必须进折叠欠账（不许凭空消失）",
+            debts(e).any { it.id == PermissionCatalog.SYSTEM_ALERT_WINDOW },
+        )
+        assertTrue("欠账不占主链：没有当前步要用户点", actionable(e).isEmpty())
     }
 
-    @Test fun 通道就绪时补齐优先走静默取法() {
+    @Test fun 通道就绪时无障碍欠账归静默自动流() {
+        // 原 F4「优先走静默取法」的语义：静默能办的不再排成阶段行动作，
+        // 而是由配对后的 [PostPairingAutoFlow] 静默办 —— 本处只钉「它仍被记着」。
         val noA11y = ENTRY_GRANTS - PermissionCatalog.ACCESSIBILITY
         val e = ev(
             dev = true, wireless = true, grants = noA11y, creds = CredentialsState.PAIRED,
             channel = LIVE, controlPlane = true, checks = listOf(CheckItem("bundle", true)),
         )
-        val f4 = rows(e).getValue(OnboardingFlow.F4)
-        assertEquals(PermissionCatalog.ACCESSIBILITY, f4.actionCapId)
-        assertEquals(AcquireKind.SILENT_VIA_ADB, f4.action?.kind)
-    }
-
-    @Test fun 配对前置不重复催_未成立的F1认领它们() {
-        // 同一项在两处催 = 两张清单。F1 还开着时，它的前置（含通知）不进 F4 的补齐文案。
-        val e = ev(dev = true, wireless = true)
-        val f4 = rows(e).getValue(OnboardingFlow.F4)
-        assertFalse(
-            "通知发送该由 P0 与 F1 认领，不许出现在补齐清单里",
-            f4.detail.contains(CapabilityCatalog.titleOf(PermissionCatalog.POST_NOTIFICATIONS)),
+        assertTrue(debts(e).any { it.id == PermissionCatalog.ACCESSIBILITY })
+        // 通道在线时它的取法链首项就是静默下发（自动流的执行前提）。
+        assertEquals(
+            AcquireKind.SILENT_VIA_ADB,
+            CapabilityCatalog.byId(PermissionCatalog.ACCESSIBILITY)?.acquirer?.invoke(e)?.firstOrNull()?.kind,
         )
     }
 
-    @Test fun 任意读数下主行动唯一_次要只许出现在F4() {
+    @Test fun 配对前置不重复催_未成立的F1认领它们() {
+        // 同一项在两处催 = 两张清单。F1 还开着时，它的前置（含通知）不进 debts()。
+        val e = ev(dev = true, wireless = true)
+        assertFalse(
+            "通知发送该由 P0 与 F1 认领，不许出现在欠账清单里",
+            debts(e).any { it.id == PermissionCatalog.POST_NOTIFICATIONS },
+        )
+    }
+
+    @Test fun 任意读数下主行动唯一_且本版没有次要按钮() {
         val readings = listOf(
             ev(),
             ev(grants = NOTIF),
@@ -209,10 +235,9 @@ class OnboardingFlowTest {
                 stages.count { it.action != null } <= 1)
             assertTrue("第 $i 条读数的 CURRENT 不唯一",
                 stages.count { it.status == StageStatus.CURRENT } <= 1)
-            assertTrue("第 $i 条读数的次要按钮越界：" + stages.filter { it.extra != null }.map { it.id },
-                stages.filter { it.extra != null }.all {
-                    it.id == OnboardingFlow.F4 && it.status != StageStatus.DONE
-                })
+            // 原 F4 的次要动作已折叠：本版任何行都不许长第二个按钮。
+            assertTrue("第 $i 条读数出现次要动作：" + stages.filter { it.extra != null }.map { it.id },
+                stages.none { it.extra != null || it.extraCapId != null })
             assertNull("第 $i 条读数的 F1 动作必须是输码入口",
                 stages.first { it.id == OnboardingFlow.F1 }
                     .action?.takeIf { it.kind != AcquireKind.USER_CODE })

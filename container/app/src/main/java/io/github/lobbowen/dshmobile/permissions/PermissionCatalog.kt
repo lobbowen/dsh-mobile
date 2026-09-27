@@ -42,6 +42,13 @@ object PermissionCatalog {
     const val SECURE_KEY_ACCESSIBILITY = "enabled_accessibility_services"
     const val SECURE_KEY_NOTIFICATION_LISTENER = "enabled_notification_listeners"
 
+    /**
+     * 无障碍**总开关**键名。真机实证（2026-09-27 07:08）：只写服务名单而总开关为 0 时，
+     * 系统根本不绑定服务（名单在、绑定无、且已进 Crashed services）；置 1 后立刻重绑。
+     * 它是「名单在 ≠ 锚在位」的第二半判据；读侧的绿仍以服务实例为准（[PermissionCenter]）。
+     */
+    const val SECURE_KEY_ACCESSIBILITY_ENABLED = "accessibility_enabled"
+
     /** 控制面能力所需的全部授权项（含服务开关）—— 首页 S2、体检、桥 caps 共用这张表。 */
     val SPECIAL: List<PermissionSpec> = listOf(
         PermissionSpec(

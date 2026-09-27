@@ -14,6 +14,10 @@
 //
 // 目录注入：DSH_ADB_DIR 环境变量（由 AdbClientRunner 传入 files/adb）。
 // 缺失即抛错——绝不悄悄落到别处产生第二把身份密钥。
+//
+// 常驻形态（2026-09-27 根治"无限连接断开"）：serve 进程内 transport 维护一条
+// 复用会话，channel() 只读它的就绪状态，shell() 优先复用它；真正新 dial 只发生在
+// 会话尚未建立（或已断且退避已过）时。
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -95,16 +99,40 @@ async function pair(o) {
 
 /**
  * 在已配对设备上执行 shell 命令。
+ *
+ * 端点优先级：显式 host/connectPort > 常驻会话现有的就绪端点 > state.json 历史值。
+ * 中间那档是这次根治的关键：探针与后续命令落在**同一条** TLS 会话上，不再每次新
+ * dial；state.json 只作为"会话还没起来"时的回落（它的连接端口可能已被无线调试轮换）。
  * @param {{cmd:string, host?:string, connectPort?:number, timeoutMs?:number}} o
  */
 async function shell(o) {
-  const st = readState();
-  const host = o.host || (st && st.host);
-  const port = o.connectPort || (st && st.connectPort);
+  let host = o.host;
+  let port = o.connectPort;
+  if (!host && !port) {
+    const live = transport.readyEndpoint();
+    if (live) { host = live.host; port = live.port; }
+  }
+  if (!host || !port) {
+    const st = readState();
+    host = host || (st && st.host);
+    port = port || (st && st.connectPort);
+  }
   if (!host || !port) throw new Error('未配对或缺少连接地址（host/connectPort）');
   return transport.shell({ host: host, port: port, key: ensureKey(), cmd: o.cmd, timeoutMs: o.timeoutMs });
 }
 
+/**
+ * 常驻通道读数：只回答"当前是否已有一条就绪的 TLS 会话"，不发新连接、不执行命令。
+ * 供 AdbChannelProbe 在两次重验之间读连接状态续绿——不改 TTL，只省掉不必要的 dial。
+ */
+function channel() {
+  const ep = transport.readyEndpoint();
+  return { ok: true, ready: !!ep, host: ep ? ep.host : null, port: ep ? ep.port : null };
+}
+
+/** 收干净全部常驻会话（一次性 CLI 收尾 / serve 退出时用）。 */
+function closeAll() { return transport.closeAll(); }
+
 module.exports = {
-  keyPath, namePath, statePath, status, pair, shell, forget,
+  keyPath, namePath, statePath, status, pair, shell, forget, channel, closeAll,
 };

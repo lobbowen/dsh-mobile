@@ -5,16 +5,22 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.Gravity
 import android.view.View
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import io.github.lobbowen.dshmobile.bridge.ScreenCaptureService
+import io.github.lobbowen.dshmobile.capability.AdbChannelProbe
+import io.github.lobbowen.dshmobile.capability.CapabilityAcquisitionRunner
+import io.github.lobbowen.dshmobile.capability.CapabilityCatalog
+import io.github.lobbowen.dshmobile.capability.Evidence
 import io.github.lobbowen.dshmobile.kernelota.KernelManager
 import io.github.lobbowen.dshmobile.kernelota.KernelOtaUpdater
 import io.github.lobbowen.dshmobile.kernelota.KernelSelfCheck
@@ -50,6 +56,23 @@ class MainActivity : AppCompatActivity() {
     private var uiMode = false // false=诊断面板, true=WebView(内核 /__host 宿主帧 + 面板 iframe)
     /** 设备端自检结果（后台算一次，渲染时前缀到诊断面板）。 */
     @Volatile private var selfCheckText: String = ""
+
+    /**
+     * 顶部通道状态条：channelLive()==false 时常驻红条，可点重探。
+     * 与开屏 [io.github.lobbowen.dshmobile.ui.OnboardingActivity] 同源 —— 同一把判据
+     * （[Evidence.channelLive]）与同一句文案（[ChannelStatusText.DOWN]），不新造第二套。
+     */
+    private var channelBar: TextView? = null
+    /** 滚动页的原始上内边距：红条出现时往下让位，消失时复原（左右下不动）。 */
+    private var scrollBaseTopPadding = 0
+    /** 红条占位高度（固定值：避免每帧测量后再重排）。 */
+    private val channelBarHeightPx: Int by lazy {
+        (CHANNEL_BAR_HEIGHT_DP * resources.displayMetrics.density).toInt()
+    }
+    /** 通道条刷新防重入：探针会阻塞（走常驻通道跑 id），不许并发。 */
+    @Volatile private var channelBarRefreshInFlight = false
+    /** 通道条刷新节流：500ms 轮询 × N ≈ 与开屏 2s 采集同频（探针自带冷却）。 */
+    private var channelBarTick = 0
 
     /** 内核更新桥协议版本：必须与内核 kernelUpdateBridge.ts 的 BRIDGE_PROTOCOL_VERSION 一致。 */
     private val kernelUpdateProtocol = 1
@@ -102,11 +125,23 @@ class MainActivity : AppCompatActivity() {
         copyBtn.setOnClickListener { copySelfCheck() }
 
         setupWebView()
+        // 通道状态条：工作台与诊断页同帧，红条挂 FrameLayout 顶层，两种模式都看得见。
+        installChannelBar()
         // 复用上次授权：若缓存 grant 仍有效直接拉起服务；Android 14+ 跨重启可能失效，届时回落弹窗。
         reuseExistingCaptureGrant()
         startRuntime()
         startPolling()
         runSelfCheckOnce()
+    }
+
+    /**
+     * 回前台 = 最强的新鲜度事件（用户可能刚在设置页拨了无线调试，端口也轮换过）。
+     * 与开屏同一姿势：作废通道缓存并立刻重采 —— 不让过期的 LIVE 继续挂着不报红。
+     */
+    override fun onResume() {
+        super.onResume()
+        AdbChannelProbe.invalidate()
+        refreshChannelBar()
     }
 
     /**
@@ -327,6 +362,9 @@ class MainActivity : AppCompatActivity() {
     private fun startPolling() {
         handler.post(object : Runnable {
             override fun run() {
+                // 通道条与面板模式无关：诊断帧与 WebView 帧都要常驻（工作台就是后者）。
+                // 500ms 轮询 × 4 ≈ 2s 一采，与开屏的 2s 采集同频；探针自带冷却，不会打崩 adbd。
+                if (channelBarTick++ % 4 == 0) refreshChannelBar()
                 if (!uiMode) {
                     val log = RuntimeDiagnostics.read(this@MainActivity)
                     val body = if (log.isBlank()) "初始化中..." else log
@@ -364,6 +402,109 @@ class MainActivity : AppCompatActivity() {
         false
     }
 
+    // ---- 通道状态条（与开屏同源）----
+
+    /**
+     * 把红条挂到 FrameLayout 顶层并捕获滚动页的原始内边距。
+     *
+     * 为什么挂在 FrameLayout 而不是诊断滚动页里：工作台是 WebView 帧，诊断是另一个子视图，
+     * 二者切换时只有 FrameLayout 顶层常驻 —— 通道断了必须两种帧都看得见。
+     */
+    private fun installChannelBar() {
+        val frame = scroll.parent?.parent as? FrameLayout ?: return
+        scrollBaseTopPadding = scroll.paddingTop
+        val pad = (8f * resources.displayMetrics.density).toInt()
+        val bar = TextView(this).apply {
+            text = ChannelStatusText.DOWN
+            textSize = 13f
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(pad * 2, pad, pad * 2, pad)
+            setBackgroundColor(0xFFFFEBEE.toInt())
+            setTextColor(0xFFC62828.toInt())
+            setOnClickListener { retestChannel() }
+            visibility = View.GONE
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                channelBarHeightPx,
+                Gravity.TOP,
+            )
+        }
+        channelBar = bar
+        frame.addView(bar)
+    }
+
+    /**
+     * 刷新红条：后台取通道读数，主线程只切可见性。
+     *
+     * 判据只有一把尺子：[Evidence.channelLive]（探针 LIVE 且读数未过期）。这里**不**自己判
+     * LIVE/DEAD —— 开屏、自动流、工作台三处必须同一口径，否则会在「一条读数是绿、另一条是红」
+     * 之间来回翻（v1 假绿事故的同款机制）。
+     */
+    private fun refreshChannelBar() {
+        if (channelBarRefreshInFlight) return
+        channelBarRefreshInFlight = true
+        Thread {
+            val now = System.currentTimeMillis()
+            val probe = runCatching { AdbChannelProbe.probe(applicationContext, now) }.getOrNull()
+            val live = probe != null && Evidence(nowMs = now, channel = probe).channelLive()
+            channelBarRefreshInFlight = false
+            handler.post {
+                channelBar?.visibility = if (live) View.GONE else View.VISIBLE
+                reserveChannelBarSpace(!live)
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
+    /**
+     * 红条出现/消失时给下方内容让位：滚动页只加上内边距，WebView 只加顶外边距。
+     * 不让位的话红条会盖住诊断首行 / 面板顶栏 —— 「不改其它行为」不等于「盖住别的」。
+     */
+    private fun reserveChannelBarSpace(visible: Boolean) {
+        val offset = if (visible) channelBarHeightPx else 0
+        val lp = webView.layoutParams as? FrameLayout.LayoutParams
+        if (lp != null && lp.topMargin != offset) {
+            lp.topMargin = offset
+            webView.layoutParams = lp
+        }
+        scroll.setPadding(
+            scroll.paddingLeft,
+            scrollBaseTopPadding + offset,
+            scroll.paddingRight,
+            scroll.paddingBottom,
+        )
+    }
+
+    /**
+     * 红条点击：作废通道缓存并重探（用户此刻就是想知道「还连不连得上」）。
+     *
+     * 动作取登记表的取法链首项（[CapabilityCatalog.ADB_CHANNEL] → AUTO「重测通道」），
+     * 与开屏的 retestChannel 同源 —— 探针命令不许在 UI 里再拼一份。
+     */
+    private fun retestChannel() {
+        AdbChannelProbe.invalidate()
+        android.widget.Toast.makeText(this, "正在重测 ADB 通道…", android.widget.Toast.LENGTH_SHORT).show()
+        val ctx = applicationContext
+        Thread {
+            val acq = CapabilityCatalog.byId(CapabilityCatalog.ADB_CHANNEL)
+                ?.acquirer?.invoke(
+                    Evidence(nowMs = System.currentTimeMillis(), channel = AdbChannelProbe.cached())
+                )
+                ?.firstOrNull()
+            val result = acq?.let {
+                runCatching { CapabilityAcquisitionRunner.dispatch(ctx, it) }.getOrNull()
+            }
+            handler.post {
+                refreshChannelBar()
+                android.widget.Toast.makeText(
+                    this,
+                    if (result?.verified == true) "ADB 通道已恢复"
+                    else "ADB 通道仍不可用：" + (result?.detail ?: "未取得结论"),
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()
@@ -376,4 +517,17 @@ class MainActivity : AppCompatActivity() {
             activity.runOnUiThread { activity.handleKernelUpdateRequest(json) }
         }
     }
+}
+
+/** 通道红条的固定占位高度（dp）：固定值才能确定性地给下方内容让位，不用等测量回调。 */
+private const val CHANNEL_BAR_HEIGHT_DP = 36
+
+/**
+ * 通道状态条的文案——**唯一出处**：工作台与开屏同读它，避免两处各写一句后漂移。
+ *
+ * 说明：开屏 [io.github.lobbowen.dshmobile.ui.OnboardingActivity] 当前仍保留同一句字面量，
+ * 本次改动的授权文件清单不含它；后续把它改成引用本处即可（否则改名只改一边 = 两处不一致）。
+ */
+internal object ChannelStatusText {
+    const val DOWN = "ADB 通道已断开 · 点此重连"
 }

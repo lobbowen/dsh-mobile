@@ -55,6 +55,14 @@ class DshAccessibilityService : AccessibilityService() {
         instance = this
         Log.i(TAG, "DshAccessibilityService 已连接（ui_automation 能力可用）")
         RuntimeDiagnostics.append(this, "accessibility", true, "无障碍服务已连接", "ui_automation 能力可用")
+        // 锚状态上报：这是「闸门是否开着」唯一能上屏的读数。App 读不到别 uid 的
+        // OplusHansManager 判决，只能以锚状态作代理（真机 2026-09-27：锚在位 =
+        // importance=accessibility，HANS 拒绝把本 uid 转出 Running；不在位 = traffic）。
+        RuntimeDiagnostics.append(
+            this, "accessibility", true,
+            "锚 " + AccessibilityAnchor.state(this) + "：服务已连接（闸门开着）",
+            "HANS 拒绝把本 uid 转出 Running；ui_automation 可执行",
+        )
         // 保活权威链的**根边**（ADR-0006）：本绑定让 HANS 拒冻本 uid
         // （实证 `cannot transition from R to M, importance=accessibility`）——
         // 锚一落定就拉起/确认监督者（:main），让"APK 不死 ⇒ 运行时不死"的环闭合。
@@ -65,6 +73,13 @@ class DshAccessibilityService : AccessibilityService() {
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         if (instance === this) instance = null
         Log.i(TAG, "DshAccessibilityService 已解绑")
+        // 解绑 = 闸门关闭：HANS 判决即将降到 importance=traffic，进程随时会被 o-kill。
+        // 这里只负责让状态可见；恢复由 [AccessibilityAnchor] 的监护尝试（先摘后写逼 AMS 重绑）。
+        RuntimeDiagnostics.append(
+            this, "accessibility", false,
+            "锚 " + AccessibilityAnchor.state(this) + "：服务被解绑（闸门关闭）",
+            "监督者的锚监护会尝试无感自愈；这是预防窗口，不是死后自愈",
+        )
         return super.onUnbind(intent)
     }
 

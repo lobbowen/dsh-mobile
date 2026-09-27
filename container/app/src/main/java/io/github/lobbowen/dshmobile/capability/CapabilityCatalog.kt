@@ -47,8 +47,17 @@ object CapabilityCatalog {
     const val EXEC_RERUN_SELFCHECK = "kernel-selfcheck-rerun"
     const val EXEC_NOTIFICATION_LISTENER = "settings-put-notification-listener"
     const val EXEC_ACCESSIBILITY = "settings-put-accessibility-service"
+    /**
+     * 电池白名单的 ADB 执行器。真机实证 uid=2000 可用 `dumpsys deviceidle whitelist +<pkg>`，
+     * 与 AppOps 权限面无关，所以它不必等 Device Owner（DO 在位与否都走这条静默边）。
+     */
+    const val EXEC_BATTERY_WHITELIST = "dumpsys-battery-whitelist"
 
-    /** dpm 在多用户设备上的平台级拒绝；命中即 UNREACHABLE，不再重复下发。 */
+    /**
+     * dpm 在多用户设备上的平台级拒绝；命中即 UNREACHABLE，不再重复下发。
+     * 本机（4 个用户 + 7 个账户）必然命中：DO 不可达是**既有事实**，判据只记这一档，
+     * 不重试、不阻塞，也不把用户推去 3 个 AppOps 系统页（那是旧「按钮墙」的路）。
+     */
     const val OWNER_REJECTED_MARK = "several users"
 
     val ALL: List<Capability> = listOf(
@@ -117,6 +126,13 @@ object CapabilityCatalog {
             },
             acquirer = { listOf(Acquisition(AcquireKind.AUTO, "重测通道", EXEC_REPROBE)) },
         ),
+        // DEVICE_OWNER 不再是「可选加速器」：它是 **AppOps 档唯一的静默路径**（本机 shell 已无
+        // MANAGE_APP_OPS_MODES，`appops set` 不可用），因此被 [PostPairingAutoFlow] **必跑**
+        // —— 配对成功的同一前台会话里立刻试一次。它仍不进任何 requires（见文件头规则 2）：
+        // 它是取法路径，不是放行门槛。
+        // 本机 DO 实际不可达（4 用户 + 7 账户 → dpm 报 "several users"，命中 [OWNER_REJECTED_MARK]）：
+        // 判据落 UNREACHABLE，**不重试、不阻塞、不回落成 3 个 AppOps 系统页**。设备事实只写注释，
+        // 判据层只认系统侧回读（[CapabilityCriteria.isDeviceOwner]）。
         Capability(
             id = DEVICE_OWNER, title = "Device Owner", segment = S1, optional = true,
             requires = setOf(ADB_CHANNEL), bridgeToken = "device_owner",
@@ -129,14 +145,16 @@ object CapabilityCatalog {
                     )
                     e.ownerAttempt?.outcome == OwnerAttemptOutcome.FAILED ->
                         CapVerdict(CapStatus.FAILED, e.ownerAttempt.reason)
-                    else -> CapVerdict(CapStatus.ACTION, "可选加速器：跳过不影响放行")
+                    // AppOps 档的唯一静默前提；由配对后的自动流尝试，不是开屏要人点的东西。
+                    else -> CapVerdict(CapStatus.ACTION, "AppOps 档唯一静默路径：配对后自动尝试")
                 }
             },
             acquirer = {
                 listOf(Acquisition(AcquireKind.SILENT_VIA_ADB, "经 ADB 激活", EXEC_DEVICE_OWNER))
             },
         ),
-        // ---- S2：每项按自己的获取通道登记；DO 在位时静默路径升为主路径（见 [permAcquirers]）----
+        // ---- S2：每项按自己的获取通道登记。静默路径**就是主路径**（通道/DO 在位时，
+        //      取法链里不再排一条人点的降级项；见 [permAcquirers] 与其上方的注释）----
         perm(
             PermissionCatalog.MANAGE_EXTERNAL_STORAGE, "全部文件访问", PermTierClass.APPOP,
             note = "AppOps 档：shell 已无 MANAGE_APP_OPS_MODES，只能人点",
@@ -198,6 +216,10 @@ object CapabilityCatalog {
      *
      * [segment] 默认 S2，但**不**由档位决定：通知发送虽然是个普通运行时权限，它在流程上是
      * S0 配对的前置（见 [ADB_CREDENTIALS] 的 requires），所以登记在 S0。
+     *
+     * 取法链由 [permAcquirers] 按档位派生：静默通道在位时**只**给 SILENT_*，静默不可用才
+     * 回落 USER_TAP —— 「能不能静默办」只有这一个出处，[PermissionSprint] 与
+     * [PostPairingAutoFlow] 都读它。
      */
     private fun perm(
         id: String,
@@ -222,36 +244,53 @@ object CapabilityCatalog {
         )
     }
 
-    /** 取法链（主 → 降级）。核心不变式：DO/ADB **缺席**时链条只是变短，能力不会变成 BLOCKED。 */
+    /**
+     * 取法链（主 → 降级）。核心不变式：DO/ADB **缺席**时链条只是变短，能力不会变成 BLOCKED。
+     *
+     * 2026-09-27 起「静默即唯一入口」：静默通道在位时链里**只**有 SILENT_*，不再把
+     * 「去系统页点一下」排在同一轮降级位 —— 那会让开屏的 P0 冲刺把人甩去系统页。
+     * 静默不可用（通道不通 / DO 不在位）才回落 USER_TAP；那是欠账，归工作台能力面板，
+     * 不是开屏动作。AppOps 档的静默前提是 DO，DO 不可达时判 UNREACHABLE，不复用这回落。
+     */
     private fun permAcquirers(id: String, tier: PermTierClass, e: Evidence): List<Acquisition> {
+        // 回落项：静默通道不在位时，用户手动授权的落点（按档位决定跳哪类系统页）。
         val tap = when (tier) {
             PermTierClass.RUNTIME -> Acquisition(AcquireKind.RUNTIME_DIALOG, "系统弹窗授权", id)
             PermTierClass.IN_APP -> Acquisition(AcquireKind.USER_TAP, "去诊断页授权", NAV_DIAGNOSTICS)
             PermTierClass.SECURE_SETTINGS -> Acquisition(AcquireKind.USER_TAP, "去系统授权页", id)
             PermTierClass.APPOP -> Acquisition(AcquireKind.USER_TAP, "去系统授权页", id)
         }
-        val silent = when (tier) {
-            PermTierClass.SECURE_SETTINGS -> when (id) {
-                PermissionCatalog.NOTIFICATION_ACCESS ->
-                    Acquisition(AcquireKind.SILENT_VIA_ADB, "经 ADB 静默开启", EXEC_NOTIFICATION_LISTENER)
-                PermissionCatalog.ACCESSIBILITY ->
-                    Acquisition(AcquireKind.SILENT_VIA_ADB, "经 ADB 静默开启", EXEC_ACCESSIBILITY)
-                else -> null
+        var silent: Acquisition? = null
+        var usable = false
+        when (tier) {
+            // Secure 服务开关：shell 写设置串就能办，用不着 DO。
+            PermTierClass.SECURE_SETTINGS -> {
+                silent = when (id) {
+                    PermissionCatalog.NOTIFICATION_ACCESS ->
+                        Acquisition(AcquireKind.SILENT_VIA_ADB, "经 ADB 静默开启", EXEC_NOTIFICATION_LISTENER)
+                    PermissionCatalog.ACCESSIBILITY ->
+                        Acquisition(AcquireKind.SILENT_VIA_ADB, "经 ADB 静默开启", EXEC_ACCESSIBILITY)
+                    else -> null
+                }
+                usable = e.channelLive()
             }
-            // 只有 AppOps 档 DO 能静默授予；SECURE_SETTINGS 档 shell 就能办，用不着 DO。
-            PermTierClass.APPOP -> Acquisition(AcquireKind.SILENT_VIA_DO, "DO 静默授予", id)
-            else -> null
-        }
-        val out = mutableListOf<Acquisition>()
-        if (silent != null) {
-            val usable = when (tier) {
-                PermTierClass.SECURE_SETTINGS -> e.channelLive()
-                else -> e.deviceOwner
+            // AppOps 档：电池白名单走 ADB（`dumpsys deviceidle whitelist +<pkg>`，uid=2000
+            // 实证可用，与 AppOps 权限面无关）；其余只有 DO 能静默授予。
+            PermTierClass.APPOP -> {
+                silent = if (id == PermissionCatalog.BATTERY_OPTIMIZATION) {
+                    Acquisition(AcquireKind.SILENT_VIA_ADB, "经 ADB 加入 Doze 白名单", EXEC_BATTERY_WHITELIST)
+                } else {
+                    Acquisition(AcquireKind.SILENT_VIA_DO, "DO 静默授予", id)
+                }
+                usable = if (id == PermissionCatalog.BATTERY_OPTIMIZATION) e.channelLive() else e.deviceOwner
             }
-            if (usable) out += silent
+            else -> {
+                silent = null
+                usable = false
+            }
         }
-        out += tap
-        return out
+        val silentAcq = silent
+        return if (silentAcq != null && usable) listOf(silentAcq) else listOf(tap)
     }
 
     init {

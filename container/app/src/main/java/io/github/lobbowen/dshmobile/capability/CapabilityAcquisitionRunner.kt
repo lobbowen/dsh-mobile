@@ -1,12 +1,17 @@
 package io.github.lobbowen.dshmobile.capability
 
 import android.content.Context
+import io.github.lobbowen.dshmobile.RuntimeDiagnostics
 import io.github.lobbowen.dshmobile.bridge.AdbClientRunner
+import io.github.lobbowen.dshmobile.lifecycle.AccessibilityAnchor
 import io.github.lobbowen.dshmobile.permissions.PermissionCatalog
 import io.github.lobbowen.dshmobile.permissions.PermissionCenter
 
 /** 一次静默取法的结果。[verified] 单独成列：**下发成功不等于生效**（DO 的真机教训）。 */
 data class AcquisitionResult(val ok: Boolean, val verified: Boolean, val detail: String)
+
+/** 自动流一行：[attempted]=是否真的下发过；[ok]=系统侧回读是否确认生效。 */
+data class AutoFlowStep(val capId: String, val attempted: Boolean, val ok: Boolean, val detail: String)
 
 /**
  * 静默取法的执行器（spec §2.1：判据层只声明 `SILENT_VIA_*` + 执行器 id，命令在这里拼）。
@@ -20,6 +25,10 @@ object CapabilityAcquisitionRunner {
 
     private const val DEFAULT_TIMEOUT_MS = 20_000L
 
+    /** 自动流单项的重试上限与退避：失败不阻塞后续，但不许无限刷 AMS。 */
+    private const val AUTO_FLOW_MAX_ATTEMPTS = 2
+    private const val AUTO_FLOW_BACKOFF_MS = 1_500L
+
     /** 平台级拒绝标记：DO 之外的场景不产生 UNREACHABLE。 */
     private const val MULTI_USER_MARK = "several users"
 
@@ -27,13 +36,12 @@ object CapabilityAcquisitionRunner {
     fun run(ctx: Context, executor: String, timeoutMs: Long = DEFAULT_TIMEOUT_MS): AcquisitionResult =
         when (executor) {
             CapabilityCatalog.EXEC_DEVICE_OWNER -> setDeviceOwner(ctx, timeoutMs)
-            CapabilityCatalog.EXEC_NOTIFICATION_LISTENER ->
-                enableSecureService(ctx, SecureService.NOTIFICATION_LISTENER, timeoutMs)
-            CapabilityCatalog.EXEC_ACCESSIBILITY ->
-                enableSecureService(ctx, SecureService.ACCESSIBILITY, timeoutMs)
+            CapabilityCatalog.EXEC_NOTIFICATION_LISTENER -> enableNotificationListener(ctx, timeoutMs)
+            CapabilityCatalog.EXEC_ACCESSIBILITY -> healAccessibilityAnchor(ctx, timeoutMs)
+            CapabilityCatalog.EXEC_BATTERY_WHITELIST -> whitelistBattery(ctx, timeoutMs)
             CapabilityCatalog.EXEC_REPROBE -> reprobeChannel(ctx)
             CapabilityCatalog.EXEC_RERUN_SELFCHECK -> rerunSelfCheck(ctx)
-            else -> AcquisitionResult(false, false, "未知执行器：$executor")
+            else -> AcquisitionResult(false, false, "未知执行器：" + executor)
         }
 
     /**
@@ -48,6 +56,71 @@ object CapabilityAcquisitionRunner {
                 if (executor == null) AcquisitionResult(false, false, "取法缺执行器") else run(ctx, executor)
             else -> null
         }
+    }
+
+    /**
+     * 配对后自动流的**唯一执行入口**：[ids] 按顺序串行跑（**不并发** —— 多条 settings put
+     * 并发会互相覆盖服务名单），单项失败不阻塞后续，单项内退避重试有上限。
+     *
+     * 三条取舍：
+     *  - 先读判据：已 GRANTED 或已 UNREACHABLE 的项直接跳过（**不重试**）—— 多用户设备的 DO
+     *    拒绝是平台事实，重试只会制造噪声；
+     *  - 只接受取法链首项是 SILENT_* 的项：其余交回欠账（不挡入口，也不在开屏问）；
+     *  - 每项结论写 [RuntimeDiagnostics]，与常驻通知/诊断页同源，不另造状态出口。
+     */
+    @Synchronized
+    fun runAutoFlow(
+        ctx: Context,
+        ids: List<String>,
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+    ): List<AutoFlowStep> {
+        val out = mutableListOf<AutoFlowStep>()
+        for (id in ids) {
+            val verdict = CapabilityCatalog.evaluate(CapabilityEvidenceCollector.systemReads(ctx))[id]
+            if (verdict?.status == CapStatus.GRANTED) {
+                out += AutoFlowStep(id, false, true, "判据=GRANTED，跳过（不重试）")
+                continue
+            }
+            if (verdict?.status == CapStatus.UNREACHABLE) {
+                out += AutoFlowStep(id, false, false, "判据=UNREACHABLE，跳过（平台不可得，不重试）")
+                continue
+            }
+            val acq = CapabilityCatalog.byId(id)
+                ?.acquirer(CapabilityEvidenceCollector.systemReads(ctx))
+                ?.firstOrNull()
+            val target = acq?.target
+            if (acq == null || target == null ||
+                (acq.kind != AcquireKind.SILENT_VIA_ADB && acq.kind != AcquireKind.SILENT_VIA_DO)
+            ) {
+                out += AutoFlowStep(id, false, false, "取法链首项不是静默取法，交回欠账（不挡入口）")
+                continue
+            }
+
+            var result: AcquisitionResult? = null
+            var attempt = 0
+            while (attempt < AUTO_FLOW_MAX_ATTEMPTS) {
+                attempt++
+                result = run(ctx, target, timeoutMs)
+                if (result.verified || result.ok) break
+                // 平台级拒绝（如多用户设备的 DO）重试没有意义：判据只会再给同一个 UNREACHABLE。
+                if (CapabilityCatalog.evaluate(
+                        CapabilityEvidenceCollector.systemReads(ctx)
+                    )[id]?.status == CapStatus.UNREACHABLE
+                ) {
+                    break
+                }
+                if (attempt < AUTO_FLOW_MAX_ATTEMPTS) sleepQuietly(AUTO_FLOW_BACKOFF_MS * attempt)
+            }
+            val r = result ?: AcquisitionResult(false, false, "未执行")
+            out += AutoFlowStep(id, true, r.verified, acq.label + "（第 " + attempt + " 次）：" + r.detail)
+            RuntimeDiagnostics.append(
+                ctx, "autoflow",
+                if (r.verified) true else if (r.ok) null else false,
+                id + (if (r.verified) " 已生效" else " 未生效"),
+                r.detail,
+            )
+        }
+        return out
     }
 
     private fun reprobeChannel(ctx: Context): AcquisitionResult {
@@ -67,14 +140,14 @@ object CapabilityAcquisitionRunner {
         return AcquisitionResult(
             ok = bad.isEmpty(),
             verified = bad.isEmpty(),
-            detail = if (bad.isEmpty()) "自检 ${items.size} 项通过" else "未通过/未知：" + bad.joinToString(),
+            detail = if (bad.isEmpty()) "自检 " + items.size + " 项通过" else "未通过/未知：" + bad.joinToString(),
         )
     }
 
     private fun setDeviceOwner(ctx: Context, timeoutMs: Long): AcquisitionResult {
         val names = CapabilityCriteria.names(ctx)
         val outcome = AdbClientRunner.shell(
-            ctx, "dpm set-device-owner ${names.dpcComponent}", null, null, timeoutMs,
+            ctx, "dpm set-device-owner " + names.dpcComponent, null, null, timeoutMs,
         )
         val now = System.currentTimeMillis()
         // 唯一真值 = 系统侧回读。dpm 抛 IllegalStateException 时 exit 仍是 0
@@ -98,40 +171,52 @@ object CapabilityAcquisitionRunner {
         )
     }
 
-    private enum class SecureService { ACCESSIBILITY, NOTIFICATION_LISTENER }
+    /**
+     * 无障碍锚：**不自建实现**，只调 [AccessibilityAnchor.ensureBound]（契约冻结）。
+     * 三级自愈（名单合并 / 总开关置 1 / 先摘后写逼重绑）全在锚对象里，本层只做结果翻译。
+     */
+    private fun healAccessibilityAnchor(ctx: Context, timeoutMs: Long): AcquisitionResult {
+        val outcome = AccessibilityAnchor.ensureBound(ctx, timeoutMs)
+        return AcquisitionResult(
+            ok = outcome.healed,
+            verified = outcome.healed,
+            detail = "锚 " + outcome.state + "：" + outcome.detail,
+        )
+    }
 
-    private fun enableSecureService(
-        ctx: Context,
-        which: SecureService,
-        timeoutMs: Long,
-    ): AcquisitionResult {
+    private fun enableNotificationListener(ctx: Context, timeoutMs: Long): AcquisitionResult {
         val center = PermissionCenter(ctx)
         val names = CapabilityCriteria.names(ctx)
-        val ours: String
-        val key: String
-        val current: String
-        when (which) {
-            SecureService.ACCESSIBILITY -> {
-                ours = names.accessibilityComponent
-                key = PermissionCatalog.SECURE_KEY_ACCESSIBILITY
-                current = center.accessibilityServicesValue()
-            }
-            SecureService.NOTIFICATION_LISTENER -> {
-                ours = names.notificationListenerComponent
-                key = PermissionCatalog.SECURE_KEY_NOTIFICATION_LISTENER
-                current = center.notificationListenersValue()
-            }
-        }
+        val ours = names.notificationListenerComponent
         if (ours.isBlank()) return AcquisitionResult(false, false, "组件名未解析，不能下发")
+        val current = center.notificationListenersValue()
         val merged = (current.split(":").filter { it.isNotBlank() && it != ours } + ours).joinToString(":")
-        val outcome = AdbClientRunner.shell(ctx, "settings put secure $key $merged", null, null, timeoutMs)
-        val readBack = when (which) {
-            SecureService.ACCESSIBILITY -> center.accessibilityEnabledInSettings()
-            SecureService.NOTIFICATION_LISTENER -> center.notificationListenerEnabled()
-        }
+        val outcome = AdbClientRunner.shell(
+            ctx,
+            "settings put secure " + PermissionCatalog.SECURE_KEY_NOTIFICATION_LISTENER + " " + merged,
+            null, null, timeoutMs,
+        )
+        val readBack = center.notificationListenerEnabled()
         return when {
             // 系统勾选已回读成功，但服务实例绑定是异步的 —— 下一轮采集自然变绿，这里不冒充绿。
             readBack -> AcquisitionResult(true, false, "系统已记录勾选，等待服务绑定")
+            !outcome.ok -> AcquisitionResult(false, false, "下发失败：" +
+                (outcome.error ?: commandText(outcome).take(160)))
+            else -> AcquisitionResult(true, false, "命令已下发，回读未见生效：" + commandText(outcome).take(160))
+        }
+    }
+
+    /**
+     * 电池白名单：真机实证 uid=2000 可用 `dumpsys deviceidle whitelist +<pkg>`。
+     * 真值仍以系统侧回读为准（[PermissionCenter.batteryExempt]），命令 exit 0 不算数。
+     */
+    private fun whitelistBattery(ctx: Context, timeoutMs: Long): AcquisitionResult {
+        val outcome = AdbClientRunner.shell(
+            ctx, "dumpsys deviceidle whitelist +" + ctx.packageName, null, null, timeoutMs,
+        )
+        val readBack = PermissionCenter(ctx).batteryExempt()
+        return when {
+            readBack -> AcquisitionResult(true, true, "已加入 Doze 白名单")
             !outcome.ok -> AcquisitionResult(false, false, "下发失败：" +
                 (outcome.error ?: commandText(outcome).take(160)))
             else -> AcquisitionResult(true, false, "命令已下发，回读未见生效：" + commandText(outcome).take(160))
@@ -144,5 +229,13 @@ object CapabilityAcquisitionRunner {
         return (out + "\n" + logs + "\n" + outcome.raw).lineSequence()
             .firstOrNull { "Exception" in it || "error" in it.lowercase() }
             ?: (outcome.error ?: out.trim().ifBlank { "无输出" })
+    }
+
+    private fun sleepQuietly(ms: Long) {
+        try {
+            Thread.sleep(ms)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
     }
 }

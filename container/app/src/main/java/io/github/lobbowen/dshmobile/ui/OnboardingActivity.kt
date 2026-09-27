@@ -19,6 +19,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import io.github.lobbowen.dshmobile.BuildConfig
+import io.github.lobbowen.dshmobile.ChannelStatusText
 import io.github.lobbowen.dshmobile.MainActivity
 import io.github.lobbowen.dshmobile.capability.AcquireKind
 import io.github.lobbowen.dshmobile.capability.Acquisition
@@ -29,18 +30,20 @@ import io.github.lobbowen.dshmobile.capability.CapabilityAcquisitionRunner
 import io.github.lobbowen.dshmobile.capability.CapabilityCatalog
 import io.github.lobbowen.dshmobile.capability.CapabilityEvidenceCollector
 import io.github.lobbowen.dshmobile.capability.CapabilityNavigation
+import io.github.lobbowen.dshmobile.capability.CapVerdict
 import io.github.lobbowen.dshmobile.capability.Evidence
 import io.github.lobbowen.dshmobile.capability.OnboardingFlow
 import io.github.lobbowen.dshmobile.capability.PairingGate
 import io.github.lobbowen.dshmobile.capability.PermissionSprint
 import io.github.lobbowen.dshmobile.capability.PipelineProjection
 import io.github.lobbowen.dshmobile.capability.PipelineRefresh
+import io.github.lobbowen.dshmobile.capability.PostPairingAutoFlow
 import io.github.lobbowen.dshmobile.capability.StageStatus
 import io.github.lobbowen.dshmobile.capability.StepStatus
 import io.github.lobbowen.dshmobile.lifecycle.ResidencyAudit
 
 /**
- * 开场首页：渲染 [OnboardingFlow] 的四张阶段卡（**当前阶段 + 一个动作**），下面是 S0–S4
+ * 开场首页：渲染 [OnboardingFlow] 的两张阶段卡（**当前阶段 + 一个动作**），下面是 S0–S4
  * 判据核对（[PipelineProjection] 的段行，探针期兼作证据出口）。
  *
  * 开屏的**授权冲刺不在这里出现**：P0（[PermissionSprint]）在每次采集后静默把「还该要的
@@ -59,16 +62,26 @@ class OnboardingActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private val stageTexts = mutableMapOf<String, TextView>()
     private val stageButtons = mutableMapOf<String, Button>()
-    private val stageExtraButtons = mutableMapOf<String, Button>()
     private var criteriaText: TextView? = null
     private var recentText: TextView? = null
+    /** 顶部通道状态条：channelLive()==false 时红条常驻，可点重测。 */
+    private var channelBar: TextView? = null
+    /** 自动流的进度文案（只有一行，不产生按钮）。 */
+    private var progressText: TextView? = null
+    /** F4 折叠欠账：一行摘要 + 展开明细（都不是入口动作）。 */
+    private var debtsText: TextView? = null
+    private var debtsDetail: TextView? = null
     private var enterBtn: Button? = null
     private var lastEvidence: Evidence? = null
+    /** 本次前台会话里自动流已尝试过的能力 id；plan 减去它 = 还欠的静默项（可重入）。 */
+    private val autoFlowAttempted = mutableSetOf<String>()
+    /** 自动流是否正在跑（防重入：多条 settings 下发不许并发）。 */
+    @Volatile private var autoFlowRunning = false
+    /** 最近一次自动流结论文案。 */
+    private var autoFlowNotice = ""
 
     @Volatile private var refreshInFlight = false
     @Volatile private var actionInFlight = false
-    /** 自动跳转只做一次；入口重新变红时才解锁（否则从面板回来会被再次弹走）。 */
-    private var autoEntered = false
     /** 本次开屏已经抛过问题的授权项。见 [io.github.lobbowen.dshmobile.capability.PermissionSprint.pending]。 */
     private val sprintAsked = mutableSetOf<String>()
     /** 冲刺链一次只走一步：等系统把上一步的结果交回来再继续。 */
@@ -124,7 +137,7 @@ class OnboardingActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    // ---- 布局：阶段卡四行 + 判据核对 + 探针期导出通道 ----
+    // ---- 布局：通道状态条 + 阶段卡两行 + 自动流进度 + 折叠欠账 + 判据核对 + 探针期导出通道 ----
 
     private fun buildLayout(): View {
         val pad = (16f * resources.displayMetrics.density).toInt()
@@ -139,7 +152,7 @@ class OnboardingActivity : AppCompatActivity() {
             setPadding(0, 0, 0, pad / 2)
         })
         // 「刚刚发生了什么」常驻在标题下面：配对发生在系统页 + 通知栏里，用户回到本界面时
-        // 第一眼必须看到上一次尝试的结论，而不是从四张阶段卡里自己反推（真机定罪 2026-09-26
+        // 第一眼必须看到上一次尝试的结论，而不是从阶段卡里自己反推（真机定罪 2026-09-26
         // 「回到界面又不知道点什么」）。文案与通知共用 AttemptStore 那一份，两处不许各说各话。
         recentText = TextView(this).apply {
             textSize = 13f
@@ -147,6 +160,17 @@ class OnboardingActivity : AppCompatActivity() {
             text = recentActions()
         }
         col.addView(recentText)
+        // 顶部通道状态条：通道一断就红条常驻（可点重测），不让用户在「通道已死」的界面上
+        // 对着按钮猜。工作台（MainActivity）那份不在本文件授权范围内，见 REPORT 遗留项。
+        channelBar = TextView(this).apply {
+            textSize = 13f
+            setPadding(pad / 2, pad / 2, pad / 2, pad / 2)
+            setBackgroundColor(0xFFFFEBEE.toInt())
+            setTextColor(0xFFC62828.toInt())
+            setOnClickListener { retestChannel() }
+            visibility = View.GONE
+        }
+        col.addView(channelBar)
         for (stage in OnboardingFlow.SKELETON) {
             val tv = TextView(this).apply {
                 textSize = 15f
@@ -161,14 +185,11 @@ class OnboardingActivity : AppCompatActivity() {
                 text = stage.why
             })
             // 每行一律给一个动作按钮；动作内容由阶段机给，这里不猜（F3 现在只有「看启动日志」）。
-            // 次要按钮只挂在阶段机给出的那一行（F4 补齐），主按钮全页至多一个。
+            // 本版阶段机不再产生次要按钮（F4 已折叠成一行欠账文案），主按钮全页至多一个。
             // 「进入工作台」是入口本身，另置一个按钮，未放行时禁用（比点了没反应诚实）。
             val btn = Button(this).apply { visibility = View.GONE }
             stageButtons[stage.id] = btn
             col.addView(btn)
-            val extra = Button(this).apply { visibility = View.GONE }
-            stageExtraButtons[stage.id] = extra
-            col.addView(extra)
             if (stage.id == OnboardingFlow.F3) {
                 enterBtn = Button(this).apply {
                     text = "进入工作台"
@@ -179,6 +200,28 @@ class OnboardingActivity : AppCompatActivity() {
                 col.addView(enterBtn)
             }
         }
+        // 自动流进度：只是一行文案，**不产生按钮**。
+        progressText = TextView(this).apply {
+            textSize = 12f
+            setPadding(0, pad / 2, 0, 0)
+        }
+        col.addView(progressText)
+        // F4 折叠欠账：一行摘要，点开看明细；刻意不是入口动作。
+        debtsText = TextView(this).apply {
+            textSize = 12f
+            setPadding(0, pad / 2, 0, 0)
+            setOnClickListener {
+                debtsDetail?.visibility =
+                    if (debtsDetail?.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            }
+        }
+        col.addView(debtsText)
+        debtsDetail = TextView(this).apply {
+            textSize = 11f
+            setPadding(pad / 2, 0, 0, 0)
+            visibility = View.GONE
+        }
+        col.addView(debtsDetail)
         criteriaText = TextView(this).apply {
             textSize = 11f
             setPadding(0, pad, 0, 0)
@@ -242,24 +285,30 @@ class OnboardingActivity : AppCompatActivity() {
             btn.text = acq?.label ?: ""
             btn.isEnabled = true
             if (acq != null) btn.setOnClickListener { dispatch(s.actionCapId ?: "", acq, btn) }
-            val sec = s.extra
-            val extra = stageExtraButtons[s.id] ?: continue
-            extra.visibility = if (sec == null) View.GONE else View.VISIBLE
-            extra.text = sec?.let { "补：${it.label}" } ?: ""
-            extra.isEnabled = true
-            if (sec != null) extra.setOnClickListener { dispatch(s.extraCapId ?: "", sec, extra) }
         }
+        // 顶部通道状态条：LIVE==false 常驻红条，可点重测。
+        val live = e.channelLive()
+        channelBar?.visibility = if (live) View.GONE else View.VISIBLE
+        channelBar?.text = ChannelStatusText.DOWN
+
         // P0 静默授权冲刺：界面上不出卡，每次采集后把「还该要且本轮没要过」的第一项要掉。
         advanceSprint(e)
+
+        // 配对成功后的自动适配流：**同一前台会话内立即跑**（见 [maybeRunAutoFlow] 的注释）。
+        maybeRunAutoFlow(e)
+        val pendingAuto = pendingAutoIds(e)
+
+        // F4 折叠欠账：只给一行文案，不给按钮。
+        renderDebts(verdicts)
+
         val ready = OnboardingFlow.readyToEnter(verdicts)
+        // 「完成后才 enable」：自动流没跑完之前不放行，避免用户在静默配置中途进面板。
+        // 刻意**不做自动跳转**：产品承诺是「走完出现【进入工作台】」，auto 跳会把刚出现的
+        // 按钮直接吞掉（那会让"走完"看起来像"没走完"）。
+        val enterable = ready && !autoFlowRunning && pendingAuto.isEmpty()
         enterBtn?.visibility = if (ready) View.VISIBLE else View.GONE
-        enterBtn?.isEnabled = ready
-        if (ready && !autoEntered) {
-            autoEntered = true
-            openWorkbench()
-        } else if (!ready) {
-            autoEntered = false
-        }
+        enterBtn?.isEnabled = enterable
+        progressText?.text = autoFlowProgress(e, pendingAuto)
         criteriaText?.text = "判据核对：" +
             PipelineProjection.project(e, verdicts).joinToString("  ") {
                 "${it.id}${segMark(it.status)}${it.detail}"
@@ -283,7 +332,7 @@ class OnboardingActivity : AppCompatActivity() {
         ProbeJournal.append(this, "perm", "P0 冲刺 $capId → ${acq.kind} ${acq.label}")
         // 没发出去（系统页打不开 / 本机压根不要求这一步）就不许占住整条链：
         // 占住的后果不是「少弹一个窗」，而是后面所有授权这一整轮都要不到。
-        // 记入 asked 是故意的 —— 失败也不在同一轮里重试，欠账归 F4 补齐行。
+        // 记入 asked 是故意的 —— 失败也不在同一轮里重试，欠账归配对后的自动流 / 折叠欠账行。
         if (!dispatch(capId, acq, null)) sprintWaiting = false
     }
 
@@ -356,7 +405,8 @@ class OnboardingActivity : AppCompatActivity() {
      *
      * ③ 冻结 P0 冲刺一段时间：用户此刻在系统的「无线调试」页里输码，从他手上那个页面回到
      * 本界面的那一帧，旧实现会立刻把下一个授权页甩到他脸上（真机定罪「回到界面一堆乱七八糟」）。
-     * 冻结是有上限的（到期自动解冻），不是一条需要谁来解的锁 —— 配对期间的欠账由 F4 补齐行接着要。
+     * 冻结是有上限的（到期自动解冻），不是一条需要谁来解的锁 —— 配对期间的欠账由配对后的
+     * 自动适配流接着办，办不成才落进折叠欠账行。
      */
     private fun startPairing() {
         AdbChannelProbe.invalidate()
@@ -431,6 +481,88 @@ class OnboardingActivity : AppCompatActivity() {
                 refreshSoon()
             }
         }.apply { isDaemon = true }.start()
+    }
+
+    /**
+     * 通道条点击：作废缓存并重测（动作取登记表的取法链首项，不自拼命令）。
+     */
+    private fun retestChannel() {
+        AdbChannelProbe.invalidate()
+        val e = lastEvidence ?: Evidence()
+        val acq = CapabilityCatalog.byId(CapabilityCatalog.ADB_CHANNEL)
+            ?.acquirer?.invoke(e)?.firstOrNull()
+        if (acq == null) {
+            refreshSoon()
+            return
+        }
+        toast("正在重测 ADB 通道…")
+        dispatch(CapabilityCatalog.ADB_CHANNEL, acq, null)
+    }
+
+    /**
+     * 配对成功后的自动适配流。
+     *
+     * **必须在本前台会话内立即跑**：配对期间 [PairingProbeService] 的前台服务还活着，
+     * 进程不可能已经被 HANS 冻/杀；一旦改成「后台定时唤醒」，锚没绑 → :main 被清理 →
+     * 那条唤醒永远等不到，就掉回「静默通道永远等不到」的循环依赖。
+     *
+     * 凭据在册那一帧探针可能还没 LIVE（plan 里只有 DO），等通道 LIVE 后 plan 变长，
+     * 下一次 render 再补跑剩下的 —— [autoFlowAttempted] 保证同一项不重复下发（幂等、可重入）。
+     */
+    private fun maybeRunAutoFlow(e: Evidence) {
+        if (!resumed || autoFlowRunning) return
+        val ids = pendingAutoIds(e)
+        if (ids.isEmpty()) return
+        autoFlowRunning = true
+        autoFlowAttempted += ids
+        ProbeJournal.append(this, "autoflow", "自动适配流启动：" + ids.joinToString())
+        Thread {
+            val ctx = applicationContext
+            val steps = runCatching { CapabilityAcquisitionRunner.runAutoFlow(ctx, ids) }
+                .getOrNull().orEmpty()
+            val summary = steps.joinToString("；") {
+                CapabilityCatalog.titleOf(it.capId) + "=" + (if (it.ok) "OK" else "未成")
+            }
+            handler.post {
+                autoFlowRunning = false
+                autoFlowNotice = if (summary.isBlank()) "自动适配流无结论" else "自动适配流：" + summary
+                ProbeJournal.append(ctx, "autoflow", autoFlowNotice)
+                refreshSoon()
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
+    /** 自动流适用时的完整 plan；未就绪时返回空（视为「不该跑」，不挡入口）。 */
+    private fun autoFlowIds(e: Evidence): List<String> =
+        if (PostPairingAutoFlow.ready(e)) PostPairingAutoFlow.plan(e) else emptyList()
+
+    /** plan 减去本次会话已尝试过的项 = 还欠的静默项。 */
+    private fun pendingAutoIds(e: Evidence): List<String> =
+        autoFlowIds(e).filter { it !in autoFlowAttempted }
+
+    /** 自动流进度：一行文案（不产生按钮）。 */
+    private fun autoFlowProgress(e: Evidence, pending: List<String>): String {
+        if (!PostPairingAutoFlow.ready(e)) return ""
+        if (autoFlowRunning) return "自动配置中：正在静默完成剩余授权…"
+        if (pending.isNotEmpty()) return "自动配置待续：还欠 ${pending.size} 项，通道一就绪就接着办"
+        if (autoFlowNotice.isNotBlank()) return autoFlowNotice
+        return if (autoFlowAttempted.isEmpty()) "" else "自动配置已完成：${autoFlowAttempted.size} 项"
+    }
+
+    /**
+     * F4 折叠欠账：一行摘要 + 点开明细。刻意**不给按钮** —— 静默能办的由自动流办，
+     * 剩下的欠账不挡入口，进面板后各功能自行降级提示（避免又长出一排授权按钮）。
+     */
+    private fun renderDebts(verdicts: Map<String, CapVerdict>) {
+        val debts = OnboardingFlow.debts(verdicts)
+        debtsText?.text = if (debts.isEmpty()) {
+            "欠账（不挡入口）：无"
+        } else {
+            "欠账（不挡入口）：${debts.size} 项 · 点此展开"
+        }
+        debtsDetail?.text = debts.joinToString("\n") {
+            "· " + it.title + "：" + (verdicts[it.id]?.detail ?: "")
+        }
     }
 
     /** 控制面板 / 灾难兜底诊断页同帧（MainActivity）：入口绿是面板，S3 红时它是唯一证据出口。 */
