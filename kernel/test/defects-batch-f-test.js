@@ -54,7 +54,7 @@ console.log('== K9 版本解析正则 ==');
 // ── K10 卸载失败保留 manifest ──
 console.log('== K10 卸载失败时保留 manifest ==');
 {
-  const p = path.join(ROOT, 'src', 'guard', 'native', 'manager.js');
+  const p = path.join(ROOT, 'src', 'assembler', 'manager.js');
   const src = fs.readFileSync(p, 'utf8');
   // 找出 uninstall 相关块：rm(this.manifestFile) 必须**在成功分支内**
   const idx = src.indexOf('npm uninstall exit');

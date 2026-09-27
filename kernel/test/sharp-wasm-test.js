@@ -12,7 +12,7 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined ? '  <- ' + x : '')); };
 
 const ROOT = path.join(__dirname, '..');
-const { ensureSharpWasm, PKG } = require(path.join(ROOT, 'src', 'guard', 'native', 'sharp-wasm'));
+const { ensureSharpWasm, PKG } = require(path.join(ROOT, 'src', 'assembler', 'sharp-wasm'));
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'sharp-wasm-test-'));
 
 // 假 npm：把包写进 --prefix 指向的目录

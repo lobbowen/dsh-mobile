@@ -32,8 +32,8 @@ const ROOT = path.join(__dirname, '..');
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
-const src = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'native', 'manager.js'), 'utf8');
-const { NativeManager } = require(path.join(ROOT, 'src', 'guard', 'native', 'manager.js'));
+const src = fs.readFileSync(path.join(ROOT, 'src', 'assembler', 'manager.js'), 'utf8');
+const { NativeManager } = require(path.join(ROOT, 'src', 'assembler', 'manager.js'));
 
 const bodyOf = (name) => {
   const m = src.match(new RegExp('async ' + name + '\\([^)]*\\) \\{[\\s\\S]*?\\n  \\}'));

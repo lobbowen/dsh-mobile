@@ -18,7 +18,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'narb-shim-'));
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined ? '  ← ' + x : '')); };
 
-const shimMod = require(path.join(ROOT, 'src', 'guard', 'native', 'require-builtin-shim'));
+const shimMod = require(path.join(ROOT, 'src', 'assembler', 'require-builtin-shim'));
 const SHIM_MARKER = 'dsh-android-kernel:narb-js-shim:v1';
 
 const THROWS = 'throw new Error("No usable native binding found (simulated)")';
@@ -67,7 +67,7 @@ function probeNative(entry) {
   check('S2 原生绑定可加载：逐字委派零损伤（无需 flag）', probeNative(natMain) === 'R:NATIVE:whatever', probeNative(natMain));
 
   // ── S3 NativeManager.ensureRequireBuiltinShim：契约门控 + 结局可见 ──
-  const { NativeManager } = require(path.join(ROOT, 'src', 'guard', 'native', 'manager.js'));
+  const { NativeManager } = require(path.join(ROOT, 'src', 'assembler', 'manager.js'));
   const runtimeContract = require(path.join(ROOT, 'src', 'platform', 'runtime-contract'));
   const events3 = [];
   const nmConfig = { command: ['node', 'dsh', 'web'], packageName: '@deepseek-ai/dsh', targetPort: 3080 };
@@ -98,7 +98,7 @@ function probeNative(entry) {
   // 再由 native-supply-gate 与 manager 双向对账）。本判据钉的是**运行时真跑到了**：
   // ensureNativeUnits 是 spawn 前唯一入口，漏一格就是能力静默消失。
   check('S3 ensureNativeUnits 收口全部供给单元（与表逐一对应，不分先后）', (() => {
-    const table = require(path.join(ROOT, 'src', 'guard', 'native', 'supply-table.json'));
+    const table = require(path.join(ROOT, 'src', 'assembler', 'supply-table.json'));
     const want = table.units.filter((u) => u.disposition === 'supplied-by-us').map((u) => u.id);
     const got = Object.keys(nm.ensureNativeUnits(root3));
     return want.length > 0 && want.length === got.length && want.every((k) => got.includes(k));

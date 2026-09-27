@@ -13,7 +13,7 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined ? '  <- ' + x : '')); };
 
 const ROOT = path.join(__dirname, '..');
-const { ensureNodePtyPrebuild } = require(path.join(ROOT, 'src', 'guard', 'native', 'node-pty-prebuild'));
+const { ensureNodePtyPrebuild } = require(path.join(ROOT, 'src', 'assembler', 'node-pty-prebuild'));
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'pty-pre-'));
 
 const dshDir = path.join(TMP, 'dsh');

@@ -19,7 +19,7 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x ? '  ← ' + x : '')); };
 
 (async () => {
-  const { NativeManager } = require(path.join(ROOT, 'src', 'guard', 'native', 'manager'));
+  const { NativeManager } = require(path.join(ROOT, 'src', 'assembler', 'manager'));
   const npmRoot = path.join(TMP, 'npm-root');
   fs.mkdirSync(npmRoot, { recursive: true });
 

@@ -25,7 +25,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 
 const ROOT = path.join(__dirname, '..');
 const REPO_ROOT = path.join(ROOT, '..');
-const NATIVE_DIR = path.join(ROOT, 'src', 'guard', 'native');
+const NATIVE_DIR = path.join(ROOT, 'src', 'assembler');
 const TABLE_PATH = path.join(NATIVE_DIR, 'supply-table.json');
 const REGISTRY = 'https://registry.npmjs.org';
 const NPM_TIMEOUT_MS = 300000;

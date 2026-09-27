@@ -16,7 +16,7 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 // workflow 只能经 _workflow 读（行尾归一化），裸 readFileSync 由 workflow-parse W4 判红。
 const W = require(path.join(__dirname, '_workflow.js'));
-const { PKG, ensureRipgrepPackage } = require(path.join(ROOT, 'src', 'guard', 'native', 'ripgrep-package'));
+const { PKG, ensureRipgrepPackage } = require(path.join(ROOT, 'src', 'assembler', 'ripgrep-package'));
 
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined ? '  ← ' + x : '')); };
@@ -85,7 +85,7 @@ check('链接位被普通文件占据 -> 重投为符号链接', (() => {
 // 读不到配方/解析不出版本一律 FAIL —— 那样这条判据就是在空转，等于没装锁。
 // 取实现源码里的常量而非落盘产物：静态对账，不依赖上面那次投放跑没跑成。
 try {
-  const impl = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'native', 'ripgrep-package.js'), 'utf8');
+  const impl = fs.readFileSync(path.join(ROOT, 'src', 'assembler', 'ripgrep-package.js'), 'utf8');
   const bridgeVer = (/version:\s*'(\d[\d.]+)'/.exec(impl) || [])[1] || null;
   const sh = fs.readFileSync(path.join(ROOT, '..', 'scripts', 'build-native-capabilities.sh'), 'utf8');
   const cargoVer = (/cargo install[^\n]*--version\s+([\d.]+)[^\n]*\bripgrep\b/.exec(sh) || [])[1] || null;

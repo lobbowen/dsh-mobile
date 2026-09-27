@@ -23,7 +23,7 @@ const os = require('node:os');
 const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 
-const { NativeManager } = require(path.join(ROOT, 'src', 'guard', 'native', 'manager.js'));
+const { NativeManager } = require(path.join(ROOT, 'src', 'assembler', 'manager.js'));
 
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };

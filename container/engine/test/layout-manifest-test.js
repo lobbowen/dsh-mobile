@@ -106,7 +106,7 @@ try {
     if (head.indexOf('kernel/src/d2') < 0) add('D2-INVENTORY', '.github/native-assets.txt 的来源不是 D2 唯一处');
   }
   // 规则 5：环境目录单一来源
-  const stPath = path.join(ROOT, 'kernel', 'src', 'guard', 'native', 'supply-table.json');
+  const stPath = path.join(ROOT, 'kernel', 'src', 'assembler', 'supply-table.json');
   const envUnits = fs.existsSync(stPath) ? (JSON.parse(readSafe(stPath)).envUnits || []) : [];
   if (ex('kernel/src/platform/env-catalog.js') && envUnits.length > 0) add('ENV-CATALOG', 'env-catalog.js 与 supply-table#envUnits 同时在场');
   // 规则 6：CI 工具不得住在 L0 车辆里（L0 目录里不该有构建 CLI）

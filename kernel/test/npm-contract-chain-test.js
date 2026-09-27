@@ -62,7 +62,7 @@ fs.writeFileSync(path.join(SUP, 'runtime.json'), JSON.stringify({
 const reads = (f) => { try { return fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 const loggerStub = { info() {}, warn() {}, error() {} };
 const distMod = require(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'));
-const { NativeManager } = require(path.join(ROOT, 'src', 'guard', 'native', 'manager.js'));
+const { NativeManager } = require(path.join(ROOT, 'src', 'assembler', 'manager.js'));
 const { PluginManager } = require(path.join(ROOT, 'src', 'domains', 'plugin', 'plugins.js'));
 
 async function main() {

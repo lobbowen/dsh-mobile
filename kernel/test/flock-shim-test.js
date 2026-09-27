@@ -20,7 +20,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'flock-shim-'));
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined ? '  ← ' + x : '')); }
 
-const shimMod = require(path.join(ROOT, 'src', 'guard', 'native', 'flock-shim'));
+const shimMod = require(path.join(ROOT, 'src', 'assembler', 'flock-shim'));
 const SHIM_MARKER = 'dsh-android-kernel:flock-native-shim:v1';
 
 // vendor @deepseek-ai/node-addon-system@0.1.2 lib/flock.js 逐字副本（真机报错源），
@@ -96,7 +96,7 @@ function probe(entry, env) {
   check('F2 绑定缺 tryLock → 视为不可用（不误吞）', probe(entry2, { DSH_FLOCK_NATIVE: badBind }) === 'RESOLVED:ORIGINAL_CALLED:7', probe(entry2, { DSH_FLOCK_NATIVE: badBind }));
 
   // ── F3 NativeManager.ensureFlockShim：契约 × DSH_FLOCK_NATIVE 双重门控 + 结局可见 ──
-  const { NativeManager } = require(path.join(ROOT, 'src', 'guard', 'native', 'manager.js'));
+  const { NativeManager } = require(path.join(ROOT, 'src', 'assembler', 'manager.js'));
   const runtimeContract = require(path.join(ROOT, 'src', 'platform', 'runtime-contract'));
   const events3 = [];
   const nm = new NativeManager({ config: { command: ['node', 'dsh', 'web'], packageName: '@deepseek-ai/dsh', targetPort: 3080 }, logger: { info() {}, warn() {}, error() {} }, events: { append: (n, d) => events3.push({ n, d }) }, stateDir: path.join(TMP, 'state3'), npmRoot: root1 });

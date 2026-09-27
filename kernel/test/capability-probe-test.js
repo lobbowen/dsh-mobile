@@ -20,7 +20,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
-const NATIVE_DIR = path.join(ROOT, 'src', 'guard', 'native');
+const NATIVE_DIR = path.join(ROOT, 'src', 'assembler');
 const probe = require(path.join(NATIVE_DIR, 'capability-probe'));
 const { PASS, PROBE_TIMEOUT_MS, probeUnit, probeUnits, overall } = probe;
 

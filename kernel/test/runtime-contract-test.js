@@ -121,7 +121,7 @@ check('R-6 契约 schema 版本 = 2（与壳 handshake）', rc.SUPPORTED_SCHEMA 
 const dist = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'), 'utf8');
 check('R-4 dist/index.js 用契约解析 npm', /runtimeContract\.npmInvocation\(/.test(dist), 'ok');
 check('R-4 dist/index.js 用契约注入环境（PATH/prefix）', /runtimeContract\.(withPath|npmEnv)\(/.test(dist), 'ok');
-const nm = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'native', 'manager.js'), 'utf8');
+const nm = fs.readFileSync(path.join(ROOT, 'src', 'assembler', 'manager.js'), 'utf8');
 check('R-4 manager.js 用契约解析 npm', /runtimeContract\.npmInvocation\(/.test(nm), 'ok');
 check('R-4 manager.js node 探测走契约', /runtimeContract\.nodeBin\(/.test(nm), 'ok');
 // 投放单元的 $PREFIX 只能来自契约：read() 在场 = _unitContext 走的是 runtime.json，
