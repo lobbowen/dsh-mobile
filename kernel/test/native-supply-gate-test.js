@@ -24,13 +24,7 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
 const ROOT = path.join(__dirname, '..');
-
-/** impl 路径解析：内核内相对优先，其次仓内相对（C 的实现在 APK 侧，不在内核里）。 */
-function implPath(u) {
-  const inKernel = path.join(ROOT, u.impl);
-  if (fs.existsSync(inKernel)) return inKernel;
-  return path.join(ROOT, '..', u.impl);
-}const REPO_ROOT = path.join(ROOT, '..');
+const REPO_ROOT = path.join(ROOT, '..');
 const NATIVE_DIR = path.join(ROOT, 'src', 'assembler');
 const TABLE_PATH = path.join(NATIVE_DIR, 'supply-table.json');
 const REGISTRY = 'https://registry.npmjs.org';
@@ -127,7 +121,7 @@ if (table) {
 
   for (const u of units) {
     check('处置须写明为什么: ' + u.id, typeof u.why === 'string' && u.why.length >= 20);    if (u.disposition === 'supplied-by-us') {
-      check('投放实现文件在场: ' + u.id, !!u.impl && fs.existsSync(implPath(u)), u.impl || '（缺 impl）');
+      check('投放实现文件在场: ' + u.id, !!u.impl && fs.existsSync(path.join(ROOT, u.impl)), u.impl || '（缺 impl）');
     }
     if (u.disposition === 'npm-auto') {
       check('npm-auto 须写明证据: ' + u.id, typeof u.evidence === 'string' && u.evidence.length >= 20);
@@ -333,7 +327,7 @@ check('C 层须写明归属层（seed=B种子 / shared=C共享 / d1=Linux语义 
         crit ? 'ok' : 'scripts/userland-verify.json 里没有 ' + toolName);
     }
     if (u.disposition === 'supplied-by-us') {
-      check('C 层供给件须有在场 impl: ' + u.id, !!u.impl && fs.existsSync(implPath(u)), u.impl || '（缺 impl）');
+      check('C 层供给件须有在场 impl: ' + u.id, !!u.impl && fs.existsSync(path.join(ROOT, u.impl)), u.impl || '（缺 impl）');
       check('C 层供给件不得免检: ' + u.id, !v.notApplicable, 'supplied-by-us 却给 notApplicable');
     }
     if (u.disposition === 'runtime-check') {
@@ -351,10 +345,7 @@ check('C 层须写明归属层（seed=B种子 / shared=C共享 / d1=Linux语义 
   check('对照组：语法检查能命中坏文件',
     (() => { try { new vm.Script('function {'); return false; } catch (e) { return true; } })());
   for (const impl of [...new Set(envUnits.map((u) => u.impl).filter(Boolean))]) {
-    // 实现已搬到 APK 侧且是 **Kotlin/Android 原生** —— JS 语法解析对它无意义，直接跳过。
-    //   不是「放过」：在场性由 implPath() 判、形状由供给表门禁判；只有 JS 判据才需要 vm 解析。
-    if (!String(impl).endsWith('.js')) continue;
-    const p = implPath({ impl });
+    const p = path.join(ROOT, impl);
     let parseErr = null;
     try { new vm.Script(fs.readFileSync(p, 'utf8'), { filename: impl }); } catch (e) { parseErr = e.message; }
     check('C 层供给实现语法可解析: ' + impl, !parseErr, parseErr || '');
