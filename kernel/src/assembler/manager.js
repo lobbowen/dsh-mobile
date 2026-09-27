@@ -455,7 +455,11 @@ class NativeManager {
     res.at = new Date().toISOString();
     const prev = this.nativeCaps;
     this.nativeCaps = res;
-    if (!prev || prev.overall !== res.overall) {
+    // 事件条件必须是「**任一格结论变了**」，不能只看 overall —— 真机定罪（2026-09-28，kernel .40）：
+    //   投放前那一拍与投放后那一拍 overall 都是 false（都因 env-python3 红），
+    //   于是投放后判据由「清单尚未取回」变成真结论时**一行事件都不写** ⇒ 面板永远停在旧读数。
+    const sig = (r) => Object.keys(r.units || {}).sort().map((k) => k + '=' + String(r.units[k].ok)).join(',');
+    if (!prev || prev.overall !== res.overall || sig(prev) !== sig(res)) {
       if (this.events) {
         const failed = Object.keys(res.units).filter((k) => res.units[k].ok === false);
         const unknown = Object.keys(res.units).filter((k) => res.units[k].ok === null);

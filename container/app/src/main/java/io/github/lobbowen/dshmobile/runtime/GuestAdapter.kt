@@ -118,6 +118,12 @@ object GuestAdapter {
             // 互相覆盖，哪侧生效全凭运气。注意：boot-env-contract 门禁会连注释一起按
             // 正则计数本文件的 PATH 装配字面量，注释里不要再写这类字面量。
             put("PATH", joinPath(i.prefixBin.absolutePath, i.base.nodeBin.parentFile!!.absolutePath, inheritedPath))
+                // https 的信任根：安卓系统 CA 的落点**随版本变**（API 34+ 起在 conscrypt APEX）。
+                // 只传当前存在的那几个目录（OpenSSL 的 SSL_CERT_DIR 接受冒号列表）——
+                // 写死单个路径必有一头 TLS 全灭（真机实测 API 37：git https 报 unable to get local issuer）。
+                val caDirs = listOf("/apex/com.android.conscrypt/cacerts", "/system/etc/security/cacerts", "/data/misc/keychain/cacerts-added")
+                    .filter { java.io.File(it).isDirectory }
+                if (caDirs.isNotEmpty()) put("SSL_CERT_DIR", caDirs.joinToString(":"))
             put("SHELL", i.bashBin?.absolutePath ?: "/system/bin/sh")
             i.npmEntry?.let { put("DSH_NPM_ENTRY", it.absolutePath) }
             // D1 Linux 语义：安卓取不到 cpu 信息（os.cpus() 空），由预载垫片在**空**时用
