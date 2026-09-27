@@ -18,6 +18,28 @@ static int raw_openat(int dirfd, const char *path, int flags, mode_t mode) {
     return (int)syscall(__NR_openat, dirfd, path, flags, mode);
 }
 
+// D1：/tmp 语义兑现。安卓根文件系统只读、SELinux 也不给 app 在 / 下建目录，
+// 硬编码 /tmp 的脚本（Linux 习惯）必然失败。这里在 open/openat 上把 /tmp 前缀
+// 重写到 $TMPDIR —— 只改前缀、只动 /tmp，其余路径与语义一律不变。
+// 开关：DSH_TMP_REDIRECT=1 时生效（缺省不生效）；TMPDIR 缺失/非绝对路径时不生效。
+// 判据（设备端探针 tmp-redirect）：写 "/tmp/<name>" 后能在 $TMPDIR/<name> 读回。
+static const char *tmp_redirect(const char *path, char *buf, size_t bufsz) {
+    if (path == 0 || path[0] != '/') return path;
+    const char *on = getenv("DSH_TMP_REDIRECT");
+    if (on == 0 || on[0] != '1') return path;
+    if (strncmp(path, "/tmp", 4) != 0) return path;
+    if (path[4] != '/' && path[4] != '\0') return path; /* 排除 /tmpfoo */
+    const char *tmp = getenv("TMPDIR");
+    if (tmp == 0 || tmp[0] != '/') return path;
+    size_t tl = strlen(tmp);
+    while (tl > 1 && tmp[tl - 1] == '/') tl--;
+    size_t rest = strlen(path + 4); /* "/..." 或 "" */
+    if (tl + rest >= bufsz) return path;
+    memcpy(buf, tmp, tl);
+    memcpy(buf + tl, path + 4, rest + 1);
+    return buf;
+}
+
 // 仅在 path 是 $HOME 的祖先（含 "/"）且本身确为目录时替换，避免影响其它 EACCES。
 static int substitute_dir_fd(const char *path) {
     if (path == 0 || path[0] != '/') return -1;
@@ -44,9 +66,11 @@ int open(const char *path, int flags, ...) {
         mode = (mode_t)va_arg(ap, int);
         va_end(ap);
     }
-    int fd = raw_openat(AT_FDCWD, path, flags, mode);
+    char rb[PATH_MAX];
+    const char *p = tmp_redirect(path, rb, sizeof rb);
+    int fd = raw_openat(AT_FDCWD, p, flags, mode);
     if (fd >= 0 || errno != EACCES) return fd;
-    return substitute_dir_fd(path);
+    return substitute_dir_fd(p);
 }
 
 int openat(int dirfd, const char *path, int flags, ...) {
@@ -57,8 +81,10 @@ int openat(int dirfd, const char *path, int flags, ...) {
         mode = (mode_t)va_arg(ap, int);
         va_end(ap);
     }
-    int fd = raw_openat(dirfd, path, flags, mode);
+    char rb[PATH_MAX];
+    const char *p = tmp_redirect(path, rb, sizeof rb);
+    int fd = raw_openat(dirfd, p, flags, mode);
     if (fd >= 0 || errno != EACCES) return fd;
-    if (dirfd == AT_FDCWD) return substitute_dir_fd(path);
+    if (dirfd == AT_FDCWD) return substitute_dir_fd(p);
     return fd;
 }

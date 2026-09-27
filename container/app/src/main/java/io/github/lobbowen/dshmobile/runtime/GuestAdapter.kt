@@ -107,6 +107,10 @@ object GuestAdapter {
             put("DSH_FLOCK_NATIVE", i.flockNative.absolutePath)
             // link(2) 用户态替代：经 LD_PRELOAD 注入 DSH 进程，见 native/posix/。
             put("LD_PRELOAD", i.posixShim.absolutePath)
+            // D1：/tmp 语义兑现 —— 安卓根只读，硬编码 /tmp 的脚本必失败；libdshposix 的
+            // open/openat 把 /tmp 前缀重写到 $TMPDIR（见 container/native/posix/open-fallback.c）。
+            // 显式声明的开关：值为 0 即关闭（逃生阀）。
+            put("DSH_TMP_REDIRECT", "1")
             // $PREFIX：nativeLibraryDir 的原生件在这里以**真名**落地（bash/rg 是复制，
             // node 是指向 libnode.so 的链接 —— 判据见 PrefixProvisioner.linkNode），
             // 供 DSH 按名字解析，不改 DSH 内部路径（ADR-0001）。

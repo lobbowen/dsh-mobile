@@ -75,15 +75,15 @@ locale 空、os.cpus() 返回 0、/tmp 不可写）。逐条修会修成"补丁"
 |---|---|
 | B | 既有（PrefixProvisioner / GuestAdapter / runtime.json） |
 | C | pnpm：`kernel/src/platform/toolchain.js` 物化到共享 $PREFIX（首用即装，自写 sh 入口）；git/python3/jq/sqlite3 在 `supply-table.json` 的 `envUnits` 登记为到期即红的豁免 |
-| D1 | `LANG=C.UTF-8`（`GuestAdapter.baseEnv`）；/tmp 与 os.cpus 为**欠账**，见 §6 |
+| D1 | `LANG=C.UTF-8`；`/tmp`→`$TMPDIR` 前缀重写（`container/native/posix/open-fallback.c` + 开关 `DSH_TMP_REDIRECT`）；`os.cpus()` 预载垫片（`assets/node/android-env-shim.cjs` + `NODE_OPTIONS`） |
 | D2 | `kernel/src/guard/native/platform-artifacts.js`（工件唯一解析处，只读无副作用） |
 | E | `manager.js` 经 D2 解析工件；供给表 `envUnits`/`units` 双向对账由 `native-supply-gate-test.js` 把守 |
 | F | `adapters/dsh/agent.json` 的 `android.launchFlags`（`--expose-internals` 三处消费者同源） |
 
 ## 6. 明确不做 / 欠账
 
-- **/tmp 重定向不在本 ADR 落地**：TMPDIR 已是单一事实源，改写路径属高爆破半径，
-  需单独开关与门禁；在此之前，脚本纪律 = 一律用 `$TMPDIR`。
-- **os.cpus() 垫片未落**：DSH 自身已用 `availableParallelism()`；全局改写 `os.cpus`
-  会影响所有依赖，收益与风险需要单独评估。
+- **/tmp 重写已落，边界明确**：只重写 `/tmp` 前缀（`/tmpfoo` 这类不动），且受开关
+  `DSH_TMP_REDIRECT` 控制（容器显式置 1；置 0 即逃生阀）。`TMPDIR` 仍是单一事实源。
+- **os.cpus() 垫片已落**：只在 `os.cpus()` 为空时用 `availableParallelism()` 合成，
+  非空一律不动；整段 try/catch，绝不成为启动失败点。
 - **不承诺每个产品一套机制**：产品只给声明（见 §3）。

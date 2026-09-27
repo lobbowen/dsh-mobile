@@ -1,6 +1,9 @@
 {
   "schemaVersion": 1,
-  "host": { "os": "android", "cpu": "arm64" },
+  "host": {
+    "os": "android",
+    "cpu": "arm64"
+  },
   "reference": {
     "os": "linux",
     "cpu": "x64",
@@ -47,7 +50,9 @@
       "capability": "dsh 启动链 require 内核模块",
       "disposition": "supplied-by-us",
       "impl": "src/guard/native/require-builtin-shim.js",
-      "hostExcludes": ["node-addon-require-builtin-linux-x64-gnu"],
+      "hostExcludes": [
+        "node-addon-require-builtin-linux-x64-gnu"
+      ],
       "verify": {
         "criterion": "以 dsh 站的同一个位置（cwd=Agent 包目录）require 出 NARB，并用它真取回一个模块的 API",
         "node": "const m=require('node-addon-require-builtin'); if(typeof m.requireBuiltin!=='function') throw new Error('入口没导出 requireBuiltin'); const mod=m.requireBuiltin('module'); if(!mod||typeof mod.createRequire!=='function') throw new Error('requireBuiltin(module) 没给回可用的 module API'); process.stdout.write('DSH_PROBE_PASS')"
@@ -59,7 +64,9 @@
       "capability": "bash 沙箱/会话持久化所需 flock(2)",
       "disposition": "supplied-by-us",
       "impl": "src/guard/native/flock-shim.js",
-      "hostExcludes": ["@deepseek-ai/node-addon-system-linux-x64"],
+      "hostExcludes": [
+        "@deepseek-ai/node-addon-system-linux-x64"
+      ],
       "verify": {
         "criterion": "APK 里那份原生桥真能 dlopen、导出 tryLock，并对一个真 fd 加上锁（垫片与探针问的是同一个入口，判据不会各说各话）",
         "node": "const fs=require('node:fs'); const p=process.env.DSH_FLOCK_NATIVE; if(!p) throw new Error('容器未递 DSH_FLOCK_NATIVE'); const mod={exports:{}}; process.dlopen(mod,p); if(!mod.exports||typeof mod.exports.tryLock!=='function') throw new Error('原生桥没导出 tryLock'); const fd=fs.openSync(process.execPath,'r'); mod.exports.tryLock(fd,(errno)=>{ fs.closeSync(fd); if(errno!==0) throw new Error('flock(2) 返回 errno='+errno); process.stdout.write('DSH_PROBE_PASS') });"
@@ -71,7 +78,9 @@
       "capability": "glob / grep 搜索",
       "disposition": "supplied-by-us",
       "impl": "src/guard/native/ripgrep-package.js",
-      "hostExcludes": ["@vscode/ripgrep-linux-x64"],
+      "hostExcludes": [
+        "@vscode/ripgrep-linux-x64"
+      ],
       "verify": {
         "criterion": "require.resolve 得出来（与 dsh-tool-fs-search 同一条解析式）**且**那份 rg 真被 exec 起来、--version 退 0",
         "node": "const cp=require('node:child_process'); const rg=require.resolve('@vscode/ripgrep-android-arm64/bin/rg'); const out=cp.execFileSync(rg,['--version'],{encoding:'utf8'}); const head=String(out).split('\\n')[0].trim(); if(!/ripgrep\\s+\\d/.test(head)) throw new Error('--version 首行不像 ripgrep：'+head); process.stdout.write('DSH_PROBE_PASS '+head+' <- '+rg)"
@@ -83,7 +92,10 @@
       "capability": "图片附件处理",
       "disposition": "supplied-by-us",
       "impl": "src/guard/native/sharp-wasm.js",
-      "hostExcludes": ["@img/sharp-linux-x64", "@img/sharp-libvips-linux-x64"],
+      "hostExcludes": [
+        "@img/sharp-linux-x64",
+        "@img/sharp-libvips-linux-x64"
+      ],
       "verify": {
         "criterion": "require('sharp') 不抛、sharp.versions.vips 有值，并真的把一张 8x8 图编成 PNG 字节 —— 件在树里不算数（真机 2026-09-26 就是这么被糊的）",
         "node": "const sharp=require('sharp'); const v=sharp.versions||{}; if(!v.vips) throw new Error('sharp 加载了但 versions.vips 为空 = 绑定没进来'); sharp({create:{width:8,height:8,channels:3,background:{r:1,g:2,b:3}}}).png().toBuffer().then((b)=>{ if(!b||b.length<8) throw new Error('PNG 输出异常：'+(b&&b.length)); process.stdout.write('DSH_PROBE_PASS vips='+v.vips+' bytes='+b.length); },(e)=>{ process.stderr.write(String((e&&e.message)||e)); process.exit(1); });"
@@ -98,7 +110,11 @@
       "hostExcludes": [],
       "verify": {
         "criterion": "require('node-pty') 起一个真 PTY、跑一条命令并读到退出码",
-        "deferred": { "followUp": "P-T 终端批次", "verifiedAt": "2026-09-26", "expiresAt": "2026-10-26" }
+        "deferred": {
+          "followUp": "P-T 终端批次",
+          "verifiedAt": "2026-09-26",
+          "expiresAt": "2026-10-26"
+        }
       },
       "deferredWhy": "用户 2026-09-26 拍板「终端能力先方后」：node-pty 的投放验收与 dlopen 探针随终端批次一起做。挂起不等于判据消失 —— 这一格在面板上恒读「未知」，不许因为没探针就显示成正常。",
       "why": "node-pty 包本身能装上，缺的是 prebuilds/android-arm64/pty.node —— 闭包 diff 看不见这类缺口，只能靠本表显式登记"
@@ -107,28 +123,50 @@
       "id": "koffi-ffi",
       "capability": "FFI（dsh 仅在 win32 分支调用）",
       "disposition": "npm-auto",
-      "hostExcludes": ["@koromix/koffi-linux-x64"],
-      "deviceInstalls": ["@koromix/koffi-android-arm64"],
+      "hostExcludes": [
+        "@koromix/koffi-linux-x64"
+      ],
+      "deviceInstalls": [
+        "@koromix/koffi-android-arm64"
+      ],
       "evidence": "上游发了 android-arm64 变体且被检计划确实装了它（这一条由本门禁的 deviceInstalls 差集当场证伪）；readelf 实测其 koffi.node NEEDED 只有 libm/libdl/libc，带 napi_register_module_v1。dsh 侧全部 koffi 调用点都在 process.platform === 'win32' 分支内，android 永不触达",
-      "verify": { "notApplicable": "调用点全在 win32 分支，android 永不触达：验它等于验一个用不到的能力，占了格子反而掩盖真缺口" },
+      "verify": {
+        "notApplicable": "调用点全在 win32 分支，android 永不触达：验它等于验一个用不到的能力，占了格子反而掩盖真缺口"
+      },
       "why": "上游有 android 变体且会被自动安装，且调用点 android 永不触达，故无需供给动作"
     },
     {
       "id": "sherpa-speech",
       "capability": "SenseVoice 语音转文字",
       "disposition": "waived",
-      "waiver": { "followUp": "P-C", "verifiedAt": "2026-09-26", "expiresAt": "2026-10-26" },
-      "hostExcludes": ["sherpa-onnx-linux-x64"],
-      "verify": { "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力，写成待做反而伪造出一个不存在的判定" },
+      "waiver": {
+        "followUp": "P-C",
+        "verifiedAt": "2026-09-26",
+        "expiresAt": "2026-10-26"
+      },
+      "hostExcludes": [
+        "sherpa-onnx-linux-x64"
+      ],
+      "verify": {
+        "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力，写成待做反而伪造出一个不存在的判定"
+      },
       "why": "上游只发 darwin/linux/win 六个变体。sherpa-onnx-node 的 loader 候选路径含 node_modules/sherpa-onnx-android-arm64/sherpa-onnx.node，故自建 addon 即可命中，无需改第三方字节；模型不在供给范围（dsh 按 runtime/assets.json 的 sha256 自行下载，int8 约 228MB）"
     },
     {
       "id": "libreoffice-doc",
       "capability": "Office 文档转换",
       "disposition": "waived",
-      "waiver": { "followUp": "P-B", "verifiedAt": "2026-09-26", "expiresAt": "2026-10-26" },
-      "hostExcludes": ["@deepseek-ai/libreoffice-kit-wasm"],
-      "verify": { "notApplicable": "缺口已豁免（见 waiver），且真正的门是上游 host 白名单：白名单不放行，验什么都还是不可用" },
+      "waiver": {
+        "followUp": "P-B",
+        "verifiedAt": "2026-09-26",
+        "expiresAt": "2026-10-26"
+      },
+      "hostExcludes": [
+        "@deepseek-ai/libreoffice-kit-wasm"
+      ],
+      "verify": {
+        "notApplicable": "缺口已豁免（见 waiver），且真正的门是上游 host 白名单：白名单不放行，验什么都还是不可用"
+      },
       "why": "引擎包存在且是 wasm（与宿主 CPU 无关，走 node Web Worker 实例化，不 execve），npm 只因 os:[\"linux\"] 不装 —— 供给可解。真正的门是 libreoffice-kit 自己的 host 白名单：android 走不到 wasm 分支，改它等于改 @deepseek-ai 字节（ADR-0001 禁止）。已拍板等上游放行，我们先把引擎备好"
     },
     {
@@ -156,12 +194,25 @@
   ],
   "envUnits": [
     {
+      "id": "tmp-redirect",
+      "capability": "/tmp 语义（D1：安卓根只读，Linux 习惯的硬编码 /tmp 必失败）",
+      "disposition": "runtime-check",
+      "hostExcludes": [],
+      "verify": {
+        "criterion": "写 \"/tmp/<name>\" 后能在 $TMPDIR/<name> 读回 —— 文件落没落到 TMPDIR 才是结论",
+        "node": "const fs=require('node:fs'),path=require('node:path'); const base='dsh-tmp-probe-'+process.pid; const dir=process.env.TMPDIR; if(!dir) throw new Error('TMPDIR 未设：本格量的是 /tmp 前缀重写，没有 TMPDIR 无从判'); fs.writeFileSync('/tmp/'+base,'ok'); const real=path.join(dir,base); const back=fs.readFileSync(real,'utf8'); fs.unlinkSync(real); if(back!=='ok') throw new Error('重写后回读不符: '+back); process.stdout.write('DSH_PROBE_PASS /tmp/'+base+' -> '+real)"
+      },
+      "why": "安卓根文件系统只读且 SELinux 不给 app 在 / 下建目录，Linux 习惯的硬编码 /tmp 必然失败；容器经 libdshposix 在 open/openat 上把 /tmp 前缀重写到 $TMPDIR（开关 DSH_TMP_REDIRECT），本格由设备端探针核验落点。"
+    },
+    {
       "id": "env-shell",
       "capability": "shell（DSH bash 工具与一切子进程）",
       "layer": "seed",
       "disposition": "seed",
       "why": "由 L0 PrefixProvisioner 把 libbash.so 播到 $PREFIX/bin/bash；缺件时 DSH 的 bash 工具与所有子进程全灭。",
-      "verify": { "notApplicable": "由 boot-env-contract 门禁（PATH 与 $PREFIX 装配）与 exec-domain 格覆盖，不在此重复第二把尺子" }
+      "verify": {
+        "notApplicable": "由 boot-env-contract 门禁（PATH 与 $PREFIX 装配）与 exec-domain 格覆盖，不在此重复第二把尺子"
+      }
     },
     {
       "id": "env-node",
@@ -169,7 +220,9 @@
       "layer": "seed",
       "disposition": "seed",
       "why": "Node 是 init 赖以启动的运行时，由 NativeAssetRegistry 的 libnode.so 经 jniLibs 落地；无它整机无 OS。",
-      "verify": { "notApplicable": "由 NativeAssetRegistry 的 exec-probe 与 native-assets 门禁覆盖（存在性/依赖/真跑三重）" }
+      "verify": {
+        "notApplicable": "由 NativeAssetRegistry 的 exec-probe 与 native-assets 门禁覆盖（存在性/依赖/真跑三重）"
+      }
     },
     {
       "id": "env-npm",
@@ -177,7 +230,9 @@
       "layer": "seed",
       "disposition": "seed",
       "why": "npm 是纯 JS，随 APK assets/npm 投放、由 libnode.so 代跑，经 runtime.json 的 npmEntry 交给内核。",
-      "verify": { "notApplicable": "由 npm-contract-chain-test 与 runtime-contract 门禁逐字对账（目录名/入口/前缀三处同源）" }
+      "verify": {
+        "notApplicable": "由 npm-contract-chain-test 与 runtime-contract 门禁逐字对账（目录名/入口/前缀三处同源）"
+      }
     },
     {
       "id": "env-pnpm",
@@ -196,36 +251,60 @@
       "capability": "git（版本控制）",
       "layer": "shared",
       "disposition": "waived",
-      "waiver": { "followUp": "C 层工具供给批次", "verifiedAt": "2026-09-27", "expiresAt": "2026-12-26" },
+      "waiver": {
+        "followUp": "C 层工具供给批次",
+        "verifiedAt": "2026-09-27",
+        "expiresAt": "2026-12-26"
+      },
       "why": "设备上无 git；Android 无现成 aarch64 产物，需自建配方（libcurl/zlib/pcre2）。缺口在册，到期未补即门禁红。",
-      "verify": { "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力，写成待做反而伪造出判定" }
+      "verify": {
+        "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力，写成待做反而伪造出判定"
+      }
     },
     {
       "id": "env-python3",
       "capability": "python3（脚本类任务）",
       "layer": "shared",
       "disposition": "waived",
-      "waiver": { "followUp": "C 层运行时供给批次", "verifiedAt": "2026-09-27", "expiresAt": "2026-12-26" },
+      "waiver": {
+        "followUp": "C 层运行时供给批次",
+        "verifiedAt": "2026-09-27",
+        "expiresAt": "2026-12-26"
+      },
       "why": "设备上无 python3；CPython 需按 bionic 交叉编译或投 Termux 式 $PREFIX，属独立立项。缺口在册。",
-      "verify": { "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力" }
+      "verify": {
+        "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力"
+      }
     },
     {
       "id": "env-jq",
       "capability": "jq（JSON CLI 处理）",
       "layer": "shared",
       "disposition": "waived",
-      "waiver": { "followUp": "C 层工具供给批次", "verifiedAt": "2026-09-27", "expiresAt": "2026-12-26" },
+      "waiver": {
+        "followUp": "C 层工具供给批次",
+        "verifiedAt": "2026-09-27",
+        "expiresAt": "2026-12-26"
+      },
       "why": "设备上无 jq；可编静态 aarch64 单文件（无 DT_NEEDED），是最低档的一件，随 C 层工具批次补。",
-      "verify": { "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力" }
+      "verify": {
+        "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力"
+      }
     },
     {
       "id": "env-sqlite3",
       "capability": "sqlite3（命令行数据库工具）",
       "layer": "shared",
       "disposition": "waived",
-      "waiver": { "followUp": "C 层工具供给批次", "verifiedAt": "2026-09-27", "expiresAt": "2026-12-26" },
+      "waiver": {
+        "followUp": "C 层工具供给批次",
+        "verifiedAt": "2026-09-27",
+        "expiresAt": "2026-12-26"
+      },
       "why": "设备上无 sqlite3 命令行（node:sqlite 是另一格 sqlite-query，两者不是同一能力）；随 C 层工具批次补静态件。",
-      "verify": { "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力" }
+      "verify": {
+        "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力"
+      }
     }
   ]
 }

@@ -120,6 +120,7 @@ class GuestAdapterTest {
         assertEquals("danger-full-access", env.getValue("DSH_PERMISSION_MODE"))
         assertEquals(File(nativeLibDir, "libdshflock.so").absolutePath, env.getValue("DSH_FLOCK_NATIVE"))
         assertEquals(File(nativeLibDir, "libdshposix.so").absolutePath, env.getValue("LD_PRELOAD"))
+        assertEquals("1", env.getValue("DSH_TMP_REDIRECT"))
     }
 
     @Test fun NODE_PATH双段且内核自带在前() {
