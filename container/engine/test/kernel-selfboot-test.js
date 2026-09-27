@@ -470,16 +470,28 @@ if (fs.existsSync(INSTALLER_KT)) {
     !/Signature\.getInstance|Ed25519/.test(ik.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')));
 }
 
-// ── 内核 OTA 必须能在设备上暂停（2026-09-27 真机定罪：当天连环自动重启 6 次，运维没有刹车）──
-// 配置只长在 APK asset 里 ⇒ 想停一次 OTA 就得重打一个包，而装包本身又是一次重启。
-// 判据：loadConfig 必须**优先**读设备侧 files/kernel-feed.json（存在即覆盖 asset）。
+// ── 内核 OTA 链的完整性（2026-09-27 立规：OTA 是保命通道，不许被自己的开关拖累）──
+// 两个方向都要钉：① 运维能停（设备侧覆盖）；② 写坏时**必须回退 asset**，绝不静默关掉自动更新。
 const OTA_KT = path.join(KT_DIR, 'kernelota', 'KernelOtaUpdater.kt');
 check('KernelOtaUpdater.kt 存在（包名与路径一致）', fs.existsSync(OTA_KT));
 if (fs.existsSync(OTA_KT)) {
   const ota = fs.readFileSync(OTA_KT, 'utf8');
   check('OTA 配置支持设备侧覆盖（files/kernel-feed.json 优先于 asset）',
-    ota.includes('File(context.filesDir, CONFIG_ASSET)') && ota.includes('fromDevice'));
-  check('OTA 覆盖不放松 https 硬前提', ota.includes('base.startsWith("https://")'));
+    ota.includes('File(context.filesDir, CONFIG_ASSET)') && ota.includes('设备侧覆盖'));
+  check('设备侧覆盖非法时回退 asset（绝不静默关掉 OTA）', ota.includes('回退 APK 内 asset'));
+  check('OTA 不放松 https 硬前提', ota.includes('base.startsWith("https://")'));
+}
+// feed asset 自证：合法 strict JSON + https + 未被显式关掉（"推了新内核就自动更新"的判据）
+const FEED_ASSET = path.join(ROOT, 'container', 'app', 'src', 'main', 'assets', 'kernel-feed.json');
+check('kernel-feed.json asset 存在', fs.existsSync(FEED_ASSET));
+if (fs.existsSync(FEED_ASSET)) {
+  let feed = null;
+  try { feed = JSON.parse(fs.readFileSync(FEED_ASSET, 'utf8')); } catch (_e) { feed = null; }
+  check('kernel-feed.json 是合法 strict JSON（不许注释）', feed !== null);
+  if (feed) {
+    check('feed baseUrl 以 https 开头', String(feed.baseUrl || '').startsWith('https://'));
+    check('feed 未被显式关掉自动检查（autoCheck !== false）', feed.autoCheck !== false);
+  }
 }
 
 function rmrf(p) { fs.rmSync(p, { recursive: true, force: true }); }
