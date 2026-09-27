@@ -168,6 +168,20 @@ else
   tail -n 15 "$ROOT_DIR/work/curl-configure.log" || true
   exit 1
 fi
+# 落地自检：configure 说通过不等于真生成了 Makefile（CI 实证：make 报 `No targets specified and no makefile found.`）。
+if [ ! -f "$ROOT_DIR/work/curl/Makefile" ]; then
+  echo "::error title=curl 没生成 Makefile::下面是 configure 输出尾 40 行、pwd 与目录内容"
+  echo "==== pwd ===="
+  pwd || true
+  echo "==== configure 输出尾 40 行 ===="
+  tail -n 40 "$ROOT_DIR/work/curl-configure.log" || true
+  echo "==== 目录内容（前 25 项）===="
+  ls -la "$ROOT_DIR/work/curl" | head -n 25 || true
+  echo "==== 找 Makefile* ===="
+  find "$ROOT_DIR/work/curl" -maxdepth 1 -name "Makefile*" || true
+  exit 1
+fi
+echo "[git] curl Makefile 已生成"
 CURL_LOG="$ROOT_DIR/work/curl-build.log"
 if ! make -j2 > "$CURL_LOG" 2>&1; then
   echo "::error title=curl 编译失败::最后 30 行"
