@@ -74,6 +74,8 @@ check('boot-fixture.js.TMPDIR 优先 o.cacheDir（os.tmpdir 仅桌面回落）',
 // D1 Linux 语义：安卓默认无 locale，排序/字符类落到 C；声明 C.UTF-8（bionic 认得的名字）。
 check('GuestAdapter 声明 LANG=C.UTF-8（D1：安卓默认无 locale）', /"LANG" to "C\.UTF-8"/.test(guest));
 check('boot-fixture.js 同构声明 LANG', /LANG:\s*'C\.UTF-8'/.test(boot));
+// D1：安卓语义垫片经 NODE_OPTIONS 预载（仅在 envShim 在场时注入，缺件不许让 node 起不来）。
+check('GuestAdapter 注入 NODE_OPTIONS=--require 垫片（仅 envShim 在场时）', /put\("NODE_OPTIONS"/.test(guest));
 
 // NODE_PATH 双段（内核自带在前、共享安装在后）—— 旧两侧各一段。
 check('GuestAdapter NODE_PATH 双段次序（kernelDir 前）',

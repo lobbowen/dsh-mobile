@@ -36,6 +36,7 @@ class GuestAdapterTest {
     private fun kernelInputs(
         bashBin: File? = File("/prefix/bin/bash"),
         npmEntry: File? = null,
+        envShim: File? = null,
     ) = GuestAdapter.KernelInputs(
         base = base,
         kernelDir = kernelDir,
@@ -47,6 +48,7 @@ class GuestAdapterTest {
         prefixBin = File("/prefix/bin"),
         bashBin = bashBin,
         npmEntry = npmEntry,
+        envShim = envShim,
     )
 
     // ── 命令形态 ──
@@ -143,6 +145,15 @@ class GuestAdapterTest {
         assertEquals(
             npm.absolutePath,
             GuestAdapter.kernelPlan(kernelInputs(npmEntry = npm), null).env.getValue("DSH_NPM_ENTRY"),
+        )
+    }
+
+    @Test fun NODE_OPTIONS只在提供envShim时出现() {
+        assertFalse(GuestAdapter.kernelPlan(kernelInputs(envShim = null), null).env.containsKey("NODE_OPTIONS"))
+        val shim = File("/prefix/lib/android-env-shim.cjs")
+        assertEquals(
+            "--require " + shim.absolutePath,
+            GuestAdapter.kernelPlan(kernelInputs(envShim = shim), null).env.getValue("NODE_OPTIONS"),
         )
     }
 

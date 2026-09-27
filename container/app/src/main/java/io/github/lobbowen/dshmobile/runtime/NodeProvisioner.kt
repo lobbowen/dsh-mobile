@@ -159,6 +159,24 @@ object NodeProvisioner {
      * 而 size 相同不代表内容相同。字节比对是这个场景下唯一可靠的判据，
      * 且这些文件都很小（KB 级），开销可忽略。
      */
+    /**
+     * D1：让安卓语义垫片（`assets/node/android-env-shim.cjs`）就位 —— 全局预载。
+     *
+     * 为什么需要它：Android/SELinux 取不到 cpu 信息，`os.cpus()` 返回 0 长数组，
+     * 按 `cpus().length` 决定线程/worker 池的库会得到 0（环境报告 P2-2）。垫片只在
+     * **空**时才用 `availableParallelism()` 合成，非空一律不动。
+     *
+     * 非致命：落地失败返回 null —— 绝不因一个可选垫片让内核起不来（不变量 C2）。
+     */
+    fun ensureEnvShim(context: Context): File? {
+        return try {
+            ensureAssetCopied(context, "node/android-env-shim.cjs", File(context.filesDir, "android-env-shim.cjs"))
+        } catch (e: Throwable) {
+            android.util.Log.w("NodeProvisioner", "安卓语义垫片落地失败（不阻断启动）", e)
+            null
+        }
+    }
+
     private fun ensureAssetCopied(context: Context, assetPath: String, dest: File): File {
         val assetBytes = context.assets.open(assetPath).use { it.readBytes() }
         if (dest.exists() && dest.length() == assetBytes.size.toLong()) {

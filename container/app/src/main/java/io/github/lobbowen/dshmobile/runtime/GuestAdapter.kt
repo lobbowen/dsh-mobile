@@ -48,6 +48,8 @@ object GuestAdapter {
         val prefixBin: File,
         val bashBin: File?,
         val npmEntry: File?,
+        /** D1 安卓语义垫片（os.cpus 等）；null = 不注入 NODE_OPTIONS —— 缺件绝不许让 node 起不来。 */
+        val envShim: File? = null,
     )
 
     /** 最终交给 ProcessBuilder 的完整指令。command/cwd/env 一起进 golden 向量。 */
@@ -114,6 +116,9 @@ object GuestAdapter {
             put("PATH", joinPath(i.prefixBin.absolutePath, i.base.nodeBin.parentFile!!.absolutePath, inheritedPath))
             put("SHELL", i.bashBin?.absolutePath ?: "/system/bin/sh")
             i.npmEntry?.let { put("DSH_NPM_ENTRY", it.absolutePath) }
+            // D1 Linux 语义：安卓取不到 cpu 信息（os.cpus() 空），由预载垫片在**空**时用
+            // availableParallelism() 合成。只在垫片真在场时注入 NODE_OPTIONS。
+            i.envShim?.let { put("NODE_OPTIONS", "--require " + it.absolutePath) }
         },
     )
 

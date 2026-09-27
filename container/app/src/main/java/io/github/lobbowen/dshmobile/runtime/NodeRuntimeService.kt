@@ -360,6 +360,13 @@ class NodeRuntimeService : Service() {
                 if (npmCli != null) "npm 就位（面板可安装 Agent）" else "npm 未就位 —— 仅影响 Agent 安装，内核照常运行",
                 npmCli?.absolutePath ?: "assets/npm 解包失败，详见 logcat"
             )
+            // D1 安卓语义垫片（os.cpus 等）：全局预载。缺件不阻断 —— 只是那项语义仍缺。
+            val envShim = NodeProvisioner.ensureEnvShim(this)
+            RuntimeDiagnostics.append(
+                this, "env-shim", envShim != null,
+                if (envShim != null) "安卓语义垫片就位（os.cpus 等）" else "安卓语义垫片未就位（不阻断；os.cpus() 仍返回 0）",
+                envShim?.absolutePath ?: "assets/node/android-env-shim.cjs 落地失败"
+            )
 
             // ---- 4) 写 runtime.json（schema 2，容器写内核读） ----
             // minNode 单源：就是随包清单里的 Node 版本（上方 version），不再手写字面量。
@@ -422,6 +429,7 @@ class NodeRuntimeService : Service() {
                         prefixBin = PrefixProvisioner.binDir(this),
                         bashBin = PrefixProvisioner.bashBin(this),
                         npmEntry = npmCli,
+                        envShim = envShim,
                     ),
                     getenv("PATH"),
                 )
