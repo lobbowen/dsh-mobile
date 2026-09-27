@@ -56,6 +56,17 @@ OPENSSL_VERSION=3.6.3
 CURL_VERSION=8.22.0
 mkdir -p "$DEPS"
 TC_DIR=$(dirname "$CC")
+# ── 编译 API 提到 23 ────────────────────────────────────────────────────
+# bionic 到 **API 23** 才把 stdin/stdout/stderr 做成真符号（API 21 只是 __sF 宏），
+#   而 openssl 的代码引用它们 ⇒ 在 API 21 下链接 curl 使用者必报 `undefined symbol: stderr`。
+#   容器本体仍按 API 21 编译（另一条线），这些 C 通道的件只要求设备 ≥ Android 6 —— 我们的目标设备都满足。
+ANDROID_API=23
+if [ ! -x "$TC_DIR/aarch64-linux-android$ANDROID_API-clang" ]; then
+  echo "::error title=缺 API$ANDROID_API 的 clang::NDK 里没有 aarch64-linux-android$ANDROID_API-clang"
+  exit 1
+fi
+export CC="$TC_DIR/aarch64-linux-android$ANDROID_API-clang"
+echo "[git] 编译 API = $ANDROID_API（$CC）"
 # 本段自给自足：不依赖脚本后段的变量（CI 两次实证：AR/AR_BIN 在此时都还没定义，set -u 直接红）。
 AR_BIN=${AR_BIN:-$TC_DIR/llvm-ar}
 RANLIB_BIN=${RANLIB_BIN:-$TC_DIR/llvm-ranlib}
@@ -100,13 +111,13 @@ tar xzf "$ROOT_DIR/work/openssl.tar.gz" -C "$ROOT_DIR/work/openssl" --strip-comp
 cd "$ROOT_DIR/work/openssl"
 # openssl 的 android 配置认 ANDROID_NDK_ROOT / ANDROID_NDK_HOME 与 ANDROID_API；
 # 显式传全，避免它「找不到 NDK 就退化成半配置」（上一轮的怪错就是被 >/dev/null 遮住的）。
-export ANDROID_API=21
+export ANDROID_API="$ANDROID_API"
 export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
 CFG_LOG="$ROOT_DIR/work/openssl-configure.log"
 # PATH 必须**导出**：openssl 的 Makefile 里 CC 是裸名（aarch64-linux-android21-clang），
 #   make 时若 PATH 里没有 NDK 的 bin，就是满屏 `Error 127`（上轮实证：apps/lib/*.o）。
 export PATH="$TC_DIR:$PATH"
-if ! ./Configure android-arm64 -fPIC --prefix="$DEPS" --openssldir="$DEPS/ssl" no-shared no-tests no-ui-console > "$CFG_LOG" 2>&1; then
+if ! ./Configure android-arm64 -fPIC -D__ANDROID_API__=$ANDROID_API --prefix="$DEPS" --openssldir="$DEPS/ssl" no-shared no-tests no-ui-console > "$CFG_LOG" 2>&1; then
   echo "::error title=openssl Configure 失败::下面是最后 30 行（真正的致命行在这里）"
   tail -n 30 "$CFG_LOG" || true
   exit 1
