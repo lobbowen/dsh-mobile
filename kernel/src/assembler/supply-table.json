@@ -358,19 +358,17 @@
       "id": "env-jq",
       "capability": "jq（JSON CLI 处理）",
       "layer": "shared",
-      "disposition": "waived",
-      "waiver": {
-        "followUp": "C 层工具供给批次",
-        "verifiedAt": "2026-09-27",
-        "expiresAt": "2026-12-26"
-      },
-      "why": "设备上无 jq；可编静态 aarch64 单文件（无 DT_NEEDED），是最低档的一件，随 C 层工具批次补。",
+      "disposition": "supplied-by-us",
+      "why": "设备上无 jq（此前是到期即红的豁免）。现由 **C 的通道**交付：CI 用 NDK 交叉编译（动态、静态链自身库，不带 .so 出门）→ 内容寻址命名 → 发到对象存储；件表与哈希住 C 的签名清单，内核按清单取件、验哈希、原子落位并 symlink 到 $PREFIX/bin。**加这一件没有改动内核的任何内容** —— 只有这一格「承诺+判据」的登记仍在内核（这正是下一步要搬进清单的东西）。",
       "verify": {
-        "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力"
+        "criterion": "jq 起得来、真解析一段 JSON 并把结果读回来（不是只看 --version）",
+        "node": "const cp = require('node:child_process'); const r = cp.spawnSync('jq', ['-c', '.a'], { input: '{\"a\":42}', encoding: 'utf8' }); if (r.error) { console.error('jq 起不来: ' + r.error.message); process.exit(1); } if (r.status !== 0) { console.error('jq 非零退出 rc=' + r.status + ' err=' + String(r.stderr || '').slice(0, 160)); process.exit(1); } const got = String(r.stdout || '').trim(); if (got !== '42') { console.error('jq 读回不对: ' + JSON.stringify(got)); process.exit(1); } process.stdout.write('DSH_PROBE_PASS jq 可用（.a => 42）');"
       },
       "bin": "jq",
       "required": false,
-      "kind": "tool"
+      "kind": "tool",
+      "impl": "src/supply/materialize.js",
+      "carrier": "$PREFIX(经 C 的签名清单投放)"
     },
     {
       "id": "env-sqlite3",
