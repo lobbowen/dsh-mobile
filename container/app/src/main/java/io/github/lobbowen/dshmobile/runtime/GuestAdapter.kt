@@ -131,6 +131,11 @@ object GuestAdapter {
                 if (caBundle.isFile) {
                     put("SSL_CERT_FILE", caBundle.absolutePath)
                     put("CURL_CA_BUNDLE", caBundle.absolutePath)
+                    // git 单独再来一个键：件里的 libcurl 当初编译时带了 --with-ca-path（指向系统信任库），
+                    //   而 libcurl 一旦**显式**设了自己的 CA 路径，就不再读 CURL_CA_BUNDLE、也不走 OpenSSL 的
+                    //   SSL_CERT_FILE 默认路径。真机实证：只设前两个键仍报 unable to get local issuer；
+                    //   GIT_SSL_CAINFO 指到同一份 bundle 立刻通（637ms 拿到 HTTP 层响应）。
+                    put("GIT_SSL_CAINFO", caBundle.absolutePath)
                 }
             put("SHELL", i.bashBin?.absolutePath ?: "/system/bin/sh")
             i.npmEntry?.let { put("DSH_NPM_ENTRY", it.absolutePath) }

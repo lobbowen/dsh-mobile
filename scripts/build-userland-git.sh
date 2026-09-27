@@ -155,6 +155,9 @@ export CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib"
 #   bash 会从那行的 # 起当注释，把后面的变量、重定向、失败处理器**整块吃掉** ——
 #   症状是「预置不生效 + 诊断一行不打 + configure 输出直接冲进日志」，极费时间。
 if ! ./configure --host=aarch64-linux-android --build=x86_64-pc-linux-gnu --prefix="$DEPS" \
+  # 编译期 CA 路径要慎给：一旦显式设了，libcurl 就不再读 CURL_CA_BUNDLE、也不走 OpenSSL 的
+  #   SSL_CERT_FILE 默认路径 —— 而"信任根随产品走"（APK 播 ca-bundle.pem）正是靠那两个键。
+  #   本行保留是为了老设备兜底；容器侧另补 GIT_SSL_CAINFO 指向 bundle（真机实证那条才生效）。
   --with-openssl="$DEPS" --with-zlib="$DEPS" --with-ca-path=/system/etc/security/cacerts \
   --disable-shared --enable-static --disable-ldap --without-libssh2 --without-libidn2 \
   --without-nghttp2 --without-brotli --without-zstd --without-libpsl --disable-manual \
