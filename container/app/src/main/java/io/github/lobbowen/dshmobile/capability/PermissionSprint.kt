@@ -9,9 +9,12 @@ import io.github.lobbowen.dshmobile.permissions.PermissionCatalog
  * 这一层只有计划（纯函数，可 JVM 单测钉死），发起动作住 ui 层：
  * 「问什么、按什么顺序问」是判据事实，「怎么把问题抛给系统」才是 Android 细节。
  *
- * 2026-09-27 收敛：开屏只留 [REQUIRED]。凡取法链首项是 SILENT_* 的能力（无障碍 / 通知读取 /
- * 电池白名单 / DO 派生的 AppOps）一律撤出开屏，改由 [PostPairingAutoFlow] 在配对成功的
- * **同一前台会话内**静默办 —— 用户开屏只看到「开始配对」。
+ * 2026-09-27 收敛（含一次纠错）：开屏 = [REQUIRED] + [OPTIONAL]。
+ *  - 撤出开屏的只有「**不需要 DO** 就能静默办」的三项（无障碍 / 通知读取 / 电池白名单）——
+ *    它们由 [PostPairingAutoFlow] 在配对成功的**同一前台会话内**静默办。
+ *  - 需要人点的 AppOps 三项（悬浮窗 / 安装未知 / 全部文件）**留在开屏点完**：DO 是否可达是
+ *    设备事实（本机 4 用户 + 7 账户 → 不可达），撤下去等于静默吞掉三项授权。
+ * 用户开屏的顺序因而是：把要人点的点完 → 开始配对 → 剩下的静默办完。
  */
 object PermissionSprint {
 
@@ -28,20 +31,27 @@ object PermissionSprint {
         .filter { PermissionCatalog.byId(it) != null }
 
     /**
-     * 理想证据：只用于 [SILENT_DEFERRABLE] 的静态推导。nowMs 与 atMs 同值使
-     * [Evidence.channelLive] 成立（age=0 < TTL），deviceOwner=true 让 DO 静默路径显形。
+     * 推导用证据：通道在线，但**显式假设 DO 不在位**。
+     *
+     * 为什么不能假设 deviceOwner=true（2026-09-27 真机纠错）：DO 是否可达是**设备事实**
+     * （本机 4 用户 + 7 账户 → dpm 被 "several users" 拒，永远不可达）。按 deviceOwner=true
+     * 推导，AppOps 三项会被算成「有静默路径」而从开屏撤下，可它们恰恰**只能人点**，自动流在
+     * 无 DO 时也办不到（取法链首项回落 USER_TAP，不是 SILENT_*）—— 三项授权被静默吞掉。
+     * 所以开屏只撤「**不需要 DO** 就能静默办」的项。
+     *
+     * nowMs 与 atMs 同值使 [Evidence.channelLive] 成立（age=0 < TTL）。
      * **必须声明在使用它的 [SILENT_DEFERRABLE] 之前** —— object 属性按声明顺序初始化，
      * 放到后面会让推导读到未初始化的字段（NPE 在类初始化期就炸）。
      */
-    private val IDEAL_EVIDENCE = Evidence(
+    private val NO_DO_EVIDENCE = Evidence(
         nowMs = 0L,
         credentials = CredentialsState.PAIRED,
         channel = ChannelProbe(ProbeOutcome.LIVE, 0L, "取法链推导用理想读数"),
-        deviceOwner = true,
+        deviceOwner = false,
     )
 
     /**
-     * 「静默可办」集合：在**理想证据**（通道在线 + DO 在位）下取法链首项是 SILENT_* 的能力。
+     * 「静默可办」集合：在**[NO_DO_EVIDENCE]**（通道在线、**无 DO**）下取法链首项是 SILENT_* 的能力。
      *
      * 为什么用理想证据推导而不是手写一张清单：手写清单会跟登记表的取法链漂移，而
      * 「这条能不能静默办」本来就定义在 [CapabilityCatalog.permAcquirers] 里。理想证据只
@@ -49,7 +59,7 @@ object PermissionSprint {
      */
     private val SILENT_DEFERRABLE: List<String> = CapabilityCatalog.ALL
         .filter { c ->
-            val kind = c.acquirer(IDEAL_EVIDENCE).firstOrNull()?.kind
+            val kind = c.acquirer(NO_DO_EVIDENCE).firstOrNull()?.kind
             kind == AcquireKind.SILENT_VIA_ADB || kind == AcquireKind.SILENT_VIA_DO
         }
         .map { it.id }
@@ -76,11 +86,12 @@ object PermissionSprint {
         .map { it.id }
 
     /**
-     * 其余待选项：权限档、无前置、非可选加速器，且不属于上面两档、也没有静默路径。
+     * 其余待选项：权限档、无前置、非可选加速器，且不属于上面两档、也**没有「不需要 DO 的」
+     * 静默路径**。
      *
-     * 有静默路径的一律排除（否则它们会从 [ANCHORS] 掉进这里，又被开屏问一遍 —— 那正是
-     * 本次收敛要消灭的按钮墙）。本机 AppOps 档的静默前提是 Device Owner，由自动流去试；
-     * 试不成落 UNREACHABLE/欠账，不回落到「去 3 个系统页点一下」。
+     * 本版这一档 = AppOps 三项（悬浮窗 / 安装未知 / 全部文件）。它们的静默前提是 Device Owner，
+     * 而 DO 是否可达是设备事实（本机不可达）。按用户拍板：**需要人点的就在开屏一次点完**，
+     * 点完再去配对 —— 不许「既不开屏问、自动流又办不到」地静默吞掉。
      */
     val OPTIONAL: List<String> = CapabilityCatalog.ALL.filter {
         PermissionCatalog.byId(it.id) != null && it.id !in REQUIRED && it.id !in ANCHORS &&
@@ -89,7 +100,8 @@ object PermissionSprint {
 
     /**
      * 冲刺顺序：配对前置 → 保活锚 → 其余（挡路的先要，同一件事只做一次）。
-     * 本版 ANCHORS / OPTIONAL 均为空（全部由静默路径接管），实际开屏只问 [REQUIRED]。
+     * 本版 [ANCHORS] 为空（三项锚都有「不需要 DO」的静默路径，撤到配对后），
+     * [OPTIONAL] = 需要人点的 AppOps 三项 —— 开屏把它们点完，才轮到「开始配对」。
      */
     val ORDER: List<String> = REQUIRED + ANCHORS + OPTIONAL
 

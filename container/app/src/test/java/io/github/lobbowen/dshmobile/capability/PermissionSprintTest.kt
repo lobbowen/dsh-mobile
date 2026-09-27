@@ -55,10 +55,22 @@ class PermissionSprintTest {
             PermissionSprint.REQUIRED + PermissionSprint.ANCHORS + PermissionSprint.OPTIONAL,
             PermissionSprint.ORDER,
         )
-        // 收敛后的硬事实：开屏只问通知发送一项。
-        assertEquals(listOf(PermissionCatalog.POST_NOTIFICATIONS), PermissionSprint.ORDER)
-        assertTrue("本版锚全部有静默路径，不应再占开屏位", PermissionSprint.ANCHORS.isEmpty())
-        assertTrue("本版待选项全部有静默路径，不应再占开屏位", PermissionSprint.OPTIONAL.isEmpty())
+        // 本版硬事实：锚（不需要 DO 就能静默）全部撤出开屏；AppOps 三项留在开屏由人点完。
+        assertTrue("三项锚都有「不需要 DO」的静默路径，不应再占开屏位", PermissionSprint.ANCHORS.isEmpty())
+        assertEquals(
+            "需要人点的 AppOps 三项必须在开屏冲刺里",
+            listOf(
+                PermissionCatalog.MANAGE_EXTERNAL_STORAGE,
+                PermissionCatalog.REQUEST_INSTALL_PACKAGES,
+                PermissionCatalog.SYSTEM_ALERT_WINDOW,
+            ).sorted(),
+            PermissionSprint.OPTIONAL.sorted(),
+        )
+        assertEquals(
+            "开屏顺序 = 配对前置 + 需要人点的待选项",
+            PermissionSprint.REQUIRED + PermissionSprint.OPTIONAL,
+            PermissionSprint.ORDER,
+        )
     }
 
     @Test fun 保活锚从登记表推导_不是手写第二张清单() {
@@ -113,13 +125,22 @@ class PermissionSprintTest {
         assertFalse(PermissionSprint.ORDER.contains(CapabilityCatalog.WIRELESS_DEBUG))
     }
 
-    @Test fun AppOps档不再由开屏问_静默不可用时才回落人点() {
-        // 反面已反转：旧版要求开屏把 MANAGE_EXTERNAL_STORAGE 抛给人点；
-        // 新版 DO 在位时它是 SILENT_VIA_DO，DO 不可达时判 UNREACHABLE、不重试，
-        // 不复用「去系统页点一下」的回落 —— 所以开屏链上必须没有它。
-        assertFalse(PermissionSprint.ORDER.contains(PermissionCatalog.MANAGE_EXTERNAL_STORAGE))
-        assertFalse(PermissionSprint.OPTIONAL.contains(PermissionCatalog.MANAGE_EXTERNAL_STORAGE))
-        // 但取法链的降级项仍在：DO 不在位时人点仍是一条路（能力没被做成不可达）。
+    @Test fun 需要人点的待选项仍然要问() {
+        // 2026-09-27 纠错（原判据本来就对，是实现的推导错了）：AppOps 三项的静默前提是
+        // Device Owner，而 DO 是否可达是设备事实（本机 4 用户 + 7 账户 → "several users" 拒）。
+        // 按用户拍板：需要人点的**就在开屏一次点完**，点完再配对 —— 不许「开屏不问 +
+        // 自动流办不到」地静默吞掉。
+        assertTrue(
+            "AppOps 三项必须留在开屏冲刺里（它们只能人点）",
+            PermissionSprint.OPTIONAL.containsAll(
+                listOf(
+                    PermissionCatalog.MANAGE_EXTERNAL_STORAGE,
+                    PermissionCatalog.REQUEST_INSTALL_PACKAGES,
+                    PermissionCatalog.SYSTEM_ALERT_WINDOW,
+                ),
+            ),
+        )
+        // 人点这条路确实还在（取法链首项 = USER_TAP），不是被做成不可达。
         assertEquals(AcquireKind.USER_TAP, firstKind(PermissionCatalog.MANAGE_EXTERNAL_STORAGE, ev()))
     }
 

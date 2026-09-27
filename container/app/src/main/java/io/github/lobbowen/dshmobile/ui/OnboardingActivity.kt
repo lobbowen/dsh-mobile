@@ -305,7 +305,9 @@ class OnboardingActivity : AppCompatActivity() {
         // 「完成后才 enable」：自动流没跑完之前不放行，避免用户在静默配置中途进面板。
         // 刻意**不做自动跳转**：产品承诺是「走完出现【进入工作台】」，auto 跳会把刚出现的
         // 按钮直接吞掉（那会让"走完"看起来像"没走完"）。
-        val enterable = ready && !autoFlowRunning && pendingAuto.isEmpty()
+        // 入口只看 GATING（凭据 + 通道 + 运行时 + 内核包）：静默流在后台跑，**不许挡门** ——
+        // 用户要的是「通道正常就直接看到进入工作台」，不是「等自动配置跑完才放行」。
+        val enterable = ready
         enterBtn?.visibility = if (ready) View.VISIBLE else View.GONE
         enterBtn?.isEnabled = enterable
         progressText?.text = autoFlowProgress(e, pendingAuto)
