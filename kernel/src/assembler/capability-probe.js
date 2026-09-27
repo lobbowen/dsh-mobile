@@ -119,8 +119,14 @@ function probeUnits(units, ctx, deps) {
   for (const u of units || []) {
     try {
       res[u.id] = probeUnit(u, ctx, deps);
+      // 带上归属维字段：面板要按「B 种子 / C 运行时 / C 工具 / D 语义」分组，
+      //   也要能区分「无需核验（由门禁覆盖）」「缺口在册（豁免）」与真「未知」（2026-09-28 用户复核）。
+      res[u.id].kind = u.kind || null;
+      res[u.id].layer = u.layer || null;
+      res[u.id].disposition = u.disposition || null;
     } catch (e) {
       res[u.id] = out(u.id, null, '探针执行器抛错（该格结果未知，不算通过）: ' + e.message, new Date().toISOString());
+      res[u.id].kind = u.kind || null; res[u.id].layer = u.layer || null; res[u.id].disposition = u.disposition || null;
     }
   }
   return res;

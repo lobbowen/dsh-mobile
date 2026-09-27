@@ -33,7 +33,11 @@ export interface NativeCapOutcome {
   ok: boolean | null;
   detail?: string | null;
   at?: string;
-}
+  /** 归属维（面板按它分组）：seed=底座种子 / runtime=C 运行时 / tool=C 工具 / check=D 语义兑现。 */
+  kind?: string | null;
+  layer?: string | null;
+  /** 处置（waived=在册豁免）—— 面板据此把「缺口在册」与真「未知」分开。 */
+  disposition?: string | null;}
 
 export interface NativeCapsReport {
   overall: boolean | null;

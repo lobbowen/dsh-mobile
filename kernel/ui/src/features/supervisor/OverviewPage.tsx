@@ -112,6 +112,16 @@ export function OverviewPage() {
     });
   }
 
+  // 三态之外的两种「不是坏」：豁免（在册缺口，有到期日）与「按处置无需核验」（由门禁/别的尺子覆盖）。
+  //   把它们和真「未知」分开显示 —— 否则一个在册缺口看起来像坏了，一个不适用看起来像没跑。
+  const unitWord = (c: { ok: boolean | null; disposition?: string | null; detail?: string | null }) => {
+    if (c.ok === true) return "通过";
+    if (c.ok === false) return "不可用";
+    if (c.disposition === "waived") return "缺口在册";
+    if (String(c.detail || "").indexOf("按处置无需核验") === 0) return "由门禁覆盖";
+    return "未知";
+  };
+
   const installedVer = installed ? (native?.version || v?.installed || "—") : "—";
   // null = 本轮还没跑过投放（不是"全部正常"），此时整行不渲染。
   const units = native?.nativeUnits ?? null;
@@ -202,11 +212,23 @@ export function OverviewPage() {
                       title="任一格不可用即整体不可用；没有红但有未知，整体就是未知">
                   能力{capWord(caps.overall)}
                 </span>
-                {Object.values(caps.units).map((c) => (
-                  <span key={c.id} className={c.ok === false ? "text-destructive" : undefined} title={c.detail || c.id}>
-                    {c.id}·{capWord(c.ok)}
-                  </span>
-                ))}
+                {/* 按**归属维**分组（B 底座种子 / C 运行时 / C 工具 / D 语义兑现）——
+                    原先平铺，把「底座种子」「运行时」「工具」混成一排，且把「无需核验（由门禁覆盖）」
+                    和真「未知」都显示成同一个词（2026-09-28 用户复核：「位置都不对」）。 */}
+                {([["seed", "B 种子"], ["runtime", "C 运行时"], ["tool", "C 工具"], ["check", "D 语义"]] as const).map(([k, label]) => {
+                  const group = Object.values(caps.units).filter((c) => (c.kind || "") === k);
+                  if (!group.length) return null;
+                  return (
+                    <span key={k} className="flex flex-wrap gap-x-3 gap-y-1">
+                      <span className="text-foreground/70">{label}</span>
+                      {group.map((c) => (
+                        <span key={c.id} className={c.ok === false ? "text-destructive" : undefined} title={c.detail || c.id}>
+                          {c.id}·{unitWord(c)}
+                        </span>
+                      ))}
+                    </span>
+                  );
+                })}
                 {caps.note ? <span title={caps.note}>（{caps.note}）</span> : null}
                 <span>核验于 {formatClockTime(caps.at)}</span>
               </div>
