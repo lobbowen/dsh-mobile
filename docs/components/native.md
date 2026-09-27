@@ -16,7 +16,7 @@
 - **来源**：本仓自有代码，BSD-3-Clause。
 - **形态**：编成 `libdshposix.so` 放进 APK jniLibs，由容器经 `LD_PRELOAD` 注入 DSH 进程。
 - `link-interpose.c`：Android 对所有 app 域 `neverallow` `link(2)`，而 DSH 的发布会话/附件依赖它；以独占拷贝给出等价语义，从而不必修改 DSH 安装树。
-- `open-fallback.c`：`/data/user/0`、`/data` 祖先目录对 app 不可读，而 DSH 的 durable-home 会逐级 `fsync` 到文件系统根，`open` 目录即 `EACCES`；这里退到最近可打开的祖先。
+- `open-fallback.c`：`/data/user/0`、`/data` 祖先目录对 app 不可读，而 DSH 的 durable-home 会逐级 `fsync` 到文件系统根，`open` 目录即 `EACCES`；这里退到最近可打开的祖先。 另有 `tmp-redirect.h`（`/tmp` 前缀重写的唯一实现）与 `tmp-paths.c`（`mkdir/stat/unlink/rename/…` 整张路径 syscall 面）—— 只动 `/tmp` 前缀，默认生效（不依赖会被 DSH 剥掉的 `DSH_*` 开关）。
 - **已删除**：首轮的 `link-publish-shim.js`（逐文件字节补丁）。
 
 ## 3. ptyprobe/ —— `libdshptyprobe.so`（本仓自有）

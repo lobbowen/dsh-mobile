@@ -463,7 +463,10 @@ class NativeManager {
   _supplyUnits() {
     if (!this._supplyUnitsCache) {
       try {
-        this._supplyUnitsCache = require('./supply-table.json').units || [];
+        const t = require('./supply-table.json');
+        // units（dsh 平台件差集）+ envUnits（C 层共享开发环境清单）**都要核验**：
+        // 只读 units 会让 C 层条目在面板上永远没有三态（真机定罪 2026-09-27）。
+        this._supplyUnitsCache = (t.units || []).concat(t.envUnits || []);
       } catch (e) {
         this.logger.warn && this.logger.warn('供给表读不到，能力核验无从执行: ' + e.message);
         this._supplyUnitsCache = [];

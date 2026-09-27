@@ -200,8 +200,8 @@
       "disposition": "runtime-check",
       "hostExcludes": [],
       "verify": {
-        "criterion": "写 \"/tmp/<name>\" 后能在 $TMPDIR/<name> 读回 —— 文件落没落到 TMPDIR 才是结论",
-        "node": "const fs=require('node:fs'),path=require('node:path'); const base='dsh-tmp-probe-'+process.pid; const dir=process.env.TMPDIR; if(!dir) throw new Error('TMPDIR 未设：本格量的是 /tmp 前缀重写，没有 TMPDIR 无从判'); fs.writeFileSync('/tmp/'+base,'ok'); const real=path.join(dir,base); const back=fs.readFileSync(real,'utf8'); fs.unlinkSync(real); if(back!=='ok') throw new Error('重写后回读不符: '+back); process.stdout.write('DSH_PROBE_PASS /tmp/'+base+' -> '+real)"
+        "criterion": "/tmp 下的 open + mkdir + stat + unlink 全部落到 $TMPDIR —— 缺一片即红（真机定罪过 one-surface 假绿）",
+        "node": "const fs=require('node:fs'),path=require('node:path'); const b='dsh-tmp-probe-'+process.pid, dir=process.env.TMPDIR; if(!dir) throw new Error('TMPDIR 未设'); try{ fs.writeFileSync('/tmp/'+b,'ok'); if(fs.readFileSync(path.join(dir,b),'utf8')!=='ok') throw new Error('open 未落到 TMPDIR'); fs.mkdirSync('/tmp/'+b+'-d'); if(!fs.statSync('/tmp/'+b+'-d').isDirectory()) throw new Error('mkdir/stat 未落到 TMPDIR'); fs.unlinkSync('/tmp/'+b); if(fs.existsSync(path.join(dir,b))) throw new Error('unlink 未生效'); fs.rmdirSync('/tmp/'+b+'-d'); process.stdout.write('DSH_PROBE_PASS open+mkdir+stat+unlink 全落 '+dir); }catch(e){ try{fs.unlinkSync('/tmp/'+b);}catch(_){} try{fs.rmdirSync('/tmp/'+b+'-d');}catch(_){} throw e; }"
       },
       "why": "安卓根文件系统只读且 SELinux 不给 app 在 / 下建目录，Linux 习惯的硬编码 /tmp 必然失败；容器经 libdshposix 在 open/openat 上把 /tmp 前缀重写到 $TMPDIR（开关 DSH_TMP_REDIRECT），本格由设备端探针核验落点。"
     },
