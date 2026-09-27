@@ -165,13 +165,19 @@ char *UP = 0;
 EOF
   "$CC" -c -O2 /tmp/termcap_stub.c -o /tmp/termcap_stub.o \
     && "$LLVM_AR" rcs /tmp/libtermcap_stub.a /tmp/termcap_stub.o
+  # 动态 bionic 的 libc.so 不再导出 mblen/setgrent/getgrent/endgrent，而 bash 引用它们
+  # （静态 libc.a 里还有）—— 这不是环境问题，是动态化的必然代价。桩正文唯一事实源：
+  # scripts/bionic-compat.c。
+  cp scripts/bionic-compat.c /tmp/bionic_compat.c
+  "$CC" -c -O2 /tmp/bionic_compat.c -o /tmp/bionic_compat.o \
+    && "$LLVM_AR" rcs /tmp/libbionic_compat.a /tmp/bionic_compat.o
   (
     set -e
     cd /tmp/bash-${BASH_VER}
     ./configure --host=aarch64-linux-android --build=x86_64-pc-linux-gnu \
       --prefix=/native --disable-nls --without-bash-malloc \
       CC="$CC" CFLAGS="-O2 -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types -Wno-error=incompatible-pointer-types" \
-      LDFLAGS="-Wl,--allow-multiple-definition" LIBS="/tmp/libtermcap_stub.a" \
+      LDFLAGS="-Wl,--allow-multiple-definition" LIBS="/tmp/libtermcap_stub.a /tmp/libbionic_compat.a" \
       bash_cv_getcwd_malloc=yes bash_cv_func_sigsetjmp=present \
       bash_cv_printf_a_format=yes bash_cv_dev_fd_standard=yes \
       bash_cv_unusable_rtsigs=no > /tmp/bash-configure.log 2>&1 \

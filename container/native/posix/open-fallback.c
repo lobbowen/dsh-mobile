@@ -21,7 +21,8 @@ static int raw_openat(int dirfd, const char *path, int flags, mode_t mode) {
 // D1：/tmp 语义兑现。安卓根文件系统只读、SELinux 也不给 app 在 / 下建目录，
 // 硬编码 /tmp 的脚本（Linux 习惯）必然失败。这里在 open/openat 上把 /tmp 前缀
 // 重写到 $TMPDIR —— 只改前缀、只动 /tmp，其余路径与语义一律不变。
-// 开关：DSH_TMP_REDIRECT=1 时生效（缺省不生效）；TMPDIR 缺失/非绝对路径时不生效。
+// 生效条件：TMPDIR 为**绝对路径**即生效（默认开）。曾经用 DSH_TMP_REDIRECT 开关，
+// 但 DSH 起子进程时会剥掉 DSH_*（真机定罪），开关到不了干活进程，故去掉开关。
 // 判据（设备端探针 tmp-redirect）：写 "/tmp/<name>" 后能在 $TMPDIR/<name> 读回。
 static const char *tmp_redirect(const char *path, char *buf, size_t bufsz) {
     if (path == 0 || path[0] != '/') return path;
