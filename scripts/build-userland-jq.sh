@@ -74,8 +74,13 @@ echo "[jq] configure（host=aarch64-linux-android, oniguruma=builtin）"
 ./configure --host=aarch64-linux-android --build=x86_64-pc-linux-gnu \
   --with-oniguruma=builtin --disable-docs --disable-valgrind \
   CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" >/dev/null
-echo "[jq] make jq"
-make -j2 jq >/dev/null
+echo "[jq] make（默认 all：vendored oniguruma 挂在 SUBDIRS 递归里，只 make jq 会跳过它）"
+if ! make -j2; then
+  echo "::error title=make 失败::见上。下面打出 vendored oniguruma 的形态，便于判断是不是需要 autoreconf"
+  ls -la vendor/oniguruma 2>/dev/null | head -n 20 || true
+  ls vendor/oniguruma/src 2>/dev/null | head -n 10 || true
+  exit 1
+fi
 
 cp jq "../../$OUT/bin/jq"
 cd "$HERE/.."
