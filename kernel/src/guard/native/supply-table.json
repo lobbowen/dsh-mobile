@@ -33,7 +33,8 @@
     "supplied-by-us": "上游无 android 变体，由我们的守卫把件投进安装树；必须有 impl 与 verify",
     "npm-auto": "上游有 android 变体，npm 自己会装上；必须有 evidence 说明为何不需要我们动手",
     "waived": "已知缺口，暂不供给；必须有 followUp 与 expiresAt，到期未补即门禁红",
-    "runtime-check": "包能装上但能力取决于运行时（编译开关/SELinux/内核 API）；必须有 verify，核验方=设备端探针，不再写「人去真机跑一条命令」"
+    "runtime-check": "包能装上但能力取决于运行时（编译开关/SELinux/内核 API）；必须有 verify，核验方=设备端探针，不再写「人去真机跑一条命令」",
+    "seed": "由 L0 容器自举种子投放（PrefixProvisioner 播到 $PREFIX）；与产品无关，C 层的地板"
   },
   "verifyLegend": {
     "why": "投放结局（applied/already/blocked/failed）只回答「我们动过手没有」，不回答「用户能不能用」。真机 2026-09-26 的 sharp 就是被这两个词糊过去的：@img/sharp-wasm32 确在依赖树内（环境报告 §4.2）、单元报 applied，而 sharp 取不到绑定、read_image 全灭。所以每格另立 verify：一段交给**被检那份 node** 跑的 JS，打出 DSH_PROBE_PASS 且退 0 才算通。执行器只有一个（src/guard/native/capability-probe.js）。",
@@ -151,6 +152,80 @@
         "node": "const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process'); const base=process.env.DSH_SUPERVISOR_HOME; if(!base) throw new Error('容器未递 DSH_SUPERVISOR_HOME：本格量的是 app home 能不能 exec，没有 app home 就无从落件'); const d=path.join(base,'.exec-domain-probe'); fs.mkdirSync(d,{recursive:true}); const bad=(r)=>((r.error&&r.error.code)||('rc='+r.status+' err='+String(r.stderr||'').slice(0,120))); const dom=(r)=>String(r.stdout||'').split('\\n')[0].trim(); try{ const ctl=cp.spawnSync('/system/bin/sh',['-c','cat /proc/self/attr/current; echo; echo CTL_OK'],{encoding:'utf8',timeout:10000}); if(!String(ctl.stdout||'').includes('CTL_OK')) throw new Error('对照组失效：连 /system/bin/sh 都起不来（'+bad(ctl)+'），本格读数不可解释'); const sh=path.join(d,'p.sh'); fs.writeFileSync(sh,'#!/system/bin/sh\\ncat /proc/self/attr/current; echo; echo SCRIPT_OK\\n'); fs.chmodSync(sh,0o755); const r1=cp.spawnSync(sh,[],{encoding:'utf8',timeout:10000}); if(!String(r1.stdout||'').includes('SCRIPT_OK')) throw new Error('exec app home 脚本 fail: '+bad(r1)); const bin=path.join(d,'p.bin'); fs.copyFileSync('/system/bin/sh',bin); fs.chmodSync(bin,0o755); const r2=cp.spawnSync(bin,['-c','echo BIN_OK'],{encoding:'utf8',timeout:10000}); if(!String(r2.stdout||'').includes('BIN_OK')) throw new Error('exec app home 自带 ELF fail: '+bad(r2)); process.stdout.write('DSH_PROBE_PASS 域='+dom(ctl)+' exec 后域='+dom(r1)); } finally{ fs.rmSync(d,{recursive:true,force:true}); }"
       },
       "why": "这条能力此前只有一个手工脚本（kernel/tools/domain-probe.js，无任何调用点）加一份 2026-09-23 在 targetSdk=34 上取的旧基线 —— 判据靠人记得跑就等于没有判据。exec 落在 app_data_file 上，与本进程同域同 uid，所以 Agent 的 run_code 子进程走不走得通由这一格说了算。link(2) 不在本格量：容器给 Agent 进程注入了 libdshposix 的 LD_PRELOAD 用户态替代（container/native/posix/），在本进程里测 link 量到的是垫片而不是系统事实。"
+    }
+  ],
+  "envUnits": [
+    {
+      "id": "env-shell",
+      "capability": "shell（DSH bash 工具与一切子进程）",
+      "layer": "seed",
+      "disposition": "seed",
+      "why": "由 L0 PrefixProvisioner 把 libbash.so 播到 $PREFIX/bin/bash；缺件时 DSH 的 bash 工具与所有子进程全灭。",
+      "verify": { "notApplicable": "由 boot-env-contract 门禁（PATH 与 $PREFIX 装配）与 exec-domain 格覆盖，不在此重复第二把尺子" }
+    },
+    {
+      "id": "env-node",
+      "capability": "Node 运行时（内核与工具链的共同地板）",
+      "layer": "seed",
+      "disposition": "seed",
+      "why": "Node 是 init 赖以启动的运行时，由 NativeAssetRegistry 的 libnode.so 经 jniLibs 落地；无它整机无 OS。",
+      "verify": { "notApplicable": "由 NativeAssetRegistry 的 exec-probe 与 native-assets 门禁覆盖（存在性/依赖/真跑三重）" }
+    },
+    {
+      "id": "env-npm",
+      "capability": "npm 客户端（装 Agent 与共享工具）",
+      "layer": "seed",
+      "disposition": "seed",
+      "why": "npm 是纯 JS，随 APK assets/npm 投放、由 libnode.so 代跑，经 runtime.json 的 npmEntry 交给内核。",
+      "verify": { "notApplicable": "由 npm-contract-chain-test 与 runtime-contract 门禁逐字对账（目录名/入口/前缀三处同源）" }
+    },
+    {
+      "id": "env-pnpm",
+      "capability": "pnpm（dsh 插件管理链路）",
+      "layer": "shared",
+      "disposition": "supplied-by-us",
+      "impl": "src/platform/toolchain.js",
+      "why": "dsh-plugin-manager 调用 pnpm；安卓无 /usr/bin/env，npm 生成的 bin shim 不可 execve，故由 C 层物化器装到共享 $PREFIX 并自写 sh 入口。pnpm 钉 10.x（11+ 是原生二进制下载器，Android 无产物）。",
+      "verify": {
+        "criterion": "共享入口 $PREFIX/bin/pnpm 真能跑起来并打印版本 —— 文件在不算数",
+        "node": "const fs=require('node:fs'),cp=require('node:child_process'),path=require('node:path'); const c=JSON.parse(fs.readFileSync(process.env.DSH_SUPERVISOR_HOME+'/supervisor/runtime.json','utf8')); const bin=path.join(c.prefix,'bin','pnpm'); const r=cp.spawnSync(bin,['--version'],{encoding:'utf8',timeout:90000}); const v=String(r.stdout||'').trim(); if(r.status!==0 || v.split('.').length<3) throw new Error('pnpm 不可用: rc='+r.status+' out='+v.slice(0,60)+' err='+String(r.stderr||'').slice(0,80)); process.stdout.write('DSH_PROBE_PASS pnpm='+v)"
+      }
+    },
+    {
+      "id": "env-git",
+      "capability": "git（版本控制）",
+      "layer": "shared",
+      "disposition": "waived",
+      "waiver": { "followUp": "C 层工具供给批次", "verifiedAt": "2026-09-27", "expiresAt": "2026-12-26" },
+      "why": "设备上无 git；Android 无现成 aarch64 产物，需自建配方（libcurl/zlib/pcre2）。缺口在册，到期未补即门禁红。",
+      "verify": { "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力，写成待做反而伪造出判定" }
+    },
+    {
+      "id": "env-python3",
+      "capability": "python3（脚本类任务）",
+      "layer": "shared",
+      "disposition": "waived",
+      "waiver": { "followUp": "C 层运行时供给批次", "verifiedAt": "2026-09-27", "expiresAt": "2026-12-26" },
+      "why": "设备上无 python3；CPython 需按 bionic 交叉编译或投 Termux 式 $PREFIX，属独立立项。缺口在册。",
+      "verify": { "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力" }
+    },
+    {
+      "id": "env-jq",
+      "capability": "jq（JSON CLI 处理）",
+      "layer": "shared",
+      "disposition": "waived",
+      "waiver": { "followUp": "C 层工具供给批次", "verifiedAt": "2026-09-27", "expiresAt": "2026-12-26" },
+      "why": "设备上无 jq；可编静态 aarch64 单文件（无 DT_NEEDED），是最低档的一件，随 C 层工具批次补。",
+      "verify": { "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力" }
+    },
+    {
+      "id": "env-sqlite3",
+      "capability": "sqlite3（命令行数据库工具）",
+      "layer": "shared",
+      "disposition": "waived",
+      "waiver": { "followUp": "C 层工具供给批次", "verifiedAt": "2026-09-27", "expiresAt": "2026-12-26" },
+      "why": "设备上无 sqlite3 命令行（node:sqlite 是另一格 sqlite-query，两者不是同一能力）；随 C 层工具批次补静态件。",
+      "verify": { "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力" }
     }
   ]
 }

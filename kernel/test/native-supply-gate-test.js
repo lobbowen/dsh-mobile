@@ -33,7 +33,7 @@ const NPM_TIMEOUT_MS = 300000;
 const IMPL_SUFFIX = /(-shim|-package|-wasm|-prebuild)\.js$/;
 // 处置词汇以这里为准：表的 dispositions 只许给这四个词写释义，
 // 想加第五种处置，必须先把投放/核验实现做出来并改这里，否则等于口头放行。
-const DISP = ['supplied-by-us', 'npm-auto', 'waived', 'runtime-check'];
+const DISP = ['supplied-by-us', 'npm-auto', 'waived', 'runtime-check', 'seed'];
 
 /** 探针用的 npm 版本：必须与设备上那份同源，见表里 probe.npm.why。 */
 function npmVersion() {
@@ -272,6 +272,37 @@ if (table) {
   check('manager 经 D2 解析 rg/pty 工件（不再自拼 $PREFIX 路径）',
     /platformArtifacts\.resolve\(ctx, 'rg'\)/.test(mgrSrc) && /platformArtifacts\.resolve\(ctx, 'pty'\)/.test(mgrSrc),
     'manager 未接 D2');
+
+  // ── C 层：共享开发环境清单（与上面「dsh 的平台件差集」分开，语义不同）──
+  // 为什么单列：开发环境是**一层**（共享、与产品无关），它的完整度要能被机器读出来；
+  // 缺件要如实登记（含到期豁免），而不是等 agent 跑到一半才发现「这台没有 git」。
+  const envUnits = table.envUnits || [];
+  check('C 层环境清单非空（开发环境是一等层，不许空转）', envUnits.length > 0, envUnits.length + ' 条');
+  const envDup = envUnits.map((u) => u.id).filter((id, i, a) => a.indexOf(id) !== i);
+  check('C 层 unit id 无重复', envDup.length === 0, envDup.join(', '));
+  check('C 层处置词汇封闭（与平台件同一词汇表）', envUnits.every((u) => DISP.includes(u.disposition)),
+    envUnits.filter((u) => !DISP.includes(u.disposition)).map((u) => u.id + '=' + u.disposition).join(', '));
+  for (const u of envUnits) {
+    check('C 层须写明能力: ' + u.id, typeof u.capability === 'string' && u.capability.length >= 4, u.capability || '(缺)');
+    check('C 层须写明归属层（seed=底座种子 / shared=共享供给）: ' + u.id, u.layer === 'seed' || u.layer === 'shared', u.layer);
+    check('C 层须写明为什么: ' + u.id, typeof u.why === 'string' && u.why.length >= 20);
+    const v = u.verify || {};
+    const shapes = ['node', 'deferred', 'notApplicable'].filter((k) => v[k] !== undefined);
+    check('C 层每格须有唯一核验出口: ' + u.id, shapes.length === 1, shapes.join('+') || '(缺 verify)');
+    if (u.disposition === 'supplied-by-us') {
+      check('C 层供给件须有在场 impl: ' + u.id, !!u.impl && fs.existsSync(path.join(ROOT, u.impl)), u.impl || '（缺 impl）');
+      check('C 层供给件不得免检: ' + u.id, !v.notApplicable, 'supplied-by-us 却给 notApplicable');
+    }
+    if (u.disposition === 'runtime-check') {
+      check('C 层 runtime-check 须有可执行判据: ' + u.id, typeof v.node === 'string' && v.node.length >= 40, '判据缺失或过短');
+    }
+    if (u.disposition === 'waived') {
+      const w = u.waiver || {};
+      const dates = [w.verifiedAt, w.expiresAt].every((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d));
+      check('C 层豁免须有核验日与到期日: ' + u.id, dates && !!w.followUp, JSON.stringify(w));
+      if (dates) check('C 层豁免未过期: ' + u.id + '（' + w.expiresAt + '）', new Date(w.expiresAt + 'T23:59:59Z') >= new Date());
+    }
+  }
 }
 
 // ---- 现场探针：两份 npm 计划做差集 ----
