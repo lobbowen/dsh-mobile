@@ -187,6 +187,9 @@ async function provisionSharedTools(opts) {
     else { o.logger && o.logger.warn && o.logger.warn(line); }
     if (o.events) { try { o.events.append('toolchain_tool', { name, status: r.status, reason: r.reason || null }); } catch (_) {} }
   }
+  // 投放改变了环境 ⇒ 能力结论必须重算（「同一件事两个正交结论」的纪律）：调用方据此
+  // 触发一次 fresh 核验，否则面板会一直挂着投放期内那次「还没装好」的读数。
+  if (typeof o.onSettled === 'function') { try { o.onSettled(out); } catch (_) {} }
   return out;
 }
 
