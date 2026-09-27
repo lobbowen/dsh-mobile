@@ -121,7 +121,7 @@ if (table) {
 
   for (const u of units) {
     check('处置须写明为什么: ' + u.id, typeof u.why === 'string' && u.why.length >= 20);    if (u.disposition === 'supplied-by-us') {
-      check('投放实现文件在场: ' + u.id, !!u.impl && fs.existsSync((function () { const p = (fs.existsSync(path.join(ROOT, u.impl)) ? path.join(ROOT, u.impl) : path.join(ROOT, '..', u.impl)); if (fs.existsSync(p)) return p; return path.join(ROOT, '..', u.impl); })()), u.impl || '（缺 impl）');
+      check('投放实现文件在场: ' + u.id, !!u.impl && fs.existsSync(path.join(ROOT, u.impl)), u.impl || '（缺 impl）');
     }
     if (u.disposition === 'npm-auto') {
       check('npm-auto 须写明证据: ' + u.id, typeof u.evidence === 'string' && u.evidence.length >= 20);
@@ -327,7 +327,7 @@ check('C 层须写明归属层（seed=B种子 / shared=C共享 / d1=Linux语义 
         crit ? 'ok' : 'scripts/userland-verify.json 里没有 ' + toolName);
     }
     if (u.disposition === 'supplied-by-us') {
-      check('C 层供给件须有在场 impl: ' + u.id, !!u.impl && fs.existsSync((fs.existsSync(path.join(ROOT, u.impl)) ? path.join(ROOT, u.impl) : path.join(ROOT, '..', u.impl))), u.impl || '（缺 impl）');
+      check('C 层供给件须有在场 impl: ' + u.id, !!u.impl && fs.existsSync(path.join(ROOT, u.impl)), u.impl || '（缺 impl）');
       check('C 层供给件不得免检: ' + u.id, !v.notApplicable, 'supplied-by-us 却给 notApplicable');
     }
     if (u.disposition === 'runtime-check') {

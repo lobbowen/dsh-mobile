@@ -63,12 +63,7 @@ function probeUnit(unit, ctx, deps) {
     const toolName = String(unit.id || '').replace(/^env-/, '');
     let tool = null;
     try {
-      // 判据来自**随件下发的清单**：C 的供给机制住 APK 侧共享层，它把清单落在
-      //   $PREFIX/lib/toolchain/userland-manifest.json。内核只**读这个落点**（检测），不持有机制。
-      const _rc = require('../platform/runtime-contract').read();
-      const _mf = _rc && _rc.prefix ? require('node:path').join(_rc.prefix, 'lib', 'toolchain', 'userland-manifest.json') : null;
-      let m = null;
-      if (_mf) { try { m = JSON.parse(require('node:fs').readFileSync(_mf, 'utf8')); } catch (_e) { m = null; } }
+      const m = require('../supply/manifest').cached();
       tool = m ? (m.tools || []).find((t) => t && t.name === toolName) : null;
     } catch (_e) { tool = null; }
     const dv = tool && tool.verify;
