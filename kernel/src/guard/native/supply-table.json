@@ -241,7 +241,7 @@
       "layer": "shared",
       "disposition": "supplied-by-us",
       "impl": "src/platform/toolchain.js",
-      "why": "dsh-plugin-manager 调用 pnpm；安卓无 /usr/bin/env，npm 生成的 bin shim 不可 execve，故由 C 层物化器装到共享 $PREFIX 并自写 sh 入口。pnpm 钉 10.x（11+ 是原生二进制下载器，Android 无产物）。",
+      "why": "dsh-plugin-manager 调用 pnpm；安卓无 /usr/bin/env，npm 生成的 bin shim 不可 execve，故由 C 层物化器装到共享 $PREFIX 并自写 sh 入口。pnpm 钉 12.6.0：官方自 12.4.0 起发 @pnpm/exe.android-arm64（bionic aarch64 原生产物），本机实测该二进制可直接 exec（--version → 12.6.0，rc=0）。",
       "verify": {
         "criterion": "共享入口 $PREFIX/bin/pnpm 真能跑起来并打印版本 —— 文件在不算数",
         "node": "const fs=require('node:fs'),cp=require('node:child_process'),path=require('node:path'); const c=JSON.parse(fs.readFileSync(process.env.DSH_SUPERVISOR_HOME+'/supervisor/runtime.json','utf8')); const bin=path.join(c.prefix,'bin','pnpm'); const r=cp.spawnSync(bin,['--version'],{encoding:'utf8',timeout:90000}); const v=String(r.stdout||'').trim(); if(r.status!==0 || v.split('.').length<3) throw new Error('pnpm 不可用: rc='+r.status+' out='+v.slice(0,60)+' err='+String(r.stderr||'').slice(0,80)); process.stdout.write('DSH_PROBE_PASS pnpm='+v)"

@@ -7,11 +7,14 @@
 //   · 安卓上 npm 生成的 bin shim 是 `#!/usr/bin/env node`，而 /usr/bin/env 在安卓不存在
 //     ⇒ execve 必 ENOENT（本仓对 npm 自己也是恒以 `node <cli.js>` 代跑）。
 //   · 故：工具本体装在共享 $PREFIX/lib/toolchain 下，可执行入口由本模块写成
-//     `#!/system/bin/sh` + `exec <$PREFIX/bin/node> <entry> "$@"`。
+//     `#!/system/bin/sh` 包装；按 kind 决定 exec 什么（native = 直接 exec 自带二进制）。
 //
-// 为什么 pnpm 钉 10.x 而不是 latest：pnpm 11 起 `bin` 改为原生二进制 + 首次使用联网下载
-//   （bin/pnpm.mjs → 下载 @pnpm/exe.<target>），Android 没有对应产物；10.x 的
-//   bin/pnpm.cjs 是纯 JS，与本仓所有 JS 工具同一条通路。
+// 为什么 pnpm 钉 12.6.0（当前 latest）而不是更旧的 10.x：
+//   pnpm 官方自 **12.4.0** 起为 Android/bionic 发布了 aarch64 真原生可执行文件
+//   （`@pnpm/exe.android-arm64`，os=android / cpu=arm64，ELF 含 /system/bin/linker64），
+//   且 `pnpm` 的 native-binary.mjs 里有专门的 android 分支。
+//   本机实测：该二进制直接 exec 输出 `12.6.0`，rc=0，42ms。
+//   （11.x 及以前没有 android 产物；10.x 的 bin/pnpm.cjs 是本仓先前的临时解，已弃。）
 //
 // 边界：只在**容器契约形态**下动手（runtime.json 有 npmEntry 与 prefix）；
 //   无契约 = skipped（PC / 测试逐字不变，不变量 C2）。
@@ -23,12 +26,16 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const runtimeContract = require('./runtime-contract');
 
-/** 共享工具清单（唯一事实源）。新增一个工具 = 加一行。 */
+/** 共享工具清单（唯一事实源）。新增一个工具 = 加一行。
+ *  pkg/entry = 要装的包名与它在 node_modules 里的可执行相对路径；kind 决定怎么 exec。
+ *  kind='native'：直接 exec 该二进制（本仓 bash/rg 同款通路）；kind='js'：exec node <entry>。 */
 const TOOLS = {
   pnpm: {
-    version: '10.20.0',
-    entry: 'bin/pnpm.cjs',
-    why: 'dsh 插件管理（dsh-plugin-manager）调用 pnpm；≤10.x 才是纯 JS（11+ 是原生二进制下载器）',
+    version: '12.6.0',
+    pkg: '@pnpm/exe.android-arm64',
+    entry: 'pnpm',
+    kind: 'native',
+    why: 'dsh 插件管理调用 pnpm；官方 12.4.0 起发 Android/bionic aarch64 原生产物（本机实测可执行）',
   },
 };
 
@@ -70,11 +77,14 @@ async function ensureSharedTool(name, opts) {
   if (!c || !c.npmEntry || !c.prefix) return out('skipped', { reason: '非容器契约形态（无 runtime.json / npmEntry / prefix）' });
   const bin = path.join(c.prefix, 'bin', name);
   const libRoot = path.join(c.prefix, 'lib', 'toolchain');
-  const entry = path.join(libRoot, 'node_modules', name, spec.entry);
+  const entry = path.join(libRoot, 'node_modules', spec.pkg, spec.entry);
   const nodeBin = path.join(c.prefix, 'bin', 'node');
+  const execLine = spec.kind === 'native'
+    ? 'exec "' + entry + '" "$@"'
+    : 'exec "' + nodeBin + '" "' + entry + '" "$@"';
   const body = '#!/system/bin/sh' + NL
     + '# dsh toolchain 生成；安卓无 /usr/bin/env，npm 的 bin shim 不可 execve。' + NL
-    + 'exec "' + nodeBin + '" "' + entry + '" "$@"' + NL;
+    + execLine + NL;
   // 新鲜判据 = **入口内容逐字相同**（不是存在性）：entry 路径随 $PREFIX 变化，
   // 按存在性判 already 会把安装树永远钉在第一代那个 $PREFIX 上（同 rg 平台包的教训）。
   let binFresh = false;
@@ -84,17 +94,18 @@ async function ensureSharedTool(name, opts) {
     const inv = o.npmInvocation || runtimeContract.npmInvocation();
     // --prefix 是 cli 参数，优先于 npmEnv 里为 -g 设的 npm_config_prefix（npm 语义）。
     const args = ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock',
-      '--prefix', libRoot, name + '@' + spec.version];
+      '--prefix', libRoot, spec.pkg + '@' + spec.version];
     const env = runtimeContract.npmEnv(process.env);
     const r = typeof o.runInstall === 'function'
       ? o.runInstall(inv, args, env)
       : await runInstall(inv, args, env, o.timeoutMs || INSTALL_TIMEOUT_MS);
     if (!r || !r.ok || !fs.existsSync(entry)) {
-      return out('failed', { reason: '安装 ' + name + '@' + spec.version + ' 后仍缺入口 ' + entry + (r && r.tail ? '（' + String(r.tail).slice(0, 160) + '）' : '') });
+      return out('failed', { reason: '安装 ' + spec.pkg + '@' + spec.version + ' 后仍缺入口 ' + entry + (r && r.tail ? '（' + String(r.tail).slice(0, 160) + '）' : '') });
     }
   }
   try {
     fs.mkdirSync(path.dirname(bin), { recursive: true });
+    if (spec.kind === 'native') { try { fs.chmodSync(entry, 0o755); } catch (_) {} }
     fs.writeFileSync(bin, body, { mode: 0o755 });
     fs.chmodSync(bin, 0o755);
   } catch (e) {
