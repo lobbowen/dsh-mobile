@@ -146,7 +146,7 @@ export CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib"
 if ! ./configure --host=aarch64-linux-android --build=x86_64-pc-linux-gnu --prefix="$DEPS" \
   --with-openssl="$DEPS" --with-zlib="$DEPS" --with-ca-path=/system/etc/security/cacerts \
   --disable-shared --enable-static --disable-ldap --without-libssh2 --without-libidn2 \
-  --without-nghttp2 --without-brotli --without-zstd --disable-manual \
+  --without-nghttp2 --without-brotli --without-zstd --without-libpsl --disable-manual \
   --disable-ftp --disable-file --disable-dict --disable-telnet --disable-tftp \
   --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-rtsp \
   --enable-http \
@@ -155,8 +155,6 @@ if ! ./configure --host=aarch64-linux-android --build=x86_64-pc-linux-gnu --pref
   ac_cv_lib_ssl_SSL_new=yes ac_cv_lib_ssl_SSL_connect=yes ac_cv_lib_ssl_SSL_get_peer_certificate=yes \
   curl_cv_openssl_with_ldl=yes curl_cv_openssl_with_ldl_and_lpthread=yes \
   LIBS="-lssl -lcrypto -lz -ldl" CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib" > "$ROOT_DIR/work/curl-configure.log" 2>&1; then
-  echo "[git] curl Configure 通过"
-else
   echo "::error title=curl Configure 失败::下面是真因"
   echo "==== config.log 里 HMAC_Update 那段（编译/链接命令与报错都在这里）===="
   grep -n -B 14 -A 8 "HMAC_Update" "$ROOT_DIR/work/curl/config.log" | head -n 90 || true
@@ -167,6 +165,8 @@ else
   echo "==== configure 输出尾 15 行 ===="
   tail -n 15 "$ROOT_DIR/work/curl-configure.log" || true
   exit 1
+else
+  echo "[git] curl Configure 通过"
 fi
 # 落地自检：configure 说通过不等于真生成了 Makefile（CI 实证：make 报 `No targets specified and no makefile found.`）。
 if [ ! -f "$ROOT_DIR/work/curl/Makefile" ]; then
