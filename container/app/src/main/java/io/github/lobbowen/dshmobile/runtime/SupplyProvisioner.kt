@@ -35,16 +35,11 @@ object SupplyProvisioner {
     fun toolchainDir(ctx: Context): File = File(PrefixProvisioner.libDir(ctx), "toolchain")
     fun entryLink(ctx: Context, name: String): File = File(PrefixProvisioner.binDir(ctx), name)
 
-    // 清单所在**目录**：通道锚里的 baseUrl 是主机（hubcdn.zll.ink），真正的路径带通道子目录
-    //   userland-<channel>（线上实证：https://hubcdn.zll.ink/userland-canary/userland-manifest.json）。
-    //   漏了这一段就是 404 —— 2026-09-29 自审时发现。
-    private fun manifestDir(ctx: Context): String? {
+    private fun channelBaseUrl(ctx: Context): String? {
         return try {
             val t = ctx.assets.open(CHANNEL_ASSET).use { it.readBytes().toString(Charsets.UTF_8) }
-            val o = JSONObject(t)
-            val base = o.optString("baseUrl", "").trimEnd('/')
-            if (base.isEmpty()) null
-            else base + "/userland-" + o.optString("channel", "canary")
+            val u = JSONObject(t).optString("baseUrl", "")
+            if (u.isEmpty()) null else u.trimEnd('/')
         } catch (e: Throwable) { null }
     }
 
@@ -170,7 +165,7 @@ object SupplyProvisioner {
 
     // 跑一轮供给：返回成功就位的件数；任何异常都只记账不抛出（不阻塞启动）。
     fun ensure(ctx: Context): Int {
-        val base = manifestDir(ctx) ?: run {
+        val base = channelBaseUrl(ctx) ?: run {
             RuntimeDiagnostics.append(ctx, "supply", false, "C 层供给未启动", "assets/" + CHANNEL_ASSET + " 读不到通道锚")
             return 0
         }

@@ -124,9 +124,6 @@ C 是服务所有产品的共享层（判据：能不能共享，看是不是产
 换任何产品都要再来一遍（用户 2026-09-29 复核）。验收判据：**加/更新一件工具不需要内核 OTA、不需要 APK 更新（只发清单）**。
 搬迁期间以 `layout.json` 的 `deliveryDebt` 挂账（有到期日，机检会红到搬完为止）。
 
-**原生供给的等价判据是真机验收**：旧 JS 物化器的两条单测（布局不变量、不静默失败）随实现删除；
-原生实现的判据是**设备上真跑**（工具就位 + 判据通过 + 加/更新一件工具只发清单）。
-
 **C 通道的件按 API 23 编译**（`aarch64-linux-android23-clang`）：bionic 到 API 23 才把 `stdin/stdout/stderr` 做成真符号，而 openssl 的代码引用它们；容器本体仍按 API 21 另线编译，件只要求设备 ≥ Android 6。内核只留判定框架（`capability-probe`）⇒ **加一件工具连内核那一格都不用动**。件内可带 `link-farm.txt`（每行「相对路径 → 链接目标」），由物化器在设备上建链 —— **可推导的链接不进包**（git 的 libexec 子命令农场约 170 项，打进去会让件从几 MB 涨到 1 GB） |
 | D1 | **车辆＝APK**：`container/native/d1/*.c` → CI 编成 `libdshposix.so` → jniLibs，容器经 `LD_PRELOAD` **单点注入**（`GuestAdapter`），作用于所有被拉起的进程及其子进程 ⇒ **改它就要装 APK，内核 OTA 送不到**。已兑现：`link-interpose.c`（`link(2)` 替代）、`open-fallback.c`（祖先目录 EACCES 回退）、`tmp-paths.c`+`tmp-redirect.h`（`/tmp`→`$TMPDIR` 整张路径面，默认生效）、`exec-path.c`（**shebang 与标准路径面**：`/usr/bin/env X`、`/usr/bin/X`、`/bin/sh` 在 execve 前按调用方 PATH 解析）。**纪律：D1 只收「稳、基础、所有进程都要」的语义** —— 它的失败模式是全局的（拖死所有进程），变更频率远低于工具；将来若要热更，前提是三件护栏齐备：APK 内留**已知好基线** + 启动校验 + 坏了自动回退，且该副本有**自己的验签链** |
 | D2 | `kernel/src/d2/pieces.json`（**件清单唯一处**：身份 + 上游按什么名字/位置找它 + 版本/哈希）+ `artifacts.js`（数据驱动的本机解析）。本体不在此（rg/bash 的本体是 B 种子、C 内容或 npm 树）。与 `.github/native-capabilities.txt` 的对账由 `native-supply-gate-test` 把守 |
