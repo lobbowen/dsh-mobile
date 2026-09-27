@@ -121,7 +121,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "runner 自带 npm: $(npm --version)"
-          NPMV="$(node -p "require('./src/guard/native/supply-table.json').probe.npm.version")"
+          NPMV="$(node -p "require('./src/assembler/supply-table.json').probe.npm.version")"
           npm install -g "npm@$NPMV"
           echo "探针用 npm: $(npm --version)"
 

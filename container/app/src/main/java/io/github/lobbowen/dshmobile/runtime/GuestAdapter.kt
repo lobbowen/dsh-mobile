@@ -105,7 +105,7 @@ object GuestAdapter {
             // flock(2) 原生绑定（fast-apk CI 现编进 jniLibs，见 docs/components/native.md）。
             // 文件缺席时垫片 dlopen 失败 ⇒ 逐字回退 vendor 原始语义，故只是声明、不要求存在。
             put("DSH_FLOCK_NATIVE", i.flockNative.absolutePath)
-            // link(2) 用户态替代：经 LD_PRELOAD 注入 DSH 进程，见 native/posix/。
+            // link(2) 用户态替代：经 LD_PRELOAD 注入 DSH 进程，见 native/d1/。
             put("LD_PRELOAD", i.posixShim.absolutePath)
             // D1：/tmp 语义兑现 —— 安卓根只读，硬编码 /tmp 的脚本必失败；libdshposix 的
             // open/openat 把 /tmp 前缀重写到 $TMPDIR（见 container/native/d1/open-fallback.c）。

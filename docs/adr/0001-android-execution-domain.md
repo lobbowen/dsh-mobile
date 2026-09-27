@@ -118,7 +118,7 @@ renameat2 NOREPLACE: available
 |---|---|
 | D1 targetSdk=28 | 已落地（`container/app/build.gradle.kts:41`）。exec 读数不再靠人跑脚本：供给表 `exec-domain` 格每进程核一次，结论进 `status().nativeCaps` 与面板。**真机读数未采** ⇒ 本条只算「判据已就位」，不算「域已自证」 |
 | D2 bionic 原生基底 | 已落地：`PrefixProvisioner` 从 nativeLibraryDir 派生 `$PREFIX`（bash/rg 真名可执行） |
-| D3 原生原语 | 已落地：`native/posix/libdshposix.so` 以 LD_PRELOAD 替代 link(2)，`native/publish` 已删 |
+| D3 原生原语 | 已落地：`native/d1/libdshposix.so` 以 LD_PRELOAD 替代 link(2)，`native/publish` 已删 |
 | D5 依赖供给 | rg 平台包 `@vscode/ripgrep-android-arm64` 由内核补给；flock / require-builtin 两个第三方垫片保留 |
 | D6 退役 shim | 已删 3 个改 DSH 字节的垫片（link-publish / capability-env / ptc-env）及其测试与夹具 |
 

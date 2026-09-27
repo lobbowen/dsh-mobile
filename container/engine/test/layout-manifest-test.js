@@ -117,8 +117,8 @@ try {
   if (ex('kernel/src/assembler/platform-artifacts.js')) add('E-D2-MIXED', 'kernel/src/assembler/platform-artifacts.js');
 
   // 规则 8：**已迁移的旧路径不得再被引用** —— 连续写法与**分段写法**都要查。
-  // 为什么加：步骤 A 搬迁后 CI 红过两次，根因都是 path.join(ROOT,'container','native','posix',…)
-  // 这类分段拼接：批量文本替换改不到它，测试于是静默指向不存在的目录（本仓文档早有同类前科记录）。
+  // 为什么加：步骤 A 搬迁后 CI 红过两次，根因都是把路径**拆成多段**的写法（path.join(ROOT, '容器段', …)）；
+  // 批量文本替换只能改连续字符串，改不到分段拼接，测试于是静默指向不存在的目录（本仓文档早有同类前科）。
   // 豁免：layout.json（迁移台账本身）与 docs/plans/（历史方案记录，讨论迁移时合法引用旧路径）。
   const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const segRe = (p) => p.split('/').map((x) => "'" + escRe(x) + "'").join("\\s*,\\s*");
