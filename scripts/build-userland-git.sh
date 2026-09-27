@@ -119,6 +119,7 @@ else
   exit 1
 fi
 BINSIZE=$(stat -c%s "$ROOT_DIR/$OUT/bin/git")
+BININODE=$(stat -c%i "$ROOT_DIR/$OUT/bin/git")
 FARM="$ROOT_DIR/$OUT/link-farm.txt"
 : > "$FARM"
 LINKED=0
@@ -133,7 +134,9 @@ for f in "$GITCORE"/*; do
     LINKED=$((LINKED+1))
   elif [ -f "$f" ]; then
     FSIZE=$(stat -c%s "$f")
-    if [ "$FSIZE" = "$BINSIZE" ]; then
+    FINODE=$(stat -c%i "$f")
+    if [ "$FINODE" = "$BININODE" ] || [ "$FSIZE" = "$BINSIZE" ]; then
+      # 硬链接（同 inode）或副本（同尺寸）：两者都不该进包 —— 设备上按名单建链。
       printf '%s\t%s\n' "libexec/git-core/$NAME" "../../bin/git" >> "$FARM"
       rm -f "$f"
       SLIMMED=$((SLIMMED+1))
