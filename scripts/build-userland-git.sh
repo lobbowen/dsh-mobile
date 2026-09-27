@@ -102,6 +102,22 @@ rm -f "$ROOT_DIR/$OUT/bin/git-credential-"* 2>/dev/null || true
 #   （CI 实测 1.29 GB）。把可推导的链接抽成名单、删掉副本；设备侧由物化器按名单建链。
 #   为什么这样对：链接是**可推导的**，就不该进包 —— 与「shebang 约定补在 D1 而不是给每件手写包装」同一条纪律。
 GITCORE="$ROOT_DIR/$OUT/libexec/git-core"
+
+# ── 先 strip 再体检 ───────────────────────────────────────────────────
+#   CI 实测：17 件里 27 个真独立二进制全是**未 strip** 的 ELF（各带完整符号表），
+#   git-core 一项就 80 MiB。strip 是这类膨胀的对症处置（不是把阈值调大）。
+STRIPPED=0
+if [ -n "${LLVM_STRIP:-}" ] && [ -x "${LLVM_STRIP}" ]; then
+  for f in "$ROOT_DIR/$OUT/bin/git" "$GITCORE"/*; do
+    [ -f "$f" ] || continue
+    [ -L "$f" ] && continue
+    if "$LLVM_STRIP" "$f" 2>/dev/null; then STRIPPED=$((STRIPPED+1)); fi
+  done
+  echo "[git] 已 strip $STRIPPED 个二进制（strip 前 bin/git $(stat -c%s "$ROOT_DIR/$OUT/bin/git") 字节）"
+else
+  echo "::error title=没有 LLVM_STRIP::未 strip 的件体积会离谱（CI 实测 102 MiB）—— 中止"
+  exit 1
+fi
 BINSIZE=$(stat -c%s "$ROOT_DIR/$OUT/bin/git")
 FARM="$ROOT_DIR/$OUT/link-farm.txt"
 : > "$FARM"
