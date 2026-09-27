@@ -83,9 +83,21 @@ if ! make -j2; then
   exit 1
 fi
 
-cp jq "$ROOT_DIR/$OUT/bin/jq"
+# libtool 会在构建目录里留一个**同名包装脚本** `jq`（设 LD_LIBRARY_PATH 后 exec .libs/jq）；
+# 真身是 ELF，在 .libs/jq。上一轮 CI 就是把包装脚本当产物拷出去了（verify 立刻红：Bourne-Again shell script）。
+if [ ! -x .libs/jq ]; then
+  echo "::error title=找不到真身::.libs/jq 不存在（libtool 布局变了？）"
+  ls -la .libs 2>/dev/null | head -n 10 || true
+  exit 1
+fi
+cp .libs/jq "$ROOT_DIR/$OUT/bin/jq"
 cd "$ROOT_DIR"
 chmod 0755 "$ROOT_DIR/$OUT/bin/jq"
+# 自检：产物必须是 ELF（不是包装脚本、不是空壳）——fail fast，别等 verify 那一关才发现。
+if ! "$READELF_BIN" -h "$ROOT_DIR/$OUT/bin/jq" >/dev/null 2>&1; then
+  echo "::error title=产物不是 ELF::$(file -b "$ROOT_DIR/$OUT/bin/jq")"
+  exit 1
+fi
 
 # 自证：不得依赖 libonig（否则上机缺库）
 if "$READELF_BIN" -d "$ROOT_DIR/$OUT/bin/jq" | grep -q 'libonig'; then
