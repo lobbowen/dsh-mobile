@@ -264,6 +264,14 @@ if (table) {
   }
   check('对照组：单元 id 抽取判据非空转（认得出全部供给项）', mgrUnits.length === tableSupplied.length && mgrUnits.length >= 5,
     mgrUnits.join(', '));
+
+  // D2：平台件**本体**的解析必须收在一处，与「落位」分层。
+  // 工件（在哪/在不在）此前与落位混在各 impl 里 —— 加一个产品就复制一份「路径怎么算」，
+  // 且「$PREFIX 唯一事实源 = runtime.json 的 prefix 格」这条判据守不住。
+  check('D2 平台件库解析器在场', fs.existsSync(path.join(NATIVE_DIR, 'platform-artifacts.js')), 'platform-artifacts.js');
+  check('manager 经 D2 解析 rg/pty 工件（不再自拼 $PREFIX 路径）',
+    /platformArtifacts\.resolve\(ctx, 'rg'\)/.test(mgrSrc) && /platformArtifacts\.resolve\(ctx, 'pty'\)/.test(mgrSrc),
+    'manager 未接 D2');
 }
 
 // ---- 现场探针：两份 npm 计划做差集 ----

@@ -20,6 +20,8 @@ const ex = require('../../platform/exec');
 // 曾因此让行为测试意外执行了真实 npm（见构造函数 `_npmBin` 的说明）。
 const execPath = require('../../platform/os/exec-path');
 const runtimeContract = require('../../platform/runtime-contract');
+// D2 平台件库：共享工件（rg/pty/…）本体的唯一解析处；落位仍在本目录各 impl 里。
+const platformArtifacts = require('./platform-artifacts');
 // npm 的**唯一 spawn 调用形态**：恒返回 `{bin, args}`，调用方拼
 // `inv.args.concat(自己的参数)` 后再 spawn。
 // · 测试注入（构造期 opts.npmBin，或赋值 _npmBinArgs）优先 —— 结构上保证
@@ -526,7 +528,7 @@ class NativeManager {
     const ctx = this._unitContext(rootOverride);
     if (ctx.skip) return this._unitOutcome('ripgrep', ctx.skip.status, ctx.skip.reason);
     try {
-      const r = require('./ripgrep-package').ensureRipgrepPackage(ctx.root, { prefix: ctx.prefix });
+      const r = require('./ripgrep-package').ensureRipgrepPackage(ctx.root, { artifact: platformArtifacts.resolve(ctx, 'rg') });
       return this._unitOutcome('ripgrep', r.status, r.status === 'applied' ? ctx.prefix + '/bin/rg' : r.reason);
     } catch (e) {
       return this._unitOutcome('ripgrep', 'failed', e.message);
@@ -562,7 +564,7 @@ class NativeManager {
     const ctx = this._unitContext(rootOverride);
     if (ctx.skip) return this._unitOutcome('node-pty', ctx.skip.status, ctx.skip.reason);
     const dshDir = path.join(ctx.root, this.config.packageName);
-    const src = ctx.prefix ? path.join(ctx.prefix, 'lib', 'pty.node') : null;
+    const src = platformArtifacts.resolve(ctx, 'pty');
     try {
       const r = require('./node-pty-prebuild').ensureNodePtyPrebuild(dshDir, src);
       return this._unitOutcome('node-pty', r.status, r.status === 'applied' ? r.path : (r.reason || null));

@@ -18,8 +18,10 @@ const PKG = '@vscode/ripgrep-android-arm64';
  * @returns {{status:'applied'|'already'|'blocked', results:Array, reason:string|null}}
  */
 function ensureRipgrepPackage(npmRoot, opts) {
-  const prefix = (opts && opts.prefix) || null;
-  const bin = prefix ? path.join(prefix, 'bin', 'rg') : null;
+  const o = opts || {};
+  // 工件路径优先由 D2 解析器（platform-artifacts）给出；{prefix} 是向后兼容的旧入口。
+  // 两者都缺才判 blocked —— 实现绝不自拼路径（$PREFIX 的唯一事实源是 runtime.json）。
+  const bin = o.artifact || (o.prefix ? path.join(o.prefix, 'bin', 'rg') : null);
   if (!npmRoot) return { status: 'blocked', reason: 'npm 全局根未知', results: [] };
   if (!bin) return { status: 'blocked', reason: '契约缺 prefix 格，找不到 ' + PKG + ' 该指向的 rg', results: [] };
   if (!fs.existsSync(bin)) return { status: 'blocked', reason: 'PREFIX 下无 rg: ' + bin, results: [] };
