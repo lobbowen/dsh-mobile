@@ -60,6 +60,25 @@ function readWatermark() {
   if (!p) return null;
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
 }
+/** 完整清单的落盘点（与水位同目录、不同文件）：水位只记「见过哪一序」，判据要用完整那份。 */
+function fullManifestPath() {
+  const c = runtimeContract.read();
+  return c && c.prefix ? path.join(c.prefix, 'lib', 'toolchain', 'userland-manifest.json') : null;
+}
+function writeFullManifest(m) {
+  const p = fullManifestPath();
+  if (!p) return;
+  try {
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(m, null, 2) + '\n');
+  } catch { /* 落不下不影响本次可用性 */ }
+}
+function readFullManifest() {
+  const p = fullManifestPath();
+  if (!p) return null;
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+}
+
 function writeWatermark(m) {
   const p = watermarkPath();
   if (!p) return;
@@ -100,6 +119,7 @@ async function load(opts) {
     throw new Error('清单 sequence 倒退（' + m.sequence + ' < 已见 ' + wm.sequence + '）：按重放拒绝');
   }
   writeWatermark(m);
+  writeFullManifest(m);   // 判据（tools[].verify）随件下发 —— 完整那份必须留在盘上，供同步消费方读
   _cache = { at: Date.now(), manifest: m };
   return m;
 }
@@ -113,7 +133,22 @@ async function toolNames(opts) {
   return (m.tools || []).map((t) => t.name);
 }
 function resetCache() { _cache = null; }
-/** 已取回并验过的清单（没有则 null）。给**同步**消费方用（如能力探针）：不发起网络，只读缓存。 */
-function cached() { return _cache ? _cache.manifest : null; }
+/**
+ * 已取回并验过的清单（没有则 null）。给**同步**消费方用（如能力探针）：不发起网络。
+ *
+ * 为什么回退读**盘上那份完整清单**（真机定罪 2026-09-28，kernel .39）：水位文件里只记
+ *   {sequence,version,at}，而探针要在投放前后**任何时刻**读到 tools[].verify。只看进程内缓存时，
+ *   重启后的首个探针永远读不到 ⇒ 面板上 C 层四格停在「清单尚未取回」，而件其实早装好了。
+ */
+function cached() {
+  if (_cache) return _cache.manifest;
+  const disk = readFullManifest();
+  if (!disk) return null;
+  try { validate(disk); } catch { return null; }   // 过期/残缺一律当没有，不按半份清单办事
+  let at = Date.now();
+  try { at = fs.statSync(fullManifestPath()).mtimeMs; } catch { /* 取不到 mtime 就用当下 */ }
+  _cache = { at, manifest: disk };
+  return disk;
+}
 
 module.exports = { load, specFor, toolNames, cached, resetCache, manifestUrl, sigUrl, validate };
