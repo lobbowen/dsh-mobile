@@ -196,6 +196,7 @@
     {
       "id": "tmp-redirect",
       "capability": "/tmp 语义（D1：安卓根只读，Linux 习惯的硬编码 /tmp 必失败）",
+      "layer": "shared",
       "disposition": "runtime-check",
       "hostExcludes": [],
       "verify": {
