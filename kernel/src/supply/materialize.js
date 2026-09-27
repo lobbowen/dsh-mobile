@@ -140,6 +140,12 @@ function runInstall(inv, args, env, timeoutMs) {
   });
 }
 
+function writeWrapperWithAliases(bin, body, prefix, aliases) {
+  let ok = writeWrapper(bin, body);
+  for (const a of (aliases || [])) ok = writeWrapper(path.join(prefix, 'bin', a), body) && ok;
+  return ok;
+}
+
 function writeWrapper(bin, body) {
   try { fs.mkdirSync(path.dirname(bin), { recursive: true }); fs.writeFileSync(bin, body, { mode: 0o755 }); fs.chmodSync(bin, 0o755); return true; }
   catch (e) { return false; }
@@ -163,6 +169,9 @@ async function ensureSharedTool(name, opts) {
   const c = runtimeContract.read();
   if (!c || !c.npmEntry || !c.prefix) return out('skipped', { reason: '非容器契约形态（无 runtime.json / npmEntry / prefix）' });
   const bin = path.join(c.prefix, 'bin', name);
+  // 别名（件可声明一个命令的多个名字）：PEP 394 下 python3 是规范名，python 允许作为同一解释器的别名；
+  // 别名的选择属于**件的内容**（清单里声明），机制只负责照单写入口 —— 不在内核里写死谁跟谁同名。
+  const aliases = Array.isArray(spec.aliases) ? spec.aliases.filter((a) => typeof a === 'string' && a && a !== name) : [];
   const libBase = path.join(c.prefix, 'lib');
   const root = path.join(libBase, 'toolchain');
   const staging = path.join(libBase, 'toolchain.staging');
@@ -186,8 +195,11 @@ async function ensureSharedTool(name, opts) {
   if (await artifactOk(entry, entrySpec)) {
     let binFresh = false;
     try { binFresh = fs.readFileSync(bin, 'utf8') === body; } catch {}
-    if (binFresh) return out('already', { bin, entry });
-    return writeWrapper(bin, body) ? out('applied', { bin, entry }) : out('failed', { reason: '写入口失败（见日志）' });
+    if (binFresh) {
+      // 入口是新的，但别名可能缺（加别名那次升级）——一并补齐。
+      return writeWrapperWithAliases(bin, body, c.prefix, aliases) ? out('already', { bin, entry }) : out('failed', { reason: '写入口失败（见日志）' });
+    }
+    return writeWrapperWithAliases(bin, body, c.prefix, aliases) ? out('applied', { bin, entry }) : out('failed', { reason: '写入口失败（见日志）' });
   }
 
   if (!acquireLock(lockFile)) return out('skipped', { reason: '另一个投放正在进行（锁被占）' });
@@ -242,7 +254,7 @@ async function ensureSharedTool(name, opts) {
     _provisioning -= 1;
     releaseLock(lockFile);
   }
-  return writeWrapper(bin, body) ? out('applied', { bin, entry }) : out('failed', { reason: '写入口失败（见日志）' });
+  return writeWrapperWithAliases(bin, body, c.prefix, aliases) ? out('applied', { bin, entry, aliases }) : out('failed', { reason: '写入口失败（见日志）' });
 }
 
 /** C 层供给：把全部共享工具**在启动时**投放就位（不是「谁用到谁装」的惰性补丁）。

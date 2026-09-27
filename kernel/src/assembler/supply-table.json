@@ -285,15 +285,18 @@
         "verifiedAt": "2026-09-27",
         "expiresAt": "2026-12-26"
       },
-      "why": "设备上无 python3；CPython 需按 bionic 交叉编译（或投 Termux 式 $PREFIX 布局），属于**运行时**而非顺手工具：它缺 = 一整类 Python 负载跑不起来，优先级高于 jq/curl/coreutils 这类工具。交付路径与其它 C 内容同一条：**清单加件，内核不动**（件名 python3、带版本地板 3.11）。缺口在册，到期未补即门禁红。",
+      "why": "【事实·官方立场】CPython 文档《Using Python on Android》明确：安卓上**没有系统级安装、没有控制台**，「唯一方式是以**嵌入模式**（native app 嵌 libpython，经 embedding API 调 Python）」；对多数人它推荐 Briefcase/Buildozer/Chaquopy/pyqtdeploy/**Termux** 这类工具，而不是直接用发布包。 【事实·官方发布物】python.org 每个版本都发 Android 包：`python-3.14.7-aarch64-linux-android.tar.gz`（页面写着 \"Android **embeddable** package\"）。当前最新稳定 = **3.14.7（2026-08-05）**；3.15 仍是 rc（2026-09-01 rc2），生产不用。CPython 自 **3.13**（PEP 738）起把 Android 作为受支持平台，目标三元组即 aarch64-linux-android，配套 wheel 生态走 cibuildwheel。 【本仓决策·为什么走前缀路线而不是嵌入】嵌入 = libpython 进 jniLibs（APK），**更新要重装 APK**，与「C 可热更」和「python 归 C」两条都冲突。故走 **Termux 同型的前缀路线**：整个运行时（bin/python3 + lib/python3.14 + lib-dynload + 依赖库）作为 **C 的件**落在共享 $PREFIX，随清单热更、内容寻址、验哈希。 【本容器可行性依据】exec 域是 targetSdk28 ⇒ app 数据目录里的**可执行与 dlopen 都可**（$PREFIX/bin/bash、sqlite3 已真机实证）；stdlib 扩展模块靠 dlopen 从 $PREFIX 加载，正落在这个域内。若哪天 targetSdk 上到 29+，这条路线即失效，届时只能走嵌入（这条前提必须写在这里，不能只活在脑子里）。 【移植要点·Termux 真机配方】ac_cv_file__dev_ptmx=yes、ac_cv_file__dev_ptc=no（无 /dev/ptc）、ac_cv_func_wcsftime=no、ac_cv_func_ftime=no（无 sys/timeb.h）、ac_cv_func_faccessat=no（无 AT_EACCESS）、ac_cv_buggy_getaddrinfo=no、--with-system-ffi --with-system-expat、--enable-loadable-sqlite-extensions、ac_cv_little_endian_double=yes、强制 posix 信号量。**Termux 还要关掉 link/linkat（安卓无硬链接）—— 本容器 D1 已用 libdshposix 兑现 link(2)，这一条我们不必关**（少一处偏离上游）。 【依赖件】openssl、libffi、libexpat、zlib、libbz2、liblzma、libsqlite、ncurses/readline、zstd、gdbm 等（Termux 的依赖表），须一并随件投放。pip 不在标准件里（Termux 拆成 python-pip/ensurepip），要用需另投或随件带。 【版本策略】地板 = **3.14**（当前最新稳定系列）；精确补丁版（3.14.7）与 sha256 由 **C 的清单**钉，改版本不发内核。 【已知限制】CPython 文档列明安卓上标准库有 notable omissions and restrictions（见其 API availability 指南），必须按件实测后再对外承诺能力。",
       "verify": {
-        "criterion": "python3 起得来、真算一段并读回结果，且版本不低于地板 3.11（不是只看 --version）",
-        "node": "const cp = require('node:child_process'); const r = cp.spawnSync('python3', ['-c', 'import sys; print(\".\".join(map(str, sys.version_info[:3]))); print(1+1)'], { encoding: 'utf8' }); if (r.error) { console.error('python3 起不来: ' + r.error.message); process.exit(1); } if (r.status !== 0) { console.error('python3 非零退出 rc=' + r.status + ' err=' + String(r.stderr || '').slice(0, 160)); process.exit(1); } const lines = String(r.stdout || '').trim().split('\\n'); const ver = (lines[0] || '').trim(); const sum = (lines[1] || '').trim(); if (sum !== '2') { console.error('python3 算不对: ' + JSON.stringify(sum)); process.exit(1); } const seg = ver.split('.').map(function (x) { return parseInt(x, 10) || 0; }); const meetsFloor = (seg[0] > 3) || (seg[0] === 3 && (seg[1] || 0) >= 11); if (!meetsFloor) { console.error('python3 低于地板 3.11: ' + ver); process.exit(1); } process.stdout.write('DSH_PROBE_PASS python3 可用（' + ver + ' >= 3.11，1+1=2）');"
+        "criterion": "python3 起得来、真算一段并读回结果，且版本不低于地板 3.14（不是只看 --version）",
+        "node": "const cp = require('node:child_process'); const r = cp.spawnSync('python3', ['-c', 'import sys; print(\".\".join(map(str, sys.version_info[:3]))); print(1+1)'], { encoding: 'utf8' }); if (r.error) { console.error('python3 起不来: ' + r.error.message); process.exit(1); } if (r.status !== 0) { console.error('python3 非零退出 rc=' + r.status + ' err=' + String(r.stderr || '').slice(0, 160)); process.exit(1); } const lines = String(r.stdout || '').trim().split('\\n'); const ver = (lines[0] || '').trim(); const sum = (lines[1] || '').trim(); if (sum !== '2') { console.error('python3 算不对: ' + JSON.stringify(sum)); process.exit(1); } const seg = ver.split('.').map(function (x) { return parseInt(x, 10) || 0; }); const meetsFloor = (seg[0] > 3) || (seg[0] === 3 && (seg[1] || 0) >= 14); if (!meetsFloor) { console.error('python3 低于地板 3.14: ' + ver); process.exit(1); } process.stdout.write('DSH_PROBE_PASS python3 可用（' + ver + ' >= 3.14，1+1=2）');"
       },
       "bin": "python3",
       "required": false,
       "kind": "runtime",
-      "floor": "3.11"
+      "floor": "3.14",
+      "aliases": [
+        "python"
+      ]
     },
     {
       "id": "env-jq",

@@ -62,6 +62,7 @@ function toolsFromDist() {
 
 function toolsExternal() {
   const j = JSON.parse(fs.readFileSync(EXTERNAL, 'utf8'));
+  // 原样透传（含 aliases：件的命令别名由**件的声明**决定，机制照单写入口，内核不写死同名关系）。
   return (j.tools || []).map((t) => ({ ...t }));
 }
 
