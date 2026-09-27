@@ -26,10 +26,12 @@ function countFiles(abs) {
   }
   return n;
 }
+const WALK_SKIP = new Set(['.git', 'node_modules', 'build', '.gradle']);
 function walkFiles(absDir, out) {
   if (!fs.existsSync(absDir)) return out;
   let es; try { es = fs.readdirSync(absDir, { withFileTypes: true }); } catch { return out; }
   for (const e of es) {
+    if (WALK_SKIP.has(e.name)) continue;
     const q = path.join(absDir, e.name);
     if (e.isDirectory()) walkFiles(q, out); else out.push(q);
   }
@@ -113,6 +115,28 @@ try {
   if (ex('container/engine/bin')) add('CI-TOOL-IN-L0', 'container/engine/bin');
   // 规则 7：D2 的件解析不得住在 E 的目录里（搬迁后其位在 assembler/，仍是越层）
   if (ex('kernel/src/assembler/platform-artifacts.js')) add('E-D2-MIXED', 'kernel/src/assembler/platform-artifacts.js');
+
+  // 规则 8：**已迁移的旧路径不得再被引用** —— 连续写法与**分段写法**都要查。
+  // 为什么加：步骤 A 搬迁后 CI 红过两次，根因都是 path.join(ROOT,'container','native','posix',…)
+  // 这类分段拼接：批量文本替换改不到它，测试于是静默指向不存在的目录（本仓文档早有同类前科记录）。
+  // 豁免：layout.json（迁移台账本身）与 docs/plans/（历史方案记录，讨论迁移时合法引用旧路径）。
+  const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const segRe = (p) => p.split('/').map((x) => "'" + escRe(x) + "'").join("\\s*,\\s*");
+  const residueScope = walkFiles(ROOT, []).filter((abs) => {
+    const rp = rel(abs);
+    return rp !== 'docs/contracts/layout.json' && !rp.startsWith('docs/plans/');
+  });
+  for (const m of (layout.moves || [])) {
+    if (!m.from || m.from.indexOf('/') < 0) continue;
+    const reCont = new RegExp(escRe(m.from));
+    const reSeg = new RegExp(segRe(m.from));
+    for (const abs of residueScope) {
+      const t = readSafe(abs);
+      if (reCont.test(t) || reSeg.test(t)) add('MOVED-PATH-RESIDUE', rel(abs) + ' 仍引用 ' + m.from);
+    }
+  }
+  // 对照组自证：分段判据必须能识破人造的分段写法
+  if (!new RegExp(segRe('a/b/c')).test("path.join(ROOT, 'a', 'b', 'c')")) problems.push('MOVED-PATH-RESIDUE 分段判据自证失败（恒空）');
 
   // 台账自净：① 未登记的违规 → 红；② 已消失的债务 → 红（防僵尸豁免）；③ 过期/缺字段 → 红
   const coveredBy = (v) => DEBT.some((d) => d.rule === v.rule && (!d.path || v.detail === d.path || v.detail.endsWith(d.path)));

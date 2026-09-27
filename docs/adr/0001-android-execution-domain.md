@@ -186,7 +186,7 @@ android-arm64，且它由 node 以 `dlopen(RTLD_LAZY)` 加载（不走 exec 路�
 会把 `<DSH_HOME>` 的**每一个祖先 fsync 到文件系统根**；Android 上 `/data/user/0`、`/data`、`/`
 对 app 均不可读，`open` 目录即 EACCES，附件保存整条失败（`read` 不走此路径，故正常）。
 
-修法（环境层，不改 DSH）：`native/posix/open-fallback.c` —— 在 `open/openat` 因 EACCES 失败、
+修法（环境层，不改 DSH）：`native/d1/open-fallback.c` —— 在 `open/openat` 因 EACCES 失败、
 且目标确为 `$HOME` 的祖先目录时，返回 `$HOME` 的只读目录句柄，让调用方的 fsync 完成。
 上游正确修法应是把 durable 边界设到 `$DSH_HOME` 或容忍 EACCES，已记录。
 ## 追加决策：容器根（2026-09-23）

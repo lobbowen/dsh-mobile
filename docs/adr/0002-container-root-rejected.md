@@ -32,7 +32,7 @@ ADR-001 在「真命名空间容器不可得」（`unshare(CLONE_NEWUSER)` 被�
   `container-root` 诊断、`DSH_ROOT/DSH_REAL_ROOT/LD_PRELOAD` 注入与两个探针方法。
 - **保留并强化**真实路径方案：
   - `$PREFIX`（`PrefixProvisioner`）—— 长路径，不假装 `/`；
-  - `native/posix/open-fallback.c` —— 祖先目录 fsync 的 EACCES 兜底（与 rootns 无关，真需求）；
+  - `native/d1/open-fallback.c` —— 祖先目录 fsync 的 EACCES 兜底（与 rootns 无关，真需求）；
   - `targetSdk = 28` —— app home `execve`；
   - `system/`（Tier S）—— 真命名空间容器在 ROM 侧的落地面。
 
