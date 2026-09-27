@@ -218,26 +218,26 @@
     },
     {
       "id": "env-shell",
-      "capability": "shell（DSH bash 工具与一切子进程）",
+      "capability": "bash（底座自举种子：$PREFIX/bin/bash）—— 不是运行时",
       "layer": "seed",
       "disposition": "seed",
-      "why": "由 L0 PrefixProvisioner 把 libbash.so 播到 $PREFIX/bin/bash；缺件时 DSH 的 bash 工具与所有子进程全灭。",
+      "why": "由 L0 PrefixProvisioner 把 libbash.so 播到 $PREFIX/bin/bash；缺件时 DSH 的 bash 工具与所有子进程全灭。**归属 B 层（底座种子），不是 C 层运行时**——定稿口径里运行时只有 node·python·go·java（docs/contracts/layout.json deliveryLayers.C.shape）。判据：bash -c 真跑 + 一个 #!/bin/sh 脚本真跑（顺带交叉验证 D1 的 exec-path 兑现）。",
       "verify": {
-        "notApplicable": "由 boot-env-contract 门禁（PATH 与 $PREFIX 装配）与 exec-domain 格覆盖，不在此重复第二把尺子"
+        "node": "const cp=require('node:child_process'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'); const a=cp.spawnSync('bash',['-c','echo SHELL_OK'],{encoding:'utf8'}); if(a.error||a.status!==0||!/SHELL_OK/.test(a.stdout||'')){console.error('bash 起不来: '+((a.error&&a.error.message)||String(a.stderr||'').slice(0,120)));process.exit(1)} const d=fs.mkdtempSync(path.join(process.env.TMPDIR||os.tmpdir(),'dsh-sh-')); const f=path.join(d,'s.sh');fs.writeFileSync(f,'#!/bin/sh\\necho SH_OK\\n');fs.chmodSync(f,0o755); const b=cp.spawnSync(f,[],{encoding:'utf8'}); if(b.status!==0||!/SH_OK/.test(b.stdout||'')){console.error('shebang 脚本跑不起来: '+String(b.stderr||'').slice(0,160));process.exit(1)} process.stdout.write('DSH_PROBE_PASS shell 可用（bash -c 与 #!/bin/sh 脚本都真跑通）');"
       },
       "bin": "bash",
       "required": false,
-      "kind": "runtime",
+      "kind": "seed",
       "carrier": "jniLibs(libbash.so)+$PREFIX 种子"
     },
     {
       "id": "env-node",
       "capability": "Node 运行时（内核与工具链的共同地板）",
-      "layer": "seed",
+      "layer": "shared",
       "disposition": "seed",
-      "why": "Node 是 init 赖以启动的运行时，由 NativeAssetRegistry 的 libnode.so 经 jniLibs 落地；无它整机无 OS。",
+      "why": "Node 是 init 赖以启动的运行时，由 NativeAssetRegistry 的 libnode.so 经 jniLibs 落地；无它整机无 OS。**归属 C 层运行时（shared）**——node·python·go·java 是运行时；它同时是 B 层的自举种子（内核自己靠它启动），所以交付方式仍是随 APK 冻结（L0），但身份不与底座种子混为一谈。",
       "verify": {
-        "notApplicable": "由 NativeAssetRegistry 的 exec-probe 与 native-assets 门禁覆盖（存在性/依赖/真跑三重）"
+        "node": "const cp=require('node:child_process'); const r=cp.spawnSync(process.execPath,['-e','process.stdout.write(String(1+1))'],{encoding:'utf8'}); if(r.status!==0||String(r.stdout||'').trim()!=='2'){console.error('被检 node 真跑失败: '+String(r.stderr||'').slice(0,160));process.exit(1)} process.stdout.write('DSH_PROBE_PASS node 可用（'+process.version+'，真算 1+1=2）');"
       },
       "bin": "node",
       "required": true,
@@ -247,16 +247,17 @@
     },
     {
       "id": "env-npm",
-      "capability": "npm 客户端（装 Agent 与共享工具）",
-      "layer": "seed",
+      "capability": "npm（C 层工具，与 pnpm·git·jq·sqlite3 同级）",
+      "layer": "shared",
       "disposition": "seed",
-      "why": "npm 是纯 JS，随 APK assets/npm 投放、由 libnode.so 代跑，经 runtime.json 的 npmEntry 交给内核。",
+      "why": "npm 是纯 JS，随 APK assets 投放、由 libnode.so 代跑，经 runtime.json 的 npmEntry 交给内核。**归属 C 层工具（shared）**，与 git/pnpm/jq/sqlite3 同级——不是运行时，也不属底座种子。（当前交付方式仍是随 APK 冻结，那是发布维的事；『工具应由环境自己装、自更新』这条尚未兑现，见表内 why 的记账。）",
       "verify": {
-        "notApplicable": "由 npm-contract-chain-test 与 runtime-contract 门禁逐字对账（目录名/入口/前缀三处同源）"
+        "node": "const cp=require('node:child_process'),fs=require('node:fs'),path=require('node:path'); let e=process.env.DSH_NPM_ENTRY||null; if(!e){try{const h=process.env.DSH_SUPERVISOR_HOME;const j=JSON.parse(fs.readFileSync(path.join(h,'supervisor','runtime.json'),'utf8'));e=j.npmEntry||(j.npm&&j.npm.entry)||null}catch(_){e=null}} if(!e||!fs.existsSync(e)){console.error('契约没给出可用的 npm 入口: '+e);process.exit(1)} const r=cp.spawnSync(process.execPath,[e,'--version'],{encoding:'utf8'}); if(r.status!==0){console.error('npm 起不来: '+String(r.stderr||'').slice(0,160));process.exit(1)} process.stdout.write('DSH_PROBE_PASS npm 可用（'+String(r.stdout||'').trim()+'）');"
       },
       "bin": "npm",
       "required": true,
-      "kind": "tool"
+      "kind": "tool",
+      "carrier": "APK assets/npm → files/npm/<ver>/（当前）；按口径该由 C 通道自更新"
     },
     {
       "id": "env-pnpm",
@@ -315,13 +316,13 @@
       "id": "env-go",
       "kind": "runtime",
       "bin": "go",
-      "layer": "seed",
+      "layer": "shared",
       "disposition": "waived",
       "capability": "Go 工具链/运行时（编译与运行 Go 负载的地板，与 node/python 同级）",
       "required": false,
       "floor": "1.27",
       "carrier": "jniLibs+assets",
-      "why": "【产品形态】运行时 ⇒ **打进 APK**（不进通道）。 【事实】Go 最新稳定 = **go1.27.1**（官方 JSON API 实测：go1.27.1 / go1.26.8；最新补丁随 1.x 系列滚动）。   官方发布物只有 `go1.27.1.linux-arm64.tar.gz`（63.9 MiB，**glibc**，无 android 包）—— 安卓上不能直接用，   必须用 Go 自身的 **android/arm64 port**（GOOS=android）自建工具链；Termux 有现成的 `golang` 包可作参照。 【待办】确定件集与体积：完整工具链（含 go 命令、编译器、stdlib 源码）体积可观，需按 APK 预算裁剪或分包。",
+      "why": "【产品形态】运行时 ⇒ **打进 APK**（不进通道）。 【事实】Go 最新稳定 = **go1.27.1**（官方 JSON API 实测：go1.27.1 / go1.26.8；最新补丁随 1.x 系列滚动）。   官方发布物只有 `go1.27.1.linux-arm64.tar.gz`（63.9 MiB，**glibc**，无 android 包）—— 安卓上不能直接用，   必须用 Go 自身的 **android/arm64 port**（GOOS=android）自建工具链；Termux 有现成的 `golang` 包可作参照。 【待办】确定件集与体积：完整工具链（含 go 命令、编译器、stdlib 源码）体积可观，需按 APK 预算裁剪或分包。（**归属 C 层运行时（shared）**：定稿口径把 node·python·go·java 并列为运行时。）",
       "verify": {
         "notApplicable": "缺口在册（waived）：没有件可投就没有可验的能力；随 APK 投放后改写成带地板的真判据"
       },
@@ -335,12 +336,12 @@
       "id": "env-java",
       "kind": "runtime",
       "bin": "java",
-      "layer": "seed",
+      "layer": "shared",
       "disposition": "waived",
       "capability": "Java 运行时（跑 Java 负载的地板，与 node/python/go 同级）",
       "required": false,
       "carrier": "未定：系统 ART（app_process + dex） vs 按需 JVM",
-      "why": "【事实 1·系统里已经有能跑 Java main 的东西】AOSP `frameworks/base/cmds/app_process/app_main.cpp` 的用法即 `app_process [java-options] cmd-dir start-class-name [options]`：它 `FindClass` 后调该类的 `main`。   但 ART（含 app_process）**只吃 dex/oat**，纯 `.class` 的 jar 要先经 d8/r8 转成 dex —— 这是 Android 的原生路径，不是 JVM。 【事实 2·完整 JVM 的真实代价】Termux 官方 aarch64 索引实测：openjdk-17 17.0.20 = 包 91.8 MiB / 装后 212.9 MiB；openjdk-21 21.0.12 = 101.2 / 243.7；openjdk-25 25.0.4 = 111.4 / 253.3（依赖 libandroid-shmem、libandroid-spawn、libiconv、libjpeg-turbo、zlib、littlecms、alsa-plugins），且是 **JDK**（含 javac/jshell）。 【事实 3·量级对比】CPython 官方 Android 包 21.4 MiB（解压 81.7 MiB）⇒ JVM 是另一个量级；当前 APK 才 50.7 MiB，放一个 JVM 直接翻三倍。 【据此的三条路】   a. **不装 JVM，用 ART**：适合跑「我们自己的 Java 组件」或「已 dex 化的负载」；代价是编译链在别处（或用 d8，而 d8 本身要 JVM）。      前提必须真机实测：app 域（untrusted_app/targetSdk28）能否 exec `/system/bin/app_process` 并加载 dex —— 这条没实测之前不能算数。   b. **按需装 JVM**（通道/工具，不进 APK）：能跑 `java -jar`、javac，代价 95–111 MiB —— 与「运行时进 APK」冲突，除非接受体积。   c. **明确不做通用 Java 负载**：把它从基础运行时里去掉，等有真实需求再说（自研组件仍可走 ART）。 【本仓倾向】建议 **a + c 组合**：基础包不放 JVM（体积），需要时优先 ART 路线；真要通用 JVM 再作为**按需件**（同一个尺子：装上去就有，只是更大）。",
+      "why": "【事实 1·系统里已经有能跑 Java main 的东西】AOSP `frameworks/base/cmds/app_process/app_main.cpp` 的用法即 `app_process [java-options] cmd-dir start-class-name [options]`：它 `FindClass` 后调该类的 `main`。   但 ART（含 app_process）**只吃 dex/oat**，纯 `.class` 的 jar 要先经 d8/r8 转成 dex —— 这是 Android 的原生路径，不是 JVM。 【事实 2·完整 JVM 的真实代价】Termux 官方 aarch64 索引实测：openjdk-17 17.0.20 = 包 91.8 MiB / 装后 212.9 MiB；openjdk-21 21.0.12 = 101.2 / 243.7；openjdk-25 25.0.4 = 111.4 / 253.3（依赖 libandroid-shmem、libandroid-spawn、libiconv、libjpeg-turbo、zlib、littlecms、alsa-plugins），且是 **JDK**（含 javac/jshell）。 【事实 3·量级对比】CPython 官方 Android 包 21.4 MiB（解压 81.7 MiB）⇒ JVM 是另一个量级；当前 APK 才 50.7 MiB，放一个 JVM 直接翻三倍。 【据此的三条路】   a. **不装 JVM，用 ART**：适合跑「我们自己的 Java 组件」或「已 dex 化的负载」；代价是编译链在别处（或用 d8，而 d8 本身要 JVM）。      前提必须真机实测：app 域（untrusted_app/targetSdk28）能否 exec `/system/bin/app_process` 并加载 dex —— 这条没实测之前不能算数。   b. **按需装 JVM**（通道/工具，不进 APK）：能跑 `java -jar`、javac，代价 95–111 MiB —— 与「运行时进 APK」冲突，除非接受体积。   c. **明确不做通用 Java 负载**：把它从基础运行时里去掉，等有真实需求再说（自研组件仍可走 ART）。 【本仓倾向】建议 **a + c 组合**：基础包不放 JVM（体积），需要时优先 ART 路线；真要通用 JVM 再作为**按需件**（同一个尺子：装上去就有，只是更大）。（**归属 C 层运行时（shared）**：定稿口径把 node·python·go·java 并列为运行时。）",
       "verify": {
         "notApplicable": "未查证且未投放：先查明再定判据（不写假判据）"
       },
@@ -378,6 +379,56 @@
       "bin": "sqlite3",
       "required": false,
       "kind": "tool"
+    },
+    {
+      "id": "env-rg",
+      "kind": "tool",
+      "capability": "rg（ripgrep，C 层工具）",
+      "layer": "shared",
+      "disposition": "seed",
+      "bin": "rg",
+      "carrier": "jniLibs(libripgrep.so) → $PREFIX/bin（走 B 层种子路径）",
+      "why": "双重身份：**能力上属 C 层工具**（定稿 C.shape 的工具清单里有 rg），**交付上走 B 层种子**（PrefixProvisioner 从 jniLibs 播到 $PREFIX/bin/rg）。两者不矛盾：种子是交付路径，工具是身份。判据真跑一次搜索。",
+      "verify": {
+        "node": "const cp=require('node:child_process'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'); const d=fs.mkdtempSync(path.join(process.env.TMPDIR||os.tmpdir(),'dsh-rg-')); const f=path.join(d,'a.txt');fs.writeFileSync(f,'needle\\n'); const r=cp.spawnSync('rg',['-n','needle',f],{encoding:'utf8'}); if(r.error||r.status!==0||!/needle/.test(r.stdout||'')){console.error('rg 真跑失败: '+((r.error&&r.error.message)||String(r.stderr||'').slice(0,140)));process.exit(1)} process.stdout.write('DSH_PROBE_PASS rg 可用（真搜到 needle）');"
+      }
+    },
+    {
+      "id": "env-curl",
+      "kind": "tool",
+      "capability": "curl（C 层工具：命令行 HTTP 客户端）",
+      "layer": "shared",
+      "disposition": "waived",
+      "required": false,
+      "bin": "curl",
+      "carrier": "未定（待由 C 通道交付）",
+      "why": "定稿 C.shape 的工具清单里有 curl，**目前既未交付也未登记**（git 件里静态链了 libcurl，但没有 curl 命令行）。缺口在册、有到期日。",
+      "waiver": {
+        "followUp": "按 C 通道交付 curl CLI（复用 git 件那套 zlib+openssl+libcurl 静态链；编译 API ≥23 已解决 stderr 符号问题），并写随件判据",
+        "verifiedAt": "2026-09-28",
+        "expiresAt": "2026-12-27"
+      },
+      "verify": {
+        "notApplicable": "尚未交付（见 waiver）：没有件可投就没有可验的能力"
+      }
+    },
+    {
+      "id": "env-coreutils",
+      "kind": "tool",
+      "capability": "coreutils（C 层工具：ls/cp/mv/rm/… 基础命令）",
+      "layer": "shared",
+      "disposition": "waived",
+      "required": false,
+      "carrier": "未定（待由 C 通道交付）",
+      "why": "定稿 C.shape 的工具清单里有 coreutils，**目前完全缺失**。安卓自带 toolbox/toybox 能满足一部分，但语义与 GNU 有差（脚本即移植性）。缺口在册、有到期日。",
+      "waiver": {
+        "followUp": "定件集（GNU coreutils 全量太大 → 选常用子集）并由 C 通道交付；先定清单再编，避免拿到一堆用不上的",
+        "verifiedAt": "2026-09-28",
+        "expiresAt": "2026-12-27"
+      },
+      "verify": {
+        "notApplicable": "尚未交付（见 waiver）：没有件可投就没有可验的能力"
+      }
     }
   ],
   "envKinds": {
