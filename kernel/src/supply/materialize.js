@@ -11,7 +11,7 @@
 //
 // 为什么不是 `npm i -g` 就完事：安卓上 npm 生成的 bin shim 是 `#!/usr/bin/env node`，
 //   而 /usr/bin/env 在安卓不存在 ⇒ execve 必 ENOENT。**这条约定已由 D1 的 exec-path.c 补回**
-//   （execve 前按调用方 PATH 解析 shebang），所以本模块不再手写包装：件解包到 $PREFIX/lib/toolchain，
+//   （execve 前按调用方 PATH 解析 shebang），所以本模块不再手写包装：件解包到 $PREFIX/lib/toolchain/<件名>/（一件一目录 —— 共用一间时每装一件会抹掉前一件），
 //   再 **symlink** 到 $PREFIX/bin（与 node 同一手法）—— 生态怎么找它，它就怎么在。
 //
 // 三条**投放不变量**（真机定罪 2026-09-27：19.5MB/47MB 的半截 pnpm 被写成入口、静默失效）：
@@ -177,6 +177,38 @@ function runInstall(inv, args, env, timeoutMs) {
 function binLinkOk(bin, target) {
   try { return fs.readlinkSync(bin) === target; } catch { return false; }
 }
+/** 一件一目录：$PREFIX/lib/toolchain/<name>。名字只来自清单（specFor），机制不猜。 */
+function rootFor(prefix, name) {
+  return path.join(prefix, 'lib', 'toolchain', name);
+}
+
+/** 暂存目录：与终态**同层**（同一文件系统，rename 才原子），点开头以免被当成件目录。 */
+function stagingFor(prefix, name) {
+  return path.join(prefix, 'lib', 'toolchain', '.' + name + '.staging');
+}
+
+/** 是不是（可能已断的）链接：existsSync 会跟随链接，断链它报 false，得用 lstat。 */
+function isLinkMaybe(p) {
+  try { return fs.lstatSync(p).isSymbolicLink(); } catch (_e) { return false; }
+}
+
+/**
+ * 清掉**旧平铺布局**的残留（历史 bug：所有件共用 lib/toolchain/ 一间）。
+ *
+ * 纪律：只删**确切知道**属于旧布局的路径，其余一律不碰 —— 宁可留一点垃圾，也不误删别人的东西。
+ *   特意**不删**：件目录（新布局）、点文件（清单水位 .manifest.json）、toolchain.lock（在 toolchain 之外）。
+ */
+function removeLegacyFlatLayout(prefix) {
+  const tc = path.join(prefix, 'lib', 'toolchain');
+  const legacy = ['bin', 'libexec', 'share', 'node_modules', 'link-farm.txt'];
+  const removed = [];
+  for (const n of legacy) {
+    const p = path.join(tc, n);
+    if (!fs.existsSync(p) && !isLinkMaybe(p)) continue;
+    try { fs.rmSync(p, { recursive: true, force: true }); removed.push(n); } catch (_e) { /* 删不掉就留着 */ }
+  }
+  return removed;
+}
 /**
  * 应用件里的 link-farm.txt（每行：树内相对路径 <TAB> 符号链接目标）。
  *
@@ -263,8 +295,12 @@ async function ensureSharedTool(name, opts) {
   // 别名的选择属于**件的内容**（清单里声明），机制只负责照单写入口 —— 不在内核里写死谁跟谁同名。
   const aliases = Array.isArray(spec.aliases) ? spec.aliases.filter((a) => typeof a === 'string' && a && a !== name) : [];
   const libBase = path.join(c.prefix, 'lib');
-  const root = path.join(libBase, 'toolchain');
-  const staging = path.join(libBase, 'toolchain.staging');
+  // 件各住**自己的一间**（lib/toolchain/<name>/）。
+  //   为什么必须分开：落位是「先清终态再 rename」，共用一间时**每装一件都会抹掉前一件**。
+  //   真机实测（2026-09-28，kernel 0.1.0-android.37）：四件都报 applied，盘上只剩最后那件
+  //   （sqlite3），另三件只留下 $PREFIX/bin 里的断链 —— CI 看不出来，只有真机跑多个件才暴露。
+  const root = rootFor(c.prefix, name);
+  const staging = stagingFor(c.prefix, name);
   const lockFile = path.join(libBase, 'toolchain.lock');
   // 取件方式决定入口在树里的相对位置：npm 装在 node_modules/<pkg>/；tarball 按包内自带布局。
   const entryRel = spec.provider === 'tarball' ? spec.entry : path.join('node_modules', spec.pkg, spec.entry);
@@ -347,6 +383,11 @@ async function ensureSharedTool(name, opts) {
  *  异步、非阻塞、非致命：调用方 fire-and-forget；失败只记账，真因由使用点如实报出。
  *  幂等；单写者锁保证并发调用里只有一个真装。使用点（插件域）另有一道 await 屏障。 */
 async function provisionSharedTools(opts) {
+  // 旧平铺布局的残留先清掉（本仓历史 bug 的产物）：不留暗账，也不让它继续占着 $PREFIX/bin 的指向。
+  const legacyRemoved = removeLegacyFlatLayout(c.prefix);
+  if (legacyRemoved.length && opts && opts.events) {
+    try { opts.events.append('toolchain_legacy_cleaned', { removed: legacyRemoved }); } catch (_e) {}
+  }
   const o = opts || {};
   const out = {};
   let names;
@@ -375,4 +416,13 @@ async function provisionSharedTools(opts) {
   return out;
 }
 
-module.exports = { ensureSharedTool, provisionSharedTools, isProvisioning, INSTALL_TIMEOUT_MS, LOCK_STALE_MS };
+module.exports = {
+  ensureSharedTool,
+  provisionSharedTools,
+  isProvisioning,
+  rootFor,
+  stagingFor,
+  removeLegacyFlatLayout,
+  INSTALL_TIMEOUT_MS,
+  LOCK_STALE_MS,
+};
