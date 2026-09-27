@@ -91,7 +91,8 @@ if ! make -j2 >/dev/null; then
   exit 1
 fi
 make install >/dev/null
-echo "[jq] oniguruma 就位：$(ls "$ONIG_PREFIX/lib" | tr '\n' ' ')"
+ONIG_LIBS=$(ls "$ONIG_PREFIX/lib" | tr '\n' ' ' || true)
+echo "[jq] oniguruma 就位：$ONIG_LIBS"
 
 # ② jq：静态链 libjq 与 oniguruma，只留系统库依赖
 cd "$ROOT_DIR/work/jq"
@@ -123,10 +124,12 @@ if ! cp "$BIN_SRC" "$ROOT_DIR/$OUT/bin/jq"; then
   echo "::error title=拷产物失败::目标目录形态如下（$ROOT_DIR/$OUT）"
   ls -la "$ROOT_DIR/$OUT" 2>/dev/null || true
   exit 1
-fichmod 0755 "$ROOT_DIR/$OUT/bin/jq"
+fi
+chmod 0755 "$ROOT_DIR/$OUT/bin/jq"
 # 自检：产物必须是 ELF（不是包装脚本、不是空壳）——fail fast，别等 verify 那一关才发现。
 if ! "$READELF_BIN" -h "$ROOT_DIR/$OUT/bin/jq" >/dev/null 2>&1; then
-  echo "::error title=产物不是 ELF::$(file -b "$ROOT_DIR/$OUT/bin/jq")"
+  KIND=$(file -b "$ROOT_DIR/$OUT/bin/jq" || true)
+  echo "::error title=产物不是 ELF::$KIND"
   exit 1
 fi
 
