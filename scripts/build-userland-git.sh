@@ -106,7 +106,7 @@ CFG_LOG="$ROOT_DIR/work/openssl-configure.log"
 # PATH 必须**导出**：openssl 的 Makefile 里 CC 是裸名（aarch64-linux-android21-clang），
 #   make 时若 PATH 里没有 NDK 的 bin，就是满屏 `Error 127`（上轮实证：apps/lib/*.o）。
 export PATH="$TC_DIR:$PATH"
-if ! ./Configure android-arm64 -fPIC --prefix="$DEPS" --openssldir="$DEPS/ssl" no-shared no-tests > "$CFG_LOG" 2>&1; then
+if ! ./Configure android-arm64 -fPIC --prefix="$DEPS" --openssldir="$DEPS/ssl" no-shared no-tests no-ui-console > "$CFG_LOG" 2>&1; then
   echo "::error title=openssl Configure 失败::下面是最后 30 行（真正的致命行在这里）"
   tail -n 30 "$CFG_LOG" || true
   exit 1
@@ -182,13 +182,22 @@ if [ ! -f "$ROOT_DIR/work/curl/Makefile" ]; then
   exit 1
 fi
 echo "[git] curl Makefile 已生成"
+# 只编/装**库**：git 只用 libcurl，不需要 curl 那个命令行工具。
+#   而且工具链接时会撞 bionic 的事：API 21 不导出 stdin/stderr 数据符号，
+#   而 openssl 的控制台 UI（ui_openssl.c）引用它们（CI 实证：undefined symbol: stdin/stderr）。
+#   两头都治：openssl 侧 no-ui-console，curl 侧根本不编工具。
 CURL_LOG="$ROOT_DIR/work/curl-build.log"
-if ! make -j2 > "$CURL_LOG" 2>&1; then
-  echo "::error title=curl 编译失败::最后 30 行"
+if ! make -C lib -j2 > "$CURL_LOG" 2>&1; then
+  echo "::error title=curl 库编译失败::最后 30 行"
   tail -n 30 "$CURL_LOG" || true
   exit 1
 fi
-make install >/dev/null
+if ! make -C lib install > "$CURL_LOG" 2>&1; then
+  echo "::error title=curl 库安装失败::最后 30 行"
+  tail -n 30 "$CURL_LOG" || true
+  exit 1
+fi
+echo "[git] curl 库已装（跳过命令行工具）"
 echo "[git] curl 就位（静态）"
 
 cd "$ROOT_DIR/work/git-src"
