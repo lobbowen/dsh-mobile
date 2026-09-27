@@ -56,6 +56,9 @@ OPENSSL_VERSION=3.6.3
 CURL_VERSION=8.22.0
 mkdir -p "$DEPS"
 TC_DIR=$(dirname "$CC")
+# 本段自给自足：不依赖脚本后段的变量（CI 两次实证：AR/AR_BIN 在此时都还没定义，set -u 直接红）。
+AR_BIN=${AR_BIN:-$TC_DIR/llvm-ar}
+RANLIB_BIN=${RANLIB_BIN:-$TC_DIR/llvm-ranlib}
 export ANDROID_NDK_ROOT="${ANDROID_NDK_LATEST_HOME:-}"
 if [ -z "$ANDROID_NDK_ROOT" ]; then
   ANDROID_NDK_ROOT=$(cd "$TC_DIR/../../../../.." && pwd)
@@ -73,7 +76,8 @@ cd "$ROOT_DIR/work/zlib"
 CHOST=aarch64-linux-android CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" ./configure --prefix="$DEPS" --static >/dev/null
 make -j2 >/dev/null
 make install >/dev/null
-echo "[git] zlib 就位：$(ls "$DEPS/lib" | tr " " " " | head -c 120)"
+ZLIB_LIBS=$(ls "$DEPS/lib" | tr "\n" " ")
+echo "[git] zlib 就位：$ZLIB_LIBS"
 
 # ② OpenSSL（静态 libssl/libcrypto；https 的 TLS 由它提供）
 if ! curl -fsSL "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VERSION/openssl-$OPENSSL_VERSION.tar.gz" -o work/openssl.tar.gz; then
