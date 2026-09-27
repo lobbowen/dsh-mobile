@@ -118,9 +118,12 @@ try {
   // 规则 5：环境目录**只有一份**（E 的登记表 #envUnits），状态视图必须是它的**投影**。
   // 判据为什么长这样：债的形态不是「某文件存在」，而是「同一件事在两处各说一遍」——
   // 所以既要查第二份目录不在，也要查投影**确实从登记表取目录**且不自持条目表。
-  const envCat = path.join(ROOT, 'kernel', 'src', 'platform', 'env-catalog.js');
+  // 判据不点名那个已被取代的文件名 —— 否则门禁自己写出了旧路径，规则 8 会判它残留（判据自伤）。
+  // 改为按**形态**识别：platform/ 下不该再有 catalog 类文件（文件名运行时取，源码里无旧路径字面量）。
+  const platDir = path.join(ROOT, 'kernel', 'src', 'platform');
+  const leftoverCats = fs.existsSync(platDir) ? fs.readdirSync(platDir).filter((f) => /catalog/i.test(f)) : [];
   const envStatus = path.join(ROOT, 'kernel', 'src', 'platform', 'env-status.js');
-  if (fs.existsSync(envCat)) add('ENV-CATALOG', 'kernel/src/platform/env-catalog.js 还在（第二份环境目录）');
+  if (leftoverCats.length) add('ENV-CATALOG', 'platform/ 下还有 catalog 类文件：' + leftoverCats.join(', '));
   else if (!fs.existsSync(envStatus)) add('ENV-CATALOG', 'kernel/src/platform/env-status.js 缺失（环境状态视图没了）');
   else {
     const st = readSafe(envStatus);
