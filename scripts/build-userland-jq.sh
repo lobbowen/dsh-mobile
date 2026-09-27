@@ -26,7 +26,8 @@ if [ -z "${CC:-}" ]; then
 fi
 
 OUT="${OUT:-dist}"
-mkdir -p "$OUT/bin" work
+# 一律用绝对路径建目录：脚本中途会 cd 进源码树，相对路径会落到别处（sqlite3 那轮也栽过同型）
+mkdir -p "$ROOT_DIR/$OUT/bin" work
 TC=$(dirname "$CC")
 AR_BIN="$TC/llvm-ar"
 RANLIB_BIN="$TC/llvm-ranlib"
@@ -117,7 +118,12 @@ if [ -z "$BIN_SRC" ]; then
   exit 1
 fi
 echo "[jq] 真身：$BIN_SRC"
-cp "$BIN_SRC" "$ROOT_DIR/$OUT/bin/jq"chmod 0755 "$ROOT_DIR/$OUT/bin/jq"
+mkdir -p "$ROOT_DIR/$OUT/bin"
+if ! cp "$BIN_SRC" "$ROOT_DIR/$OUT/bin/jq"; then
+  echo "::error title=拷产物失败::目标目录形态如下（$ROOT_DIR/$OUT）"
+  ls -la "$ROOT_DIR/$OUT" 2>/dev/null || true
+  exit 1
+fichmod 0755 "$ROOT_DIR/$OUT/bin/jq"
 # 自检：产物必须是 ELF（不是包装脚本、不是空壳）——fail fast，别等 verify 那一关才发现。
 if ! "$READELF_BIN" -h "$ROOT_DIR/$OUT/bin/jq" >/dev/null 2>&1; then
   echo "::error title=产物不是 ELF::$(file -b "$ROOT_DIR/$OUT/bin/jq")"
