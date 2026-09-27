@@ -1,60 +1,40 @@
 'use strict';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// C 层（共享开发环境）物化器：产品无关的共享工具（pnpm…）的安装与可执行入口。
+// C 层（共享开发环境）的**机制**：按 **C 自己的内容清单** 把件投放就位。
 //
-// 为什么不是 `npm i -g` 就完事：
-//   · 安卓上 npm 生成的 bin shim 是 `#!/usr/bin/env node`，而 /usr/bin/env 在安卓不存在
-//     ⇒ execve 必 ENOENT（本仓对 npm 自己也是恒以 `node <cli.js>` 代跑）。
-//   · 故：工具本体装在共享 $PREFIX/lib/toolchain 下，入口由本模块写成
-//     `#!/system/bin/sh` 包装；按 kind 决定 exec 什么（native = 直接 exec 自带二进制）。
+// 分层（ADR-0009 §2.1）：
+//   · **内容**（有哪些件、版本/url/sha/入口）= C 的通道里的**签名清单**（./manifest.js 取回并验签）；
+//     本模块**不持有**任何件的版本/哈希 —— 那是 2026-09-27 定罪的越层（加件/升级必发内核）。
+//   · **机制**（取回 → 验 → 原子落位 → 写 $PREFIX）= 本模块，住内核（L1）。
+//   · **落位规则与能力判据**归 E（../assembler/supply-table.json）。
+//
+// 为什么不是 `npm i -g` 就完事：安卓上 npm 生成的 bin shim 是 `#!/usr/bin/env node`，
+//   而 /usr/bin/env 在安卓不存在 ⇒ execve 必 ENOENT。故工具本体装在共享 $PREFIX/lib/toolchain 下，
+//   入口由本模块写成 `#!/system/bin/sh` 包装；按 kind 决定 exec 什么（native = 直接 exec 自带二进制）。
 //
 // 三条**投放不变量**（真机定罪 2026-09-27：19.5MB/47MB 的半截 pnpm 被写成入口、静默失效）：
 //   ① 完整性：工件按 sha256+size **逐字节核对**，残件一律视为没装；
 //   ② 原子性：装到 staging，校验通过后 rename 换入终态 —— 绝不半截就位；
 //   ③ 单写者：lib/toolchain.lock 独占；拿不到就本轮不做（别人正在装）。
 //
-// 为什么 pnpm 钉 12.7.0：官方自 12.4.0 起为 Android/bionic 发 aarch64 原生可执行文件
-//   （@pnpm/exe.android-arm64，含 /system/bin/linker64）。本机实测：直接 exec 输出 12.7.0。
+// 内核 → C 是**依赖**，不是内核的一部分：清单取不到（离线/验签不过）时本模块只降级 ——
+//   已就位的件照常可用，不做增量，绝不因此让内核启动失败。
 //
 // 边界：只在**容器契约形态**下动手（runtime.json 有 npmEntry 与 prefix）；
 //   无契约 = skipped（PC / 测试逐字不变，不变量 C2）。失败只返回 failed/skipped，绝不抛。
 // ═══════════════════════════════════════════════════════════════════════════
 
+const manifest = require('./manifest');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const zlib = require('node:zlib');
 const https = require('node:https');
 const { spawn } = require('node:child_process');
-const runtimeContract = require('./runtime-contract');
+const runtimeContract = require('../platform/runtime-contract');
 
-/** 共享工具清单（唯一事实源）。新增一个工具 = 加一行。
- *  provider：
- *    · 'npm'（缺省）—— pkg/entry 指 node_modules 里的可执行相对路径；size+sha256 锚**可执行文件本身**；
- *    · 'tarball'   —— 我们 CI 编好发到对象存储的件（上游没有 android 变体）：url + sha256 锚**压缩包**，
- *      entry 是包内相对路径（如 bin/sqlite3）。
- *  kind 决定 wrapper 怎么 exec：native = 直接 exec 自带二进制。 */
-const TOOLS = {
-  pnpm: {
-    version: '12.7.0',
-    pkg: '@pnpm/exe.android-arm64',
-    entry: 'pnpm',
-    kind: 'native',
-    size: 47033992,
-    sha256: 'ce0b5e064552f60ec5b153d767b464f8d64f7659dbc2c58780679ac7e5bdfe78',
-    why: 'dsh 插件管理调用 pnpm；官方 12.4.0 起发 Android/bionic aarch64 原生产物',
-  },
-  sqlite3: {
-    provider: 'tarball',
-    version: '3530400',
-    url: 'https://hubcdn.zll.ink/userland/userland-sqlite3-3530400-android-arm64.tar.gz',
-    sha256: '83a1173361588c6779598cafc510121197d236ca29e7411215560518dfcff756',
-    entry: 'bin/sqlite3',
-    kind: 'native',
-    why: 'C 层工具供给批次：上游 sqlite.org 只发源码，由本仓 CI 交叉编译（动态 aarch64，见 .github/workflows/build-userland.yml）',
-  },
-};
+// 件目录（版本/url/sha/入口）**不在本模块**：它住在 C 的通道里的签名清单，由 ./manifest.js 取回并验签。
 
 const INSTALL_TIMEOUT_MS = 600000;
 const DOWNLOAD_TIMEOUT_MS = 300000;
@@ -167,15 +147,19 @@ function writeWrapper(bin, body) {
 
 /**
  * 确保一个共享工具在场（安装 + 写可执行入口），幂等。
- * @param {string} name TOOLS 里的键
+ * @param {string} name 工具名（取自 C 的清单）
  * @param {{npmInvocation?:{bin:string,args:string[]}, runInstall?:Function, timeoutMs?:number}} [opts] 测试注入
  * @returns {Promise<{status:'already'|'applied'|'skipped'|'failed', name:string, bin?:string, entry?:string, reason?:string}>}
  */
 async function ensureSharedTool(name, opts) {
   const o = opts || {};
   const out = (status, extra) => Object.assign({ status, name }, extra || {});
-  const spec = TOOLS[name];
-  if (!spec) return out('failed', { reason: '未登记的工具: ' + name });
+  let spec = null;
+  try { spec = await manifest.specFor(name); } catch (e) {
+    // 清单取不到（离线/验签不过/超时）：**降级**，不把内核拖下水（C 可缺省：已有件仍可用）。
+    return out('skipped', { reason: 'C 清单不可用：' + e.message });
+  }
+  if (!spec) return out('skipped', { reason: '清单里没有这件（或许是别的通道/版本）: ' + name });
   const c = runtimeContract.read();
   if (!c || !c.npmEntry || !c.prefix) return out('skipped', { reason: '非容器契约形态（无 runtime.json / npmEntry / prefix）' });
   const bin = path.join(c.prefix, 'bin', name);
@@ -267,7 +251,15 @@ async function ensureSharedTool(name, opts) {
 async function provisionSharedTools(opts) {
   const o = opts || {};
   const out = {};
-  for (const name of Object.keys(TOOLS)) {
+  let names;
+  try { names = await manifest.toolNames(); } catch (e) {
+    const reason = 'C 清单不可用：' + e.message;
+    o.logger && o.logger.info && o.logger.info('共享工具投放：' + reason + '（只降级，已有件仍可用）');
+    if (o.events) { try { o.events.append('toolchain_tool', { name: '*', status: 'skipped', reason }); } catch (_) {} }
+    if (typeof o.onSettled === 'function') { try { o.onSettled({}); } catch (_) {} }
+    return out;
+  }
+  for (const name of names) {
     let r;
     try { r = await ensureSharedTool(name, o); } catch (e) { r = { status: 'failed', name, reason: e.message }; }
     out[name] = r;
@@ -285,4 +277,4 @@ async function provisionSharedTools(opts) {
   return out;
 }
 
-module.exports = { ensureSharedTool, provisionSharedTools, isProvisioning, TOOLS, INSTALL_TIMEOUT_MS, LOCK_STALE_MS };
+module.exports = { ensureSharedTool, provisionSharedTools, isProvisioning, INSTALL_TIMEOUT_MS, LOCK_STALE_MS };

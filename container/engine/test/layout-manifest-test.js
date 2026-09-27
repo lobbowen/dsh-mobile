@@ -97,7 +97,9 @@ try {
   }
   // 规则 2：C 的内容不得住内核（内容清单只在 C 通道；内核只留通道锚 + 装配动作）
   for (const abs of walkFiles(path.join(ROOT, 'kernel', 'src'), [])) {
-    if (readSafe(abs).indexOf('hubcdn.zll.ink/userland/') >= 0) add('C-IN-KERNEL', rel(abs));
+    const t = readSafe(abs);
+    if (t.indexOf('hubcdn.zll.ink/userland/') >= 0) add('C-IN-KERNEL', rel(abs));
+    else if (/https:\/\/[^'"\s]+\.tar\.gz/.test(t)) add('C-IN-KERNEL', rel(abs) + '（内核里出现制品 URL）');
   }
   // 规则 3：F 的产品声明不得住内核
   if (ex('kernel/adapters')) add('F-IN-KERNEL', 'kernel/adapters');

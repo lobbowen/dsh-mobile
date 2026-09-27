@@ -236,8 +236,8 @@
       "capability": "pnpm（dsh 插件管理链路）",
       "layer": "shared",
       "disposition": "supplied-by-us",
-      "impl": "src/platform/toolchain.js",
-      "why": "dsh-plugin-manager 调用 pnpm；安卓无 /usr/bin/env，npm 生成的 bin shim 不可 execve，故由 C 层物化器装到共享 $PREFIX 并自写 sh 入口。pnpm 钉 12.7.0（官方 Android 原生二进制）。**启动即投放**（supervisor 启动时 provisionSharedTools，非阻塞），使用点（插件域）另有一道 await 屏障——环境启动后就完整，不是谁用到才装。",
+      "impl": "src/supply/materialize.js",
+      "why": "dsh-plugin-manager 调用 pnpm；安卓无 /usr/bin/env，npm 生成的 bin shim 不可 execve，故由 C 层机制装到共享 $PREFIX 并自写 sh 入口。件表（版本/包/大小/哈希）住 **C 自己的签名清单**，内核只留通道锚 + 信任根 + 机制 —— 加件/升级只发清单，内核不动。",
       "verify": {
         "criterion": "共享入口 $PREFIX/bin/pnpm 真能跑起来并打印版本 —— 文件在不算数",
         "node": "const fs=require('node:fs'),cp=require('node:child_process'),path=require('node:path'); const c=JSON.parse(fs.readFileSync(process.env.DSH_SUPERVISOR_HOME+'/supervisor/runtime.json','utf8')); const bin=path.join(c.prefix,'bin','pnpm'); const r=cp.spawnSync(bin,['--version'],{encoding:'utf8',timeout:90000}); const v=String(r.stdout||'').trim(); if(r.status!==0 || v.split('.').length<3) throw new Error('pnpm 不可用: rc='+r.status+' out='+v.slice(0,60)+' err='+String(r.stderr||'').slice(0,80)); process.stdout.write('DSH_PROBE_PASS pnpm='+v)"
@@ -293,12 +293,12 @@
       "capability": "sqlite3 命令行（CLI）",
       "layer": "shared",
       "disposition": "supplied-by-us",
-      "why": "C 层工具供给批次（2026-09-27 兑现）：上游 sqlite.org 只发源码，由本仓 CI 交叉编译成**动态** aarch64 产物发到对象存储，内核启动时按钉死的 sha256 取用（kernel/src/platform/toolchain.js 的 TOOLS）。此前是 waived（到期 2026-12-26）。",
+      "why": "C 层工具供给批次（2026-09-27 兑现）：上游 sqlite.org 只发源码，由本仓 CI 交叉编译成**动态** aarch64 产物、按**内容寻址**命名发到对象存储；件表与哈希住 **C 自己的签名清单**（内核只留通道锚 + 信任根），内核启动时取回、验签、验哈希后原子落位。此前是 waived（到期 2026-12-26）。",
       "verify": {
         "criterion": "sqlite3 CLI 起得来、能算一条 SQL 并把结果读回来（不是只看 --version）",
         "node": "const cp = require('node:child_process'); const r = cp.spawnSync('sqlite3', [':memory:', 'select 1+1;'], { encoding: 'utf8' }); if (r.error) { console.error('sqlite3 起不来: ' + r.error.message); process.exit(1); } if (r.status !== 0) { console.error('sqlite3 非零退出 rc=' + r.status + ' err=' + String(r.stderr || '').slice(0, 160)); process.exit(1); } const got = String(r.stdout || '').trim(); if (got !== '2') { console.error('sqlite3 回读不对: ' + JSON.stringify(got)); process.exit(1); } process.stdout.write('DSH_PROBE_PASS sqlite3 CLI 可用（select 1+1 => 2）');"
       },
-      "impl": "src/platform/toolchain.js"
+      "impl": "src/supply/materialize.js"
     }
   ]
 }

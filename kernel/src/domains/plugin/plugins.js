@@ -74,7 +74,7 @@ class PluginManager {
   async _ensurePackageManager() {
     if (this._pmTool) return this._pmTool;
     if (!this._pmToolPromise) {
-      const tc = this.toolchain || require('../../platform/toolchain');
+      const tc = this.toolchain || require('../../supply/materialize');
       this._pmToolPromise = Promise.resolve()
         .then(() => tc.ensureSharedTool('pnpm'))
         .catch((e) => ({ status: 'failed', name: 'pnpm', reason: e.message }));

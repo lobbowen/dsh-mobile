@@ -371,7 +371,7 @@ class Supervisor {
     // 才由调用点顺手装（那是惰性补丁）。异步、不阻塞 spawn、失败只记账；使用点仍有一道
     // await 屏障（插件域 _ensurePackageManager），保证「用之前一定在」。
     try {
-      require('./platform/toolchain').provisionSharedTools({
+      require('./supply/materialize').provisionSharedTools({
         logger: this.logger, events: this.events,
         // 投放完成后立刻 fresh 核验：环境变了，能力结论必须跟着变（否则面板留着旧读数）。
         onSettled: () => { try { this.nativeManager && this.nativeManager.verifyNativeCapabilities(true); } catch (_) {} },

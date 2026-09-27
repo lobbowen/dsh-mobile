@@ -101,7 +101,7 @@ locale 空、os.cpus() 返回 0、/tmp 不可写）。逐条修会修成"补丁"
 | 层 | 已落 |
 |---|---|
 | B | 既有（PrefixProvisioner / GuestAdapter / runtime.json） |
-| C | pnpm 物化到共享 $PREFIX（自写 sh 入口）；sqlite3 已由 `build-userland.yml` 编好发到对象存储。**欠账（越层）**：C 的内容目录（版本/url/sha）写在 `kernel/src/platform/toolchain.js` 的 `TOOLS` 硬表里 ⇒ C 没有自己的版本与通道，每次增件/升级都要发内核。正解见 §2.1 第 1 条 |
+| C | **已按 §2.1 分层**：**内容** = C 自己的签名清单（对象存储 `userland-<channel>/userland-manifest.json` + `.sig`，带 C 的 `version`/`sequence`/件表；件命名**内容寻址**，文件名带 sha12，长缓存才安全）；**机制** = `kernel/src/supply/`（`manifest.js` 取回并对原始字节验签 + `materialize.js` 取件、验哈希、原子落位、写 `$PREFIX` 入口）。内核只留**通道锚** `channel.json` + **信任根** `userland-public.pem`（与内核 OTA 同一把）⇒ 加件/升级**只发清单，内核不动** |
 | D1 | `LANG=C.UTF-8`；`/tmp`→`$TMPDIR` 前缀重写（`container/native/d1/`：`open-fallback.c` + `tmp-paths.c` + `tmp-redirect.h`，**默认生效**）；`os.cpus()` 预载垫片（`assets/node/android-env-shim.cjs` + `NODE_OPTIONS`） |
 | D2 | `kernel/src/d2/pieces.json`（**件清单唯一处**：身份 + 上游按什么名字/位置找它 + 版本/哈希）+ `artifacts.js`（数据驱动的本机解析）。本体不在此（rg/bash 的本体是 B 种子、C 内容或 npm 树）。与 `.github/native-capabilities.txt` 的对账由 `native-supply-gate-test` 把守 |
 | E | `manager.js` 经 D2 解析工件；`supply-table.json` 的 `units` 即落位规则表。**欠账**：`envUnits`（C 的内容清单）与 `units`（E 的落位规则）同住一张表，两表该分开（§2.1 第 1 条） |
@@ -115,8 +115,9 @@ locale 空、os.cpus() 返回 0、/tmp 不可写）。逐条修会修成"补丁"
 - **os.cpus() 垫片已落**：只在 `os.cpus()` 为空时用 `availableParallelism()` 合成，
   非空一律不动；整段 try/catch，绝不成为启动失败点。
 - **不承诺每个产品一套机制**：产品只给声明（见 §3）。
-- **C 尚无自己的通道（最大欠账）**：C 的内容列表与钉（版本/url/sha）写在内核源码里 ⇒
-  增件/升级 = 内核发版。正解：C 有自己的签名清单与通道（§2.1 第 1 条），内核只留**通道锚 + 信任根**。
+- ~~C 尚无自己的通道~~ **已兑现（2026-09-27）**：C 的内容（件表/版本/哈希）住对象存储的签名清单，
+  内核只留通道锚 + 信任根 + 机制；加件/升级只发清单。签名对**文件原始字节**做（分离 `.sig`），
+  内核验签无需 canonical 实现（本仓已有两份，不添第三份）。
 - **D2 语义待校正**：本体归 C，D2 只回答「上游按什么名字/位置找它」。
 - **C↔D1 契约待落纸**：**C 的产物必须动态链接**（静态件绕过 `LD_PRELOAD`，D1 的
   link(2)、/tmp、祖先目录语义对它们全部失效）。目前只在 `build-userland.yml` 的形态门禁里拦，

@@ -1,0 +1,8 @@
+{
+  "$comment": "C 层内容清单的**通道锚**（机制的一部分，随内核发版）。清单是**内容**：它的版本/件表/哈希都在清单里，不在这里。内核与 C 的信任流：签名内核 → 本锚 + userland-public.pem → C 的签名清单。",
+  "schema": 1,
+  "baseUrl": "https://hubcdn.zll.ink",
+  "channel": "canary",
+  "manifestName": "userland-manifest.json",
+  "sigName": "userland-manifest.json.sig"
+}

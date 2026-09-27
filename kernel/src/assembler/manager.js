@@ -421,7 +421,7 @@ class NativeManager {
     // 为什么：投放是重 IO（47MB 解包），与它抢 CPU 会把探针饿成 30s 超时（真机定罪），
     // 那会把「还没装好」误报成「能力坏了」。
     try {
-      if (require('../platform/toolchain').isProvisioning()) {
+      if (require('../supply/materialize').isProvisioning()) {
         const units = {};
         for (const u of this._supplyUnits()) units[u.id] = { id: u.id, ok: null, detail: '共享工具投放进行中：本轮不核验', at: new Date().toISOString() };
         const skip = { overall: null, units, note: '共享工具投放进行中' };

@@ -255,6 +255,11 @@
       "from": "kernel/src/assembler/platform-artifacts.js",
       "to": "kernel/src/d2/artifacts.js",
       "kind": "file"
+    },
+    {
+      "from": "kernel/src/platform/toolchain.js",
+      "to": "kernel/src/supply/materialize.js",
+      "kind": "file"
     }
   ],
   "legacyForbidden": [
@@ -388,22 +393,6 @@
     }
   },
   "deliveryDebt": [
-    {
-      "id": "c-home-missing",
-      "rule": "LAYER-PATH-MISSING",
-      "path": "kernel/src/supply",
-      "expiresAt": "2026-10-11",
-      "what": "C 的机制（供给物化器）没有自己的家，现住 kernel/src/platform/toolchain.js",
-      "fix": "建 kernel/src/supply/：读 C 清单 → 取件 → 验 → 落位"
-    },
-    {
-      "id": "c-content-in-kernel",
-      "rule": "C-IN-KERNEL",
-      "path": "kernel/src/platform/toolchain.js",
-      "expiresAt": "2026-10-11",
-      "what": "C 的**内容**（版本/url/sha 硬表）住在内核源码里 ⇒ 增件/升级必发内核",
-      "fix": "内容搬进 C 的签名清单（对象存储，带 C 自己的版本）；内核只留通道锚 + 信任根"
-    },
     {
       "id": "f-in-kernel",
       "rule": "F-IN-KERNEL",
