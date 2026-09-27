@@ -367,6 +367,13 @@ class Supervisor {
       if (this.logger && this.logger.info) this.logger.info('[lifecycle] 已注册模块: ' + this.lifecycleManager.all().map((l) => l.id).join(','));
       this._syncDshLifecycleView(); // 注册后立即同步 DSH 视图（不等首个 tick）
     } catch (e) { this.logger.warn && this.logger.warn('[lifecycle] 注册失败: ' + (e && e.message)); }
+    // C 层共享工具（pnpm）**启动即投放**：环境应当在启动后就完整，而不是等第一次插件操作
+    // 才由调用点顺手装（那是惰性补丁）。异步、不阻塞 spawn、失败只记账；使用点仍有一道
+    // await 屏障（插件域 _ensurePackageManager），保证「用之前一定在」。
+    try {
+      require('./platform/toolchain').provisionSharedTools({ logger: this.logger, events: this.events })
+        .catch(() => {});
+    } catch (e) { this.logger.warn && this.logger.warn('共享工具投放未启动: ' + (e && e.message)); }
     this.tick(); // 首拍立即收敛
     // main(dsh) 收敛驱动源（C3-3b G3 接管 → C3-5 终态）：唯一心跳（registry heartbeat →
     // dsh supervise → _dshConverge）是唯一周期驱动——tick 定时器不再创建；

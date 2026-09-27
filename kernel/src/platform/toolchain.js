@@ -114,4 +114,22 @@ async function ensureSharedTool(name, opts) {
   return out('applied', { bin, entry });
 }
 
-module.exports = { ensureSharedTool, TOOLS, INSTALL_TIMEOUT_MS };
+/** C 层供给：把全部共享工具**在启动时**投放就位（不是「谁用到谁装」的惰性补丁）。
+ *  异步、非阻塞、非致命：调用方 fire-and-forget；失败只记账，真因由使用点如实报出。
+ *  幂等：已就位即 already。使用点（插件域）仍保留一道 await 屏障，防与后台投放竞态。 */
+async function provisionSharedTools(opts) {
+  const o = opts || {};
+  const out = {};
+  for (const name of Object.keys(TOOLS)) {
+    let r;
+    try { r = await ensureSharedTool(name, o); } catch (e) { r = { status: 'failed', name, reason: e.message }; }
+    out[name] = r;
+    const line = '共享工具投放 ' + name + ': ' + r.status + (r.reason ? '（' + r.reason + '）' : '');
+    if (r.status === 'applied') { o.logger && o.logger.info && o.logger.info(line); }
+    else if (r.status !== 'already' && r.status !== 'skipped') { o.logger && o.logger.warn && o.logger.warn(line); }
+    if (o.events) { try { o.events.append('toolchain_tool', { name, status: r.status, reason: r.reason || null }); } catch (_) {} }
+  }
+  return out;
+}
+
+module.exports = { ensureSharedTool, provisionSharedTools, TOOLS, INSTALL_TIMEOUT_MS };
