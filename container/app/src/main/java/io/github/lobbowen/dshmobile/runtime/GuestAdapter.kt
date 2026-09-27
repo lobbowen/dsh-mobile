@@ -22,6 +22,9 @@ import java.io.File
  */
 object GuestAdapter {
 
+    // 动本文件（container/app/**）必须同批 bump 根 version.json 的 shell.versionCode
+    // （docs/runbook/release.md §2）—— 否则 fast-apk 的发布步骤按「同版本重发」判红。
+
     /** 两种模式共享的 L-C 输入。nativeLibDir 必须来自 NativePreparer.libSearchPath，
      *  不要在别处再推导一次（linker 搜索路径的唯一正确取值 = applicationInfo.nativeLibraryDir）。 */
     data class BaseInputs(
