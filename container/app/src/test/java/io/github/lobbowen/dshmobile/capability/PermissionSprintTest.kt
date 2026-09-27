@@ -47,7 +47,9 @@ class PermissionSprintTest {
         assertTrue(PermissionSprint.REQUIRED.contains(PermissionCatalog.POST_NOTIFICATIONS))
     }
 
-    @Test fun 冲刺顺序只由三档拼成_本版锚与待选项均为空() {
+    @Test fun 冲刺首项必须是必要项_其余不得挡在前面() {
+        // 契约原名里的「首项」=这条：锚与待选项不许挤到必要项前面（本版 REQUIRED 只剩通知发送一项）。
+        assertEquals(PermissionSprint.REQUIRED.first(), PermissionSprint.ORDER.first())
         assertEquals(
             "顺序只能由 REQUIRED + ANCHORS + OPTIONAL 拼成，不许另插私货",
             PermissionSprint.REQUIRED + PermissionSprint.ANCHORS + PermissionSprint.OPTIONAL,
@@ -59,7 +61,8 @@ class PermissionSprintTest {
         assertTrue("本版待选项全部有静默路径，不应再占开屏位", PermissionSprint.OPTIONAL.isEmpty())
     }
 
-    @Test fun 保活锚从登记表推导_本版全部由静默路径接管_不是被删掉() {
+    @Test fun 保活锚从登记表推导_不是手写第二张清单() {
+        // 本版补充：锚没有被删，只是不再由开屏抢问（见下面的断言）。
         // 反事实钉死（真机 2026-09-26「锁屏后 App 被清理」的病根是锚掉了）：
         // 锚没有被删，只是不再由开屏抢问 —— 它们都有 SILENT_* 的取法链首项，
         // 由配对后的 [PostPairingAutoFlow] + ContainerSupervisor 的低频监护无感自愈。
