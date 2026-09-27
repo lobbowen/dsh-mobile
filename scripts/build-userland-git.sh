@@ -239,6 +239,19 @@ export CC
 # NDK 的 ar/ranlib：git 不改用 libtool，直接调 ar。
 TC=$(dirname "$CC")
 export AR="$TC/llvm-ar"
+
+# ── 去掉 git-imap-send ─────────────────────────────────────────────────
+# 它是「把补丁用邮件发出去」用的，我们不需要；而在 API 21 的 bionic 上，
+#   它链接时会因 openssl 引用 stderr 数据符号而失败（bionic 到 API 23 才导出该符号）。
+#   干净做法是把它从构建目标里去掉 —— 比「容忍一个失败的目标」诚实。
+IMAP_LINES=$(grep -c '^PROGRAMS += git-imap-send' Makefile || true)
+if [ "$IMAP_LINES" != "0" ]; then
+  sed -i '/^PROGRAMS += git-imap-send/d' Makefile
+  echo "[git] 已从构建目标里去掉 git-imap-send"
+else
+  echo "::error title=没找到 imap-send 的构建目标行::上游 Makefile 变了，得重新确认怎么排除"
+  exit 1
+fi
 export RANLIB="$TC/llvm-ranlib"
 
 # 关键：这些必须**写在 make 命令行上**。git 的 Makefile 用的是简单赋值（CC = cc），环境变量覆盖不了它 ——
