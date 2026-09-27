@@ -63,7 +63,8 @@ jobs:
             exit 1
           fi
           for f in dist/*.tar.gz; do
-            node scripts/upload-qiniu.js "$f" "userland/$(basename "$f")" --cache-control=31536000
+            B=$(basename "$f")
+            node scripts/upload-qiniu.js "$f" "userland/$B" --cache-control=31536000
           done
           echo "[qiniu] userland/${{ matrix.tool }} 已发布"
       - name: 归档到 Release（GitHub 在目标网络不可达，这里只是归档）
