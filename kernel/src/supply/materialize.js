@@ -383,16 +383,30 @@ async function ensureSharedTool(name, opts) {
  *  异步、非阻塞、非致命：调用方 fire-and-forget；失败只记账，真因由使用点如实报出。
  *  幂等；单写者锁保证并发调用里只有一个真装。使用点（插件域）另有一道 await 屏障。 */
 async function provisionSharedTools(opts) {
-  // 旧平铺布局的残留先清掉（本仓历史 bug 的产物）：不留暗账，也不让它继续占着 $PREFIX/bin 的指向。
-  const legacyRemoved = removeLegacyFlatLayout(c.prefix);
-  if (legacyRemoved.length && opts && opts.events) {
-    try { opts.events.append('toolchain_legacy_cleaned', { removed: legacyRemoved }); } catch (_e) {}
-  }
   const o = opts || {};
   const out = {};
   let names;
-  try { names = await manifest.toolNames(); } catch (e) {
-    const reason = 'C 清单不可用：' + e.message;
+  // 这一段（清旧残留 + 取清单）整体包在 try 里，且**绝不静默**：
+  //   真机定罪（2026-09-28，kernel .38）：这里曾把 removeLegacyFlatLayout(c.prefix) 写在 `c` 定义之前 ⇒
+  //   ReferenceError → async 拒绝 → 被调用方的 .catch(() => {}) 吞掉 ⇒ 整轮投放**零日志零事件**，
+  //   面板上四格停在「清单尚未取回」，而线上清单明明取得到。
+  try {
+    const c = runtimeContract.read();
+    if (!c || !c.prefix) {
+      const reason = '非容器契约形态（无 runtime.json / prefix），本轮不投放';
+      o.logger && o.logger.info && o.logger.info('共享工具投放：' + reason);
+      if (o.events) { try { o.events.append('toolchain_tool', { name: '*', status: 'skipped', reason }); } catch (_) {} }
+      if (typeof o.onSettled === 'function') { try { o.onSettled({}); } catch (_) {} }
+      return out;
+    }
+    // 旧平铺布局的残留先清掉（本仓历史 bug 的产物）：不留暗账，也不让它继续占着 $PREFIX/bin 的指向。
+    const legacyRemoved = removeLegacyFlatLayout(c.prefix);
+    if (legacyRemoved.length && o.events) {
+      try { o.events.append('toolchain_legacy_cleaned', { removed: legacyRemoved }); } catch (_e) {}
+    }
+    names = await manifest.toolNames();
+  } catch (e) {
+    const reason = 'C 清单不可用：' + (e && e.message ? e.message : String(e));
     o.logger && o.logger.info && o.logger.info('共享工具投放：' + reason + '（只降级，已有件仍可用）');
     if (o.events) { try { o.events.append('toolchain_tool', { name: '*', status: 'skipped', reason }); } catch (_) {} }
     if (typeof o.onSettled === 'function') { try { o.onSettled({}); } catch (_) {} }

@@ -121,8 +121,15 @@ static int parse_shebang(const char *file, char *buf, size_t n, char *tok[], int
   return k >= 1;
 }
 
-/** 以（可能被重写过的）解释器 + 新 argv 执行；失败原样返回真实 errno。 */
-static int exec_with(const char *path, char *const argv[], char *const envp[], const char *disp0, char *shebangArgs[], int nShebang) {
+/**
+ * 以（可能被重写过的）解释器执行**脚本**；失败原样返回真实 errno。
+ *
+ * 真机定罪（2026-09-28，APK 24 / kernel .38）：原先签名里只有解释器路径，函数体把**它**当作脚本参数
+ *   塞进 argv ⇒ 内核实际执行的是 `bash <bash>`，报 `bash: .../usr/bin/bash: cannot execute binary file`，
+ *   任何带 shebang 的脚本一律 rc=126（npm/pnpm 的 postinstall、git hooks、任何 shell 脚本全灭），
+ *   而面板上只表现为 env-shebang 一格红。故此处显式区分 **exe（解释器）** 与 **script（脚本）**。
+ */
+static int exec_with(const char *exe, const char *script, char *const argv[], char *const envp[], const char *disp0, char *shebangArgs[], int nShebang) {
   size_t extra = (size_t)nShebang, argc = 1 + extra + 1, i, k = 0;
   char **nargv;
   if (argv) for (i = 1; argv[i]; i++) argc++;
@@ -130,10 +137,10 @@ static int exec_with(const char *path, char *const argv[], char *const envp[], c
   if (!nargv) { errno = ENOMEM; return -1; }
   nargv[k++] = (char *)disp0;
   for (i = 0; i < extra; i++) nargv[k++] = shebangArgs[i];
-  nargv[k++] = (char *)path;
+  nargv[k++] = (char *)script;   // ← 脚本路径（不是解释器）
   if (argv) for (i = 1; argv[i]; i++) nargv[k++] = argv[i];
   nargv[k] = NULL;
-  real_execve(path, nargv, envp);
+  real_execve(exe, nargv, envp);
   { int e = errno; free(nargv); errno = e; return -1; }
 }
 
@@ -164,7 +171,7 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
     }
     if (envStyle || is_std_abs(interp)) {
       if (resolve_interp(disp0, resolved, sizeof resolved)) {
-        return exec_with(resolved, argv, envp, disp0, &tok[cmd], ntok - cmd);
+        return exec_with(resolved, path, argv, envp, disp0, &tok[cmd], ntok - cmd);
       }
     }
     // 解析不出来 → 原样交给内核（它会给出它本来会给的错）。
