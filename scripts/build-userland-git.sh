@@ -66,12 +66,12 @@ fi
 echo "[git] NDK root = $ANDROID_NDK_ROOT"
 
 # ① zlib（curl 与 git 都要它）
-if ! curl -fsSL "https://zlib.net/fossils/zlib-$ZLIB_VERSION.tar.gz" -o work/zlib.tar.gz; then
+if ! curl -fsSL "https://zlib.net/fossils/zlib-$ZLIB_VERSION.tar.gz" -o "$ROOT_DIR/work/zlib.tar.gz"; then
   echo "::error title=zlib 取不到::zlib-$ZLIB_VERSION 源码"
   exit 1
 fi
-rm -rf work/zlib && mkdir -p work/zlib
-tar xzf work/zlib.tar.gz -C work/zlib --strip-components=1
+rm -rf "$ROOT_DIR/work/zlib" && mkdir -p "$ROOT_DIR/work/zlib"
+tar xzf "$ROOT_DIR/work/zlib.tar.gz" -C "$ROOT_DIR/work/zlib" --strip-components=1
 cd "$ROOT_DIR/work/zlib"
 CHOST=aarch64-linux-android CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" ./configure --prefix="$DEPS" --static >/dev/null
 make -j2 >/dev/null
@@ -80,12 +80,12 @@ ZLIB_LIBS=$(ls "$DEPS/lib" | tr "\n" " ")
 echo "[git] zlib 就位：$ZLIB_LIBS"
 
 # ② OpenSSL（静态 libssl/libcrypto；https 的 TLS 由它提供）
-if ! curl -fsSL "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VERSION/openssl-$OPENSSL_VERSION.tar.gz" -o work/openssl.tar.gz; then
+if ! curl -fsSL "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VERSION/openssl-$OPENSSL_VERSION.tar.gz" -o "$ROOT_DIR/work/openssl.tar.gz"; then
   echo "::error title=openssl 取不到::openssl-$OPENSSL_VERSION 源码"
   exit 1
 fi
-rm -rf work/openssl && mkdir -p work/openssl
-tar xzf work/openssl.tar.gz -C work/openssl --strip-components=1
+rm -rf "$ROOT_DIR/work/openssl" && mkdir -p "$ROOT_DIR/work/openssl"
+tar xzf "$ROOT_DIR/work/openssl.tar.gz" -C "$ROOT_DIR/work/openssl" --strip-components=1
 cd "$ROOT_DIR/work/openssl"
 PATH="$TC_DIR:$PATH" ./Configure android-arm64 -D__ANDROID_API__=21 --prefix="$DEPS" --openssldir="$DEPS/ssl" no-shared no-tests >/dev/null
 if ! make -j2 build_libs >/dev/null; then
@@ -96,12 +96,12 @@ make install_sw >/dev/null
 echo "[git] openssl 就位：$(ls "$DEPS/lib" | grep -c "[.]a") 个 .a"
 
 # ③ libcurl（只留 http/https，静态）
-if ! curl -fsSL "https://curl.se/download/curl-$CURL_VERSION.tar.gz" -o work/curl.tar.gz; then
+if ! curl -fsSL "https://curl.se/download/curl-$CURL_VERSION.tar.gz" -o "$ROOT_DIR/work/curl.tar.gz"; then
   echo "::error title=curl 取不到::curl-$CURL_VERSION 源码"
   exit 1
 fi
-rm -rf work/curl && mkdir -p work/curl
-tar xzf work/curl.tar.gz -C work/curl --strip-components=1
+rm -rf "$ROOT_DIR/work/curl" && mkdir -p "$ROOT_DIR/work/curl"
+tar xzf "$ROOT_DIR/work/curl.tar.gz" -C "$ROOT_DIR/work/curl" --strip-components=1
 cd "$ROOT_DIR/work/curl"
 # --with-ca-path 指向安卓的系统信任库：https 校验要用它（不装 CA 包时这是唯一来源）。
 ./configure --host=aarch64-linux-android --build=x86_64-pc-linux-gnu --prefix="$DEPS" \
