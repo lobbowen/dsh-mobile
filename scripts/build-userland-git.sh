@@ -117,6 +117,9 @@ fi
 rm -rf "$ROOT_DIR/work/curl" && mkdir -p "$ROOT_DIR/work/curl"
 tar xzf "$ROOT_DIR/work/curl.tar.gz" -C "$ROOT_DIR/work/curl" --strip-components=1
 cd "$ROOT_DIR/work/curl"
+# openssl 的 install_sw 会装 .pc 文件；curl 的 Configure 靠 pkg-config 认它最稳
+#   （只给 -I/-L 时它常报 `--with-openssl was given but OpenSSL could not be detected`，CI 实证）。
+export PKG_CONFIG_PATH="$DEPS/lib/pkgconfig"
 # --with-ca-path 指向安卓的系统信任库：https 校验要用它（不装 CA 包时这是唯一来源）。
 ./configure --host=aarch64-linux-android --build=x86_64-pc-linux-gnu --prefix="$DEPS" \
   --with-openssl="$DEPS" --with-zlib="$DEPS" --with-ca-path=/system/etc/security/cacerts \
@@ -125,7 +128,7 @@ cd "$ROOT_DIR/work/curl"
   --disable-ftp --disable-file --disable-dict --disable-telnet --disable-tftp \
   --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-rtsp \
   --enable-http --enable-https \
-  CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib" > "$ROOT_DIR/work/curl-configure.log" 2>&1 || { echo "::error title=curl Configure 失败::最后 30 行"; tail -n 30 "$ROOT_DIR/work/curl-configure.log" || true; exit 1; }
+  CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib" > "$ROOT_DIR/work/curl-configure.log" 2>&1 || { echo "::error title=curl Configure 失败::最后 30 行"; tail -n 40 "$ROOT_DIR/work/curl-configure.log" || true; exit 1; }
 CURL_LOG="$ROOT_DIR/work/curl-build.log"
 if ! make -j2 > "$CURL_LOG" 2>&1; then
   echo "::error title=curl 编译失败::最后 30 行"
