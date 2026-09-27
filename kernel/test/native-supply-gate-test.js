@@ -435,6 +435,38 @@ if (ref.names && host.names && table) {
     check('版本比对需要表里的包名锚', false, '表缺 agent.package，未比对 registry');
   }
   const failed = results.filter((x) => !x);
+// ── 口径对账：定稿的运行时/工具清单 ↔ 登记表每格（防「位置漂了」再发生）────────────
+// 由来（2026-09-28 用户复核）：我把 npm 摆进种子组、把 shell 写成 runtime、把 node/go/java 的 layer
+//   写成 seed —— 与 docs/contracts/layout.json 的 C.shape 明文口径冲突，且与登记表自己第 386 行
+//   的定义自相矛盾。这条规则把口径变成机检：清单里每一项都必须在册、且 kind 对得上。
+// 匹配容错：文档写 python，格是 env-python3/bin=python3 —— 按前缀认，不要求逐字相同。
+try {
+  const layout = JSON.parse(fs.readFileSync(path.join(ROOT, '..', 'docs', 'contracts', 'layout.json'), 'utf8'));
+  const shape = String((((layout.deliveryLayers || {}).C) || {}).shape || '');
+  const grab = (label) => {
+    const i = shape.indexOf(label + '（');
+    if (i < 0) return null;
+    const j = shape.indexOf('）', i);
+    if (j < 0) return null;
+    return shape.slice(i + label.length + 1, j).split('·').map((s) => s.trim()).filter(Boolean);
+  };
+  const runtimes = grab('运行时');
+  const tools = grab('工具');
+  check('口径：C.shape 能解析出运行时与工具清单', !!runtimes && !!tools && runtimes.length > 0 && tools.length > 0, JSON.stringify({ runtimes, tools }));
+  const table = JSON.parse(fs.readFileSync(path.join(ROOT, 'src', 'assembler', 'supply-table.json'), 'utf8'));
+  const units = (table.envUnits || []);
+  const cellOf = (name) => units.find((u) => (u.bin && String(u.bin).indexOf(name) === 0) || u.id === 'env-' + name);
+  for (const n of (runtimes || [])) {
+    const u = cellOf(n);
+    check('口径对账 · 运行时在册且 kind=runtime: ' + n, !!u && u.kind === 'runtime', u ? ('kind=' + u.kind) : '缺格');
+  }
+  for (const n of (tools || [])) {
+    const u = cellOf(n);
+    check('口径对账 · 工具在册且 kind=tool: ' + n, !!u && u.kind === 'tool', u ? ('kind=' + u.kind) : '缺格');
+  }
+  const shell = units.find((u) => u.id === 'env-shell');
+  check('口径对账 · shell 是底座种子（seed/seed）不是运行时', !!shell && shell.kind === 'seed' && shell.layer === 'seed', shell ? (shell.kind + '/' + shell.layer) : '缺格');
+} catch (e) { check('口径对账 · 规则自身可执行', false, e.message); }
   console.log(String.fromCharCode(10) + '结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');
   process.exit(failed.length ? 1 : 0);
 })();

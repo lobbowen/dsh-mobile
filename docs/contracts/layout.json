@@ -375,9 +375,11 @@
       "paths": [
         "kernel/src/supply",
         "scripts/build-userland-sqlite3.sh",
-        ".github/workflows/build-userland.yml"
+        ".github/workflows/build-userland.yml",
+        "container/app/src/main/assets/node-versions.json"
       ],
-      "shape": "内容按**性质**分裂：运行时（node·python·go·java）随 APK 冻结（jniLibs+assets）；工具（npm·pnpm·git·jq·sqlite3·rg·curl·coreutils）由环境自己装进 $PREFIX、自适应、自更新，内核检测并触发"
+      "shape": "内容按**性质**分裂：运行时（node·python·go·java）随 APK 冻结（jniLibs+assets）；工具（npm·pnpm·git·jq·sqlite3·rg·curl·coreutils）由环境自己装进 $PREFIX、自适应、自更新，内核检测并触发",
+      "_bootstrap": "C 通道的**自举种子**：npm（构建期由 CI 注入 assets/npm，**仓内不存在该目录**，故只在此说明不进 paths）—— 装 pnpm/git 等都要先有它，故它必须随 APK 落地；这是**设计**，不是把工具冻结在 APK。其余工具（pnpm/git/jq/sqlite3/rg/curl/coreutils）一律由环境自己装进 $PREFIX。"
     },
     "D1": {
       "title": "Linux 语义兑现",
@@ -391,7 +393,8 @@
       "vehicle": "kernel",
       "paths": [
         "kernel/src/d2"
-      ]
+      ],
+      "_payload": "D2 的**物**落在 APK：container/app/src/main/assets/node/adb-client/**（D2 行只声明清单与解析实现住 kernel/src/d2）。"
     },
     "E": {
       "title": "装配器",
@@ -403,7 +406,10 @@
     "F": {
       "title": "产品声明",
       "vehicle": "L2",
-      "paths": []
+      "paths": [
+        "container/app/src/main/assets/kernel-feed.json"
+      ],
+      "_note": "产品声明（每产品一套）：通道选择等**声明物**随壳分发。原先 paths 为空 ⇒ 声明物无位可归（kernel-feed.json 住在 B 的 assets 里）—— 现明确：F 的物就落在 APK 内，与 B 共用 assets 目录但**物各有主**。"
     }
   },
   "deliveryDebt": []

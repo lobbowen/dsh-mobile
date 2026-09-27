@@ -45,6 +45,12 @@ function probeUnit(unit, ctx, deps) {
   const v = unit && unit.verify;
   if (!v) return out(unit.id, null, '该格没有能力判据（只有投放结局，不能当能力读）', at);
   if (v.notApplicable) return out(unit.id, null, '按处置无需核验：' + v.notApplicable, at);
+  // 已豁免的缺口不跑判据、也不报红（真机定罪 2026-09-28）：waived 是**在册且带到期日**的缺口，
+  //   拿它去跑一个注定失败的判据，会把「豁免」显示成「坏了」——三态里的 false 只该给真坏了的东西。
+  if (unit.disposition === 'waived') {
+    const w = unit.waiver || {};
+    return out(unit.id, null, '缺口在册（豁免）：' + (w.followUp || '见供给表 waiver') + (w.expiresAt ? '；到期 ' + w.expiresAt : ''), at);
+  }
   if (v.deferred) {
     return out(unit.id, null, '判据待做（' + v.deferred.followUp + '，' +
       v.deferred.expiresAt + ' 前）：' + (v.criterion || ''), at);
