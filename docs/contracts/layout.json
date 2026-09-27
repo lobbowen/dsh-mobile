@@ -303,5 +303,131 @@
     "read-release-asset.sh": "cross",
     "check-apk-release-version.sh": "L0",
     "verify-apk-version-gate.sh": "L0"
-  }
+  },
+  "deliveryLayers": {
+    "_note": "交付维（六层，与上面的发布维 layers 正交）：层=职责，上面 layers=车辆。物理组织必须同时满足两轴。这里每条 paths 是**目标位**；尚未达成的进 deliveryDebt（有到期日、修好必须销账，否则门禁红）。",
+    "B": {
+      "title": "容器/OS 底座",
+      "vehicle": "L0",
+      "paths": [
+        "container/app",
+        "container/app/src/main/assets"
+      ]
+    },
+    "C": {
+      "title": "开发环境层",
+      "vehicle": "channel",
+      "paths": [
+        "kernel/src/supply",
+        "scripts/build-userland-sqlite3.sh",
+        ".github/workflows/build-userland.yml"
+      ]
+    },
+    "D1": {
+      "title": "Linux 语义兑现",
+      "vehicle": "L0",
+      "paths": [
+        "container/native/d1"
+      ]
+    },
+    "D2": {
+      "title": "Android 平台件库",
+      "vehicle": "kernel",
+      "paths": [
+        "kernel/src/d2"
+      ]
+    },
+    "E": {
+      "title": "装配器",
+      "vehicle": "L1",
+      "paths": [
+        "kernel/src/assembler"
+      ]
+    },
+    "F": {
+      "title": "产品声明",
+      "vehicle": "L2",
+      "paths": []
+    }
+  },
+  "deliveryDebt": [
+    {
+      "id": "c-home-missing",
+      "rule": "LAYER-PATH-MISSING",
+      "path": "kernel/src/supply",
+      "expiresAt": "2026-10-11",
+      "what": "C 的机制（供给物化器）没有自己的家，现住 kernel/src/platform/toolchain.js",
+      "fix": "建 kernel/src/supply/：读 C 清单 → 取件 → 验 → 落位"
+    },
+    {
+      "id": "d1-home-missing",
+      "rule": "LAYER-PATH-MISSING",
+      "path": "container/native/d1",
+      "expiresAt": "2026-10-11",
+      "what": "D1 的源与 D2 的件混在 container/native/ 下",
+      "fix": "拆 container/native/{d1,d2}/，posix/ 归 d1，flock/·ptyprobe/ 归 d2"
+    },
+    {
+      "id": "d2-home-missing",
+      "rule": "LAYER-PATH-MISSING",
+      "path": "kernel/src/d2",
+      "expiresAt": "2026-10-11",
+      "what": "D2（件库：标识+命名/位置+版本+sha+verify）没有单一家",
+      "fix": "建 kernel/src/d2/：件清单唯一处；平台件的版本/sha 只此一份"
+    },
+    {
+      "id": "e-home-missing",
+      "rule": "LAYER-PATH-MISSING",
+      "path": "kernel/src/assembler",
+      "expiresAt": "2026-10-11",
+      "what": "E（装配器）没有以职责命名的家，现住 kernel/src/guard/native/",
+      "fix": "迁到 kernel/src/assembler/（manager/supply-table(units)/capability-probe/各 impl）"
+    },
+    {
+      "id": "c-content-in-kernel",
+      "rule": "C-IN-KERNEL",
+      "path": "kernel/src/platform/toolchain.js",
+      "expiresAt": "2026-10-11",
+      "what": "C 的**内容**（版本/url/sha 硬表）住在内核源码里 ⇒ 增件/升级必发内核",
+      "fix": "内容搬进 C 的签名清单（对象存储，带 C 自己的版本）；内核只留通道锚 + 信任根"
+    },
+    {
+      "id": "f-in-kernel",
+      "rule": "F-IN-KERNEL",
+      "path": "kernel/adapters",
+      "expiresAt": "2026-10-11",
+      "what": "F 的产品声明住 L1（进 OTA 包）⇒ 改产品声明 = 发内核",
+      "fix": "声明随产品走（产品树/数据目录，产品安装器写）；内核只留 schema + 默认值"
+    },
+    {
+      "id": "d2-inventory-split",
+      "rule": "D2-INVENTORY",
+      "expiresAt": "2026-10-11",
+      "what": "平台件知识散五处（Kotlin 注册表 / 生成物 native-assets.txt / platform-artifacts.js / native-deps.txt / 构建配方），无版本+sha",
+      "fix": "收敛为 kernel/src/d2/ 的件清单唯一处；生成物由它对账"
+    },
+    {
+      "id": "env-catalog-dual",
+      "rule": "ENV-CATALOG",
+      "expiresAt": "2026-10-11",
+      "what": "环境目录两份：env-catalog.js 与 supply-table.json#envUnits，形状与消费方都不同",
+      "fix": "单一来源：一份环境目录，另一份改为由它生成或被它取代"
+    },
+    {
+      "id": "ci-tool-in-l0",
+      "rule": "CI-TOOL-IN-L0",
+      "path": "container/engine/bin/build-bundle.js",
+      "expiresAt": "2026-10-11",
+      "what": "CI 构建工具住在 L0 车辆里（layout.json 把 container/engine 记为 L0）",
+      "fix": "构建工具移出 L0（归 scripts/ 或明确标注 CI 侧）"
+    },
+    {
+      "id": "e-d2-mixed-dir",
+      "rule": "E-D2-MIXED",
+      "path": "kernel/src/guard/native/platform-artifacts.js",
+      "expiresAt": "2026-10-11",
+      "what": "D2 的件解析住在 E 的目录里（guard/native）",
+      "fix": "随 D2 的家一起迁走；E 目录只留装配职责"
+    }
+  ]
 }

@@ -26,6 +26,15 @@ function countFiles(abs) {
   }
   return n;
 }
+function walkFiles(absDir, out) {
+  if (!fs.existsSync(absDir)) return out;
+  let es; try { es = fs.readdirSync(absDir, { withFileTypes: true }); } catch { return out; }
+  for (const e of es) {
+    const q = path.join(absDir, e.name);
+    if (e.isDirectory()) walkFiles(q, out); else out.push(q);
+  }
+  return out;
+}
 try {
   const ROOT = findRoot(__dirname);
   const layout = JSON.parse(fs.readFileSync(path.join(ROOT, 'docs', 'contracts', 'layout.json'), 'utf8'));
@@ -69,6 +78,66 @@ try {
   if (stale.length) problems.push('scriptsOwnership 登记了不存在的文件: ' + stale.join(', '));
   // 自证：同一个「未登记」判据必须能识破一个不存在的样本（防判据写坏成恒空）
   if (['__nonexistent__'].filter(f => !owned.includes(f)).length !== 1) problems.push('scriptsOwnership 判据自证失败（恒空）');
+  // ── 交付维（六层）对账 ──
+  // 为什么必须机器查：此前 layout.json 只编码发布维，六层只活在 ADR 文字里 —— 于是
+  // 「C 的内容住进内核」「产品声明留在内核」这类越层一路绿灯。规则如下，未登记即红。
+  const DL = (layout.deliveryLayers || {});
+  const DEBT = (layout.deliveryDebt || []);
+  const rel = (abs) => path.relative(ROOT, abs).split(path.sep).join('/');
+  const readSafe = (abs) => { try { return fs.readFileSync(abs, 'utf8'); } catch { return ''; } };
+  const violations = [];
+  const add = (rule, detail) => violations.push({ rule, detail: detail || '' });
+
+  // 规则 1：每层声明的目标路径必须存在
+  for (const k of Object.keys(DL)) {
+    if (k.startsWith('_')) continue;
+    for (const p of (DL[k].paths || [])) if (!ex(p)) add('LAYER-PATH-MISSING', k + ':' + p);
+  }
+  // 规则 2：C 的内容不得住内核（内容清单只在 C 通道；内核只留通道锚 + 装配动作）
+  for (const abs of walkFiles(path.join(ROOT, 'kernel', 'src'), [])) {
+    if (readSafe(abs).indexOf('hubcdn.zll.ink/userland/') >= 0) add('C-IN-KERNEL', rel(abs));
+  }
+  // 规则 3：F 的产品声明不得住内核
+  if (ex('kernel/adapters')) add('F-IN-KERNEL', 'kernel/adapters');
+  // 规则 4：D2 件清单唯一处 —— 生成物必须声明来源，且来源指向 D2 的家
+  const naPath = path.join(ROOT, '.github', 'native-assets.txt');
+  if (fs.existsSync(naPath)) {
+    const head = fs.readFileSync(naPath, 'utf8').split('\n').slice(0, 6).join('\n');
+    if (head.indexOf('kernel/src/d2') < 0) add('D2-INVENTORY', '.github/native-assets.txt 的来源不是 D2 唯一处');
+  }
+  // 规则 5：环境目录单一来源
+  const stPath = path.join(ROOT, 'kernel', 'src', 'guard', 'native', 'supply-table.json');
+  const envUnits = fs.existsSync(stPath) ? (JSON.parse(readSafe(stPath)).envUnits || []) : [];
+  if (ex('kernel/src/platform/env-catalog.js') && envUnits.length > 0) add('ENV-CATALOG', 'env-catalog.js 与 supply-table#envUnits 同时在场');
+  // 规则 6：CI 工具不得住在 L0 车辆里
+  if (ex('container/engine/bin/build-bundle.js')) add('CI-TOOL-IN-L0', 'container/engine/bin/build-bundle.js');
+  // 规则 7：D2 的件解析不得住在 E 的目录里
+  if (ex('kernel/src/guard/native/platform-artifacts.js')) add('E-D2-MIXED', 'kernel/src/guard/native/platform-artifacts.js');
+
+  // 台账自净：① 未登记的违规 → 红；② 已消失的债务 → 红（防僵尸豁免）；③ 过期/缺字段 → 红
+  const coveredBy = (v) => DEBT.some((d) => d.rule === v.rule && (!d.path || v.detail === d.path || v.detail.endsWith(d.path)));
+  for (const v of violations) if (!coveredBy(v)) problems.push('交付分层违规（未登记）: ' + v.rule + ' ' + v.detail);
+  for (const d of DEBT) {
+    const hit = violations.some((v) => v.rule === d.rule && (!d.path || v.detail === d.path || v.detail.endsWith(d.path)));
+    if (!hit) problems.push('deliveryDebt 僵尸条目（违规已消失，必须销账）: ' + d.id);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d.expiresAt || '') || new Date(d.expiresAt + 'T23:59:59Z') < new Date()) {
+      problems.push('deliveryDebt 过期或缺到期日: ' + d.id);
+    }
+    if (!d.what || !d.fix) problems.push('deliveryDebt 缺少 what/fix（债要说清是什么、怎么还）: ' + d.id);
+  }
+  // 对照组自证：判据必须能识破人造违规，否则是永不红的死规则
+  if (coveredBy({ rule: '__no_such_rule__', detail: '' })) problems.push('deliveryDebt 匹配判据自证失败（把未知规则判成已覆盖）');
+
+  console.log('== 交付维（六层）==');
+  for (const k of Object.keys(DL)) {
+    if (k.startsWith('_')) continue;
+    const ps = (DL[k].paths || []);
+    console.log('  ' + k.padEnd(3) + ' ' + String(DL[k].title || '').padEnd(16) + ' vehicle=' + String(DL[k].vehicle || '?').padEnd(8)
+      + ' paths=' + (ps.length ? ps.map((p) => (ex(p) ? '✓' : '✗') + p).join(' ') : '(无仓内路径)'));
+  }
+  console.log('  违规 ' + violations.length + ' 条 / 已登记债务 ' + DEBT.length + ' 条');
+  for (const d of DEBT) console.log('    debt ' + String(d.id).padEnd(24) + ' rule=' + String(d.rule).padEnd(20) + ' 到期 ' + d.expiresAt);
+
   console.log('== summary ==');
   console.log('  pending=' + pending + ' done=' + done + ' conflict=' + conflict + ' missing=' + missing);
   console.log('  legacyForbidden present: ' + (legacy.length ? legacy.join(', ') : 'none'));
