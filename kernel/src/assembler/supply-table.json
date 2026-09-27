@@ -192,25 +192,25 @@
     {
       "id": "tmp-redirect",
       "capability": "/tmp 语义（D1：安卓根只读，Linux 习惯的硬编码 /tmp 必失败）",
-      "layer": "shared",
+      "layer": "d1",
       "disposition": "runtime-check",
       "hostExcludes": [],
       "verify": {
         "criterion": "/tmp 下的 open + mkdir + stat + unlink 全部落到 $TMPDIR —— 缺一片即红（真机定罪过 one-surface 假绿）",
         "node": "const fs=require('node:fs'),path=require('node:path'); const b='dsh-tmp-probe-'+process.pid, dir=process.env.TMPDIR; if(!dir) throw new Error('TMPDIR 未设'); try{ fs.writeFileSync('/tmp/'+b,'ok'); if(fs.readFileSync(path.join(dir,b),'utf8')!=='ok') throw new Error('open 未落到 TMPDIR'); fs.mkdirSync('/tmp/'+b+'-d'); if(!fs.statSync('/tmp/'+b+'-d').isDirectory()) throw new Error('mkdir/stat 未落到 TMPDIR'); fs.unlinkSync('/tmp/'+b); if(fs.existsSync(path.join(dir,b))) throw new Error('unlink 未生效'); fs.rmdirSync('/tmp/'+b+'-d'); process.stdout.write('DSH_PROBE_PASS open+mkdir+stat+unlink 全落 '+dir); }catch(e){ try{fs.unlinkSync('/tmp/'+b);}catch(_){} try{fs.rmdirSync('/tmp/'+b+'-d');}catch(_){} throw e; }"
       },
-      "why": "安卓根文件系统只读且 SELinux 不给 app 在 / 下建目录，Linux 习惯的硬编码 /tmp 必然失败；容器经 libdshposix 在整张路径 syscall 面上把 /tmp 前缀重写到 $TMPDIR（**默认生效**，不依赖会被 DSH 剥掉的 DSH_* 开关），本格由设备端探针核验落点。",
+      "why": "安卓根文件系统只读且 SELinux 不给 app 在 / 下建目录，Linux 习惯的硬编码 /tmp 必然失败；容器经 libdshposix 在整张路径 syscall 面上把 /tmp 前缀重写到 $TMPDIR（**默认生效**，不依赖会被 DSH 剥掉的 DSH_* 开关），本格由设备端探针核验落点。（**归属 D1**：这是 Linux 语义兑现层的件，不是 C 层共享供给 —— 原先借 shared 表达，等于没有家。）",
       "kind": "check"
     },
     {
       "id": "env-shebang",
       "kind": "check",
       "capability": "shebang 与标准路径面（/usr/bin/env、/bin/sh、/usr/bin/X）",
-      "layer": "shared",
+      "layer": "d1",
       "disposition": "runtime-check",
       "required": false,
       "carrier": "jniLibs(libdshposix.so)",
-      "why": "安卓没有 /usr/bin/env、没有 /usr/bin/<x>、没有 /bin/sh，而生态大量程序按这些绝对路径写 shebang（npm 生成的 bin shim、pip 的 console script、我们自己的脚本）。 缺约定的后果是「exec 一个脚本 → 内核找解释器 ENOENT → 调用方以为脚本不存在」，于是我们此前给每个工具手写 `#!/system/bin/sh` 包装 —— 那是**补偿层**。 本格判据它是否真被兑现：D1 的 exec-path.c（termux-exec 同族）在 execve 前按**调用方 PATH** 解析 shebang 解释器与标准绝对路径。 注意：判据同时报出 /usr/bin/env 在本机是否存在 —— 若本机本就有它，这一格的通过不能归功于 shim（不自证清白）。",
+      "why": "安卓没有 /usr/bin/env、没有 /usr/bin/<x>、没有 /bin/sh，而生态大量程序按这些绝对路径写 shebang（npm 生成的 bin shim、pip 的 console script、我们自己的脚本）。 缺约定的后果是「exec 一个脚本 → 内核找解释器 ENOENT → 调用方以为脚本不存在」，于是我们此前给每个工具手写 `#!/system/bin/sh` 包装 —— 那是**补偿层**。 本格判据它是否真被兑现：D1 的 exec-path.c（termux-exec 同族）在 execve 前按**调用方 PATH** 解析 shebang 解释器与标准绝对路径。 注意：判据同时报出 /usr/bin/env 在本机是否存在 —— 若本机本就有它，这一格的通过不能归功于 shim（不自证清白）。（**归属 D1**：这是 Linux 语义兑现层的件，不是 C 层共享供给 —— 原先借 shared 表达，等于没有家。）",
       "verify": {
         "criterion": "两个形状的脚本都必须真跑起来：#!/usr/bin/env bash 与 #!/bin/sh（不是只看文件在不在）",
         "node": "const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process'); const dir=process.env.TMPDIR||os.tmpdir(); const envAbsent=!fs.existsSync('/usr/bin/env'); const a=path.join(dir,'dsh-shebang-env-'+process.pid+'.sh'), b=path.join(dir,'dsh-shebang-sh-'+process.pid+'.sh'); const mk=(p,body)=>{fs.writeFileSync(p,body+'\\n',{mode:0o755});fs.chmodSync(p,0o755);}; mk(a,'#!/usr/bin/env bash\\necho DSH_SHEBANG_ENV_OK'); mk(b,'#!/bin/sh\\necho DSH_SHEBANG_SH_OK'); const run=(p)=>{const r=cp.spawnSync(p,[],{encoding:'utf8'});return {out:String(r.stdout||'').trim(),err:String(r.stderr||'').trim(),code:r.status,error:r.error?r.error.message:null};}; const ra=run(a), rb=run(b); try{fs.unlinkSync(a);}catch(_){}try{fs.unlinkSync(b);}catch(_){} if(ra.out.indexOf('DSH_SHEBANG_ENV_OK')<0||rb.out.indexOf('DSH_SHEBANG_SH_OK')<0){console.error('shebang 未兑现：/usr/bin/env 形态='+JSON.stringify(ra)+' /bin/sh 形态='+JSON.stringify(rb)+'（/usr/bin/env 于本机'+(envAbsent?'不存在':'存在')+'）');process.exit(1);} process.stdout.write('DSH_PROBE_PASS shebang 兑现：#!/usr/bin/env bash 与 #!/bin/sh 都能跑（/usr/bin/env 于本机'+(envAbsent?'不存在 ⇒ 是 shim 在起作用':'存在 ⇒ 本格对它无证明力')+'）');"

@@ -309,7 +309,11 @@ if (table) {
     envUnits.filter((u) => !DISP.includes(u.disposition)).map((u) => u.id + '=' + u.disposition).join(', '));
   for (const u of envUnits) {
     check('C 层须写明能力: ' + u.id, typeof u.capability === 'string' && u.capability.length >= 4, u.capability || '(缺)');
-    check('C 层须写明归属层（seed=底座种子 / shared=共享供给）: ' + u.id, u.layer === 'seed' || u.layer === 'shared', u.layer);
+    // 归属层词表：seed=底座种子(B) / shared=共享供给(C) / d1=Linux 语义兑现(D1) / d2=Android 平台件库(D2)。
+// 为什么必须扩：D1 的两格原先只能借 shared 表达 —— 那不是它们的家，面板按归属维分组也分不出来
+//（真机 2026-09-28 用户复核：「这些东西位置都不对」）。
+const LAYERS = ['seed', 'shared', 'd1', 'd2'];
+check('C 层须写明归属层（seed=B种子 / shared=C共享 / d1=Linux语义 / d2=平台件库）: ' + u.id, LAYERS.indexOf(u.layer) >= 0, u.layer);
     check('C 层须写明为什么: ' + u.id, typeof u.why === 'string' && u.why.length >= 20);
     const v = u.verify || {};
     const shapes = ['node', 'deferred', 'notApplicable', 'delegated'].filter((k) => v[k] !== undefined);
