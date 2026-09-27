@@ -63,7 +63,12 @@ function probeUnit(unit, ctx, deps) {
     const toolName = String(unit.id || '').replace(/^env-/, '');
     let tool = null;
     try {
-      const m = require('../supply/manifest').cached();
+      // 判据来自**随件下发的清单**：C 的供给（容器侧、Android 原生）把它落在
+      //   $PREFIX/lib/toolchain/userland-manifest.json。内核只**读落点**（检测），不持有机制。
+      const _rc = require('../platform/runtime-contract').read();
+      const _mf = _rc && _rc.prefix ? require('node:path').join(_rc.prefix, 'lib', 'toolchain', 'userland-manifest.json') : null;
+      let m = null;
+      if (_mf) { try { m = JSON.parse(require('node:fs').readFileSync(_mf, 'utf8')); } catch (_e) { m = null; } }
       tool = m ? (m.tools || []).find((t) => t && t.name === toolName) : null;
     } catch (_e) { tool = null; }
     const dv = tool && tool.verify;
