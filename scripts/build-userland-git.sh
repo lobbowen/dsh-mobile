@@ -87,9 +87,20 @@ fi
 rm -rf "$ROOT_DIR/work/openssl" && mkdir -p "$ROOT_DIR/work/openssl"
 tar xzf "$ROOT_DIR/work/openssl.tar.gz" -C "$ROOT_DIR/work/openssl" --strip-components=1
 cd "$ROOT_DIR/work/openssl"
-PATH="$TC_DIR:$PATH" ./Configure android-arm64 -D__ANDROID_API__=21 --prefix="$DEPS" --openssldir="$DEPS/ssl" no-shared no-tests >/dev/null
-if ! make -j2 build_libs >/dev/null; then
-  echo "::error title=openssl 编译失败::见上"
+# openssl 的 android 配置认 ANDROID_NDK_ROOT / ANDROID_NDK_HOME 与 ANDROID_API；
+# 显式传全，避免它「找不到 NDK 就退化成半配置」（上一轮的怪错就是被 >/dev/null 遮住的）。
+export ANDROID_API=21
+export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
+CFG_LOG="$ROOT_DIR/work/openssl-configure.log"
+if ! PATH="$TC_DIR:$PATH" ./Configure android-arm64 --prefix="$DEPS" --openssldir="$DEPS/ssl" no-shared no-tests > "$CFG_LOG" 2>&1; then
+  echo "::error title=openssl Configure 失败::下面是最后 30 行（真正的致命行在这里）"
+  tail -n 30 "$CFG_LOG" || true
+  exit 1
+fi
+BUILD_LOG="$ROOT_DIR/work/openssl-build.log"
+if ! make -j2 build_libs > "$BUILD_LOG" 2>&1; then
+  echo "::error title=openssl 编译失败::最后 30 行"
+  tail -n 30 "$BUILD_LOG" || true
   exit 1
 fi
 make install_sw >/dev/null
@@ -111,9 +122,11 @@ cd "$ROOT_DIR/work/curl"
   --disable-ftp --disable-file --disable-dict --disable-telnet --disable-tftp \
   --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-rtsp \
   --enable-http --enable-https \
-  CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib" >/dev/null
-if ! make -j2 >/dev/null; then
-  echo "::error title=curl 编译失败::见上"
+  CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib" > "$ROOT_DIR/work/curl-configure.log" 2>&1 || { echo "::error title=curl Configure 失败::最后 30 行"; tail -n 30 "$ROOT_DIR/work/curl-configure.log" || true; exit 1; }
+CURL_LOG="$ROOT_DIR/work/curl-build.log"
+if ! make -j2 > "$CURL_LOG" 2>&1; then
+  echo "::error title=curl 编译失败::最后 30 行"
+  tail -n 30 "$CURL_LOG" || true
   exit 1
 fi
 make install >/dev/null
