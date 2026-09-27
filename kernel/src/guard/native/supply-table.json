@@ -109,15 +109,11 @@
       "impl": "src/guard/native/node-pty-prebuild.js",
       "hostExcludes": [],
       "verify": {
-        "criterion": "require('node-pty') 起一个真 PTY、跑一条命令并读到退出码",
-        "deferred": {
-          "followUp": "P-T 终端批次",
-          "verifiedAt": "2026-09-26",
-          "expiresAt": "2026-10-26"
-        }
+        "criterion": "require('node-pty') 用 /system/bin/sh 起一个真 PTY、跑一条命令并读到退出码（测的是 PTY 层本身）",
+        "node": "const pty = require('node-pty'); const p = pty.spawn('/system/bin/sh', ['-c', 'echo PTY-OK; exit 7'], { name: 'xterm-256color', cols: 80, rows: 24, cwd: process.cwd(), env: process.env }); let out = '', code = null, done = false; const finish = () => { if (done) return; done = true; clearTimeout(timer);   if (out.indexOf('PTY-OK') < 0) { console.error('PTY 没读到命令输出: ' + JSON.stringify(out.slice(0, 160))); process.exit(1); }   if (code !== 7) { console.error('PTY 退出码读不到或不对: ' + code); process.exit(1); }   process.stdout.write('DSH_PROBE_PASS 真 PTY：起得来、命令跑得动、退出码读得到 (rc=' + code + ')');   process.exit(0); }; const timer = setTimeout(() => { console.error('PTY 8s 未退出: ' + JSON.stringify(out.slice(0, 160))); process.exit(1); }, 8000); p.onData((d) => { out += d; }); p.onExit((e) => { code = e.exitCode; finish(); });"
       },
-      "deferredWhy": "用户 2026-09-26 拍板「终端能力先方后」：node-pty 的投放验收与 dlopen 探针随终端批次一起做。挂起不等于判据消失 —— 这一格在面板上恒读「未知」，不许因为没探针就显示成正常。",
-      "why": "node-pty 包本身能装上，缺的是 prebuilds/android-arm64/pty.node —— 闭包 diff 看不见这类缺口，只能靠本表显式登记"
+      "why": "node-pty 包本身能装上，缺的是 prebuilds/android-arm64/pty.node —— 闭包 diff 看不见这类缺口，只能靠本表显式登记",
+      "criterionWhy": "P-T 终端批次落地（2026-09-27）：判据从 deferred 转正 —— 真起 PTY、真跑命令、真读退出码；不再只看「包装上了没有」（sharp 那一格的教训）。"
     },
     {
       "id": "koffi-ffi",
