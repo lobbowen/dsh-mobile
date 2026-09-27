@@ -150,6 +150,12 @@ jobs:
           npm run build
 
       - name: Build & sign kernel bundle
+        # 输出目录必须显式给：build-kernel-bundle.js 的默认值是「脚本所在仓的三层之上」(../..)，
+        #   在 CI 上等于 /home/runner/work/release —— 而本工作流后面按仓内 release/ 读它，
+        #   于是 sign 步骤 ENOENT（实测：kernel-ota-0.1.0-android.37 首次发布即因此红）。
+        #   脚本本来就留了 DSH_BUNDLE_OUT_DIR 这个口子，这里显式钉成仓内 release/。
+        env:
+          DSH_BUNDLE_OUT_DIR: ${{ github.workspace }}/release
         run: |
           chmod +x scripts/build-kernel-bundle.sh
           ./scripts/build-kernel-bundle.sh "$PWD/kernel-src" "$KERNEL_VER" "$KERNEL_ABI" "$OTA_URL_BASE"
