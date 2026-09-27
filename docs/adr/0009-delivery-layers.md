@@ -21,42 +21,69 @@ locale 空、os.cpus() 返回 0、/tmp 不可写）。逐条修会修成"补丁"
 
 ```
         Android 宿主（AMS · SELinux · 权限 · W^X）
-┌──────────────────────────────────────────────────────────────────────┐
-│ B. 容器 / OS 底座      【L0 · APK 冻结 · 只播自举种子】
-│  进程与生命周期 · exec 域 · HostBridge · runtime.json 契约
-│  nativeLibraryDir: libnode.so · libdshposix.so · libdshflock.so …
-│  $PREFIX 种子: bash · rg · node · lib/pty.node
-├──────────────────────────────────────────────────────────────────────┤
-│ C. 共享开发环境        【共享 · 最大化 · 产品无关】
-│  运行时 node/python · 包管理器 npm/pnpm · 工具 git/jq/sqlite3/rg/curl
-│  根: $PREFIX(files/usr) · $HOME/.npm-global
-│  写者: 供给物化器（如 kernel/src/platform/toolchain.js）
-├──────────────────────────────────────────────────────────────────────┤
-│ D1. Linux 语义兑现     【共享 · 全局注入】
-│  LANG=C.UTF-8 · /tmp 语义 · os.cpus() · exec/dlopen 域
-│  link(2)/open 祖先: LD_PRELOAD libdshposix.so
-├──────────────────────────────────────────────────────────────────────┤
-│ D2. Android 平台件库   【共享工件 · 与落位分层】
-│  工件本体解析唯一处: kernel/src/guard/native/platform-artifacts.js
-│  rg · pty.node · libdshflock.so · sharp-wasm32 · narb 垫片源
-├──────────────────────────────────────────────────────────────────────┤
-│ E. 装配器              【共享一套 · 注册表驱动】
-│  {包身份} → 平台件 + 落位方式；安装/升级后与 spawn 前幂等跑
-│  kernel/src/guard/native/{manager.js, supply-table.json, capability-probe.js}
-├──────────────────────────────────────────────────────────────────────┤
-══════════ 以下按产品分，一个产品一套（互不共享）══════════
-│ F. 产品声明            【adapters/<id>/agent.json】
-│  依赖树 · 数据目录 · profile/插件 · 启动契约(android.launchFlags)
-│  写者: 该产品自己的安装器
-└──────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│ B. 容器 / OS 底座        【L0 · APK 冻结 · 容器写】
+│   进程与生命周期 · exec 域(targetSdk28) · HostBridge · runtime.json 契约
+│   nativeLibraryDir: libnode.so · libdshposix.so · libdshflock.so · libc++
+│   $PREFIX 的「自举种子」: bash · rg · node · lib/pty.node
+│   写者：PrefixProvisioner（只播种子，不做增量）
+└──────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│ C. 开发环境层            【共享 · 最大化 · 可热更 · 供给物化器写】
+│   运行时：node · python
+│   工具：  npm · pnpm · git · jq · sqlite3 · rg · curl · coreutils
+│   根：    $PREFIX(files/usr) · $HOME/.npm-global
+│   所有产品共用这一份；一份、有版本、可核验
+└──────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│ D. 平台兼容层            【共享 · 最大化 · 解决「Android ≠ Linux」】
+│   D1 Linux 语义兑现（全局注入，与产品无关）
+│      LD_PRELOAD(libdshposix): link(2) 替代 · open 祖先回退
+│      /tmp → TMPDIR · locale(C.UTF-8) · os.cpus() · exec/dlopen 域
+│   D2 Android 平台件库（工件一份，带版本+sha+verify）
+│      rg 的命名件 · pty.node · libdshflock.so · sharp-wasm32 · narb JS 垫片源
+│      注：rg 的二进制本体在 C，D2 只解决「上游按什么名字/位置找它」
+└──────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│ E. 装配器                【共享一份 · 注册表驱动 · 内核写】
+│   规则：{包身份, 版本} → 平台件 + 落位方式(补命名包/换入口/落预编译/补依赖)
+│   输入：产品树(npm root + 根包名) + 产品声明
+│   时机：安装/升级后 与 spawn 前，幂等可重放
+│   出口：逐项结局(applied/already/blocked/failed) + 能力三态(true/false/null)
+└──────────────────────────────────────────────────────────────────────────┘
+════════════════ 以下按产品分，一个产品一套（互不共享） ════════════════════
+┌───────────────────────┐ ┌───────────────────────┐ ┌───────────────────────┐
+│ F1. dsh               │ │ F2. pi                │ │ F3. <未来 agent>      │
+│  · 依赖树(自己一套)   │ │  · 依赖树             │ │                       │
+│  · 数据 ~/.dsh        │ │  · 数据 ~/.pi         │ │                       │
+│  · profile/插件       │ │  · …                  │ │                       │
+│  · 启动契约声明:      │ │  · 启动契约声明       │ │                       │
+│    --expose-internals │ │                       │ │                       │
+│    web 子命令         │ │                       │ │                       │
+│  写者：产品安装器     │ │  写者：产品安装器     │ │                       │
+└───────────────────────┘ └───────────────────────┘ └───────────────────────┘
 ```
+
+### 2.1 三条推论（规范的一部分，防止再次跑偏）
+
+1. **两张独立的表，别焊在一起**：
+   - **E 的落位规则表**（内核）：`{包身份, 版本} → 平台件 + 落位方式`。稳定，**随机制发版**。
+   - **C 的内容清单**（C 自己的通道）：有哪些运行时/工具、各自版本/url/sha256/入口。频繁，
+     **随内容发版**。
+   ⇒ 加一件、升一版 C 的件，**不发内核**。把 C 的内容目录写进内核源码，等于让 C 搭 L1 的车，
+   是本节要防的第一号错误。
+2. **同一件工具可以同时出现在 B 与 C**：B 里是**自举种子**（保证机器起得来、E 跑得动；只播、
+   **不做增量**），C 里是**受管副本**（一份、有版本、可核验、可热更）。**增量只在 C/E**。
+3. **内核 → C 是依赖，不是内核的一部分**：如插件管理要用 pnpm。C 缺失时内核必须照常启动，
+   只降级该项能力（依赖可缺省）。
+
 
 ## 3. 判据（归属怎么定）
 
 | 问题 | 归 |
 |---|---|
 | 是不是「Android 与 Linux 的差」？ | **D1**（全局一次） |
-| 是不是「上游没有 android 产物/命名」？ | 工件 **D2**，落位 **E** |
+| 是不是「上游没有 android 产物/命名」？ | 命名/位置 **D2**；**本体在 C**；落位 **E** |
 | 是不是「与产品无关的运行时/工具/包管理器」？ | **C** |
 | 只跟某个产品的包 / 数据 / 语义有关？ | **F** |
 
@@ -74,10 +101,10 @@ locale 空、os.cpus() 返回 0、/tmp 不可写）。逐条修会修成"补丁"
 | 层 | 已落 |
 |---|---|
 | B | 既有（PrefixProvisioner / GuestAdapter / runtime.json） |
-| C | pnpm：`kernel/src/platform/toolchain.js` 物化到共享 $PREFIX（首用即装，自写 sh 入口）；git/python3/jq/sqlite3 在 `supply-table.json` 的 `envUnits` 登记为到期即红的豁免 |
+| C | pnpm 物化到共享 $PREFIX（自写 sh 入口）；sqlite3 已由 `build-userland.yml` 编好发到对象存储。**欠账（越层）**：C 的内容目录（版本/url/sha）写在 `kernel/src/platform/toolchain.js` 的 `TOOLS` 硬表里 ⇒ C 没有自己的版本与通道，每次增件/升级都要发内核。正解见 §2.1 第 1 条 |
 | D1 | `LANG=C.UTF-8`；`/tmp`→`$TMPDIR` 前缀重写（`container/native/posix/open-fallback.c` + 开关 `DSH_TMP_REDIRECT`）；`os.cpus()` 预载垫片（`assets/node/android-env-shim.cjs` + `NODE_OPTIONS`） |
-| D2 | `kernel/src/guard/native/platform-artifacts.js`（工件唯一解析处，只读无副作用） |
-| E | `manager.js` 经 D2 解析工件；供给表 `envUnits`/`units` 双向对账由 `native-supply-gate-test.js` 把守 |
+| D2 | `kernel/src/guard/native/platform-artifacts.js`。**语义待校正**：现写着「工件本体的唯一解析处」，与「本体在 C、D2 只解决上游按什么名字/位置找它」冲突 |
+| E | `manager.js` 经 D2 解析工件；`supply-table.json` 的 `units` 即落位规则表。**欠账**：`envUnits`（C 的内容清单）与 `units`（E 的落位规则）同住一张表，两表该分开（§2.1 第 1 条） |
 | F | `adapters/dsh/agent.json` 的 `android.launchFlags`（`--expose-internals` 三处消费者同源） |
 
 ## 6. 明确不做 / 欠账
@@ -87,3 +114,9 @@ locale 空、os.cpus() 返回 0、/tmp 不可写）。逐条修会修成"补丁"
 - **os.cpus() 垫片已落**：只在 `os.cpus()` 为空时用 `availableParallelism()` 合成，
   非空一律不动；整段 try/catch，绝不成为启动失败点。
 - **不承诺每个产品一套机制**：产品只给声明（见 §3）。
+- **C 尚无自己的通道（最大欠账）**：C 的内容列表与钉（版本/url/sha）写在内核源码里 ⇒
+  增件/升级 = 内核发版。正解：C 有自己的签名清单与通道（§2.1 第 1 条），内核只留**通道锚 + 信任根**。
+- **D2 语义待校正**：本体归 C，D2 只回答「上游按什么名字/位置找它」。
+- **C↔D1 契约待落纸**：**C 的产物必须动态链接**（静态件绕过 `LD_PRELOAD`，D1 的
+  link(2)、/tmp、祖先目录语义对它们全部失效）。目前只在 `build-userland.yml` 的形态门禁里拦，
+  规则活在脚本里而不在结构里。
