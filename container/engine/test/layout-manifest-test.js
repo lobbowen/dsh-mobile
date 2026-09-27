@@ -101,11 +101,17 @@ try {
   }
   // 规则 3：F 的产品声明不得住内核
   if (ex('kernel/adapters')) add('F-IN-KERNEL', 'kernel/adapters');
-  // 规则 4：D2 件清单唯一处 —— 生成物必须声明来源，且来源指向 D2 的家
-  const naPath = path.join(ROOT, '.github', 'native-assets.txt');
-  if (fs.existsSync(naPath)) {
-    const head = fs.readFileSync(naPath, 'utf8').split('\n').slice(0, 6).join('\n');
-    if (head.indexOf('kernel/src/d2') < 0) add('D2-INVENTORY', '.github/native-assets.txt 的来源不是 D2 唯一处');
+  // 规则 4：D2 件清单唯一处 —— 目录必须在，且**与随包投递清单对账**（带 libName 的件必须出现）。
+  // 知识一处（D2 件清单）、投递一处（随包能力件清单）；两边漂移即红。
+  const d2Pieces = path.join(ROOT, 'kernel', 'src', 'd2', 'pieces.json');
+  const capsTxt = path.join(ROOT, '.github', 'native-capabilities.txt');
+  if (!fs.existsSync(d2Pieces)) add('D2-INVENTORY', 'kernel/src/d2/pieces.json 缺失（D2 无唯一件清单）');
+  else if (fs.existsSync(capsTxt)) {
+    const caps = fs.readFileSync(capsTxt, 'utf8');
+    let cat = null; try { cat = JSON.parse(fs.readFileSync(d2Pieces, 'utf8')); } catch { cat = null; }
+    for (const p of (cat && cat.pieces) || []) {
+      if (p.libName && caps.indexOf(' ' + p.libName + ' ') < 0) add('D2-INVENTORY', 'D2 件 ' + p.id + ' 的 ' + p.libName + ' 不在随包清单里');
+    }
   }
   // 规则 5：环境目录单一来源
   const stPath = path.join(ROOT, 'kernel', 'src', 'assembler', 'supply-table.json');

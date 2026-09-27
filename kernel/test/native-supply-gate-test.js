@@ -265,12 +265,37 @@ if (table) {
   check('对照组：单元 id 抽取判据非空转（认得出全部供给项）', mgrUnits.length === tableSupplied.length && mgrUnits.length >= 5,
     mgrUnits.join(', '));
 
-  // D2：平台件**本体**的解析必须收在一处，与「落位」分层。
-  // 工件（在哪/在不在）此前与落位混在各 impl 里 —— 加一个产品就复制一份「路径怎么算」，
-  // 且「$PREFIX 唯一事实源 = runtime.json 的 prefix 格」这条判据守不住。
-  check('D2 平台件库解析器在场', fs.existsSync(path.join(NATIVE_DIR, 'platform-artifacts.js')), 'platform-artifacts.js');
+  // D2：平台件库 —— 回答**「上游按什么名字/位置找它」**，本体不在此（2026-09-27 按 ADR-0009 校正）。
+  //   本体（bits）归 B 种子 / C 内容 / npm 树；落位规则与能力判据归 E（本目录的 supply-table.json）。
+  const D2_DIR = path.join(ROOT, 'kernel', 'src', 'd2');
+  check('D2 平台件库在场（pieces.json + artifacts.js）',
+    fs.existsSync(path.join(D2_DIR, 'pieces.json')) && fs.existsSync(path.join(D2_DIR, 'artifacts.js')), 'kernel/src/d2/');
+  check('D2 不再住 E 的目录（assembler/platform-artifacts.js 必须已迁走）',
+    !fs.existsSync(path.join(NATIVE_DIR, 'platform-artifacts.js')), 'assembler/ 里还有 D2 的文件');
+  let d2 = null;
+  try { d2 = JSON.parse(fs.readFileSync(path.join(D2_DIR, 'pieces.json'), 'utf8')); } catch (_e) { d2 = null; }
+  check('D2 件清单是合法 JSON 且有 pieces', !!(d2 && Array.isArray(d2.pieces) && d2.pieces.length >= 3), '');
+  if (d2) {
+    for (const p of d2.pieces) {
+      check('D2 件须写明身份与上游期望: ' + p.id,
+        ['id', 'upstream', 'delivery', 'placedAt'].every((k) => typeof p[k] === 'string' && p[k].length > 0),
+        JSON.stringify(p).slice(0, 120));
+      check('D2 件须有版本/哈希格（null = 未固化）: ' + p.id, 'version' in p && 'sha256' in p);
+    }
+    const d2ids = d2.pieces.map((p) => p.id);
+    check('D2 件 id 无重复', d2ids.length === new Set(d2ids).size, d2ids.join(','));
+    // 对账：带 libName 的 D2 件必须出现在「随包能力件清单」（生成物）—— 知识一处、投递一处，两边不许漂移。
+    const capsPath = path.join(ROOT, '.github', 'native-capabilities.txt');
+    const caps = fs.existsSync(capsPath) ? fs.readFileSync(capsPath, 'utf8') : '';
+    check('D2 对账的对照组：随包清单在场（判据不得恒空）', caps.length > 0, 'native-capabilities.txt');
+    for (const p of d2.pieces) {
+      if (!p.libName) { check('D2 非原生件须写明投递方式: ' + p.id, p.delivery === 'npm-tree', p.delivery); continue; }
+      check('D2 件与随包清单对账（' + p.libName + '）', caps.indexOf(' ' + p.libName + ' ') >= 0, '件清单里找不到 ' + p.libName);
+    }
+  }
   check('manager 经 D2 解析 rg/pty 工件（不再自拼 $PREFIX 路径）',
-    /platformArtifacts\.resolve\(ctx, 'rg'\)/.test(mgrSrc) && /platformArtifacts\.resolve\(ctx, 'pty'\)/.test(mgrSrc),
+    /platformArtifacts\.resolve\(ctx, 'rg'\)/.test(mgrSrc) && /platformArtifacts\.resolve\(ctx, 'pty'\)/.test(mgrSrc) &&
+      /require\('\.\.\/d2\/artifacts'\)/.test(mgrSrc),
     'manager 未接 D2');
 
   // ── C 层：共享开发环境清单（与上面「dsh 的平台件差集」分开，语义不同）──

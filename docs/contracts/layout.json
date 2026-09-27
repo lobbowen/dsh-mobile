@@ -250,6 +250,11 @@
       "from": "container/engine/bin/build-bundle.js",
       "to": "scripts/build-kernel-bundle.js",
       "kind": "file"
+    },
+    {
+      "from": "kernel/src/assembler/platform-artifacts.js",
+      "to": "kernel/src/d2/artifacts.js",
+      "kind": "file"
     }
   ],
   "legacyForbidden": [
@@ -390,14 +395,6 @@
       "fix": "建 kernel/src/supply/：读 C 清单 → 取件 → 验 → 落位"
     },
     {
-      "id": "d2-home-missing",
-      "rule": "LAYER-PATH-MISSING",
-      "path": "kernel/src/d2",
-      "expiresAt": "2026-10-11",
-      "what": "D2（件库：标识+命名/位置+版本+sha+verify）没有单一家",
-      "fix": "建 kernel/src/d2/：件清单唯一处；平台件的版本/sha 只此一份"
-    },
-    {
       "id": "c-content-in-kernel",
       "rule": "C-IN-KERNEL",
       "path": "kernel/src/platform/toolchain.js",
@@ -414,26 +411,11 @@
       "fix": "声明随产品走（产品树/数据目录，产品安装器写）；内核只留 schema + 默认值"
     },
     {
-      "id": "d2-inventory-split",
-      "rule": "D2-INVENTORY",
-      "expiresAt": "2026-10-11",
-      "what": "平台件知识散五处（Kotlin 注册表 / 生成物 native-assets.txt / platform-artifacts.js / native-deps.txt / 构建配方），无版本+sha",
-      "fix": "收敛为 kernel/src/d2/ 的件清单唯一处；生成物由它对账"
-    },
-    {
       "id": "env-catalog-dual",
       "rule": "ENV-CATALOG",
       "expiresAt": "2026-10-11",
       "what": "环境目录两份：env-catalog.js 与 supply-table.json#envUnits，形状与消费方都不同",
       "fix": "单一来源：一份环境目录，另一份改为由它生成或被它取代"
-    },
-    {
-      "id": "e-d2-mixed-dir",
-      "rule": "E-D2-MIXED",
-      "path": "kernel/src/assembler/platform-artifacts.js",
-      "expiresAt": "2026-10-11",
-      "what": "D2 的件解析住在 E 的目录里（assembler）",
-      "fix": "随 D2 的家一起迁走；E 目录只留装配职责"
     }
   ]
 }

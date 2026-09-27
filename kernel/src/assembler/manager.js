@@ -21,7 +21,7 @@ const ex = require('../platform/exec');
 const execPath = require('../platform/os/exec-path');
 const runtimeContract = require('../platform/runtime-contract');
 // D2 平台件库：共享工件（rg/pty/…）本体的唯一解析处；落位仍在本目录各 impl 里。
-const platformArtifacts = require('./platform-artifacts');
+const platformArtifacts = require('../d2/artifacts');
 // npm 的**唯一 spawn 调用形态**：恒返回 `{bin, args}`，调用方拼
 // `inv.args.concat(自己的参数)` 后再 spawn。
 // · 测试注入（构造期 opts.npmBin，或赋值 _npmBinArgs）优先 —— 结构上保证
