@@ -128,6 +128,11 @@ export PKG_CONFIG_PATH="$DEPS/lib/pkgconfig"
   --disable-ftp --disable-file --disable-dict --disable-telnet --disable-tftp \
   --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-rtsp \
   --enable-http --enable-https \
+  # 交叉编译要「我知道答案」：curl 对 openssl 的探测是几个链接测试，静态库下它们常误判为 no。
+  #   这些 ac_cv_* 就是 autoconf 给的口子（比猜链接参数稳）。
+  ac_cv_lib_crypto_HMAC_Update=yes ac_cv_lib_crypto_HMAC_Init_ex=yes \
+  ac_cv_lib_ssl_SSL_new=yes ac_cv_lib_ssl_SSL_connect=yes ac_cv_lib_ssl_SSL_get_peer_certificate=yes \
+  curl_cv_openssl_with_ldl=yes curl_cv_openssl_with_ldl_and_lpthread=yes \
   LIBS="-lssl -lcrypto -lz -ldl" CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib" > "$ROOT_DIR/work/curl-configure.log" 2>&1 || { echo "::error title=curl Configure 失败::最后 30 行"; grep -i openssl "$ROOT_DIR/work/curl-configure.log" | tail -n 20 || true
 echo "---- 日志最后 15 行 ----"
 tail -n 15 "$ROOT_DIR/work/curl-configure.log" || true; exit 1; }
