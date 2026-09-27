@@ -55,7 +55,7 @@ export RANLIB="$TC/llvm-ranlib"
 
 # 关键：这些必须**写在 make 命令行上**。git 的 Makefile 用的是简单赋值（CC = cc），环境变量覆盖不了它 ——
 #   上一轮 CI 因此用宿主 gcc 编出了 x86-64 的 git（形态门禁当场红）。
-MAKE_ARGS="CC=$CC AR=$AR RANLIB=$RANLIB uname_S=Linux uname_M=aarch64 prefix=$ROOT_DIR/$OUT NO_CURL=1 NO_EXPAT=1 NO_GETTEXT=1 NO_ICONV=1 NO_TCLTK=1 NO_NSEC=1 NO_INSTALL_HARDLINKS=1 NO_PERL=1 NO_PYTHON=1 RUNTIME_PREFIX=1 ac_cv_fread_reads_directories=yes ac_cv_header_libintl_h=no ac_cv_iconv_omits_bom=no ac_cv_snprintf_returns_bogus=no"
+MAKE_ARGS="CC=$CC AR=$AR RANLIB=$RANLIB uname_S=Linux uname_M=aarch64 prefix=$ROOT_DIR/$OUT NO_CURL=1 NO_OPENSSL=1 NO_EXPAT=1 NO_GETTEXT=1 NO_ICONV=1 NO_TCLTK=1 NO_NSEC=1 NO_INSTALL_HARDLINKS=1 NO_PERL=1 NO_PYTHON=1 RUNTIME_PREFIX=1 ac_cv_fread_reads_directories=yes ac_cv_header_libintl_h=no ac_cv_iconv_omits_bom=no ac_cv_snprintf_returns_bogus=no"
 echo "[git] make（$MAKE_ARGS）"
 if ! make -j2 $MAKE_ARGS all; then
   echo "::error title=make 失败::见上"
