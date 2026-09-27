@@ -155,7 +155,7 @@ if ! ./configure --host=aarch64-linux-android --build=x86_64-pc-linux-gnu --pref
   ac_cv_lib_ssl_SSL_new=yes ac_cv_lib_ssl_SSL_connect=yes ac_cv_lib_ssl_SSL_get_peer_certificate=yes \
   curl_cv_openssl_with_ldl=yes curl_cv_openssl_with_ldl_and_lpthread=yes \
   LIBS="-lssl -lcrypto -lz -ldl" CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib" > "$ROOT_DIR/work/curl-configure.log" 2>&1; then
-  true
+  echo "[git] curl Configure 通过"
 else
   echo "::error title=curl Configure 失败::下面是真因"
   echo "==== config.log 里 HMAC_Update 那段（编译/链接命令与报错都在这里）===="
