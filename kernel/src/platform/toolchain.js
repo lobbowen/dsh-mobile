@@ -9,11 +9,11 @@
 //   · 故：工具本体装在共享 $PREFIX/lib/toolchain 下，可执行入口由本模块写成
 //     `#!/system/bin/sh` 包装；按 kind 决定 exec 什么（native = 直接 exec 自带二进制）。
 //
-// 为什么 pnpm 钉 12.6.0（当前 latest）而不是更旧的 10.x：
+// 为什么 pnpm 钉 12.7.0（当前最高已发布版；全量版本里无更高者，含预发布）：
 //   pnpm 官方自 **12.4.0** 起为 Android/bionic 发布了 aarch64 真原生可执行文件
 //   （`@pnpm/exe.android-arm64`，os=android / cpu=arm64，ELF 含 /system/bin/linker64），
 //   且 `pnpm` 的 native-binary.mjs 里有专门的 android 分支。
-//   本机实测：该二进制直接 exec 输出 `12.6.0`，rc=0，42ms。
+//   本机实测：该二进制直接 exec 输出 `12.7.0`，rc=0，33ms（sha512 校验通过）。
 //   （11.x 及以前没有 android 产物；10.x 的 bin/pnpm.cjs 是本仓先前的临时解，已弃。）
 //
 // 边界：只在**容器契约形态**下动手（runtime.json 有 npmEntry 与 prefix）；
@@ -31,7 +31,7 @@ const runtimeContract = require('./runtime-contract');
  *  kind='native'：直接 exec 该二进制（本仓 bash/rg 同款通路）；kind='js'：exec node <entry>。 */
 const TOOLS = {
   pnpm: {
-    version: '12.6.0',
+    version: '12.7.0',
     pkg: '@pnpm/exe.android-arm64',
     entry: 'pnpm',
     kind: 'native',
