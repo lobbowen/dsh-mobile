@@ -120,6 +120,10 @@ cd "$ROOT_DIR/work/curl"
 # openssl 的 install_sw 会装 .pc 文件；curl 的 Configure 靠 pkg-config 认它最稳
 #   （只给 -I/-L 时它常报 `--with-openssl was given but OpenSSL could not be detected`，CI 实证）。
 export PKG_CONFIG_PATH="$DEPS/lib/pkgconfig"
+# 工具链必须**导出为环境**：autoconf 的 AC_PROG_AR/AC_PROG_CC 只看环境变量，
+#   用「参数」传会晚一步 —— CI 实证：`checking for aarch64-linux-android-ar... no`。
+export CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN"
+export CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib"
 # --with-ca-path 指向安卓的系统信任库：https 校验要用它（不装 CA 包时这是唯一来源）。
 ./configure --host=aarch64-linux-android --build=x86_64-pc-linux-gnu --prefix="$DEPS" \
   --with-openssl="$DEPS" --with-zlib="$DEPS" --with-ca-path=/system/etc/security/cacerts \
@@ -127,7 +131,7 @@ export PKG_CONFIG_PATH="$DEPS/lib/pkgconfig"
   --without-nghttp2 --without-brotli --without-zstd --disable-manual \
   --disable-ftp --disable-file --disable-dict --disable-telnet --disable-tftp \
   --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-rtsp \
-  --enable-http --enable-https \
+  --enable-http \
   # 交叉编译要「我知道答案」：curl 对 openssl 的探测是几个链接测试，静态库下它们常误判为 no。
   #   这些 ac_cv_* 就是 autoconf 给的口子（比猜链接参数稳）。
   ac_cv_lib_crypto_HMAC_Update=yes ac_cv_lib_crypto_HMAC_Init_ex=yes \
@@ -135,7 +139,11 @@ export PKG_CONFIG_PATH="$DEPS/lib/pkgconfig"
   curl_cv_openssl_with_ldl=yes curl_cv_openssl_with_ldl_and_lpthread=yes \
   LIBS="-lssl -lcrypto -lz -ldl" CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib" > "$ROOT_DIR/work/curl-configure.log" 2>&1 || { echo "::error title=curl Configure 失败::最后 30 行"; grep -i openssl "$ROOT_DIR/work/curl-configure.log" | tail -n 20 || true
 echo "---- 日志最后 15 行 ----"
-tail -n 15 "$ROOT_DIR/work/curl-configure.log" || true; exit 1; }
+tail -n 15 "$ROOT_DIR/work/curl-configure.log" || true
+echo "---- config.log 尾 25 行（链接/工具链真因在这里）----"
+tail -n 25 "$ROOT_DIR/work/curl/config.log" || true
+echo "---- end ----"
+exit 1; }
 CURL_LOG="$ROOT_DIR/work/curl-build.log"
 if ! make -j2 > "$CURL_LOG" 2>&1; then
   echo "::error title=curl 编译失败::最后 30 行"
