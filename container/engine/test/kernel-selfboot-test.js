@@ -470,6 +470,18 @@ if (fs.existsSync(INSTALLER_KT)) {
     !/Signature\.getInstance|Ed25519/.test(ik.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')));
 }
 
+// ── 内核 OTA 必须能在设备上暂停（2026-09-27 真机定罪：当天连环自动重启 6 次，运维没有刹车）──
+// 配置只长在 APK asset 里 ⇒ 想停一次 OTA 就得重打一个包，而装包本身又是一次重启。
+// 判据：loadConfig 必须**优先**读设备侧 files/kernel-feed.json（存在即覆盖 asset）。
+const OTA_KT = path.join(KT_DIR, 'kernelota', 'KernelOtaUpdater.kt');
+check('KernelOtaUpdater.kt 存在（包名与路径一致）', fs.existsSync(OTA_KT));
+if (fs.existsSync(OTA_KT)) {
+  const ota = fs.readFileSync(OTA_KT, 'utf8');
+  check('OTA 配置支持设备侧覆盖（files/kernel-feed.json 优先于 asset）',
+    ota.includes('File(context.filesDir, CONFIG_ASSET)') && ota.includes('fromDevice'));
+  check('OTA 覆盖不放松 https 硬前提', ota.includes('base.startsWith("https://")'));
+}
+
 function rmrf(p) { fs.rmSync(p, { recursive: true, force: true }); }
 
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_e) {}

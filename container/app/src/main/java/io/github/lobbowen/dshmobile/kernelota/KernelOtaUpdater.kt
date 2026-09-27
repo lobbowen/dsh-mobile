@@ -65,9 +65,23 @@ object KernelOtaUpdater {
         val detail: String,
     )
 
-    /** 读 assets/kernel-feed.json；缺失/非法/baseUrl 非 https → null（= 远端 OTA 关闭）。 */
+    /**
+     * 读配置：**设备侧覆盖优先**（`files/kernel-feed.json`），否则 APK 内的 `assets/kernel-feed.json`。
+     *
+     * 为什么必须有设备侧覆盖（2026-09-27 真机定罪）：配置只长在 asset 里 ⇒ 一旦要暂停 OTA 或临时改
+     * 通道，就"只能再打一个 APK"，而装包本身就是一次 App 重启。内核 OTA 是高危投递，必须**能在设备上
+     * 随时停下**；否则连续发版会把用户拖进连环自动重启（当天实证 6 次）。
+     *
+     * 语义不变：缺失/非法/baseUrl 非 https → null（= 远端 OTA 关闭）。
+     */
     fun loadConfig(context: Context): Config? = try {
-        val text = context.assets.open(CONFIG_ASSET).bufferedReader().use { it.readText() }
+        val devCfg = File(context.filesDir, CONFIG_ASSET)
+        val fromDevice = devCfg.isFile
+        val text = if (fromDevice) {
+            devCfg.readText()
+        } else {
+            context.assets.open(CONFIG_ASSET).bufferedReader().use { it.readText() }
+        }
         val o = JSONObject(text)
         val base = o.optString("baseUrl", "").trim().trimEnd('/')
         val channel = o.optString("channel", "stable").trim().ifBlank { "stable" }
@@ -77,6 +91,7 @@ object KernelOtaUpdater {
         val name = o.optString("manifestName", "kernel-manifest.json").trim().ifBlank { "kernel-manifest.json" }
         val auto = o.optBoolean("autoCheck", true)
         val budget = o.optLong("startupBudgetMs", 12000L)
+        if (fromDevice) Log.i(TAG, "kernel-feed.json 取自设备侧覆盖：$devCfg（可随时暂停/改通道，无需重装 APK）")
         if (!base.startsWith("https://")) null else Config(base, tag, channel, name, auto, budget)
     } catch (e: Throwable) {
         Log.w(TAG, "kernel-feed.json 不可用: ${e.message}")

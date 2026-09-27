@@ -183,8 +183,11 @@ async function provisionSharedTools(opts) {
     try { r = await ensureSharedTool(name, o); } catch (e) { r = { status: 'failed', name, reason: e.message }; }
     out[name] = r;
     const line = '共享工具投放 ' + name + ': ' + r.status + (r.reason ? '（' + r.reason + '）' : '');
-    if (r.status === 'applied') { o.logger && o.logger.info && o.logger.info(line); }
-    else { o.logger && o.logger.warn && o.logger.warn(line); }
+    // 严重度按**结局**给，不按「是不是 applied」：already（已就位）与 skipped（本轮不做，例如
+    // 别人正在装/非容器形态）都是正常路径，记 info；只有 failed 才是警告 —— 否则正常启动会
+    // 天天刷 WARN，把真警告淹掉（真机定罪 2026-09-27）。
+    if (r.status === 'failed') { o.logger && o.logger.warn && o.logger.warn(line); }
+    else { o.logger && o.logger.info && o.logger.info(line); }
     if (o.events) { try { o.events.append('toolchain_tool', { name, status: r.status, reason: r.reason || null }); } catch (_) {} }
   }
   // 投放改变了环境 ⇒ 能力结论必须重算（「同一件事两个正交结论」的纪律）：调用方据此
