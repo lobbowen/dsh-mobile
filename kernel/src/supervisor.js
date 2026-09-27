@@ -370,14 +370,8 @@ class Supervisor {
     // C 层共享工具（pnpm）**启动即投放**：环境应当在启动后就完整，而不是等第一次插件操作
     // 才由调用点顺手装（那是惰性补丁）。异步、不阻塞 spawn、失败只记账；使用点仍有一道
     // await 屏障（插件域 _ensurePackageManager），保证「用之前一定在」。
-    try {
-      require('./supply/materialize').provisionSharedTools({
-        logger: this.logger, events: this.events,
-        // 投放完成后立刻 fresh 核验：环境变了，能力结论必须跟着变（否则面板留着旧读数）。
-        onSettled: () => { try { this.nativeManager && this.nativeManager.verifyNativeCapabilities(true); } catch (_) {} },
-      }).catch(() => {});
-    } catch (e) { this.logger.warn && this.logger.warn('共享工具投放未启动: ' + (e && e.message)); }
-    this.tick(); // 首拍立即收敛
+    // C 层共享供给**不由内核做**：C 是共享层（服务所有产品），机制随 APK 走、Android 原生实现，
+    //   由容器在启动时执行。内核只**检测**（探针读清单落点）与**触发**（发现缺件/清单前进时请容器再供）。
     // main(dsh) 收敛驱动源（C3-3b G3 接管 → C3-5 终态）：唯一心跳（registry heartbeat →
     // dsh supervise → _dshConverge）是唯一周期驱动——tick 定时器不再创建；
     // 仅 registry 不可用（极罕见）时保留 tick 定时器兜底（保证 main 不被放养）。

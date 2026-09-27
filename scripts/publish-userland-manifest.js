@@ -36,12 +36,12 @@ const EXTERNAL = path.join(__dirname, 'userland-external-tools.json');
 const VERIFY = path.join(__dirname, 'userland-verify.json');
 const TTL_MS = 30 * 86400_000;
 
-/** 本次构建出的件（tar.gz 命名即契约：userland-<name>-<ver>-android-arm64.tar.gz）。 */
+/** 本次构建出的件（tar.gz 命名即契约：userland-<name>-<ver>-android-arm64.zip）。 */
 function toolsFromDist() {
   if (!fs.existsSync(DIST)) throw new Error('dist 目录不存在: ' + DIST);
   const out = [];
   for (const f of fs.readdirSync(DIST)) {
-    // 命名契约（内容寻址）：userland-<name>-<ver>-<sha12>-android-arm64.tar.gz
+    // 命名契约（内容寻址）：userland-<name>-<ver>-<sha12>-android-arm64.zip
     const m = /^userland-([a-z0-9-]+)-([0-9][^-]*)-([0-9a-f]{12})-android-arm64\.tar\.gz$/.exec(f);
     if (!m) continue;
     const name = m[1];
@@ -52,7 +52,7 @@ function toolsFromDist() {
     const real = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 12);
     if (real !== claimed) throw new Error('文件名里的内容哈希与实际不符: ' + f + '（名 ' + claimed + ' vs 实 ' + real + '）');
     out.push({
-      name, provider: 'tarball', version: ver, kind: 'native',
+      name, provider: 'zip', version: ver, kind: 'native',
       url: BASE + '/userland/' + f,
       sha256: crypto.createHash('sha256').update(buf).digest('hex'),
       entry: 'bin/' + name,
