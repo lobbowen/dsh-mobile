@@ -277,7 +277,7 @@
       "capability": "git（本地版本控制 + https 远端）",
       "layer": "shared",
       "disposition": "supplied-by-us",
-      "why": "设备上无 git。由 **C 的通道**交付：CI 用 NDK 交叉编译，**含 https**（zlib + openssl + libcurl 静态链入），`RUNTIME_PREFIX=1` 让 git 按可执行文件自身位置推导 gitexecdir/template_dir（否则构建期前缀会被编死、设备上表现为「git 少了子命令」），`NO_INSTALL_HARDLINKS=1` 用符号链接（我们的解包器为此补了符号链接支持）。件走内容寻址 + 签名清单，内核按清单取件验哈希落位。**https 远端的缺口单列在 env-git-https**，不在这里含糊。 **编译 API = 23**（见 env-git-https 格：bionic 的 stdin/stderr 符号到 API 23 才有）。",
+      "why": "设备上无 git。由 **C 的通道**交付：CI 用 NDK 交叉编译，**含 https**（zlib + openssl + libcurl 静态链入），`RUNTIME_PREFIX=1` 让 git 按可执行文件自身位置推导 gitexecdir/template_dir（否则构建期前缀会被编死、设备上表现为「git 少了子命令」），`NO_INSTALL_HARDLINKS=1` 用符号链接（我们的解包器为此补了符号链接支持）。件走内容寻址 + 签名清单，内核按清单取件验哈希落位。**。https 远端已随本件一起兑现（zlib/openssl/libcurl 静态链入），不再单列缺口。 **编译 API = 23**（见 env-git-https 格：bionic 的 stdin/stderr 符号到 API 23 才有）。",
       "verify": {
         "delegated": "判据随件下发：C 的清单 tools[].verify（发布侧副本 scripts/userland-verify.json）。"
       },
@@ -286,21 +286,6 @@
       "kind": "tool",
       "impl": "src/supply/materialize.js",
       "carrier": "$PREFIX(经 C 的签名清单投放)"
-    },
-    {
-      "id": "env-git-https",
-      "kind": "tool",
-      "capability": "git 的 https 远端（clone/fetch/push over https）",
-      "layer": "shared",
-      "disposition": "supplied-by-us",
-      "required": false,
-      "bin": "git",
-      "carrier": "$PREFIX(随 git 件一起投放：zlib/openssl/libcurl 静态链入)",
-      "why": "已兑现（2026-09-27 出件）：zlib 1.3.2 + openssl 3.6.3 + libcurl 8.22.0 全部**静态**链进 git，CA 路径指向安卓系统信任库 /system/etc/security/cacerts ⇒ 一个件就能 clone/fetch over https。判据随件下发（含真打 TLS 的断言：非 no-curl、非证书错误）。**编译 API = 23**：bionic 到 API 23 才把 stdin/stdout/stderr 做成真符号，openssl 引用它们；容器本体仍按 API 21 另线编译，本件只要求设备 ≥ Android 6。",
-      "verify": {
-        "delegated": "判据随件下发：C 的清单 tools[].verify（发布侧副本 scripts/userland-verify.json，git 那条含 https 段）。"
-      },
-      "impl": "src/supply/materialize.js"
     },
     {
       "id": "env-python3",
