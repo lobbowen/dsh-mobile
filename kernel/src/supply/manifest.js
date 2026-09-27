@@ -113,5 +113,7 @@ async function toolNames(opts) {
   return (m.tools || []).map((t) => t.name);
 }
 function resetCache() { _cache = null; }
+/** 已取回并验过的清单（没有则 null）。给**同步**消费方用（如能力探针）：不发起网络，只读缓存。 */
+function cached() { return _cache ? _cache.manifest : null; }
 
-module.exports = { load, specFor, toolNames, resetCache, manifestUrl, sigUrl, validate };
+module.exports = { load, specFor, toolNames, cached, resetCache, manifestUrl, sigUrl, validate };

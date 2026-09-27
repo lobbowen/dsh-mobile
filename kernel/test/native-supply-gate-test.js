@@ -312,8 +312,16 @@ if (table) {
     check('C 层须写明归属层（seed=底座种子 / shared=共享供给）: ' + u.id, u.layer === 'seed' || u.layer === 'shared', u.layer);
     check('C 层须写明为什么: ' + u.id, typeof u.why === 'string' && u.why.length >= 20);
     const v = u.verify || {};
-    const shapes = ['node', 'deferred', 'notApplicable'].filter((k) => v[k] !== undefined);
+    const shapes = ['node', 'deferred', 'notApplicable', 'delegated'].filter((k) => v[k] !== undefined);
     check('C 层每格须有唯一核验出口: ' + u.id, shapes.length === 1, shapes.join('+') || '(缺 verify)');
+    if (v.delegated) {
+      // 判据随件下发 ⇒ 发布侧必须真的有这件判据（本地文件，不依赖网络）。
+      const toolName = String(u.id).replace(/^env-/, '');
+      let crit = null;
+      try { crit = (JSON.parse(fs.readFileSync(path.join(ROOT, '..', 'scripts', 'userland-verify.json'), 'utf8')).criteria || {})[toolName]; } catch (_e) { crit = null; }
+      check('随件判据须在发布侧在册: ' + u.id, !!(crit && typeof crit.node === 'string' && crit.node.length >= 20),
+        crit ? 'ok' : 'scripts/userland-verify.json 里没有 ' + toolName);
+    }
     if (u.disposition === 'supplied-by-us') {
       check('C 层供给件须有在场 impl: ' + u.id, !!u.impl && fs.existsSync(path.join(ROOT, u.impl)), u.impl || '（缺 impl）');
       check('C 层供给件不得免检: ' + u.id, !v.notApplicable, 'supplied-by-us 却给 notApplicable');

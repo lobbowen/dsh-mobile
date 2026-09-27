@@ -49,8 +49,23 @@ function probeUnit(unit, ctx, deps) {
     return out(unit.id, null, '判据待做（' + v.deferred.followUp + '，' +
       v.deferred.expiresAt + ' 前）：' + (v.criterion || ''), at);
   }
-  if (typeof v.node !== 'string' || !v.node.trim()) {
-    return out(unit.id, null, '判据写法漂移：verify 既不是 notApplicable/deferred 也没有 node 脚本', at);
+  // 判据随件下发（C 的通道工具）：内核不认识具体工具，从已取回的清单里取它自己的判据。
+  // 为什么这样分：加一件工具不应要求改内核；内核只留「什么算数」的框架。
+  // 探针是同步的，所以只读**已取回**的清单缓存（不发起网络）；尚未取回时如实给 null。
+  let nodeScript = v.node;
+  if (typeof nodeScript !== 'string' && v.delegated) {
+    const toolName = String(unit.id || '').replace(/^env-/, '');
+    let tool = null;
+    try {
+      const m = require('../supply/manifest').cached();
+      tool = m ? (m.tools || []).find((t) => t && t.name === toolName) : null;
+    } catch (_e) { tool = null; }
+    const dv = tool && tool.verify;
+    if (dv && typeof dv.node === 'string' && dv.node.trim()) nodeScript = dv.node;
+    else return out(unit.id, null, tool ? '这件没随带判据（发布器本应拦下）' : '判据随件下发，但 C 清单尚未取回/不可用', at);
+  }
+  if (typeof nodeScript !== 'string' || !nodeScript.trim()) {
+    return out(unit.id, null, '判据写法漂移：verify 既不是 notApplicable/deferred/delegated 也没有 node 脚本', at);
   }
   const nodeBin = ctx && ctx.nodeBin;
   const packageDir = ctx && ctx.packageDir;
@@ -61,7 +76,7 @@ function probeUnit(unit, ctx, deps) {
   // 与 guard/supervisor/main-process.js 的 _androidLaunchReady 同一事实源。
   // 探针测的必须是「Agent 真会用的那种调用」，否则 require 内部模块那一格在探针里通、
   // 在真实启动里不通，两个结论各说各话。
-  const args = AGENT.android.launchFlags.concat(['-e', v.node]);
+  const args = AGENT.android.launchFlags.concat(['-e', nodeScript]);
   const r = run(nodeBin, args, {
     cwd: packageDir,
     env: d.env || process.env,

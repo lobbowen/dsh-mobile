@@ -266,8 +266,7 @@
       "impl": "src/supply/materialize.js",
       "why": "dsh-plugin-manager 调用 pnpm；安卓无 /usr/bin/env，npm 生成的 bin shim 不可 execve，故由 C 层机制装到共享 $PREFIX 并自写 sh 入口。件表（版本/包/大小/哈希）住 **C 自己的签名清单**，内核只留通道锚 + 信任根 + 机制 —— 加件/升级只发清单，内核不动。",
       "verify": {
-        "criterion": "共享入口 $PREFIX/bin/pnpm 真能跑起来并打印版本 —— 文件在不算数",
-        "node": "const fs=require('node:fs'),cp=require('node:child_process'),path=require('node:path'); const c=JSON.parse(fs.readFileSync(process.env.DSH_SUPERVISOR_HOME+'/supervisor/runtime.json','utf8')); const bin=path.join(c.prefix,'bin','pnpm'); const r=cp.spawnSync(bin,['--version'],{encoding:'utf8',timeout:90000}); const v=String(r.stdout||'').trim(); if(r.status!==0 || v.split('.').length<3) throw new Error('pnpm 不可用: rc='+r.status+' out='+v.slice(0,60)+' err='+String(r.stderr||'').slice(0,80)); process.stdout.write('DSH_PROBE_PASS pnpm='+v)"
+        "delegated": "判据随件下发：C 的清单 tools[].verify（发布侧副本 scripts/userland-verify.json）。内核只留判定框架，不认识具体工具。"
       },
       "bin": "pnpm",
       "required": false,
@@ -361,8 +360,7 @@
       "disposition": "supplied-by-us",
       "why": "设备上无 jq（此前是到期即红的豁免）。现由 **C 的通道**交付：CI 用 NDK 交叉编译（动态、静态链自身库，不带 .so 出门）→ 内容寻址命名 → 发到对象存储；件表与哈希住 C 的签名清单，内核按清单取件、验哈希、原子落位并 symlink 到 $PREFIX/bin。**加这一件没有改动内核的任何内容** —— 只有这一格「承诺+判据」的登记仍在内核（这正是下一步要搬进清单的东西）。",
       "verify": {
-        "criterion": "jq 起得来、真解析一段 JSON 并把结果读回来（不是只看 --version）",
-        "node": "const cp = require('node:child_process'); const r = cp.spawnSync('jq', ['-c', '.a'], { input: '{\"a\":42}', encoding: 'utf8' }); if (r.error) { console.error('jq 起不来: ' + r.error.message); process.exit(1); } if (r.status !== 0) { console.error('jq 非零退出 rc=' + r.status + ' err=' + String(r.stderr || '').slice(0, 160)); process.exit(1); } const got = String(r.stdout || '').trim(); if (got !== '42') { console.error('jq 读回不对: ' + JSON.stringify(got)); process.exit(1); } process.stdout.write('DSH_PROBE_PASS jq 可用（.a => 42）');"
+        "delegated": "判据随件下发：C 的清单 tools[].verify（发布侧副本 scripts/userland-verify.json）。内核只留判定框架，不认识具体工具。"
       },
       "bin": "jq",
       "required": false,
@@ -377,8 +375,7 @@
       "disposition": "supplied-by-us",
       "why": "C 层工具供给批次（2026-09-27 兑现）：上游 sqlite.org 只发源码，由本仓 CI 交叉编译成**动态** aarch64 产物、按**内容寻址**命名发到对象存储；件表与哈希住 **C 自己的签名清单**（内核只留通道锚 + 信任根），内核启动时取回、验签、验哈希后原子落位。此前是 waived（到期 2026-12-26）。",
       "verify": {
-        "criterion": "sqlite3 CLI 起得来、能算一条 SQL 并把结果读回来（不是只看 --version）",
-        "node": "const cp = require('node:child_process'); const r = cp.spawnSync('sqlite3', [':memory:', 'select 1+1;'], { encoding: 'utf8' }); if (r.error) { console.error('sqlite3 起不来: ' + r.error.message); process.exit(1); } if (r.status !== 0) { console.error('sqlite3 非零退出 rc=' + r.status + ' err=' + String(r.stderr || '').slice(0, 160)); process.exit(1); } const got = String(r.stdout || '').trim(); if (got !== '2') { console.error('sqlite3 回读不对: ' + JSON.stringify(got)); process.exit(1); } process.stdout.write('DSH_PROBE_PASS sqlite3 CLI 可用（select 1+1 => 2）');"
+        "delegated": "判据随件下发：C 的清单 tools[].verify（发布侧副本 scripts/userland-verify.json）。内核只留判定框架，不认识具体工具。"
       },
       "impl": "src/supply/materialize.js",
       "bin": "sqlite3",

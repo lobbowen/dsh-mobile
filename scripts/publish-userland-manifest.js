@@ -33,6 +33,7 @@ const CHANNEL = process.argv[5] || 'canary';
 const BASE = (process.env.USERLAND_BASE_URL || 'https://hubcdn.zll.ink').replace(/\/+$/, '');
 const PUBKEY = path.join(ROOT, 'container', 'app', 'src', 'main', 'assets', 'ota-public.pem');
 const EXTERNAL = path.join(__dirname, 'userland-external-tools.json');
+const VERIFY = path.join(__dirname, 'userland-verify.json');
 const TTL_MS = 30 * 86400_000;
 
 /** 本次构建出的件（tar.gz 命名即契约：userland-<name>-<ver>-android-arm64.tar.gz）。 */
@@ -72,11 +73,23 @@ function versionString() {
   return d + '.' + run;
 }
 
+/** 各件的能力判据（随件下发）。缺判据即硬失败：设备拿不到判定依据的件等于不可核验。 */
+function criteria() {
+  const j = JSON.parse(fs.readFileSync(VERIFY, 'utf8'));
+  return j.criteria || {};
+}
+
 function main() {
+  const crit = criteria();
   const tools = toolsFromDist().concat(toolsExternal()).sort((a, b) => a.name.localeCompare(b.name));
   if (!tools.length) throw new Error('清单为空：没有构建产物也没有外部件');
   const seen = new Set();
   for (const t of tools) {
+    const v = crit[t.name];
+    if (!v || typeof v.node !== 'string' || v.node.length < 20) {
+      throw new Error('件没有能力判据，不许发布: ' + t.name + '（在 scripts/userland-verify.json 里补）');
+    }
+    t.verify = { criterion: v.criterion, node: v.node };
     if (!t.name || !t.version || !t.sha256) throw new Error('件缺字段(name/version/sha256): ' + JSON.stringify(t).slice(0, 120));
     if (seen.has(t.name)) throw new Error('件重名: ' + t.name);
     seen.add(t.name);
@@ -99,7 +112,7 @@ function main() {
   fs.writeFileSync(path.join(OUT, 'userland-manifest.json'), body);
   fs.writeFileSync(path.join(OUT, 'userland-manifest.json.sig'), sig + '\n');
   console.log('[userland] channel=' + CHANNEL + ' version=' + man.version + ' sequence=' + man.sequence + ' tools=' + tools.length);
-  for (const t of tools) console.log('  - ' + t.name + '@' + t.version + ' ' + t.provider + ' ' + t.sha256.slice(0, 12) + '…');
+  for (const t of tools) console.log('  - ' + t.name + '@' + t.version + ' ' + t.provider + ' ' + t.sha256.slice(0, 12) + '… 判据 ' + t.verify.node.length + ' 字');
   console.log('[userland] 签名自检通过（与 APK 公钥配对）: ' + path.join(OUT, 'userland-manifest.json'));
 }
 
