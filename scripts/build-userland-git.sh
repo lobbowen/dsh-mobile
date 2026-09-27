@@ -198,6 +198,16 @@ if ! make -C lib install > "$CURL_LOG" 2>&1; then
   exit 1
 fi
 echo "[git] curl 库已装（跳过命令行工具）"
+# 头文件要单独装：`make -C lib install` 只装库，include/curl/*.h 归 include/ 子目录管
+#   （CI 实证：git 编 http.c 时报 `curl/curl.h file not found`）。
+mkdir -p "$DEPS/include"
+rm -rf "$DEPS/include/curl"
+cp -r "$ROOT_DIR/work/curl/include/curl" "$DEPS/include/"
+if [ ! -f "$DEPS/include/curl/curl.h" ]; then
+  echo "::error title=curl 头文件没装上::git 会编不过 http.c"
+  exit 1
+fi
+echo "[git] curl 头文件已装"
 echo "[git] curl 就位（静态）"
 
 cd "$ROOT_DIR/work/git-src"
