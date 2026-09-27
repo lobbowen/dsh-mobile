@@ -40,7 +40,7 @@
     "seed": "由 L0 容器自举种子投放（PrefixProvisioner 播到 $PREFIX）；与产品无关，C 层的地板"
   },
   "verifyLegend": {
-    "why": "投放结局（applied/already/blocked/failed）只回答「我们动过手没有」，不回答「用户能不能用」。真机 2026-09-26 的 sharp 就是被这两个词糊过去的：@img/sharp-wasm32 确在依赖树内（环境报告 §4.2）、单元报 applied，而 sharp 取不到绑定、read_image 全灭。所以每格另立 verify：一段交给**被检那份 node** 跑的 JS，打出 DSH_PROBE_PASS 且退 0 才算通。执行器只有一个（src/guard/native/capability-probe.js）。",
+    "why": "投放结局（applied/already/blocked/failed）只回答「我们动过手没有」，不回答「用户能不能用」。真机 2026-09-26 的 sharp 就是被这两个词糊过去的：@img/sharp-wasm32 确在依赖树内（环境报告 §4.2）、单元报 applied，而 sharp 取不到绑定、read_image 全灭。所以每格另立 verify：一段交给**被检那份 node** 跑的 JS，打出 DSH_PROBE_PASS 且退 0 才算通。执行器只有一个（src/assembler/capability-probe.js）。",
     "states": "true=探针退 0 且带标记；false=探针跑起来了而判据不过（能力坏了）；null=探针没条件跑或该格待做/不适用 —— 未知绝不算通过",
     "shapes": "verify 三选一：{criterion, node}（可执行判据）/ {criterion, deferred:{followUp,verifiedAt,expiresAt}}（判据待做，按豁免同样到期即红）/ {notApplicable}（处置本身不需要核验，须写明为什么）"
   },
@@ -49,7 +49,7 @@
       "id": "require-builtin",
       "capability": "dsh 启动链 require 内核模块",
       "disposition": "supplied-by-us",
-      "impl": "src/guard/native/require-builtin-shim.js",
+      "impl": "src/assembler/require-builtin-shim.js",
       "hostExcludes": [
         "node-addon-require-builtin-linux-x64-gnu"
       ],
@@ -63,7 +63,7 @@
       "id": "addon-system-flock",
       "capability": "bash 沙箱/会话持久化所需 flock(2)",
       "disposition": "supplied-by-us",
-      "impl": "src/guard/native/flock-shim.js",
+      "impl": "src/assembler/flock-shim.js",
       "hostExcludes": [
         "@deepseek-ai/node-addon-system-linux-x64"
       ],
@@ -77,7 +77,7 @@
       "id": "ripgrep",
       "capability": "glob / grep 搜索",
       "disposition": "supplied-by-us",
-      "impl": "src/guard/native/ripgrep-package.js",
+      "impl": "src/assembler/ripgrep-package.js",
       "hostExcludes": [
         "@vscode/ripgrep-linux-x64"
       ],
@@ -91,7 +91,7 @@
       "id": "sharp-image",
       "capability": "图片附件处理",
       "disposition": "supplied-by-us",
-      "impl": "src/guard/native/sharp-wasm.js",
+      "impl": "src/assembler/sharp-wasm.js",
       "hostExcludes": [
         "@img/sharp-linux-x64",
         "@img/sharp-libvips-linux-x64"
@@ -106,7 +106,7 @@
       "id": "node-pty",
       "capability": "终端 PTY",
       "disposition": "supplied-by-us",
-      "impl": "src/guard/native/node-pty-prebuild.js",
+      "impl": "src/assembler/node-pty-prebuild.js",
       "hostExcludes": [],
       "verify": {
         "criterion": "require('node-pty') 用 /system/bin/sh 起一个真 PTY、跑一条命令并读到退出码（测的是 PTY 层本身）",
@@ -185,7 +185,7 @@
         "criterion": "在 app home 落一个脚本和一份自带 ELF，各 exec 一次并读到自己的输出；对照组是 /system/bin/sh 本身 —— 对照组起不来就整格红，不许把 spawn 坏了读成 exec 被禁",
         "node": "const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process'); const base=process.env.DSH_SUPERVISOR_HOME; if(!base) throw new Error('容器未递 DSH_SUPERVISOR_HOME：本格量的是 app home 能不能 exec，没有 app home 就无从落件'); const d=path.join(base,'.exec-domain-probe'); fs.mkdirSync(d,{recursive:true}); const bad=(r)=>((r.error&&r.error.code)||('rc='+r.status+' err='+String(r.stderr||'').slice(0,120))); const dom=(r)=>String(r.stdout||'').split('\\n')[0].trim(); try{ const ctl=cp.spawnSync('/system/bin/sh',['-c','cat /proc/self/attr/current; echo; echo CTL_OK'],{encoding:'utf8',timeout:10000}); if(!String(ctl.stdout||'').includes('CTL_OK')) throw new Error('对照组失效：连 /system/bin/sh 都起不来（'+bad(ctl)+'），本格读数不可解释'); const sh=path.join(d,'p.sh'); fs.writeFileSync(sh,'#!/system/bin/sh\\ncat /proc/self/attr/current; echo; echo SCRIPT_OK\\n'); fs.chmodSync(sh,0o755); const r1=cp.spawnSync(sh,[],{encoding:'utf8',timeout:10000}); if(!String(r1.stdout||'').includes('SCRIPT_OK')) throw new Error('exec app home 脚本 fail: '+bad(r1)); const bin=path.join(d,'p.bin'); fs.copyFileSync('/system/bin/sh',bin); fs.chmodSync(bin,0o755); const r2=cp.spawnSync(bin,['-c','echo BIN_OK'],{encoding:'utf8',timeout:10000}); if(!String(r2.stdout||'').includes('BIN_OK')) throw new Error('exec app home 自带 ELF fail: '+bad(r2)); process.stdout.write('DSH_PROBE_PASS 域='+dom(ctl)+' exec 后域='+dom(r1)); } finally{ fs.rmSync(d,{recursive:true,force:true}); }"
       },
-      "why": "这条能力此前只有一个手工脚本（kernel/tools/domain-probe.js，无任何调用点）加一份 2026-09-23 在 targetSdk=34 上取的旧基线 —— 判据靠人记得跑就等于没有判据。exec 落在 app_data_file 上，与本进程同域同 uid，所以 Agent 的 run_code 子进程走不走得通由这一格说了算。link(2) 不在本格量：容器给 Agent 进程注入了 libdshposix 的 LD_PRELOAD 用户态替代（container/native/posix/），在本进程里测 link 量到的是垫片而不是系统事实。"
+      "why": "这条能力此前只有一个手工脚本（kernel/tools/domain-probe.js，无任何调用点）加一份 2026-09-23 在 targetSdk=34 上取的旧基线 —— 判据靠人记得跑就等于没有判据。exec 落在 app_data_file 上，与本进程同域同 uid，所以 Agent 的 run_code 子进程走不走得通由这一格说了算。link(2) 不在本格量：容器给 Agent 进程注入了 libdshposix 的 LD_PRELOAD 用户态替代（container/native/d1/），在本进程里测 link 量到的是垫片而不是系统事实。"
     }
   ],
   "envUnits": [

@@ -109,10 +109,10 @@ try {
   const stPath = path.join(ROOT, 'kernel', 'src', 'guard', 'native', 'supply-table.json');
   const envUnits = fs.existsSync(stPath) ? (JSON.parse(readSafe(stPath)).envUnits || []) : [];
   if (ex('kernel/src/platform/env-catalog.js') && envUnits.length > 0) add('ENV-CATALOG', 'env-catalog.js 与 supply-table#envUnits 同时在场');
-  // 规则 6：CI 工具不得住在 L0 车辆里
-  if (ex('container/engine/bin/build-bundle.js')) add('CI-TOOL-IN-L0', 'container/engine/bin/build-bundle.js');
-  // 规则 7：D2 的件解析不得住在 E 的目录里
-  if (ex('kernel/src/guard/native/platform-artifacts.js')) add('E-D2-MIXED', 'kernel/src/guard/native/platform-artifacts.js');
+  // 规则 6：CI 工具不得住在 L0 车辆里（L0 目录里不该有构建 CLI）
+  if (ex('container/engine/bin')) add('CI-TOOL-IN-L0', 'container/engine/bin');
+  // 规则 7：D2 的件解析不得住在 E 的目录里（搬迁后其位在 assembler/，仍是越层）
+  if (ex('kernel/src/assembler/platform-artifacts.js')) add('E-D2-MIXED', 'kernel/src/assembler/platform-artifacts.js');
 
   // 台账自净：① 未登记的违规 → 红；② 已消失的债务 → 红（防僵尸豁免）；③ 过期/缺字段 → 红
   const coveredBy = (v) => DEBT.some((d) => d.rule === v.rule && (!d.path || v.detail === d.path || v.detail.endsWith(d.path)));

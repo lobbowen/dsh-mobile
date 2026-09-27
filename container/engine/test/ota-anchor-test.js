@@ -208,7 +208,7 @@ const stripComments = makeRunner.stripComments;
     bundleCalls === 1 && /--private/.test(bundle), `实际 ${bundleCalls} 次`);
   check('⑤ 配对判据排在真正签名那一步之前（不配对就不签）',
     bundle.includes('verify-ota-anchor.sh') &&
-      bundle.indexOf('verify-ota-anchor.sh') < bundle.indexOf('build-bundle.js'),
+      bundle.indexOf('verify-ota-anchor.sh') < bundle.indexOf('build-kernel-bundle.js'),
     '顺序反了 = 先签出一个没人能验的包再报错');
   const hostSrc = fs.readFileSync(HOST, 'utf8');
   for (const [what, re] of [

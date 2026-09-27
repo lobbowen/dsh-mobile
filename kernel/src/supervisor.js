@@ -28,9 +28,9 @@ const { Lifecycle } = require('./guard/lifecycle/guard-self');
 const { Health } = require('./guard/health');
 const monitor = require('./guard/monitor/index');
 const guardian = require('./guard/guardian/index');
-const native = require('./guard/native/index');
+const native = require('./assembler/index');
 const { DshTokenService } = require('./platform/token');
-const { NativeManager } = require('./guard/native/manager');
+const { NativeManager } = require('./assembler/manager');
 const { LifecycleManager } = require('./guard/lifecycle/index');
 const { ManagedRegistry } = require('./guard/lifecycle/objects');
 const { IntentLedger } = require('./guard/intent');
@@ -1039,7 +1039,7 @@ class Supervisor {
   }
 
 
-  /** 组装 DSH 启动命令（原生专属，交给 guard/native）。 */
+  /** 组装 DSH 启动命令（原生专属，交给 assembler）。 */
   // ── 本节已拆分 → guard/supervisor/main-process.js（§7.6 结构性重构）──
 
 }

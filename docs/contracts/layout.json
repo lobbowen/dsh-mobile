@@ -203,23 +203,52 @@
       "kind": "file"
     },
     {
-      "from": "container/native/flock/PROVENANCE.md",
+      "from": "container/native/d2/PROVENANCE.md",
       "to": "docs/components/native.md",
       "kind": "file"
     },
     {
-      "from": "container/native/posix/PROVENANCE.md",
+      "from": "container/native/d1/PROVENANCE.md",
       "to": "docs/components/native.md",
       "kind": "file"
     },
     {
-      "from": "container/native/ptyprobe/PROVENANCE.md",
+      "from": "container/native/d2/PROVENANCE.md",
       "to": "docs/components/native.md",
       "kind": "file"
     },
     {
       "from": "_artifacts",
       "to": "docs/components/container.md",
+      "kind": "file"
+    },
+    {
+      "from": "container/native/posix",
+      "to": "container/native/d1",
+      "kind": "dir",
+      "expectFiles": 4
+    },
+    {
+      "from": "container/native/flock",
+      "to": "container/native/d2",
+      "kind": "dir",
+      "expectFiles": 1
+    },
+    {
+      "from": "container/native/ptyprobe",
+      "to": "container/native/d2",
+      "kind": "dir",
+      "expectFiles": 1
+    },
+    {
+      "from": "kernel/src/guard/native",
+      "to": "kernel/src/assembler",
+      "kind": "dir",
+      "expectFiles": 10
+    },
+    {
+      "from": "container/engine/bin/build-bundle.js",
+      "to": "scripts/build-kernel-bundle.js",
       "kind": "file"
     }
   ],
@@ -302,7 +331,8 @@
     "pick.sh": "cross",
     "read-release-asset.sh": "cross",
     "check-apk-release-version.sh": "L0",
-    "verify-apk-version-gate.sh": "L0"
+    "verify-apk-version-gate.sh": "L0",
+    "build-kernel-bundle.js": "cross"
   },
   "deliveryLayers": {
     "_note": "交付维（六层，与上面的发布维 layers 正交）：层=职责，上面 layers=车辆。物理组织必须同时满足两轴。这里每条 paths 是**目标位**；尚未达成的进 deliveryDebt（有到期日、修好必须销账，否则门禁红）。",
@@ -360,28 +390,12 @@
       "fix": "建 kernel/src/supply/：读 C 清单 → 取件 → 验 → 落位"
     },
     {
-      "id": "d1-home-missing",
-      "rule": "LAYER-PATH-MISSING",
-      "path": "container/native/d1",
-      "expiresAt": "2026-10-11",
-      "what": "D1 的源与 D2 的件混在 container/native/ 下",
-      "fix": "拆 container/native/{d1,d2}/，posix/ 归 d1，flock/·ptyprobe/ 归 d2"
-    },
-    {
       "id": "d2-home-missing",
       "rule": "LAYER-PATH-MISSING",
       "path": "kernel/src/d2",
       "expiresAt": "2026-10-11",
       "what": "D2（件库：标识+命名/位置+版本+sha+verify）没有单一家",
       "fix": "建 kernel/src/d2/：件清单唯一处；平台件的版本/sha 只此一份"
-    },
-    {
-      "id": "e-home-missing",
-      "rule": "LAYER-PATH-MISSING",
-      "path": "kernel/src/assembler",
-      "expiresAt": "2026-10-11",
-      "what": "E（装配器）没有以职责命名的家，现住 kernel/src/guard/native/",
-      "fix": "迁到 kernel/src/assembler/（manager/supply-table(units)/capability-probe/各 impl）"
     },
     {
       "id": "c-content-in-kernel",
@@ -414,19 +428,11 @@
       "fix": "单一来源：一份环境目录，另一份改为由它生成或被它取代"
     },
     {
-      "id": "ci-tool-in-l0",
-      "rule": "CI-TOOL-IN-L0",
-      "path": "container/engine/bin/build-bundle.js",
-      "expiresAt": "2026-10-11",
-      "what": "CI 构建工具住在 L0 车辆里（layout.json 把 container/engine 记为 L0）",
-      "fix": "构建工具移出 L0（归 scripts/ 或明确标注 CI 侧）"
-    },
-    {
       "id": "e-d2-mixed-dir",
       "rule": "E-D2-MIXED",
-      "path": "kernel/src/guard/native/platform-artifacts.js",
+      "path": "kernel/src/assembler/platform-artifacts.js",
       "expiresAt": "2026-10-11",
-      "what": "D2 的件解析住在 E 的目录里（guard/native）",
+      "what": "D2 的件解析住在 E 的目录里（assembler）",
       "fix": "随 D2 的家一起迁走；E 目录只留装配职责"
     }
   ]

@@ -37,7 +37,7 @@ ANDROID_HOME="${ANDROID_HOME:-}"
 # 真机实证（2026-09-23）：dsh 两条设备死路都没有 JS 等价物——
 # ① flock（下列）；② link：Android 7+ SELinux 禁 untrusted_app 硬链接，
 #    dsh 会话/附件的 link 式独占发布报 EACCES ⇒ renameat2(RENAME_NOREPLACE)
-#    link 用户态替代（container/native/posix/，自有代码）→ libdshposix.so，经 LD_PRELOAD 注入。
+#    link 用户态替代（container/native/d1/，自有代码）→ libdshposix.so，经 LD_PRELOAD 注入。
 #    两库不能合并成单一 .so：NAPI_MODULE_INIT 入口每模块唯一。
 # 真机实证：dsh 会话持久化硬依赖
 # @deepseek-ai/node-addon-system 的 flock 绑定，上游只发 linux(glibc/musl)/
@@ -73,7 +73,7 @@ INC=/tmp/node-headers/include/node
 # vendor 注释写 v8 但其源码超出 v8 面，9 是其真实下限。
 mkdir -p "container/app/src/main/jniLibs/${ABI}"
 "$CC" -shared -fPIC -O2 -DNAPI_VERSION=9 -I "$INC" \
-  -o "container/app/src/main/jniLibs/${ABI}/libdshflock.so" container/native/flock/flock.c
+  -o "container/app/src/main/jniLibs/${ABI}/libdshflock.so" container/native/d2/flock.c
 SO="container/app/src/main/jniLibs/${ABI}/libdshflock.so"
 SIZE=$(stat -c%s "$SO")
 [ "$SIZE" -gt 1000 ] || { echo "[error] $SO 仅 $SIZE 字节，编译产物可疑"; exit 1; }
@@ -83,7 +83,7 @@ echo "[ok] libdshflock.so $SIZE 字节 ($(file -b --mime-type "$SO" 2>/dev/null 
 # ② link/linkat 用户态替代（纯 libc 符号，无 NDK 头文件依赖）
 "$CC" -shared -fPIC -O2 -I "$INC" \
   -o "container/app/src/main/jniLibs/${ABI}/libdshposix.so" \
-  container/native/posix/link-interpose.c container/native/posix/open-fallback.c container/native/posix/tmp-paths.c -ldl
+  container/native/d1/link-interpose.c container/native/d1/open-fallback.c container/native/d1/tmp-paths.c -ldl
 SO2="container/app/src/main/jniLibs/${ABI}/libdshposix.so"
 SIZE2=$(stat -c%s "$SO2")
 [ "$SIZE2" -gt 500 ] || { echo "[error] $SO2 仅 $SIZE2 字节，编译产物可疑"; exit 1; }
@@ -106,7 +106,7 @@ cd "$ROOT"
 #                      Android 无 /bin/bash，可 exec 目录只有 nativeLibraryDir
 #                      由 PrefixProvisioner 复制为 $PREFIX/bin 下的真名可执行文件。
 #   · libdshrg.so  —— glob/grep 硬依赖 ripgrep（无 JS 等价物），由 $PREFIX 提供。
-#   · libdshptyprobe.so —— 真机 PTY 能力探针（container/native/ptyprobe/，决策 node-pty 路线）。
+#   · libdshptyprobe.so —— 真机 PTY 能力探针（container/native/d2/，决策 node-pty 路线）。
 # 失败语义：bash/rg/探针均为硬性必需（$PREFIX 依赖它们，无回退）；node-pty 走上游
 # 配方，软失败（终端降级，不陪葬其它能力）。Audit 步骤如实报告 APK 内有无。
 # bash 配方要点：bionic 无 termcap/readline ⇒ 预编一个 tputs 族 no-op 桩归档
@@ -140,7 +140,7 @@ check_so() { # $1=路径 $2=最小字节
 }
 
 # ── ① PTY 探针（必须成功；见 docs/components/native.md）──
-"$CC" -static -O2 -o "$J/libdshptyprobe.so" container/native/ptyprobe/pty-probe.c \
+"$CC" -static -O2 -o "$J/libdshptyprobe.so" container/native/d2/pty-probe.c \
   || { echo "[error] ptyprobe 编译失败（纯 C 静态，失败即环境问题）"; exit 1; }
 check_so "$J/libdshptyprobe.so" 1000 || exit 1
 

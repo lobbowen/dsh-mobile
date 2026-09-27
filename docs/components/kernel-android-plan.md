@@ -49,7 +49,7 @@
 
 | 域 | 路径 | 移动端职责 |
 |---|---|---|
-| **native** | `src/guard/native/` | Agent 运行时（如 DSH）安装 / 升级 / 卸载 / 探活 |
+| **native** | `src/assembler/` | Agent 运行时（如 DSH）安装 / 升级 / 卸载 / 探活 |
 | **dist** | `src/domains/dist/` | npm 分发、镜像源测速与固定 |
 | **plugin** | `src/domains/plugin/` | 第三方插件市场 / 安装 / 启用 |
 | **router** | `src/domains/router/` | **模型网关**（多供应商 Key 轮换代理，移动端同样需要） |

@@ -123,7 +123,7 @@ adb shell run-as io.github.lobbowen.dshmobile cat files/diagnostics.txt
 | **与投放结局对照** | 同一格在 `nativeUnits` 里完全可能是 `applied`，那只代表「我们补装动过手」。两排不一致是设计如此，读能力以 `nativeCaps` 为准 |
 | **为什么重要** | 真机 2026-09-26：`sharp-image` 报 applied（`@img/sharp-wasm32` 就在依赖树里）而 sharp 取不到绑定，`read_image` 全灭，界面上零痕迹 —— ADR-0001 P4 因此把「已解决」写了出去（现已作废） |
 
-判据本体（每格一段交给**被检那份 node** 跑的 JS）住在 `kernel/src/guard/native/supply-table.json`
+判据本体（每格一段交给**被检那份 node** 跑的 JS）住在 `kernel/src/assembler/supply-table.json`
 的 `units[].verify`，执行器唯一：`capability-probe.js`。改判据就是改表，CI 逐格盯得住
 （`native-supply-gate-test.js`）。当前表里 `node-pty` 那格按拍板挂起到终端批次，面板恒读「未知」——
 那不是 bug，别替它报通过。

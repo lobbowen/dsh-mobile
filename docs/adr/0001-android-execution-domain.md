@@ -82,7 +82,7 @@ renameat2 NOREPLACE: available
 5. 向上游提需求。
 **禁止**：改 `@deepseek-ai/dsh` 的任何字节。
 
-**D6｜分阶段退役 `guard/native/*-shim.js` 字节补丁层**（其职责迁往 D3/D5）。
+**D6｜分阶段退役 `assembler/*-shim.js` 字节补丁层**（其职责迁往 D3/D5）。
 
 ## 4. 后果
 
@@ -99,7 +99,7 @@ renameat2 NOREPLACE: available
 | P2 | `$PREFIX`（bash/coreutils/rg） | DSH bash 工具**无任何补丁**可用；`glob/grep` 无补丁可用 |
 | P3 | Agent 描述符 + DSH adapter | 内核对 DSH 零硬编码；可挂第二个 Agent |
 | P4 | 图像/PTY 原生件（自有 codec、node-pty android 构建） | `read_image`/图片附件、终端可用。读数只认 `nativeCaps` 对应格的 `ok=true`（投放结局 applied 不算过，见 P4 证伪记录） |
-| P5 | 退役 shim 层 | `guard/native/*-shim.js` 与 `.dsh-orig` 归零 |
+| P5 | 退役 shim 层 | `assembler/*-shim.js` 与 `.dsh-orig` 归零 |
 
 ## 6. 被否决的方案
 
@@ -141,7 +141,7 @@ renameat2 NOREPLACE: available
 **图片**：Android 不在 `sharp/dist/sharp.cjs` 的**硬编码原生 switch** 内（全包无 `android` 字样），
 因此**即使 NDK 编出 android 原生绑定也不会被加载**。但 sharp 为未知平台预留了正式回退：
 `require('@img/sharp-wasm32/sharp.node')`（真 libvips 编到 wasm，官方路径，需显式补装）。
-故正解是**补给该依赖**：`guard/native/sharp-wasm.js` 在隔离目录装好后拷回 DSH 树。
+故正解是**补给该依赖**：`assembler/sharp-wasm.js` 在隔离目录装好后拷回 DSH 树。
 不 fork sharp、不替换实现、不用 NDK；代价是 wasm 比原生慢（附件归一化场景可接受）。
 
 **PTY**：node-pty 无任何 wasm/回退路径，只能构建原生 `.node`（NDK + node 头）。
@@ -167,7 +167,7 @@ renameat2 NOREPLACE: available
 
 **口径修正（2026-09-26 起）**：原生件有两个正交结论 —— 投放结局 `nativeUnits`
 （applied/already/skipped/blocked/failed，只说「动没动过手」）与能力结论 `nativeCaps`
-（true/false/null，未知绝不算通过）。判据以数据形式住在 `kernel/src/guard/native/supply-table.json`
+（true/false/null，未知绝不算通过）。判据以数据形式住在 `kernel/src/assembler/supply-table.json`
 每格的 `verify`，唯一执行器是 `capability-probe.js`，探针跑在**被检的那份 node** 的子进程里；
 以「文件在不在」作结论已被 `native-supply-gate-test.js` 禁用（那正是本节假绿的形状）。
 本 ADR 此后不再写「某能力已解决」，除非引用那格 `ok=true` 的出处（面板 / `native_capability` 事件）。

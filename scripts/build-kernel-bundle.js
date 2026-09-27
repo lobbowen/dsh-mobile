@@ -12,9 +12,10 @@
 
 const fs = require('fs');
 const path = require('path');
-const { packBundle, DEFAULT_ABI } = require('../src/kernel-bundle');
-const { loadPrivateKey } = require('../src/keys');
-const { sha256 } = require('../src/verify');
+// 本 CLI 是 **CI 工具**，住在 scripts/（CI 层）；库本体仍在 L0 的 container/engine/src。
+const { packBundle, DEFAULT_ABI } = require('../container/engine/src/kernel-bundle');
+const { loadPrivateKey } = require('../container/engine/src/keys');
+const { sha256 } = require('../container/engine/src/verify');
 
 function main() {
   const srcDir = process.argv[2];
@@ -23,7 +24,7 @@ function main() {
   const urlBase = process.argv[5] || process.env.OTA_URL_BASE || '';
 
   if (!srcDir || !version) {
-    console.error('用法: build-bundle.js <kernel-src-dir> <version> [abi] [url-base]');
+    console.error('用法: scripts/build-kernel-bundle.js <kernel-src-dir> <version> [abi] [url-base]');
     console.error('环境变量: DSH_BUNDLE_OUT_DIR 可指定输出目录（默认 <repo>/release）');
     process.exit(2);
   }

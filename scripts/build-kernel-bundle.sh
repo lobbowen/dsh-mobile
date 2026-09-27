@@ -34,4 +34,4 @@ fi
 # 但设备端只会把包判成 signature-invalid —— 判据只住 verify-ota-anchor.sh。
 bash "$ROOT/scripts/verify-ota-anchor.sh" --private "$ROOT/keys/ota-private.pem"
 
-exec node "$ROOT/container/engine/bin/build-bundle.js" "$SRC" "$VER" "$ABI" "$URL_BASE"
+exec node "$ROOT/scripts/build-kernel-bundle.js" "$SRC" "$VER" "$ABI" "$URL_BASE"

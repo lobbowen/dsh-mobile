@@ -38,5 +38,5 @@ Tier S 是底座正解：容器成为特权系统服务，垫片全部消失。
 ## Tier S 到位后可删除的垫片
 
 - `container/app/build.gradle.kts` 的 `targetSdk = 28`（exec 限制不再适用）
-- `container/native/posix/*`（`link(2)` 替代与 open 回退）
+- `container/native/d1/*`（`link(2)` 替代与 open 回退）
 - `PrefixProvisioner` 的 lib→真名复制（可直接以镜像内可执行文件分发）

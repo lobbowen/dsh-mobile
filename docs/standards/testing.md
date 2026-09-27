@@ -16,7 +16,7 @@
 
 - `node test/*.js`、`node --check`、`npm test` / `npm run *`
 - `./gradlew *`、gradle、任何编译 / 打包
-- 直接执行仓库内脚本（`scripts/*.js|sh|py`、`container/engine/bin/*`）做**自检或生成**
+- 直接执行仓库内脚本（`scripts/*.js|sh|py`、`container/engine/test/*`）做**自检或生成**
 - 任何形式的"我先本地试一下"
 
 > 判据：**是否让仓内代码运行**。跑 = 违规；只看 / 只改 = 允许。
@@ -68,7 +68,7 @@
 以下四条约束所有**新增或整改**的门禁；行为回归与防复活绊线是资产不是负债。
 
 1. **一判据一实现**：门禁逻辑住 `scripts/`（先例：`verify-runtime-elf.sh`），workflow 只准调用。
-2. **判据数据化，清单禁手维护**：优先"数据格子 + 唯一执行器"（先例：`kernel/src/guard/native/supply-table.json`）；
+2. **判据数据化，清单禁手维护**：优先"数据格子 + 唯一执行器"（先例：`kernel/src/assembler/supply-table.json`）；
    必须进 git 的清单只能由生成器产出、并被对账门禁核验（先例：`gen-native-assets.js` ↔ `git diff --exit-code`）。
 3. **扫描式门禁限额 + 自证**：绊线类门禁 ≤60 行，必须带违例样本自证。
 4. **门禁预算制（一进一退）**：净增 >100 行的门禁 PR，必须同时退役或合并 ≥ 等量的重叠覆盖门禁。
