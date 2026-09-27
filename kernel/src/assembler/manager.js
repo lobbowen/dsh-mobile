@@ -12,14 +12,14 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const AGENT = require('../../platform/agent').load();
+const AGENT = require('../platform/agent').load();
 const { spawn } = require('node:child_process');
-const ex = require('../../platform/exec');
+const ex = require('../platform/exec');
 // npm 的统一解析入口（经 platform/os/exec-path）。
 // 经**模块对象**调用而非解构：解构是值绑定，无法被测试替换 ——
 // 曾因此让行为测试意外执行了真实 npm（见构造函数 `_npmBin` 的说明）。
-const execPath = require('../../platform/os/exec-path');
-const runtimeContract = require('../../platform/runtime-contract');
+const execPath = require('../platform/os/exec-path');
+const runtimeContract = require('../platform/runtime-contract');
 // D2 平台件库：共享工件（rg/pty/…）本体的唯一解析处；落位仍在本目录各 impl 里。
 const platformArtifacts = require('./platform-artifacts');
 // npm 的**唯一 spawn 调用形态**：恒返回 `{bin, args}`，调用方拼
@@ -35,7 +35,7 @@ function npmSpawn(self) {
   }
   return runtimeContract.npmInvocation(execPath.npmBin());
 }
-const { semverCompare, VERSION_RE } = require('../../domains/dist/index');
+const { semverCompare, VERSION_RE } = require('../domains/dist/index');
 
 class NativeManager {
   constructor(opts) {
@@ -1061,7 +1061,7 @@ class NativeManager {
         );
         // 尽力杀进程树：只 kill 父进程会留下 npm 拉起的 node 子进程。
         try {
-          const { killTree } = require('../../platform/os/process');
+          const { killTree } = require('../platform/os/process');
           killTree(child.pid, 'SIGKILL', () => finish(-1));
         } catch (e) {
           try { child.kill('SIGKILL'); } catch (e2) {}

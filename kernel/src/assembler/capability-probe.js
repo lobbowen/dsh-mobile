@@ -19,8 +19,8 @@
 // 分开 null 与 false 的理由：前者是「我们不知道」，后者是「它坏了」。混起来要么假绿（把
 // 不知道说成正常），要么假红（把容器没交付说成 Agent 能力缺失），两种都会把人支去做错的事。
 
-const ex = require('../../platform/exec');
-const AGENT = require('../../platform/agent').load();
+const ex = require('../platform/exec');
+const AGENT = require('../platform/agent').load();
 
 /** 通过标记：判据脚本必须显式打出来。只退 0 不算通过 —— 脚本被改空、被截断都会退 0。 */
 const PASS = 'DSH_PROBE_PASS';
