@@ -83,7 +83,8 @@ echo "[ok] libdshflock.so $SIZE 字节 ($(file -b --mime-type "$SO" 2>/dev/null 
 # ② link/linkat 用户态替代（纯 libc 符号，无 NDK 头文件依赖）
 "$CC" -shared -fPIC -O2 -I "$INC" \
   -o "container/app/src/main/jniLibs/${ABI}/libdshposix.so" \
-  container/native/d1/link-interpose.c container/native/d1/open-fallback.c container/native/d1/tmp-paths.c -ldl
+  container/native/d1/link-interpose.c container/native/d1/open-fallback.c container/native/d1/tmp-paths.c \
+  container/native/d1/exec-path.c -ldl
 SO2="container/app/src/main/jniLibs/${ABI}/libdshposix.so"
 SIZE2=$(stat -c%s "$SO2")
 [ "$SIZE2" -gt 500 ] || { echo "[error] $SO2 仅 $SIZE2 字节，编译产物可疑"; exit 1; }

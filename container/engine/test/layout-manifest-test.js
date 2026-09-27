@@ -158,6 +158,12 @@ try {
   // 对照组自证：分段判据必须能识破人造的分段写法
   if (!new RegExp(segRe('a/b/c')).test("path.join(ROOT, 'a', 'b', 'c')")) problems.push('MOVED-PATH-RESIDUE 分段判据自证失败（恒空）');
 
+  // 规则 9：shebang 约定缺失的**补偿层**必须显式在册、有到期日。
+  // 判据为什么这样写：这不是「坏味道」而是**已知的待删物** —— 它存在一天，台账里就要有一天；
+  // D1 的 exec-path.c 落地并在真机判据上转绿后，删掉包装与这笔债（僵尸债会红，删不干净也会红）。
+  const matPath = path.join(ROOT, 'kernel', 'src', 'supply', 'materialize.js');
+  if (fs.existsSync(matPath) && readSafe(matPath).indexOf('#!/system/bin/sh') >= 0) add('SHEBANG-COMPENSATION', 'kernel/src/supply/materialize.js 仍在手写 sh 包装');
+
   // 台账自净：① 未登记的违规 → 红；② 已消失的债务 → 红（防僵尸豁免）；③ 过期/缺字段 → 红
   const coveredBy = (v) => DEBT.some((d) => d.rule === v.rule && (!d.path || v.detail === d.path || v.detail.endsWith(d.path)));
   for (const v of violations) if (!coveredBy(v)) problems.push('交付分层违规（未登记）: ' + v.rule + ' ' + v.detail);

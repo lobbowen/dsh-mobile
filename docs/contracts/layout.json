@@ -403,5 +403,13 @@
       "paths": []
     }
   },
-  "deliveryDebt": []
+  "deliveryDebt": [
+    {
+      "id": "shebang-compensation-wrapper",
+      "rule": "SHEBANG-COMPENSATION",
+      "expiresAt": "2026-11-15",
+      "what": "kernel/src/supply/materialize.js 给每个工具手写 `#!/system/bin/sh` 包装 —— 这是 shebang 约定缺失的补偿层，不是机制本身",
+      "fix": "D1 exec-path.c 的真机判据（env-shebang 格）绿后，删掉包装生成：件本体解包到 $PREFIX/lib/toolchain 后直接 symlink 到 $PREFIX/bin（与 node 同形）"
+    }
+  ]
 }
