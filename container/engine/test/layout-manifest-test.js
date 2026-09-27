@@ -119,8 +119,9 @@ try {
   if (ex('kernel/src/platform/env-catalog.js') && envUnits.length > 0) add('ENV-CATALOG', 'env-catalog.js 与 supply-table#envUnits 同时在场');
   // 规则 6：CI 工具不得住在 L0 车辆里（L0 目录里不该有构建 CLI）
   if (ex('container/engine/bin')) add('CI-TOOL-IN-L0', 'container/engine/bin');
-  // 规则 7：D2 的件解析不得住在 E 的目录里（搬迁后其位在 assembler/，仍是越层）
-  if (ex('kernel/src/assembler/platform-artifacts.js')) add('E-D2-MIXED', 'kernel/src/assembler/platform-artifacts.js');
+  // 规则 7（原「D2 的件解析不得住 E 的目录」）已退役：该不变量现由内核门禁把守
+  // （kernel/test/native-supply-gate-test.js 的「D2 不再住 E 的目录」），此处若再写一遍旧路径，
+  // 反而会被规则 8 判成本身就是残留 —— 判据不该有两把尺子。
 
   // 规则 8：**已迁移的旧路径不得再被引用** —— 连续写法与**分段写法**都要查。
   // 为什么加：步骤 A 搬迁后 CI 红过两次，根因都是把路径**拆成多段**的写法（path.join(ROOT, '容器段', …)）；

@@ -244,7 +244,7 @@
       "from": "kernel/src/guard/native",
       "to": "kernel/src/assembler",
       "kind": "dir",
-      "expectFiles": 10
+      "expectFiles": 9
     },
     {
       "from": "container/engine/bin/build-bundle.js",
