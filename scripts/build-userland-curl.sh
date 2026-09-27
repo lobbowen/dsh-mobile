@@ -57,7 +57,12 @@ rm -rf "$ROOT_DIR/work/openssl" && mkdir -p "$ROOT_DIR/work/openssl"
 tar xzf "$ROOT_DIR/work/openssl.tar.gz" -C "$ROOT_DIR/work/openssl" --strip-components=1
 cd "$ROOT_DIR/work/openssl"
 export ANDROID_API
-export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$TC_DIR/../../../../..}"
+# openssl 的 android 配置只认 ANDROID_NDK_ROOT / ANDROID_NDK_HOME（缺了它就退化去找 aarch64-linux-android-gcc，
+#   报 `no NDK aarch64-linux-android-gcc on $PATH` —— git 件那边就是这么写才通的，这里对齐）。
+export ANDROID_NDK_ROOT="${ANDROID_NDK_LATEST_HOME:-}"
+if [ -z "$ANDROID_NDK_ROOT" ]; then ANDROID_NDK_ROOT=$(cd "$TC_DIR/../../../../.." && pwd); fi
+export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
+echo "[curl] NDK root = $ANDROID_NDK_ROOT"
 if ! ./Configure android-arm64 -fPIC -D__ANDROID_API__=$ANDROID_API --prefix="$DEPS" --openssldir="$DEPS/ssl" no-shared no-tests no-ui-console > "$ROOT_DIR/work/openssl-configure.log" 2>&1; then
   echo "::error title=openssl Configure 失败::尾 30 行"; tail -n 30 "$ROOT_DIR/work/openssl-configure.log"; exit 1; fi
 if ! make -j2 build_libs > "$ROOT_DIR/work/openssl-build.log" 2>&1; then
