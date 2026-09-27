@@ -39,7 +39,7 @@ jobs:
       fail-fast: false
       matrix:
         # C 层工具供给批次：逐件补齐。已供给的追加到这一行即可。
-        tool: [sqlite3, jq]
+        tool: [sqlite3, jq, git]
     steps:
       - uses: actions/checkout@v4
       - name: 定位 NDK

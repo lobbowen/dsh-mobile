@@ -87,7 +87,12 @@ function downloadTo(url, dest, timeoutMs, depth) {
 }
 
 /** 解 tar.gz 到目标目录。为什么自带解析：设备上不保证有 tar，而交付链不该依赖 PATH 里有没有一条命令。
- *  只处理目录与普通文件，拒绝穿越路径（.. / 绝对路径）。 */
+ *
+ * 处理目录、普通文件、**符号链接**与硬链接 —— 后两者不是锦上添花：git 这类的运行期布局靠它
+ *   （libexec/git-core/* 是符号链接，git-remote-https 就在里面）。只认文件与目录的解包器会把它们
+ *   **悄悄丢掉**，真机上表现为「git 少了半套子命令」——这种错 CI 看不见，所以在这里就做对。
+ *
+ * 安全：拒绝绝对路径与含 .. 的成员；符号链接目标也拒绝绝对路径。 */
 function extractTarGz(gzPath, destDir) {
   const buf = zlib.gunzipSync(fs.readFileSync(gzPath));
   let off = 0;
@@ -102,9 +107,25 @@ function extractTarGz(gzPath, destDir) {
     if (full.indexOf('..') < 0 && full.charAt(0) !== '/') {
       const dest = path.join(destDir, full);
       if (type === '5') { fs.mkdirSync(dest, { recursive: true }); }
+      else if (type === '2') {
+        const link = buf.toString('utf8', off + 157, off + 257).split(String.fromCharCode(0))[0];
+        if (link.charAt(0) !== '/') {
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          try { fs.unlinkSync(dest); } catch (_e) { /* 不存在即可 */ }
+          fs.symlinkSync(link, dest);
+        }
+      } else if (type === '1') {
+        const hl = buf.toString('utf8', off + 157, off + 257).split(String.fromCharCode(0))[0];
+        if (hl.indexOf('..') < 0 && hl.charAt(0) !== '/') {
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          try { fs.unlinkSync(dest); } catch (_e) { /* 不存在即可 */ }
+          fs.linkSync(path.join(destDir, hl), dest);
+        }
+      }
       else if (type === '0' || type === '' || type === '\u0000') {
         fs.mkdirSync(path.dirname(dest), { recursive: true });
-        fs.writeFileSync(dest, buf.subarray(dataOff, dataOff + size), { mode: 0o755 });
+        const perm = parseInt(buf.toString('utf8', off + 100, off + 108).split(String.fromCharCode(0))[0].trim(), 8) || 0o644;
+        fs.writeFileSync(dest, buf.subarray(dataOff, dataOff + size), { mode: perm });
       }
     }
     off = dataOff + Math.ceil(size / 512) * 512;

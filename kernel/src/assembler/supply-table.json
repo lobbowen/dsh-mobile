@@ -274,21 +274,37 @@
     },
     {
       "id": "env-git",
-      "capability": "git（版本控制）",
+      "capability": "git（本地版本控制：init/add/commit/log/diff/branch/checkout/stash/grep）",
       "layer": "shared",
-      "disposition": "waived",
-      "waiver": {
-        "followUp": "C 层工具供给批次",
-        "verifiedAt": "2026-09-27",
-        "expiresAt": "2026-12-26"
-      },
-      "why": "设备上无 git；Android 无现成 aarch64 产物，需自建配方（libcurl/zlib/pcre2）。缺口在册，到期未补即门禁红。",
+      "disposition": "supplied-by-us",
+      "why": "设备上无 git。本批由 **C 的通道**交付：CI 用 NDK 交叉编译（`NO_CURL=1`，即**不含 https 远端**），`RUNTIME_PREFIX=1` 让 git 按可执行文件自身位置推导 gitexecdir/template_dir（否则构建期前缀会被编死、设备上表现为「git 少了子命令」），`NO_INSTALL_HARDLINKS=1` 用符号链接（我们的解包器为此补了符号链接支持）。件走内容寻址 + 签名清单，内核按清单取件验哈希落位。**https 远端的缺口单列在 env-git-https**，不在这里含糊。",
       "verify": {
-        "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力，写成待做反而伪造出判定"
+        "delegated": "判据随件下发：C 的清单 tools[].verify（发布侧副本 scripts/userland-verify.json）。"
       },
       "bin": "git",
       "required": false,
-      "kind": "tool"
+      "kind": "tool",
+      "impl": "src/supply/materialize.js",
+      "carrier": "$PREFIX(经 C 的签名清单投放)"
+    },
+    {
+      "id": "env-git-https",
+      "kind": "tool",
+      "capability": "git 的 https 远端（clone/fetch/push over https）",
+      "layer": "shared",
+      "disposition": "waived",
+      "required": false,
+      "bin": "git",
+      "carrier": "未定（需 openssl + libcurl 随件静态链入）",
+      "why": "git 的 http/https 走 libcurl。本批刻意不含它：那要 openssl（Termux 实测 3.6.3，装后 8.5 MiB）+ libcurl（8.22.0，装后 3.5 MiB）及其依赖，是一条独立依赖链，值得单批做、单独判。缺口在册，到期未补即门禁红。",
+      "waiver": {
+        "followUp": "补 openssl + libcurl 到 C 的构建链（静态链入 git），并把本格判据改成真做一次 https clone（打一个只读小仓库）",
+        "verifiedAt": "2026-09-27",
+        "expiresAt": "2026-12-26"
+      },
+      "verify": {
+        "notApplicable": "缺口已豁免（见 waiver）：git 本批不含 https，没有可验的能力"
+      }
     },
     {
       "id": "env-python3",

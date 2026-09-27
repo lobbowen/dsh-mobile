@@ -13,6 +13,10 @@
     "jq": {
       "criterion": "jq 起得来、真解析一段 JSON 并把结果读回来（不是只看 --version）",
       "node": "const cp = require('node:child_process'); const r = cp.spawnSync('jq', ['-c', '.a'], { input: '{\"a\":42}', encoding: 'utf8' }); if (r.error) { console.error('jq 起不来: ' + r.error.message); process.exit(1); } if (r.status !== 0) { console.error('jq 非零退出 rc=' + r.status + ' err=' + String(r.stderr || '').slice(0, 160)); process.exit(1); } const got = String(r.stdout || '').trim(); if (got !== '42') { console.error('jq 读回不对: ' + JSON.stringify(got)); process.exit(1); } process.stdout.write('DSH_PROBE_PASS jq 可用（.a => 42）');"
+    },
+    "git": {
+      "criterion": "git 起得来、真做一次 init→add→commit→log 并读回提交（不是只看 --version）",
+      "node": "const cp = require('node:child_process'), fs = require('node:fs'), os = require('node:os'), path = require('node:path'); const d = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'dsh-git-')); const env = Object.assign({}, process.env, { GIT_AUTHOR_NAME: 'dsh', GIT_AUTHOR_EMAIL: 'dsh@local', GIT_COMMITTER_NAME: 'dsh', GIT_COMMITTER_EMAIL: 'dsh@local' }); const run = (args) => cp.spawnSync('git', args, { cwd: d, encoding: 'utf8', env }); const r0 = run(['init', '-q']); if (r0.error) { console.error('git 起不来: ' + r0.error.message); process.exit(1); } fs.writeFileSync(path.join(d, 'a.txt'), 'hello'); run(['add', 'a.txt']); const r1 = run(['commit', '-q', '-m', 'first']); if (r1.status !== 0) { console.error('commit 失败: ' + String(r1.stderr || '').slice(0, 160)); process.exit(1); } const r2 = run(['log', '--oneline']); if (r2.status !== 0 || String(r2.stdout || '').indexOf('first') < 0) { console.error('log 读不到提交: ' + JSON.stringify(String(r2.stdout || '').slice(0, 120))); process.exit(1); } process.stdout.write('DSH_PROBE_PASS git 可用（init/add/commit/log 真跑通）');"
     }
   }
 }
