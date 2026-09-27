@@ -398,19 +398,15 @@
       "kind": "tool",
       "capability": "curl（C 层工具：命令行 HTTP 客户端）",
       "layer": "shared",
-      "disposition": "waived",
+      "disposition": "supplied-by-us",
       "required": false,
       "bin": "curl",
-      "carrier": "未定（待由 C 通道交付）",
-      "why": "定稿 C.shape 的工具清单里有 curl，**目前既未交付也未登记**（git 件里静态链了 libcurl，但没有 curl 命令行）。缺口在册、有到期日。",
-      "waiver": {
-        "followUp": "按 C 通道交付 curl CLI（复用 git 件那套 zlib+openssl+libcurl 静态链；编译 API ≥23 已解决 stderr 符号问题），并写随件判据",
-        "verifiedAt": "2026-09-28",
-        "expiresAt": "2026-12-27"
-      },
+      "carrier": "$PREFIX(经 C 的签名清单投放)",
+      "why": "已兑现（2026-09-28 出件）：与 git 件同源静态链（zlib 1.3.2 + openssl 3.6.3 + libcurl 8.22.0），但**刻意不传编译期 CA 路径** —— 信任根由容器播的 $PREFIX/etc/ca-bundle.pem 经环境（CURL_CA_BUNDLE/SSL_CERT_FILE）供给。编译 API=23（bionic 到 23 才有 stdin/stderr 真符号，API 21 下这个命令行工具链接必失败）。判据随件下发：真打 TLS 取回线上清单。",
       "verify": {
-        "notApplicable": "尚未交付（见 waiver）：没有件可投就没有可验的能力"
-      }
+        "delegated": "判据随件下发：C 的清单 tools[].verify（发布侧副本 scripts/userland-verify.json，curl 那条真打 HTTPS）。"
+      },
+      "impl": "src/supply/materialize.js"
     },
     {
       "id": "env-coreutils",
