@@ -36,7 +36,7 @@ echo "[sqlite3] 下载页 $BYTES 字节"
 REL=$(grep -oE '[0-9]{4}/sqlite-amalgamation-[0-9]{7}[.]zip' work/download.html | head -n 1 || true)
 if [ -z "$REL" ]; then
   echo "::error title=找不到 amalgamation 链接::下载页里没有 [0-9]{4}/sqlite-amalgamation-[0-9]{7}.zip（页面结构变了？前 3 条 zip 链接如下）"
-  grep -oE '[^"'"' ]+[.]zip' work/download.html | head -n 3 || true
+  grep -oE '[A-Za-z0-9._/-]+[.]zip' work/download.html | head -n 3 || true
   exit 1
 fi
 URL="https://www.sqlite.org/$REL"
