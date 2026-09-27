@@ -72,4 +72,6 @@ jobs:
           echo "[qiniu] userland/${{ matrix.tool }} 已发布"
       - name: 归档到 Release（GitHub 在目标网络不可达，这里只是归档）
         if: ${{ github.event.inputs.publish == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bash scripts/gh-release-upload.sh userland-canary --prune "^userland-${{ matrix.tool }}-" dist/*.tar.gz

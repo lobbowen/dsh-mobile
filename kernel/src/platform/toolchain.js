@@ -24,12 +24,17 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const zlib = require('node:zlib');
+const https = require('node:https');
 const { spawn } = require('node:child_process');
 const runtimeContract = require('./runtime-contract');
 
 /** 共享工具清单（唯一事实源）。新增一个工具 = 加一行。
- *  pkg/entry = 要装的包与它在 node_modules 里的可执行相对路径；kind 决定怎么 exec；
- *  sha256/size = 工件完整性锚（装完必须逐字节对上）。 */
+ *  provider：
+ *    · 'npm'（缺省）—— pkg/entry 指 node_modules 里的可执行相对路径；size+sha256 锚**可执行文件本身**；
+ *    · 'tarball'   —— 我们 CI 编好发到对象存储的件（上游没有 android 变体）：url + sha256 锚**压缩包**，
+ *      entry 是包内相对路径（如 bin/sqlite3）。
+ *  kind 决定 wrapper 怎么 exec：native = 直接 exec 自带二进制。 */
 const TOOLS = {
   pnpm: {
     version: '12.7.0',
@@ -40,9 +45,19 @@ const TOOLS = {
     sha256: 'ce0b5e064552f60ec5b153d767b464f8d64f7659dbc2c58780679ac7e5bdfe78',
     why: 'dsh 插件管理调用 pnpm；官方 12.4.0 起发 Android/bionic aarch64 原生产物',
   },
+  sqlite3: {
+    provider: 'tarball',
+    version: '3530400',
+    url: 'https://hubcdn.zll.ink/userland/userland-sqlite3-3530400-android-arm64.tar.gz',
+    sha256: '83a1173361588c6779598cafc510121197d236ca29e7411215560518dfcff756',
+    entry: 'bin/sqlite3',
+    kind: 'native',
+    why: 'C 层工具供给批次：上游 sqlite.org 只发源码，由本仓 CI 交叉编译（动态 aarch64，见 .github/workflows/build-userland.yml）',
+  },
 };
 
 const INSTALL_TIMEOUT_MS = 600000;
+const DOWNLOAD_TIMEOUT_MS = 300000;
 const LOCK_STALE_MS = 15 * 60 * 1000;
 const NL = String.fromCharCode(10);
 
@@ -65,6 +80,54 @@ async function artifactOk(file, spec) {
   try { const st = fs.statSync(file); if (!st.isFile()) return false; if (spec.size && st.size !== spec.size) return false; } catch { return false; }
   if (!spec.sha256) return true;
   try { return (await sha256File(file)) === spec.sha256; } catch { return false; }
+}
+
+/** 取一个 https 文件到本地（跟随重定向、有界）。设备端只走 HTTPS。 */
+function downloadTo(url, dest, timeoutMs, depth) {
+  const d = depth || 0;
+  return new Promise((resolve) => {
+    let req;
+    try {
+      req = https.get(url, { timeout: timeoutMs }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && d < 5) {
+          res.resume();
+          return resolve(downloadTo(new URL(res.headers.location, url).toString(), dest, timeoutMs, d + 1));
+        }
+        if (res.statusCode !== 200) { res.resume(); return resolve({ ok: false, reason: 'HTTP ' + res.statusCode }); }
+        const out = fs.createWriteStream(dest);
+        out.on('error', (e) => resolve({ ok: false, reason: e.message }));
+        out.on('finish', () => out.close(() => resolve({ ok: true })));
+        res.pipe(out);
+      });
+    } catch (e) { return resolve({ ok: false, reason: e.message }); }
+    req.on('timeout', () => { try { req.destroy(); } catch {} resolve({ ok: false, reason: '取件超时 ' + timeoutMs + 'ms' }); });
+    req.on('error', (e) => resolve({ ok: false, reason: e.message }));
+  });
+}
+
+/** 解 tar.gz 到目标目录。为什么自带解析：设备上不保证有 tar，而交付链不该依赖 PATH 里有没有一条命令。
+ *  只处理目录与普通文件，拒绝穿越路径（.. / 绝对路径）。 */
+function extractTarGz(gzPath, destDir) {
+  const buf = zlib.gunzipSync(fs.readFileSync(gzPath));
+  let off = 0;
+  while (off + 512 <= buf.length) {
+    const raw = buf.toString('utf8', off, off + 100).replace(/\0[\s\S]*$/, '');
+    if (!raw) { off += 512; continue; }
+    const size = parseInt(buf.toString('utf8', off + 124, off + 136).replace(/\0[\s\S]*$/, '').trim(), 8) || 0;
+    const type = buf.toString('utf8', off + 156, off + 157);
+    const prefix = buf.toString('utf8', off + 345, off + 500).replace(/\0[\s\S]*$/, '');
+    const full = (prefix ? prefix + '/' : '') + raw;
+    const dataOff = off + 512;
+    if (full.indexOf('..') < 0 && full.charAt(0) !== '/') {
+      const dest = path.join(destDir, full);
+      if (type === '5') { fs.mkdirSync(dest, { recursive: true }); }
+      else if (type === '0' || type === '' || type === '\u0000') {
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.writeFileSync(dest, buf.subarray(dataOff, dataOff + size), { mode: 0o755 });
+      }
+    }
+    off = dataOff + Math.ceil(size / 512) * 512;
+  }
 }
 
 function acquireLock(lockFile) {
@@ -120,8 +183,13 @@ async function ensureSharedTool(name, opts) {
   const root = path.join(libBase, 'toolchain');
   const staging = path.join(libBase, 'toolchain.staging');
   const lockFile = path.join(libBase, 'toolchain.lock');
-  const entry = path.join(root, 'node_modules', spec.pkg, spec.entry);
-  const stagingEntry = path.join(staging, 'node_modules', spec.pkg, spec.entry);
+  // 取件方式决定入口在树里的相对位置：npm 装在 node_modules/<pkg>/；tarball 按包内自带布局。
+  const entryRel = spec.provider === 'tarball' ? spec.entry : path.join('node_modules', spec.pkg, spec.entry);
+  const entry = path.join(root, entryRel);
+  const stagingEntry = path.join(staging, entryRel);
+  // 完整性锚的**作用对象**不同：npm 件锚可执行文件本身；tarball 件锚压缩包（解包产物由包内布局 +
+  // 原子落位保证），故入口只判「是不是文件」。
+  const entrySpec = spec.provider === 'tarball' ? {} : spec;
   const nodeBin = path.join(c.prefix, 'bin', 'node');
   const execLine = spec.kind === 'native'
     ? 'exec "' + entry + '" "$@"'
@@ -131,7 +199,7 @@ async function ensureSharedTool(name, opts) {
     + execLine + NL;
 
   // ①③ 已就位 = 入口在场**且工件逐字节完整**；入口按内容判新鲜。
-  if (await artifactOk(entry, spec)) {
+  if (await artifactOk(entry, entrySpec)) {
     let binFresh = false;
     try { binFresh = fs.readFileSync(bin, 'utf8') === body; } catch {}
     if (binFresh) return out('already', { bin, entry });
@@ -143,20 +211,41 @@ async function ensureSharedTool(name, opts) {
   try {
     fs.rmSync(staging, { recursive: true, force: true });
     fs.mkdirSync(staging, { recursive: true });
-    const inv = o.npmInvocation || runtimeContract.npmInvocation();
-    const args = ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock',
-      '--prefix', staging, spec.pkg + '@' + spec.version];
-    const env = runtimeContract.npmEnv(process.env);
-    const r = typeof o.runInstall === 'function'
-      ? o.runInstall(inv, args, env)
-      : await runInstall(inv, args, env, o.timeoutMs || INSTALL_TIMEOUT_MS);
-    if (!r || !r.ok) {
-      fs.rmSync(staging, { recursive: true, force: true });
-      return out('failed', { reason: '安装 ' + spec.pkg + '@' + spec.version + ' 失败' + (r && r.tail ? '（' + String(r.tail).slice(0, 160) + '）' : '') });
+    if (spec.provider === 'tarball') {
+      // 上游没有 android 变体的件：取回 → 核对**压缩包** sha256 → 解包到暂存 → 原子落位。
+      const gz = path.join(staging, '.artifact.tar.gz');
+      const dl = await downloadTo(spec.url, gz, o.downloadTimeoutMs || DOWNLOAD_TIMEOUT_MS);
+      if (!dl.ok) {
+        fs.rmSync(staging, { recursive: true, force: true });
+        return out('failed', { reason: '取件失败: ' + dl.reason + ' <- ' + spec.url });
+      }
+      const got = await sha256File(gz);
+      if (spec.sha256 && got !== spec.sha256) {
+        fs.rmSync(staging, { recursive: true, force: true });
+        return out('failed', { reason: '取件完整性不过（sha256 ' + got.slice(0, 16) + '… ≠ 表锚），已丢弃 —— 不落一个可疑件' });
+      }
+      extractTarGz(gz, staging);
+      try { fs.unlinkSync(gz); } catch {}
+    } else {
+      const inv = o.npmInvocation || runtimeContract.npmInvocation();
+      const args = ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock',
+        '--prefix', staging, spec.pkg + '@' + spec.version];
+      const env = runtimeContract.npmEnv(process.env);
+      const r = typeof o.runInstall === 'function'
+        ? o.runInstall(inv, args, env)
+        : await runInstall(inv, args, env, o.timeoutMs || INSTALL_TIMEOUT_MS);
+      if (!r || !r.ok) {
+        fs.rmSync(staging, { recursive: true, force: true });
+        return out('failed', { reason: '安装 ' + spec.pkg + '@' + spec.version + ' 失败' + (r && r.tail ? '（' + String(r.tail).slice(0, 160) + '）' : '') });
+      }
+      if (!(await artifactOk(stagingEntry, spec))) {
+        fs.rmSync(staging, { recursive: true, force: true });
+        return out('failed', { reason: '工件完整性校验不过（sha256/size 不符），已丢弃暂存树: ' + stagingEntry });
+      }
     }
-    if (!(await artifactOk(stagingEntry, spec))) {
+    if (!fs.existsSync(stagingEntry)) {
       fs.rmSync(staging, { recursive: true, force: true });
-      return out('failed', { reason: '工件完整性校验不过（sha256/size 不符），已丢弃暂存树: ' + stagingEntry });
+      return out('failed', { reason: '暂存树里没有入口（包内布局与表不符）: ' + stagingEntry });
     }
     // ② 原子落位：单写者已持锁，先清终态再 rename（窗口极小且无读方在写）。
     fs.rmSync(root, { recursive: true, force: true });

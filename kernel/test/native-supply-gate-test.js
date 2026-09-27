@@ -303,6 +303,16 @@ if (table) {
       if (dates) check('C 层豁免未过期: ' + u.id + '（' + w.expiresAt + '）', new Date(w.expiresAt + 'T23:59:59Z') >= new Date());
     }
   }
+  // C 层供给实现必须**语法可解析**：它只在设备上跑，CI 此前从不解析它 —— 一个括号写错的 impl
+  // 会一路走到真机才炸，而那时的表现是「工具没装上」，排查方向被带偏一整轮。
+  check('对照组：语法检查能命中坏文件',
+    (() => { try { new vm.Script('function {'); return false; } catch (e) { return true; } })());
+  for (const impl of [...new Set(envUnits.map((u) => u.impl).filter(Boolean))]) {
+    const p = path.join(ROOT, impl);
+    let parseErr = null;
+    try { new vm.Script(fs.readFileSync(p, 'utf8'), { filename: impl }); } catch (e) { parseErr = e.message; }
+    check('C 层供给实现语法可解析: ' + impl, !parseErr, parseErr || '');
+  }
 }
 
 // ---- 现场探针：两份 npm 计划做差集 ----
