@@ -15,6 +15,7 @@ set -euo pipefail
 
 HERE=$(dirname "$0")
 cd "$HERE/.."
+ROOT_DIR=$(pwd)   # 绝对仓根：脚本中途会 cd 进源码树，后续一律用它拼路径
 
 JQ_VERSION=1.8.2
 REL_BASE=https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}
@@ -82,16 +83,16 @@ if ! make -j2; then
   exit 1
 fi
 
-cp jq "../../$OUT/bin/jq"
-cd "$HERE/.."
-chmod 0755 "$OUT/bin/jq"
+cp jq "$ROOT_DIR/$OUT/bin/jq"
+cd "$ROOT_DIR"
+chmod 0755 "$ROOT_DIR/$OUT/bin/jq"
 
 # 自证：不得依赖 libonig（否则上机缺库）
-if "$READELF_BIN" -d "$OUT/bin/jq" | grep -q 'libonig'; then
+if "$READELF_BIN" -d "$ROOT_DIR/$OUT/bin/jq" | grep -q 'libonig'; then
   echo "::error title=jq 依赖外部 libonig::vendored oniguruma 被编成了共享库 —— 我们的件只有 bin/jq，上机必缺库"
-  "$READELF_BIN" -d "$OUT/bin/jq" | grep -i needed || true
+  "$READELF_BIN" -d "$ROOT_DIR/$OUT/bin/jq" | grep -i needed || true
   exit 1
 fi
-echo "$JQ_VERSION" > "$OUT/jq.version"
-SIZE=$(stat -c%s "$OUT/bin/jq")
-echo "[jq] 产出 $OUT/bin/jq（$SIZE 字节，无外部 libonig）"
+echo "$JQ_VERSION" > "$ROOT_DIR/$OUT/jq.version"
+SIZE=$(stat -c%s "$ROOT_DIR/$OUT/bin/jq")
+echo "[jq] 产出 $ROOT_DIR/$OUT/bin/jq（$SIZE 字节，无外部 libonig）"
