@@ -292,15 +292,19 @@
       "kind": "tool",
       "capability": "git 的 https 远端（clone/fetch/push over https）",
       "layer": "shared",
-      "disposition": "supplied-by-us",
+      "disposition": "waived",
       "required": false,
       "bin": "git",
-      "carrier": "$PREFIX(随 git 件一起投放：zlib/openssl/libcurl 静态链入)",
-      "why": "已兑现：https 通路随 git 件一起交付 —— 构建时 zlib + openssl(3.6.3) + libcurl(8.22.0) 全部**静态**链进 git（curl 的 CA 路径指向安卓系统信任库 /system/etc/security/cacerts），于是「一个件」就能 clone/fetch over https，不必再拖一串 .so。判据里真打一次 TLS（拿得到 HTTP 层响应即算过；离线则如实标注「仅证到非 no-curl 构建」）。",
+      "carrier": "未定（openssl + libcurl 需先编成）",
+      "why": "已开工但**尚未兑现**：依赖链 ①zlib 编通、②openssl 的 Configure 失败（`No value given for COMMENT/CMAKECONFIGDIR/PKGCONFIGDIR/libdir`，被 `>/dev/null` 遮住真正致命行）⇒ ③libcurl 与带 https 的 git 都没拿到。**不许挂 supplied-by-us**（那是承诺未兑现）。当前件仍是「不含 https」的那一版，能力如实报 false。",
       "verify": {
-        "delegated": "判据随件下发：C 的清单 tools[].verify（发布侧副本 scripts/userland-verify.json，git 那一条含 https 段）。"
+        "notApplicable": "尚未兑现（见 waiver）：当前件不含 https，没有可验的能力"
       },
-      "impl": "src/supply/materialize.js"
+      "waiver": {
+        "followUp": "修 openssl 在 NDK 下的 Configure（去掉 >/dev/null 看真错；必要时改走 linux-aarch64 + 显式 CC/--cross-compile-prefix），再编 libcurl 与带 https 的 git，判据过真 TLS",
+        "verifiedAt": "2026-09-27",
+        "expiresAt": "2026-12-26"
+      }
     },
     {
       "id": "env-python3",
