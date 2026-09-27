@@ -165,6 +165,12 @@ try {
   const matPath = path.join(ROOT, 'kernel', 'src', 'supply', 'materialize.js');
   if (fs.existsSync(matPath) && readSafe(matPath).indexOf('#!/system/bin/sh') >= 0) add('SHEBANG-COMPENSATION', 'kernel/src/supply/materialize.js 仍在手写 sh 包装');
 
+  // 规则 10：C 的**共享供给机制**（物化器）必须住在 APK 侧共享层 —— 它服务所有产品、不属于任何一个，
+  //   更不该住内核（内核只做检测 + 触发）。由来：用户 2026-09-29 复核「加到内核里就只有内核能适配，
+  //   我再装一个 DSH/Codex，这些还要再加一遍 —— 它们是共用的」。未搬完以前，用带到期日的 deliveryDebt 挂账。
+  const matMechPath = path.join(ROOT, 'kernel', 'src', 'supply', 'materialize.js');
+  if (fs.existsSync(matMechPath)) add('SUPPLY-MECH-IN-KERNEL', 'kernel/src/supply/materialize.js');
+
   // 台账自净：① 未登记的违规 → 红；② 已消失的债务 → 红（防僵尸豁免）；③ 过期/缺字段 → 红
   const coveredBy = (v) => DEBT.some((d) => d.rule === v.rule && (!d.path || v.detail === d.path || v.detail.endsWith(d.path)));
   for (const v of violations) if (!coveredBy(v)) problems.push('交付分层违规（未登记）: ' + v.rule + ' ' + v.detail);

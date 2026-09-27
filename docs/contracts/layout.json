@@ -374,13 +374,14 @@
       "title": "开发环境层",
       "vehicle": "L0(运行时打进 APK) + 系统层($PREFIX 自装)",
       "paths": [
-        "kernel/src/supply",
+        "container/app/src/main/assets/supply",
         "scripts/build-userland-sqlite3.sh",
         ".github/workflows/build-userland.yml",
         "container/app/src/main/assets/node-versions.json"
       ],
       "shape": "内容按**性质**分裂：运行时（node·python·go·java）随 APK 冻结（jniLibs+assets）；工具（npm·pnpm·git·jq·sqlite3·rg·curl·coreutils）由环境自己装进 $PREFIX、自适应、自更新，内核检测并触发",
-      "_bootstrap": "C 通道的**自举种子**：npm（构建期由 CI 注入 assets/npm，**仓内不存在该目录**，故只在此说明不进 paths）—— 装 pnpm/git 等都要先有它，故它必须随 APK 落地；这是**设计**，不是把工具冻结在 APK。其余工具（pnpm/git/jq/sqlite3/rg/curl/coreutils）一律由环境自己装进 $PREFIX。"
+      "_bootstrap": "C 通道的**自举种子**：npm（构建期由 CI 注入 assets/npm，**仓内不存在该目录**，故只在此说明不进 paths）—— 装 pnpm/git 等都要先有它，故它必须随 APK 落地；这是**设计**，不是把工具冻结在 APK。其余工具（pnpm/git/jq/sqlite3/rg/curl/coreutils）一律由环境自己装进 $PREFIX。",
+      "_where": "C 是**共享层**（服务所有产品，与产品无关）。供给机制（取回/验签/解包/落位/链接农场）住 APK 侧共享层 container/app/src/main/assets/supply/**；内核只留**检测 + 触发**（住在 kernel/src/assembler）。判据：加/更新一件工具**不需要内核 OTA、不需要 APK 更新**（只发清单）。"
     },
     "D1": {
       "title": "Linux 语义兑现",
@@ -413,5 +414,22 @@
       "_note": "产品声明（每产品一套）：通道选择等**声明物**随壳分发。原先 paths 为空 ⇒ 声明物无位可归（kernel-feed.json 住在 B 的 assets 里）—— 现明确：F 的物就落在 APK 内，与 B 共用 assets 目录但**物各有主**。"
     }
   },
-  "deliveryDebt": []
+  "deliveryDebt": [
+    {
+      "id": "supply-mech-in-kernel",
+      "rule": "SUPPLY-MECH-IN-KERNEL",
+      "path": "kernel/src/supply/materialize.js",
+      "what": "C 通道的共享供给机制（物化器）住在内核里 —— 内核成了共享层的写者，于是任何产品（DSH/Codex/…）都得靠内核才能拿到共用开发环境，各装一遍。",
+      "fix": "把 kernel/src/supply/*（取回/验签/解包/落位/链接农场）搬到 APK 侧共享层 container/app/src/main/assets/supply/**，由容器执行；内核只留检测 + 触发。验收判据：加/更新一件工具不需内核 OTA、不需 APK 更新（只发清单）。",
+      "expiresAt": "2026-10-06"
+    },
+    {
+      "id": "supply-layer-not-landed",
+      "rule": "LAYER-PATH-MISSING",
+      "path": "container/app/src/main/assets/supply",
+      "what": "C 行已按目标把共享层位置写成 APK 侧 supply/，但实物还没搬过去（目录尚不存在）。",
+      "fix": "随 supply-mech-in-kernel 那条一起落地；落地后本条目与那条同时销账。",
+      "expiresAt": "2026-10-06"
+    }
+  ]
 }
