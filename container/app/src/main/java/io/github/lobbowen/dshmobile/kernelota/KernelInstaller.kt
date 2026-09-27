@@ -215,6 +215,12 @@ object KernelInstaller {
         // 安装 ≠ 提交：先标"待命"，由启动链在**健康检查通过**后提交（提升下限），
         // 起不来则回滚到 previousVersion 且下限不降（ADR-0005 C2）。
         km.markPending(version, previousVersion)
+        // 本次安装留下的暂存目录要**自己收**：rename 只搬走了 tmp/kernel/<version>，外壳 tmp 还留着。
+        // 失败路径全都 deleteRecursively，只有成功路径忘了收 —— 真机实证 2026-09-28：
+        // `0.1.0-android.43.tmp-31506-…` 长期驻留（启动清扫只收上一次的，收不到本次的）。
+        tmp.deleteRecursively()
+        // 两条版本流变了 ⇒ provisioning.json 必须跟着新（否则面板一直显示上一版内核）。
+        io.github.lobbowen.dshmobile.ProvisioningProbe.refreshKernelVersions(context)
         return InstallResult(
             ok = true, version = version, source = source, reason = null,
             detail = "已落盘并切换指针（待健康检查通过后提交）: ${dest.absolutePath}", nodeVerifyOutput = verify.raw,

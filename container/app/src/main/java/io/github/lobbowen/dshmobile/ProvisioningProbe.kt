@@ -91,6 +91,28 @@ object ProvisioningProbe {
 
     // ---- 机器可读快照 ----
 
+    /**
+     * 内核装完/切指针后**补写**两条版本流 —— 探针本体必须跑在 OTA 之前（「必须先于任何 spawn 上屏」），
+     * 但那一刻 CURRENT 还是旧值，于是 provisioning.json 会一直显示上一版内核（真机实证 2026-09-28：
+     * CURRENT=.40 而报告写 .39）。这里只改三个版本字段 + checkedAt，不重跑体检。
+     * 文件不存在就什么都不做（探针还没跑）；任何异常都不许影响启动。
+     */
+    fun refreshKernelVersions(ctx: Context) {
+        try {
+            val f = File(ctx.filesDir, "provisioning.json")
+            if (!f.isFile) return
+            val km = KernelManager(ctx)
+            val obj = org.json.JSONObject(f.readText())
+            obj.put("kernelVersion", km.currentVersion() ?: "")
+            obj.put("kernelFloor", km.floorVersion() ?: "")
+            obj.put("kernelPending", km.pending()?.version ?: "")
+            obj.put("checkedAt", System.currentTimeMillis())
+            f.writeText(obj.toString(2))
+        } catch (_: Throwable) {
+            // 报告刷新失败绝不影响启动流程（与 writeSnapshot 同一纪律）
+        }
+    }
+
     private fun writeSnapshot(ctx: Context, e: Evidence, results: List<ProbeResult>) {
         try {
             val km = KernelManager(ctx)
