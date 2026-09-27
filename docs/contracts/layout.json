@@ -374,14 +374,14 @@
       "title": "开发环境层",
       "vehicle": "L0(运行时打进 APK) + 系统层($PREFIX 自装)",
       "paths": [
-        "container/app/src/main/java/io/github/lobbowen/dshmobile/runtime",
+        "container/app/src/main/assets/supply",
         "scripts/build-userland-sqlite3.sh",
         ".github/workflows/build-userland.yml",
         "container/app/src/main/assets/node-versions.json"
       ],
       "shape": "内容按**性质**分裂：运行时（node·python·go·java）随 APK 冻结（jniLibs+assets）；工具（npm·pnpm·git·jq·sqlite3·rg·curl·coreutils）由环境自己装进 $PREFIX、自适应、自更新，内核检测并触发",
       "_bootstrap": "C 通道的**自举种子**：npm（构建期由 CI 注入 assets/npm，**仓内不存在该目录**，故只在此说明不进 paths）—— 装 pnpm/git 等都要先有它，故它必须随 APK 落地；这是**设计**，不是把工具冻结在 APK。其余工具（pnpm/git/jq/sqlite3/rg/curl/coreutils）一律由环境自己装进 $PREFIX。",
-      "_where": "C 是**共享层**（服务所有产品，与产品无关）。供给机制住 APK 侧（**必须 Android 原生实现：Kotlin/Android API —— 取回/校验/解包/落位/建链，不得依赖 node 或任何运行时**）；内核只留**检测 + 触发**（住 kernel/src/assembler）。判据：加/更新一件工具**不需要内核 OTA、不需要 APK 更新**（只发清单）。"
+      "_where": "C 是**共享层**（服务所有产品，与产品无关）。供给机制（取回/验签/解包/落位/链接农场）住 APK 侧共享层 container/app/src/main/assets/supply/**；内核只留**检测 + 触发**（住在 kernel/src/assembler）。判据：加/更新一件工具**不需要内核 OTA、不需要 APK 更新**（只发清单）。"
     },
     "D1": {
       "title": "Linux 语义兑现",

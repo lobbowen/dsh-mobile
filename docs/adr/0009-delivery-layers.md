@@ -116,10 +116,7 @@ locale 空、os.cpus() 返回 0、/tmp 不可写）。逐条修会修成"补丁"
 | 层 | 已落 |
 |---|---|
 | B | 既有（PrefixProvisioner / GuestAdapter / runtime.json） |
-| C | 内容按**性质**分裂：**运行时**（node·python·go·java）**随 APK 冻结**（可执行/可 dlopen 的进 jniLibs，纯数据进 assets）—— 判据：**运行时从网络取即形态错误**；**工具**（npm·pnpm·git·jq·sqlite3·rg·curl·coreutils）**不打包**，由环境自己装进 `$PREFIX`(files/usr)，件表/版本/哈希住 **C 自己的签名清单**（`userland-<channel>/userland-manifest.json` + `.sig`，件名**内容寻址**）。内核只留**通道锚** `channel.json` + **信任根** `userland-public.pem` + 检测与触发（工具落点＝属于 APK 的系统层，但本体不打包）。**判据随件下发**：每件「怎么判它可用」写在清单 `tools[].verify` 里（发布侧副本 `scripts/userland-verify.json`，发布器缺判据即拒绝发布），**C 的供给机制住 APK 侧共享层，且必须用 Android 原生实现（Kotlin/Android API），不得依赖 node 或任何运行时** ——
-它已属 APK 层，职责是**向下**把能力供给到 `$PREFIX`：取回用平台 HTTP、校验用 `java.security`/`MessageDigest`、
-解包用 `ZipInputStream`、落位与建链用 `Os.symlink`/文件 API。再回头借 node 等于又欠一层依赖（用户 2026-09-29 复核）。
-内核只留**检测 + 触发** ——
+| C | 内容按**性质**分裂：**运行时**（node·python·go·java）**随 APK 冻结**（可执行/可 dlopen 的进 jniLibs，纯数据进 assets）—— 判据：**运行时从网络取即形态错误**；**工具**（npm·pnpm·git·jq·sqlite3·rg·curl·coreutils）**不打包**，由环境自己装进 `$PREFIX`(files/usr)，件表/版本/哈希住 **C 自己的签名清单**（`userland-<channel>/userland-manifest.json` + `.sig`，件名**内容寻址**）。内核只留**通道锚** `channel.json` + **信任根** `userland-public.pem` + 检测与触发（工具落点＝属于 APK 的系统层，但本体不打包）。**判据随件下发**：每件「怎么判它可用」写在清单 `tools[].verify` 里（发布侧副本 `scripts/userland-verify.json`，发布器缺判据即拒绝发布），**C 的供给机制住 APK 侧共享层**（`container/app/src/main/assets/supply/**`），内核只留**检测 + 触发** ——
 C 是服务所有产品的共享层（判据：能不能共享，看是不是产品造成的）；机制若住内核，等于把共享层绑在某个产品上，
 换任何产品都要再来一遍（用户 2026-09-29 复核）。验收判据：**加/更新一件工具不需要内核 OTA、不需要 APK 更新（只发清单）**。
 搬迁期间以 `layout.json` 的 `deliveryDebt` 挂账（有到期日，机检会红到搬完为止）。
