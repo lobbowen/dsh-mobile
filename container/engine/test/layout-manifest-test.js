@@ -158,9 +158,10 @@ try {
   // 对照组自证：分段判据必须能识破人造的分段写法
   if (!new RegExp(segRe('a/b/c')).test("path.join(ROOT, 'a', 'b', 'c')")) problems.push('MOVED-PATH-RESIDUE 分段判据自证失败（恒空）');
 
-  // 规则 9：shebang 约定缺失的**补偿层**必须显式在册、有到期日。
-  // 判据为什么这样写：这不是「坏味道」而是**已知的待删物** —— 它存在一天，台账里就要有一天；
-  // D1 的 exec-path.c 落地并在真机判据上转绿后，删掉包装与这笔债（僵尸债会红，删不干净也会红）。
+  // 规则 9：**永久护栏** —— shebang 约定缺失的补偿层不许回潮。
+  // 背景：安卓没有 /usr/bin/env，我们曾给每件手写 `#!/system/bin/sh` 包装（补偿层）；
+  // 根因已由 D1 的 exec-path.c 补回（execve 前按调用方 PATH 解析 shebang），包装已删除。
+  // 这条护栏留着：谁再把「给每件手写包装」当解法加回来，CI 立刻红 —— 要修的是约定，不是加壳。
   const matPath = path.join(ROOT, 'kernel', 'src', 'supply', 'materialize.js');
   if (fs.existsSync(matPath) && readSafe(matPath).indexOf('#!/system/bin/sh') >= 0) add('SHEBANG-COMPENSATION', 'kernel/src/supply/materialize.js 仍在手写 sh 包装');
 

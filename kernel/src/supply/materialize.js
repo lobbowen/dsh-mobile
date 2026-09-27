@@ -10,8 +10,9 @@
 //   · **落位规则与能力判据**归 E（../assembler/supply-table.json）。
 //
 // 为什么不是 `npm i -g` 就完事：安卓上 npm 生成的 bin shim 是 `#!/usr/bin/env node`，
-//   而 /usr/bin/env 在安卓不存在 ⇒ execve 必 ENOENT。故工具本体装在共享 $PREFIX/lib/toolchain 下，
-//   入口由本模块写成 `#!/system/bin/sh` 包装；按 kind 决定 exec 什么（native = 直接 exec 自带二进制）。
+//   而 /usr/bin/env 在安卓不存在 ⇒ execve 必 ENOENT。**这条约定已由 D1 的 exec-path.c 补回**
+//   （execve 前按调用方 PATH 解析 shebang），所以本模块不再手写包装：件解包到 $PREFIX/lib/toolchain，
+//   再 **symlink** 到 $PREFIX/bin（与 node 同一手法）—— 生态怎么找它，它就怎么在。
 //
 // 三条**投放不变量**（真机定罪 2026-09-27：19.5MB/47MB 的半截 pnpm 被写成入口、静默失效）：
 //   ① 完整性：工件按 sha256+size **逐字节核对**，残件一律视为没装；
@@ -140,19 +141,37 @@ function runInstall(inv, args, env, timeoutMs) {
   });
 }
 
-function writeWrapperWithAliases(bin, body, prefix, aliases) {
-  let ok = writeWrapper(bin, body);
-  for (const a of (aliases || [])) ok = writeWrapper(path.join(prefix, 'bin', a), body) && ok;
+/**
+ * 把件暴露到 `$PREFIX/bin`：**symlink**，不是手写一层 sh 包装。
+ *
+ * 为什么删掉了包装（2026-09-27 清理）：包装是 shebang 约定缺失的**补偿层** —— 安卓没有 /usr/bin/env，
+ *   npm 生成的 bin shim（`#!/usr/bin/env node`）不可 execve，于是我们给每件手写一层 sh 包装（把 shebang 指向安卓自带的 sh）。
+ *   根因已由 D1 的 `exec-path.c` 补回（execve 前按调用方 PATH 解析 shebang 解释器与标准绝对路径），
+ *   补偿层随之删除：件怎么被生态找到，就让它以什么形态在（与 node 的 symlink 同一手法）。
+ *
+ * 边界（如实记）：脚本类入口（`#!/usr/bin/env X`）依赖上面那条兑现；在尚未装上带 exec-path.c 的 APK 的
+ *   设备上它会 ENOENT。当前清单里的件都是 native 入口（直接 exec 自带二进制），不受影响；
+ *   该前提由供给表的 `env-shebang` 格在真机上判定。
+ */
+function binLinkOk(bin, target) {
+  try { return fs.readlinkSync(bin) === target; } catch { return false; }
+}
+function linkIntoPrefix(prefix, names, target) {
+  let ok = true;
+  for (const n of names) {
+    const p = path.join(prefix, 'bin', n);
+    if (binLinkOk(p, target)) continue;
+    try {
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      try { fs.unlinkSync(p); } catch (_e) { /* 目标不存在即可 */ }
+      fs.symlinkSync(target, p);
+    } catch (_e) { ok = false; }
+  }
   return ok;
 }
 
-function writeWrapper(bin, body) {
-  try { fs.mkdirSync(path.dirname(bin), { recursive: true }); fs.writeFileSync(bin, body, { mode: 0o755 }); fs.chmodSync(bin, 0o755); return true; }
-  catch (e) { return false; }
-}
-
 /**
- * 确保一个共享工具在场（安装 + 写可执行入口），幂等。
+ * 确保一个共享工具在场（安装 + 建入口链），幂等。
  * @param {string} name 工具名（取自 C 的清单）
  * @param {{npmInvocation?:{bin:string,args:string[]}, runInstall?:Function, timeoutMs?:number}} [opts] 测试注入
  * @returns {Promise<{status:'already'|'applied'|'skipped'|'failed', name:string, bin?:string, entry?:string, reason?:string}>}
@@ -183,23 +202,14 @@ async function ensureSharedTool(name, opts) {
   // 完整性锚的**作用对象**不同：npm 件锚可执行文件本身；tarball 件锚压缩包（解包产物由包内布局 +
   // 原子落位保证），故入口只判「是不是文件」。
   const entrySpec = spec.provider === 'tarball' ? {} : spec;
-  const nodeBin = path.join(c.prefix, 'bin', 'node');
-  const execLine = spec.kind === 'native'
-    ? 'exec "' + entry + '" "$@"'
-    : 'exec "' + nodeBin + '" "' + entry + '" "$@"';
-  const body = '#!/system/bin/sh' + NL
-    + '# dsh toolchain 生成；安卓无 /usr/bin/env，npm 的 bin shim 不可 execve。' + NL
-    + execLine + NL;
+  // 暴露名：本名 + 件声明的别名（别名属件的内容，机制照单建链）。
+  const expose = [name].concat(aliases);
 
-  // ①③ 已就位 = 入口在场**且工件逐字节完整**；入口按内容判新鲜。
+  // ①③ 已就位 = 工件逐字节完整**且**入口链指向它（链按目标判新鲜：换了落位就重建）。
   if (await artifactOk(entry, entrySpec)) {
-    let binFresh = false;
-    try { binFresh = fs.readFileSync(bin, 'utf8') === body; } catch {}
-    if (binFresh) {
-      // 入口是新的，但别名可能缺（加别名那次升级）——一并补齐。
-      return writeWrapperWithAliases(bin, body, c.prefix, aliases) ? out('already', { bin, entry }) : out('failed', { reason: '写入口失败（见日志）' });
-    }
-    return writeWrapperWithAliases(bin, body, c.prefix, aliases) ? out('applied', { bin, entry }) : out('failed', { reason: '写入口失败（见日志）' });
+    const fresh = expose.every((n) => binLinkOk(path.join(c.prefix, 'bin', n), entry));
+    if (fresh) return out('already', { bin, entry });
+    return linkIntoPrefix(c.prefix, expose, entry) ? out('applied', { bin, entry }) : out('failed', { reason: '建入口链失败（见日志）' });
   }
 
   if (!acquireLock(lockFile)) return out('skipped', { reason: '另一个投放正在进行（锁被占）' });
@@ -254,7 +264,7 @@ async function ensureSharedTool(name, opts) {
     _provisioning -= 1;
     releaseLock(lockFile);
   }
-  return writeWrapperWithAliases(bin, body, c.prefix, aliases) ? out('applied', { bin, entry, aliases }) : out('failed', { reason: '写入口失败（见日志）' });
+  return linkIntoPrefix(c.prefix, expose, entry) ? out('applied', { bin, entry, aliases }) : out('failed', { reason: '建入口链失败（见日志）' });
 }
 
 /** C 层供给：把全部共享工具**在启动时**投放就位（不是「谁用到谁装」的惰性补丁）。

@@ -297,7 +297,7 @@
       "layer": "shared",
       "disposition": "waived",
       "waiver": {
-        "followUp": "C 层运行时供给批次",
+        "followUp": "随 APK 投放 CPython（jniLibs 放解释器与需 dlopen 的扩展、assets 放 stdlib）+ 接标准安装布局 + 真机判据",
         "verifiedAt": "2026-09-27",
         "expiresAt": "2026-12-26"
       },
