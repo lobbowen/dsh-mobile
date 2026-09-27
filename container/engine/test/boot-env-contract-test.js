@@ -76,8 +76,9 @@ check('GuestAdapter 声明 LANG=C.UTF-8（D1：安卓默认无 locale）', /"LAN
 check('boot-fixture.js 同构声明 LANG', /LANG:\s*'C\.UTF-8'/.test(boot));
 // D1：安卓语义垫片经 NODE_OPTIONS 预载（仅在 envShim 在场时注入，缺件不许让 node 起不来）。
 check('GuestAdapter 注入 NODE_OPTIONS=--require 垫片（仅 envShim 在场时）', /put\("NODE_OPTIONS"/.test(guest));
-// D1：/tmp → $TMPDIR 前缀重写的开关必须由生产装配声明（缺了等于 `/tmp` 依旧不可写）。
-check('GuestAdapter 声明 DSH_TMP_REDIRECT（D1 /tmp 重写开关）', /put\("DSH_TMP_REDIRECT"/.test(guest));
+// D1：/tmp → $TMPDIR 前缀重写**默认生效**，不再依赖会被剥离的 DSH_* 开关（真机定罪）。
+check('libdshposix 的 /tmp 重写不依赖被剥离的 DSH_TMP_REDIRECT 开关',
+  !/getenv\("DSH_TMP_REDIRECT"\)/.test(fs.readFileSync(path.join(ROOT, 'container', 'native', 'posix', 'open-fallback.c'), 'utf8')));
 
 // NODE_PATH 双段（内核自带在前、共享安装在后）—— 旧两侧各一段。
 check('GuestAdapter NODE_PATH 双段次序（kernelDir 前）',

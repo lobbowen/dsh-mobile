@@ -95,7 +95,13 @@ cd "$ROOT"
 # ═══════════════════════════════════════════════════════════════════
 # 2/3  Build capability binaries (bash / ripgrep / PTY probe)
 # ═══════════════════════════════════════════════════════════════════
-# android.9：终端三件套 + PTY 探针，全部 NDK 交叉编译**静态**产物：
+# android.9：终端三件套 + PTY 探针，NDK 交叉编译；**bash/rg 动态、ptyprobe 静态**：
+#   为什么 bash/rg 必须动态（2026-09-27 真机定罪）：容器全部 Linux 语义（link(2)、
+#   /tmp、祖先目录）都靠 libdshposix 经 LD_PRELOAD 落地，而 LD_PRELOAD 只对**动态**
+#   可执行文件生效。bash/rg 一旦静态，这套语义对最该生效的 shell 工具就是空的 ——
+#   实测 `echo > /tmp/x` 与 rg 的 link/临时路径全线失败。动态化后与本机 node 同一条通路。
+#   原 `--enable-static-link`/`+crt-static` 的理由是「绕开 linker/env 问题」，但那等于
+#   绕开我们自己的兼容层；代价（DT_NEEDED 走 bionic / libc++_shared）由既有 ELF 门禁兜住。
 #   · libbash.so   —— dsh-bash-local / dsh-terminal-bash 需要真 bash 二进制；
 #                      Android 无 /bin/bash，可 exec 目录只有 nativeLibraryDir
 #                      由 PrefixProvisioner 复制为 $PREFIX/bin 下的真名可执行文件。
@@ -138,7 +144,7 @@ check_so() { # $1=路径 $2=最小字节
   || { echo "[error] ptyprobe 编译失败（纯 C 静态，失败即环境问题）"; exit 1; }
 check_so "$J/libdshptyprobe.so" 1000 || exit 1
 
-# ── ② bash 5.2.15 静态交叉编译 ──
+# ── ② bash 5.2.15 交叉编译（**动态**：静态会让你 LD_PRELOAD 语义层对 shell 完全失效）──
 BASH_VER=5.2.15
 if curl -fsSL "https://ftp.gnu.org/gnu/bash/bash-${BASH_VER}.tar.gz" -o /tmp/bash.tar.gz \
    && echo "bash-${BASH_VER} sha256: $(sha256sum /tmp/bash.tar.gz | cut -d' ' -f1)" \
@@ -163,9 +169,9 @@ EOF
     set -e
     cd /tmp/bash-${BASH_VER}
     ./configure --host=aarch64-linux-android --build=x86_64-pc-linux-gnu \
-      --prefix=/native --disable-nls --enable-static-link --without-bash-malloc \
+      --prefix=/native --disable-nls --without-bash-malloc \
       CC="$CC" CFLAGS="-O2 -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types -Wno-error=incompatible-pointer-types" \
-      LDFLAGS="-static -Wl,--allow-multiple-definition" LIBS="/tmp/libtermcap_stub.a" \
+      LDFLAGS="-Wl,--allow-multiple-definition" LIBS="/tmp/libtermcap_stub.a" \
       bash_cv_getcwd_malloc=yes bash_cv_func_sigsetjmp=present \
       bash_cv_printf_a_format=yes bash_cv_dev_fd_standard=yes \
       bash_cv_unusable_rtsigs=no > /tmp/bash-configure.log 2>&1 \
@@ -194,7 +200,7 @@ else
   exit 1
 fi
 
-# ── ③ ripgrep 14.1.1（cargo 交叉到 aarch64-linux-android，静态 CRT）──
+# ── ③ ripgrep 14.1.1（cargo 交叉；**动态**，$ORIGIN 找同目录 libc++_shared.so）──
 if ! command -v cargo > /dev/null 2>&1; then
   echo "runner 无 cargo，装最小 rustup"
   curl -fsSf https://sh.rustup.rs -o /tmp/rustup.sh && sh /tmp/rustup.sh -y --profile minimal --default-toolchain stable >/dev/null
@@ -202,7 +208,7 @@ if ! command -v cargo > /dev/null 2>&1; then
 fi
 rustup target add aarch64-linux-android > /dev/null 2>&1 || echo "[warn] rustup target add 失败（可能非 rustup 安装）"
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC"
-export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS="-C target-feature=+crt-static"
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS="-C link-arg=-Wl,-rpath,\$ORIGIN"
 export CC_aarch64_linux_android="$CC" CXX_aarch64_linux_android="$CC" AR_aarch64_linux_android="$LLVM_AR"
 if cargo install --locked --version 14.1.1 ripgrep --target aarch64-linux-android --root /tmp/rgbin --no-track > /tmp/rg-build.log 2>&1; then
   cp -f /tmp/rgbin/bin/rg "$J/libdshrg.so"

@@ -109,8 +109,8 @@ object GuestAdapter {
             put("LD_PRELOAD", i.posixShim.absolutePath)
             // D1：/tmp 语义兑现 —— 安卓根只读，硬编码 /tmp 的脚本必失败；libdshposix 的
             // open/openat 把 /tmp 前缀重写到 $TMPDIR（见 container/native/posix/open-fallback.c）。
-            // 显式声明的开关：值为 0 即关闭（逃生阀）。
-            put("DSH_TMP_REDIRECT", "1")
+            // 默认生效、无开关：DSH 起子进程时会剥掉 `DSH_*`（真机定罪），开关到不了干活
+            // 的进程；生效与否由 libdshposix 看 TMPDIR 是否绝对路径决定。
             // $PREFIX：nativeLibraryDir 的原生件在这里以**真名**落地（bash/rg 是复制，
             // node 是指向 libnode.so 的链接 —— 判据见 PrefixProvisioner.linkNode），
             // 供 DSH 按名字解析，不改 DSH 内部路径（ADR-0001）。

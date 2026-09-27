@@ -25,8 +25,8 @@ static int raw_openat(int dirfd, const char *path, int flags, mode_t mode) {
 // 判据（设备端探针 tmp-redirect）：写 "/tmp/<name>" 后能在 $TMPDIR/<name> 读回。
 static const char *tmp_redirect(const char *path, char *buf, size_t bufsz) {
     if (path == 0 || path[0] != '/') return path;
-    const char *on = getenv("DSH_TMP_REDIRECT");
-    if (on == 0 || on[0] != '1') return path;
+    /* 默认生效：开关曾用 DSH_TMP_REDIRECT，但 DSH 起子进程时会剥掉 DSH_*（真机定罪），
+       靠开关 = 靠不住。这里只在 TMPDIR 缺失/非绝对时放行原路径。 */
     if (strncmp(path, "/tmp", 4) != 0) return path;
     if (path[4] != '/' && path[4] != '\0') return path; /* 排除 /tmpfoo */
     const char *tmp = getenv("TMPDIR");

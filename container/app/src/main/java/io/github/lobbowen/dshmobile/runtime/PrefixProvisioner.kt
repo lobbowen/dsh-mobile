@@ -18,6 +18,12 @@ object PrefixProvisioner {
         NativeAssetRegistry.libNameOf("bash") to "bash",
         NativeAssetRegistry.libNameOf("ripgrep") to "rg",
     )
+    // bash/rg 是**动态**可执行文件（见 scripts/build-native-capabilities.sh 的判据），
+    // 其中 rg 的 DT_NEEDED 含 libc++_shared.so；它按 `DT_RUNPATH=$ORIGIN` 找**同目录**的
+    // 依赖，所以必须把 libc++ 也放到 $PREFIX/bin，而不是只留在 nativeLibraryDir。
+    private val DEPS = listOf(
+        NativeAssetRegistry.LIBCXX.libName to NativeAssetRegistry.LIBCXX.libName,
+    )
     // libdshpty.so 来自 node-pty 配方，**不登记**在注册表里（它是软失败依赖件，
     // 登记就会把它纳入 NativePreparer 的探针与 native-assets 投影），故此处仍为字面量。
     private val LIBS = listOf("libdshpty.so" to "pty.node")
@@ -35,7 +41,7 @@ object PrefixProvisioner {
     fun provision(ctx: Context, nodeBin: File): List<String> {
         val ready = mutableListOf<String>()
         val nativeDir = ctx.applicationInfo.nativeLibraryDir
-        for ((items, dir) in listOf(BINS to binDir(ctx), LIBS to libDir(ctx))) {
+        for ((items, dir) in listOf(BINS to binDir(ctx), DEPS to binDir(ctx), LIBS to libDir(ctx))) {
             dir.mkdirs()
             val executable = items === BINS
             for ((libName, name) in items) {
@@ -80,5 +86,5 @@ object PrefixProvisioner {
     fun bashBin(ctx: Context): File? = File(binDir(ctx), "bash").takeIf { it.isFile }
 
     /** 供诊断比对：$PREFIX 里应当存在的条目（缺哪个 = 哪个能力没落地）。 */
-    val expected: List<String> = BINS.map { it.second } + LIBS.map { it.second } + NODE_BIN_NAME
+    val expected: List<String> = BINS.map { it.second } + DEPS.map { it.second } + LIBS.map { it.second } + NODE_BIN_NAME
 }
