@@ -68,6 +68,8 @@ function bootKernel(o) {
       .join(path.delimiter),
     HOME: o.kernelHome,
     TMPDIR: o.cacheDir || os.tmpdir(),
+    // D1 Linux 语义：与 GuestAdapter.baseEnv 同构（bionic 只认 C.UTF-8）。
+    LANG: 'C.UTF-8',
   }, o.npmEntry ? { DSH_NPM_ENTRY: o.npmEntry } : {}, o.extraEnv || {});
 
   const child = spawn(o.nodeBin, [entry, 'daemon'], {

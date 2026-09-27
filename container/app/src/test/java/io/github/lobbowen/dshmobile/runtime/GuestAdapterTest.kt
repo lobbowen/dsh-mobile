@@ -151,7 +151,7 @@ class GuestAdapterTest {
         val env = GuestAdapter.probePlan(base, File("/s.js"), null).env
         assertTrue("探针 env 出现了 DSH_*: " + env.keys.filter { it.startsWith("DSH_") },
             env.keys.none { it.startsWith("DSH_") })
-        assertEquals(setOf("HOME", "TMPDIR", "LD_LIBRARY_PATH", "NODE_BIN", "PATH", "NODE_PATH"), env.keys)
+        assertEquals(setOf("HOME", "TMPDIR", "LANG", "LD_LIBRARY_PATH", "NODE_BIN", "PATH", "NODE_PATH"), env.keys)
     }
 
     @Test fun 继承路径为空时PATH不发散() {

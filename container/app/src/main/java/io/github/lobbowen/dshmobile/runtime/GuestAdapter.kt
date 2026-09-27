@@ -121,6 +121,10 @@ object GuestAdapter {
         // 否则"tmp 写入被 SELinux 拒"这类故障只在一侧复现。
         "HOME" to base.filesDir.absolutePath,
         "TMPDIR" to base.cacheDir.absolutePath,
+        // Linux 语义（D1）：安卓/bionic 下 LANG/LC_* 全空，排序与字符类按 C locale 走，
+        // 多字节语义与预期不符（环境报告 P3-1）。C.UTF-8 是 bionic 认得的 UTF-8 名字。
+        // 只设 LANG、不设 LC_ALL —— 留出逐类覆盖的余地，也不覆盖调用方的显式选择。
+        "LANG" to "C.UTF-8",
         // 只服务 $PREFIX 下尚无 RUNPATH 的工具；libnode 的依赖由二进制的
         // DT_RUNPATH=$ORIGIN 负责（见 docs/architecture.md 第 3 节），这些工具按同一判据
         // 重编之后本键即可删除。
