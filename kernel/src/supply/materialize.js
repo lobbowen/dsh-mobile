@@ -33,7 +33,7 @@ const crypto = require('node:crypto');
 const zlib = require('node:zlib');
 const https = require('node:https');
 const { spawn } = require('node:child_process');
-const runtimeContract = require('./contract');
+const runtimeContract = require('../platform/runtime-contract');
 
 // 件目录（版本/url/sha/入口）**不在本模块**：它住在 C 的通道里的签名清单，由 ./manifest.js 取回并验签。
 

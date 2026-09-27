@@ -19,7 +19,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-prov-'));
 // 契约文件路径 = <DSH_SUPERVISOR_HOME>/supervisor/runtime.json；这里**故意不写**它。
 process.env.DSH_SUPERVISOR_HOME = tmp;
-const m = require('../../container/app/src/main/assets/supply/materialize');
+const m = require('../src/supply/materialize');
 
 (async () => {
   const events = [];

@@ -71,7 +71,6 @@ class NodeRuntimeService : Service() {
     @Volatile private var keepRunning = true
     /** 设备事实类探针（预置体检/写路径/PTY）每进程只跑一次。 */
     @Volatile private var probesDone = false
-    @Volatile private var supplyStarted = false
 
     /** 暂存清扫的每进程一次闸门：boot 可以重试，重复扫只会把同一件事写进诊断好几遍。 */
     @Volatile private var stagingSwept = false
@@ -213,34 +212,6 @@ class NodeRuntimeService : Service() {
             // 但必须**先于**任何 spawn 上屏 —— 内核起不来时屏幕要能回答"设备缺哪环"。
             // （docs/runbook/provisioning.md §4；真机报告「全盘不可写 EACCES」的定位探针；
             //   PTY 判定实验见 docs/components/native.md。）
-            // C 层共享供给：**容器执行**（机制随 APK 走 —— C 是服务所有产品的共享层，内核只检测/触发）。
-            //   异步、不阻塞启动：供给可能下载几十 MB；探针照旧先跑，下一拍就看到已就位的真相。
-            //   prefix / npm 入口 / node 路径经环境交给它（容器本来就是这些事实的写者）。
-            if (!supplyStarted) {
-                supplyStarted = true
-                Thread {
-                    try {
-                        val entry = SupplyProvisioner.stage(this) ?: return@Thread
-                        val node = java.io.File(PrefixProvisioner.binDir(this), "node")
-                        if (!node.isFile) return@Thread
-                        val npmEntry = try {
-                            org.json.JSONObject(java.io.File(filesDir, "supervisor/runtime.json").readText()).optString("npmEntry")
-                        } catch (_: Throwable) { "" }
-                        val pb = ProcessBuilder(node.absolutePath, entry.absolutePath)
-                        pb.environment()["DSH_SUPPLY_PREFIX"] = PrefixProvisioner.root(this).absolutePath
-                        pb.environment()["DSH_SUPPLY_NODE_BIN"] = node.absolutePath
-                        if (npmEntry.isNotEmpty()) pb.environment()["DSH_SUPPLY_NPM_ENTRY"] = npmEntry
-                        pb.redirectErrorStream(true)
-                        val p = pb.start()
-                        p.inputStream.readBytes()
-                        val rc = p.waitFor()
-                        RuntimeDiagnostics.append(this, "supply", rc == 0, "C 层共享供给退出码 $rc", entry.absolutePath)
-                    } catch (e: Throwable) {
-                        RuntimeDiagnostics.append(this, "supply", false, "C 层共享供给异常", e.message ?: "")
-                    }
-                }.start()
-            }
-
             if (!probesDone) {
                 probesDone = true
                 try {

@@ -14,7 +14,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const m = require('../../container/app/src/main/assets/supply/materialize');
+const m = require('../src/supply/materialize');
 
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
