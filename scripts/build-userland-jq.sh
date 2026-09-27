@@ -103,13 +103,21 @@ if ! make -j2 >/dev/null; then
   exit 1
 fi
 
-# 真身在 .libs/（构建目录里的同名 jq 是 libtool 的包装脚本）
-if [ ! -x .libs/jq ]; then
-  echo "::error title=找不到真身::.libs/jq 不存在（libtool 布局变了？）"
+# 真身按 **ELF** 挑（两种 libtool 布局都吃过）：
+#   · 共享构建：构建目录里的 jq 是包装脚本，真身在 .libs/jq；
+#   · 静态构建（我们现在的配置）：没有包装，真身就是构建目录里的 jq。
+BIN_SRC=""
+for cand in .libs/jq jq; do
+  if [ -f "$cand" ] && "$READELF_BIN" -h "$cand" >/dev/null 2>&1; then BIN_SRC="$cand"; break; fi
+done
+if [ -z "$BIN_SRC" ]; then
+  echo "::error title=找不到 ELF 真身::候选都不是 ELF（libtool 包装脚本不算）"
   ls -la .libs 2>/dev/null | head -n 10 || true
+  file jq 2>/dev/null || true
   exit 1
 fi
-cp .libs/jq "$ROOT_DIR/$OUT/bin/jq"chmod 0755 "$ROOT_DIR/$OUT/bin/jq"
+echo "[jq] 真身：$BIN_SRC"
+cp "$BIN_SRC" "$ROOT_DIR/$OUT/bin/jq"chmod 0755 "$ROOT_DIR/$OUT/bin/jq"
 # 自检：产物必须是 ELF（不是包装脚本、不是空壳）——fail fast，别等 verify 那一关才发现。
 if ! "$READELF_BIN" -h "$ROOT_DIR/$OUT/bin/jq" >/dev/null 2>&1; then
   echo "::error title=产物不是 ELF::$(file -b "$ROOT_DIR/$OUT/bin/jq")"
