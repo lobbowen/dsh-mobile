@@ -417,6 +417,18 @@ class NativeManager {
    * @returns {object|null} 本轮核验汇总（null = 本轮还没跑过） */
   verifyNativeCapabilities(fresh) {
     if (this._capsRan && !fresh) return this.nativeCaps;
+    // 共享工具投放进行中：本轮**不核验**，也不置 _capsRan（下一拍/下次 spawn 重试）。
+    // 为什么：投放是重 IO（47MB 解包），与它抢 CPU 会把探针饿成 30s 超时（真机定罪），
+    // 那会把「还没装好」误报成「能力坏了」。
+    try {
+      if (require('../platform/toolchain').isProvisioning()) {
+        const units = {};
+        for (const u of this._supplyUnits()) units[u.id] = { id: u.id, ok: null, detail: '共享工具投放进行中：本轮不核验', at: new Date().toISOString() };
+        const skip = { overall: null, units, note: '共享工具投放进行中' };
+        this.nativeCaps = skip;
+        return skip;
+      }
+    } catch (_) {}
     this._capsRan = true;
     let res;
     try {
