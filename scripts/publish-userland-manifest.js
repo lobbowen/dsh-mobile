@@ -40,12 +40,16 @@ function toolsFromDist() {
   if (!fs.existsSync(DIST)) throw new Error('dist 目录不存在: ' + DIST);
   const out = [];
   for (const f of fs.readdirSync(DIST)) {
-    const m = /^userland-([a-z0-9-]+)-(.+)-android-arm64\.tar\.gz$/.exec(f);
+    // 命名契约（内容寻址）：userland-<name>-<ver>-<sha12>-android-arm64.tar.gz
+    const m = /^userland-([a-z0-9-]+)-([0-9][^-]*)-([0-9a-f]{12})-android-arm64\.tar\.gz$/.exec(f);
     if (!m) continue;
     const name = m[1];
     const ver = m[2];
+    const claimed = m[3];
     const buf = fs.readFileSync(path.join(DIST, f));
     if (buf.length === 0) throw new Error('0 字节产物: ' + f);
+    const real = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 12);
+    if (real !== claimed) throw new Error('文件名里的内容哈希与实际不符: ' + f + '（名 ' + claimed + ' vs 实 ' + real + '）');
     out.push({
       name, provider: 'tarball', version: ver, kind: 'native',
       url: BASE + '/userland/' + f,
