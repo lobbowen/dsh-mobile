@@ -102,9 +102,18 @@ if ! make -j2 > "$ROOT_DIR/work/curl-build.log" 2>&1; then
 echo "[curl] 构建完成，取真身"
 CAND=""
 for c in "$ROOT_DIR/work/curl-src/src/.libs/curl" "$ROOT_DIR/work/curl-src/src/curl"; do
-  if [ -f "$c" ] && "$TC_DIR/llvm-readelf" -h "$c" 2>/dev/null | grep -q "AArch64"; then CAND="$c"; break; fi
+  if [ -f "$c" ] && file -b "$c" 2>/dev/null | grep -q "aarch64"; then CAND="$c"; break; fi
 done
-if [ -z "$CAND" ]; then echo "::error title=没找到 aarch64 的 curl 真身::可能是 libtool 包装脚本"; ls -la "$ROOT_DIR/work/curl-src/src" | head; exit 1; fi
+if [ -z "$CAND" ]; then
+  echo "::error title=没找到 aarch64 的 curl 真身::下面列出 src 与 src/.libs（诊断不许走管道 ——
+    set -o pipefail 下 ls|head 会以 SIGPIPE 判死整脚本，把真因盖住，本批已踩过一次）"
+  ls -la "$ROOT_DIR/work/curl-src/src" || true
+  echo "---- src/.libs ----"
+  ls -la "$ROOT_DIR/work/curl-src/src/.libs" || true
+  echo "---- file 判定 ----"
+  file -b "$ROOT_DIR/work/curl-src/src/curl" 2>/dev/null || true
+  exit 1
+fi
 cp "$CAND" "$ROOT_DIR/$OUT/bin/curl"
 chmod 0755 "$ROOT_DIR/$OUT/bin/curl"
 if [ -n "${LLVM_STRIP:-}" ] && [ -x "${LLVM_STRIP}" ]; then "$LLVM_STRIP" "$ROOT_DIR/$OUT/bin/curl" && echo "[curl] 已 strip"; else echo "::error title=没有 LLVM_STRIP::不许产出臃肿件"; exit 1; fi
