@@ -18,6 +18,9 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/build-userland.yml'
+      - 'scripts/build-userland-*.sh'
+      - 'scripts/verify-userland-artifact.sh'
+      - 'scripts/package-userland.sh'
 
 permissions:
   contents: write
