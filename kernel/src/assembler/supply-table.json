@@ -341,15 +341,15 @@
       "bin": "java",
       "layer": "seed",
       "disposition": "waived",
-      "capability": "Java 运行时（JVM：跑 Java 负载的地板，与 node/python/go 同级）",
+      "capability": "Java 运行时（跑 Java 负载的地板，与 node/python/go 同级）",
       "required": false,
-      "carrier": "未定（未查证）",
-      "why": "【产品形态】运行时 ⇒ **打进 APK**（不进通道）。 【未查证·如实记录】我尚未查清安卓上 JVM 的现实路线与版本，**不填数字**。待查项：   ① 选型：OpenJDK 的 Android/bionic 移植（如 Termux 的 openjdk 系列） vs 复用系统 ART（ART 跑的是 dex，不等于通用 JVM）；   ② 版本与许可（GPLv2+CE / Classpath 例外）与分发形态；   ③ 体积（JDK vs 精简 JRE）与 APK 预算；   ④ 依赖件（libiconv/zlib/alsa/字体等）与本容器 D1 语义的交互。",
+      "carrier": "未定：系统 ART（app_process + dex） vs 按需 JVM",
+      "why": "【事实 1·系统里已经有能跑 Java main 的东西】AOSP `frameworks/base/cmds/app_process/app_main.cpp` 的用法即 `app_process [java-options] cmd-dir start-class-name [options]`：它 `FindClass` 后调该类的 `main`。   但 ART（含 app_process）**只吃 dex/oat**，纯 `.class` 的 jar 要先经 d8/r8 转成 dex —— 这是 Android 的原生路径，不是 JVM。 【事实 2·完整 JVM 的真实代价】Termux 官方 aarch64 索引实测：openjdk-17 17.0.20 = 包 91.8 MiB / 装后 212.9 MiB；openjdk-21 21.0.12 = 101.2 / 243.7；openjdk-25 25.0.4 = 111.4 / 253.3（依赖 libandroid-shmem、libandroid-spawn、libiconv、libjpeg-turbo、zlib、littlecms、alsa-plugins），且是 **JDK**（含 javac/jshell）。 【事实 3·量级对比】CPython 官方 Android 包 21.4 MiB（解压 81.7 MiB）⇒ JVM 是另一个量级；当前 APK 才 50.7 MiB，放一个 JVM 直接翻三倍。 【据此的三条路】   a. **不装 JVM，用 ART**：适合跑「我们自己的 Java 组件」或「已 dex 化的负载」；代价是编译链在别处（或用 d8，而 d8 本身要 JVM）。      前提必须真机实测：app 域（untrusted_app/targetSdk28）能否 exec `/system/bin/app_process` 并加载 dex —— 这条没实测之前不能算数。   b. **按需装 JVM**（通道/工具，不进 APK）：能跑 `java -jar`、javac，代价 95–111 MiB —— 与「运行时进 APK」冲突，除非接受体积。   c. **明确不做通用 Java 负载**：把它从基础运行时里去掉，等有真实需求再说（自研组件仍可走 ART）。 【本仓倾向】建议 **a + c 组合**：基础包不放 JVM（体积），需要时优先 ART 路线；真要通用 JVM 再作为**按需件**（同一个尺子：装上去就有，只是更大）。",
       "verify": {
         "notApplicable": "未查证且未投放：先查明再定判据（不写假判据）"
       },
       "waiver": {
-        "followUp": "查证 Android 上 JVM 的现实选型（OpenJDK/bionic 移植 vs 复用 ART）、版本、许可、体积与依赖，再定件集",
+        "followUp": "真机实测 app_process 在 app 域能否 exec 并跑一个 dex main class；据此在 ART 路线与按需 JVM 之间定夺（若选 JVM，另需件集与体积预算）",
         "verifiedAt": "2026-09-27",
         "expiresAt": "2026-12-26"
       }
