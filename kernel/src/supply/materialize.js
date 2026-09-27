@@ -158,6 +158,8 @@ function binLinkOk(bin, target) {
 }
 function linkIntoPrefix(prefix, names, target) {
   let ok = true;
+  // 目标要可执行（以前这由包装体自带；改 symlink 后补在这里，免得暴露出一个不可执行的入口）。
+  try { fs.chmodSync(target, 0o755); } catch (_e) { /* 不可改也不致命：判据会如实报 */ }
   for (const n of names) {
     const p = path.join(prefix, 'bin', n);
     if (binLinkOk(p, target)) continue;
