@@ -128,7 +128,9 @@ export PKG_CONFIG_PATH="$DEPS/lib/pkgconfig"
   --disable-ftp --disable-file --disable-dict --disable-telnet --disable-tftp \
   --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-rtsp \
   --enable-http --enable-https \
-  CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib" > "$ROOT_DIR/work/curl-configure.log" 2>&1 || { echo "::error title=curl Configure 失败::最后 30 行"; tail -n 40 "$ROOT_DIR/work/curl-configure.log" || true; exit 1; }
+  LIBS="-ldl" CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib" > "$ROOT_DIR/work/curl-configure.log" 2>&1 || { echo "::error title=curl Configure 失败::最后 30 行"; grep -i openssl "$ROOT_DIR/work/curl-configure.log" | tail -n 20 || true
+echo "---- 日志最后 15 行 ----"
+tail -n 15 "$ROOT_DIR/work/curl-configure.log" || true; exit 1; }
 CURL_LOG="$ROOT_DIR/work/curl-build.log"
 if ! make -j2 > "$CURL_LOG" 2>&1; then
   echo "::error title=curl 编译失败::最后 30 行"
