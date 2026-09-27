@@ -92,7 +92,10 @@ cd "$ROOT_DIR/work/openssl"
 export ANDROID_API=21
 export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
 CFG_LOG="$ROOT_DIR/work/openssl-configure.log"
-if ! PATH="$TC_DIR:$PATH" ./Configure android-arm64 --prefix="$DEPS" --openssldir="$DEPS/ssl" no-shared no-tests > "$CFG_LOG" 2>&1; then
+# PATH 必须**导出**：openssl 的 Makefile 里 CC 是裸名（aarch64-linux-android21-clang），
+#   make 时若 PATH 里没有 NDK 的 bin，就是满屏 `Error 127`（上轮实证：apps/lib/*.o）。
+export PATH="$TC_DIR:$PATH"
+if ! ./Configure android-arm64 --prefix="$DEPS" --openssldir="$DEPS/ssl" no-shared no-tests > "$CFG_LOG" 2>&1; then
   echo "::error title=openssl Configure 失败::下面是最后 30 行（真正的致命行在这里）"
   tail -n 30 "$CFG_LOG" || true
   exit 1
