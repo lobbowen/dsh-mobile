@@ -171,6 +171,16 @@ try {
   const matMechPath = path.join(ROOT, 'kernel', 'src', 'supply', 'materialize.js');
   if (fs.existsSync(matMechPath)) add('SUPPLY-MECH-IN-KERNEL', 'kernel/src/supply/materialize.js');
 
+  // 规则 11：C 的供给层**必须是 Android 原生实现** —— 它已属 APK 层，职责是向下供给；
+  //   再借 node/运行时等于又多欠一层依赖（用户 2026-09-29 复核：「不应该用 node，而是用安卓原生的逻辑」）。
+  //   判据：APK 侧供给实现里不得出现 JS 文件（原生实现是 Kotlin/Android API）。
+  const supplyNativeDir = path.join(ROOT, 'container', 'app', 'src', 'main', 'assets', 'supply');
+  if (fs.existsSync(supplyNativeDir)) {
+    for (const f of fs.readdirSync(supplyNativeDir)) {
+      if (/\.js$/i.test(f)) add('SUPPLY-NOT-NATIVE', 'container/app/src/main/assets/supply/' + f);
+    }
+  }
+
   // 台账自净：① 未登记的违规 → 红；② 已消失的债务 → 红（防僵尸豁免）；③ 过期/缺字段 → 红
   const coveredBy = (v) => DEBT.some((d) => d.rule === v.rule && (!d.path || v.detail === d.path || v.detail.endsWith(d.path)));
   for (const v of violations) if (!coveredBy(v)) problems.push('交付分层违规（未登记）: ' + v.rule + ' ' + v.detail);
