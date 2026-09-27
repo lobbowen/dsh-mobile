@@ -66,8 +66,18 @@ fi
 echo "[git] NDK root = $ANDROID_NDK_ROOT"
 
 # ① zlib（curl 与 git 都要它）
-if ! curl -fsSL "https://zlib.net/fossils/zlib-$ZLIB_VERSION.tar.gz" -o "$ROOT_DIR/work/zlib.tar.gz"; then
-  echo "::error title=zlib 取不到::zlib-$ZLIB_VERSION 源码"
+# 多来源 + 解包前先验 tar：zlib.net 是常见的不稳定源（CI 实证：同一 URL 上一轮成功、这一轮给回非 gzip 内容）。
+ZLIB_URLS="https://zlib.net/fossils/zlib-$ZLIB_VERSION.tar.gz https://github.com/madler/zlib/archive/refs/tags/v$ZLIB_VERSION.tar.gz"
+ZLIB_OK=0
+for u in $ZLIB_URLS; do
+  if curl -fsSL "$u" -o "$ROOT_DIR/work/zlib.tar.gz" && tar tzf "$ROOT_DIR/work/zlib.tar.gz" >/dev/null 2>&1; then
+    ZLIB_OK=1
+    echo "[git] zlib 源码来自 $u"
+    break
+  fi
+done
+if [ "$ZLIB_OK" != "1" ]; then
+  echo "::error title=zlib 取不到::所有来源都失败或内容不是 tar.gz"
   exit 1
 fi
 rm -rf "$ROOT_DIR/work/zlib" && mkdir -p "$ROOT_DIR/work/zlib"
@@ -85,6 +95,7 @@ if ! curl -fsSL "https://github.com/openssl/openssl/releases/download/openssl-$O
   exit 1
 fi
 rm -rf "$ROOT_DIR/work/openssl" && mkdir -p "$ROOT_DIR/work/openssl"
+tar tzf "$ROOT_DIR/work/openssl.tar.gz" >/dev/null 2>&1 || { echo "::error title=openssl 源码不是 tar.gz::下载被墙或返回了错误页"; exit 1; }
 tar xzf "$ROOT_DIR/work/openssl.tar.gz" -C "$ROOT_DIR/work/openssl" --strip-components=1
 cd "$ROOT_DIR/work/openssl"
 # openssl 的 android 配置认 ANDROID_NDK_ROOT / ANDROID_NDK_HOME 与 ANDROID_API；
@@ -115,6 +126,7 @@ if ! curl -fsSL "https://curl.se/download/curl-$CURL_VERSION.tar.gz" -o "$ROOT_D
   exit 1
 fi
 rm -rf "$ROOT_DIR/work/curl" && mkdir -p "$ROOT_DIR/work/curl"
+tar tzf "$ROOT_DIR/work/curl.tar.gz" >/dev/null 2>&1 || { echo "::error title=curl 源码不是 tar.gz::下载被墙或返回了错误页"; exit 1; }
 tar xzf "$ROOT_DIR/work/curl.tar.gz" -C "$ROOT_DIR/work/curl" --strip-components=1
 cd "$ROOT_DIR/work/curl"
 # openssl 的 install_sw 会装 .pc 文件；curl 的 Configure 靠 pkg-config 认它最稳
