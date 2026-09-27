@@ -177,6 +177,54 @@ function runInstall(inv, args, env, timeoutMs) {
 function binLinkOk(bin, target) {
   try { return fs.readlinkSync(bin) === target; } catch { return false; }
 }
+/**
+ * 应用件里的 link-farm.txt（每行：树内相对路径 <TAB> 符号链接目标）。
+ *
+ * 为什么让**件声明、设备生成**：git 的 libexec/git-core 有约 170 个子命令，全是指向同一二进制的链接。
+ *   打包时若落成副本，件体积爆炸（CI 实测 1.29 GB）；只带名单 + 一个二进制则只有几 MB。
+ *   链接是**可推导的**，就不该进包 —— 这跟「shebang 约定该补在 D1，而不是给每件手写包装」是同一条纪律。
+ *
+ * 安全：路径与目标都必须是相对路径、不含 ..（与解包器的链接规则一致）。
+ */
+function applyLinkFarm(rootDir) {
+  let txt = '';
+  try { txt = fs.readFileSync(path.join(rootDir, 'link-farm.txt'), 'utf8'); } catch (_e) { return null; }
+  let applied = 0, skipped = 0;
+  for (const line of txt.split('\n')) {
+    const t = line.replace(/\r$/, '');
+    if (!t || t.charAt(0) === '#') continue;
+    const parts = t.split('\t');
+    if (parts.length !== 2) { skipped += 1; continue; }
+    const rel = parts[0].trim(), target = parts[1].trim();
+    const bad = !rel || !target || rel.indexOf('..') >= 0 || target.indexOf('..') >= 0 || rel.charAt(0) === '/' || target.charAt(0) === '/';
+    if (bad) { skipped += 1; continue; }
+    const dest = path.join(rootDir, rel);
+    try {
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      try { fs.unlinkSync(dest); } catch (_e2) { /* 不存在即可 */ }
+      fs.symlinkSync(target, dest);
+      applied += 1;
+    } catch (_e2) { skipped += 1; }
+  }
+  return { applied, skipped };
+}
+
+/** 链接农场是否已就位（逐条比对 readlink），用于「已就位」路径的修补判断。 */
+function linkFarmOk(rootDir) {
+  let txt = '';
+  try { txt = fs.readFileSync(path.join(rootDir, 'link-farm.txt'), 'utf8'); } catch (_e) { return true; }
+  for (const line of txt.split('\n')) {
+    const t = line.replace(/\r$/, '');
+    if (!t || t.charAt(0) === '#') continue;
+    const parts = t.split('\t');
+    if (parts.length !== 2) continue;
+    const rel = parts[0].trim(), target = parts[1].trim();
+    if (!rel || !target) continue;
+    try { if (fs.readlinkSync(path.join(rootDir, rel)) !== target) return false; } catch (_e2) { return false; }
+  }
+  return true;
+}
+
 function linkIntoPrefix(prefix, names, target) {
   let ok = true;
   // 目标要可执行（以前这由包装体自带；改 symlink 后补在这里，免得暴露出一个不可执行的入口）。
@@ -230,9 +278,11 @@ async function ensureSharedTool(name, opts) {
 
   // ①③ 已就位 = 工件逐字节完整**且**入口链指向它（链按目标判新鲜：换了落位就重建）。
   if (await artifactOk(entry, entrySpec)) {
-    const fresh = expose.every((n) => binLinkOk(path.join(c.prefix, 'bin', n), entry));
+    const fresh = expose.every((n) => binLinkOk(path.join(c.prefix, 'bin', n), entry)) && linkFarmOk(root);
     if (fresh) return out('already', { bin, entry });
-    return linkIntoPrefix(c.prefix, expose, entry) ? out('applied', { bin, entry }) : out('failed', { reason: '建入口链失败（见日志）' });
+    // 入口链或链接农场有缺项（加了子命令、或上次崩在中间）—— 一并补齐。
+    const repaired = applyLinkFarm(root);
+    return linkIntoPrefix(c.prefix, expose, entry) ? out('applied', { bin, entry, links: repaired ? repaired.applied : 0 }) : out('failed', { reason: '建入口链失败（见日志）' });
   }
 
   if (!acquireLock(lockFile)) return out('skipped', { reason: '另一个投放正在进行（锁被占）' });
@@ -279,6 +329,9 @@ async function ensureSharedTool(name, opts) {
     // ② 原子落位：单写者已持锁，先清终态再 rename（窗口极小且无读方在写）。
     fs.rmSync(root, { recursive: true, force: true });
     fs.renameSync(staging, root);
+    // 件声明的链接农场：解包后按需生成（git 的子命令农场就靠它，避免把约 170 个链接打进包）。
+    // 失败不致命：入口链那一关会如实报出结局。
+    applyLinkFarm(root);
     try { fs.chmodSync(entry, 0o755); } catch {}
   } catch (e) {
     fs.rmSync(staging, { recursive: true, force: true });

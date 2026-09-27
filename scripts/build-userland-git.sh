@@ -96,6 +96,43 @@ if [ ! -d "$ROOT_DIR/$OUT/libexec/git-core" ]; then
   exit 1
 fi
 rm -f "$ROOT_DIR/$OUT/bin/git-credential-"* 2>/dev/null || true
+
+# ── 链接农场：只带名单，链接在设备上生成 ────────────────────────────────
+#   install 可能把 libexec/git-core 的子命令做成**副本**（与 bin/git 同尺寸），那会让件体积爆炸
+#   （CI 实测 1.29 GB）。把可推导的链接抽成名单、删掉副本；设备侧由物化器按名单建链。
+#   为什么这样对：链接是**可推导的**，就不该进包 —— 与「shebang 约定补在 D1 而不是给每件手写包装」同一条纪律。
+GITCORE="$ROOT_DIR/$OUT/libexec/git-core"
+BINSIZE=$(stat -c%s "$ROOT_DIR/$OUT/bin/git")
+FARM="$ROOT_DIR/$OUT/link-farm.txt"
+: > "$FARM"
+LINKED=0
+SLIMMED=0
+KEPT=0
+for f in "$GITCORE"/*; do
+  [ -e "$f" ] || continue
+  NAME=$(basename "$f")
+  if [ -L "$f" ]; then
+    TGT=$(readlink "$f")
+    printf '%s\t%s\n' "libexec/git-core/$NAME" "$TGT" >> "$FARM"
+    LINKED=$((LINKED+1))
+  elif [ -f "$f" ]; then
+    FSIZE=$(stat -c%s "$f")
+    if [ "$FSIZE" = "$BINSIZE" ]; then
+      printf '%s\t%s\n' "libexec/git-core/$NAME" "../../bin/git" >> "$FARM"
+      rm -f "$f"
+      SLIMMED=$((SLIMMED+1))
+    else
+      KEPT=$((KEPT+1))
+    fi
+  fi
+done
+echo "[git] 链接农场：符号链接 $LINKED、副本瘦身 $SLIMMED、真独立文件 $KEPT"
+TREE=$(du -sm "$ROOT_DIR/$OUT" | cut -f1)
+echo "[git] 件树体积 ${TREE} MiB"
+if [ "$TREE" -gt 60 ]; then
+  echo "::error title=件太大::${TREE} MiB —— 链接农场没生效？（bin/git $BINSIZE 字节）"
+  exit 1
+fi
 echo "$GIT_VERSION" > "$ROOT_DIR/$OUT/git.version"
 SIZE=$(stat -c%s "$ROOT_DIR/$OUT/bin/git")
 SUBS=$(ls "$ROOT_DIR/$OUT/libexec/git-core" | wc -l)
