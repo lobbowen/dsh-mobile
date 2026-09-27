@@ -69,30 +69,47 @@ fi
 echo "[jq] 源码树就位（含 vendored oniguruma）"
 
 cd work/jq
-export CC AR="$AR_BIN" RANLIB="$RANLIB_BIN"
-export CFLAGS="-O2 -DNDEBUG"
-echo "[jq] configure（host=aarch64-linux-android, oniguruma=builtin）"
-./configure --host=aarch64-linux-android --build=x86_64-pc-linux-gnu \
-  --with-oniguruma=builtin --disable-docs --disable-valgrind \
-  CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" >/dev/null
-echo "[jq] make（默认 all：vendored oniguruma 挂在 SUBDIRS 递归里，只 make jq 会跳过它）"
-if ! make -j2; then
-  echo "::error title=make 失败::见上。下面打出 vendored oniguruma 的形态，便于判断是不是需要 autoreconf"
-  ls -la vendor/oniguruma 2>/dev/null | head -n 20 || true
-  ls vendor/oniguruma/src 2>/dev/null | head -n 10 || true
+export CC AR="$AR_BIN" RANLIB="$RANLIB_BIN" CFLAGS="-O2 -DNDEBUG"
+CONFIGURE_COMMON="--host=aarch64-linux-android --build=x86_64-pc-linux-gnu"
+
+# ① vendored oniguruma：**静态**编到自己的 prefix（单文件件不许带 .so 出门）
+ONIG_PREFIX="$ROOT_DIR/work/onig"
+echo "[jq] 静态编 vendored oniguruma → $ONIG_PREFIX"
+cd "$ROOT_DIR/work/jq/vendor/oniguruma"
+if [ ! -x ./configure ]; then
+  echo "[jq] vendor/oniguruma 没有 configure，用 autoreconf 生成"
+  if ! autoreconf -i >/dev/null 2>&1; then
+    echo "::error title=autoreconf 失败::vendor/oniguruma 需要 autoconf/automake/libtool"
+    exit 1
+  fi
+fi
+./configure $CONFIGURE_COMMON --prefix="$ONIG_PREFIX" --disable-shared --enable-static \
+  --disable-dependency-tracking CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" >/dev/null
+if ! make -j2 >/dev/null; then
+  echo "::error title=oniguruma 编译失败::静态编不过，jq 就会带 .so 出门，不可接受"
+  exit 1
+fi
+make install >/dev/null
+echo "[jq] oniguruma 就位：$(ls "$ONIG_PREFIX/lib" | tr '\n' ' ')"
+
+# ② jq：静态链 libjq 与 oniguruma，只留系统库依赖
+cd "$ROOT_DIR/work/jq"
+echo "[jq] configure jq（--disable-shared --enable-static --with-oniguruma=<prefix>）"
+./configure $CONFIGURE_COMMON --disable-shared --enable-static --disable-docs \
+  --with-oniguruma="$ONIG_PREFIX" CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" >/dev/null
+echo "[jq] make"
+if ! make -j2 >/dev/null; then
+  echo "::error title=make 失败::见上"
   exit 1
 fi
 
-# libtool 会在构建目录里留一个**同名包装脚本** `jq`（设 LD_LIBRARY_PATH 后 exec .libs/jq）；
-# 真身是 ELF，在 .libs/jq。上一轮 CI 就是把包装脚本当产物拷出去了（verify 立刻红：Bourne-Again shell script）。
+# 真身在 .libs/（构建目录里的同名 jq 是 libtool 的包装脚本）
 if [ ! -x .libs/jq ]; then
   echo "::error title=找不到真身::.libs/jq 不存在（libtool 布局变了？）"
   ls -la .libs 2>/dev/null | head -n 10 || true
   exit 1
 fi
-cp .libs/jq "$ROOT_DIR/$OUT/bin/jq"
-cd "$ROOT_DIR"
-chmod 0755 "$ROOT_DIR/$OUT/bin/jq"
+cp .libs/jq "$ROOT_DIR/$OUT/bin/jq"chmod 0755 "$ROOT_DIR/$OUT/bin/jq"
 # 自检：产物必须是 ELF（不是包装脚本、不是空壳）——fail fast，别等 verify 那一关才发现。
 if ! "$READELF_BIN" -h "$ROOT_DIR/$OUT/bin/jq" >/dev/null 2>&1; then
   echo "::error title=产物不是 ELF::$(file -b "$ROOT_DIR/$OUT/bin/jq")"
