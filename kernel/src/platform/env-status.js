@@ -1,11 +1,17 @@
 'use strict';
 
-// EnvCatalog：声明式环境目录（Phase2 收口）。
-// 每条目 = { id, label, required, probe() → ok?detail }；状态机 ok/missing/unconfigured。
-// 消费方：supervisor.envStatus/dshenvStatus/面板环境卡；壳负责 Node 前置安装，catalog 负责陈述+判定。
+// EnvStatus：环境状态**投影**（2026-09-27 单一来源收口）。
+//
+// 目录（有哪些环境条目、各自可执行名、是否就绪前置）**只有一份**：E 的登记表
+//   `../assembler/supply-table.json#envUnits`（它同时带处置、能力判据与落位出口）。
+// 本模块**不再自持条目表** —— 只做两件事：① 把目录投影成面板/守卫要的三态视图；
+//   ② 提供探测实现（版本查询；node 另需达壳投放的最低门槛）。
+// 为什么原来有两份就是债：同一件事（环境里有没有这个件）在两个地方各说一遍，
+//   加一件工具要改两处、两处还会漂移（正是「一把尺子」纪律要消掉的东西）。
+// 消费方：supervisor.envStatus/dshenvStatus/面板环境卡。
 
-const fs = require('node:fs');
 const ex = require('./exec');
+const TABLE = require('../assembler/supply-table.json');
 // 单一事实源：node/npm 的可执行形态由容器投放的运行契约决定（安卓 W^X 下
 // npm 只能由 node 代跑），ambient PATH 仅作无契约时的降级回退。
 const rc = require('./runtime-contract');
@@ -93,18 +99,20 @@ function probeNode() {
   return { version: 'v' + ver, min, meets: verAtLeast(ver, min) };
 }
 
-/** 系统环境条目（必要前置：Node/npm 为 DSH 与反代更新的执行器；git 可选）。 */
-const SYSTEM_ENTRIES = {
-  node: { label: 'Node.js', required: true, probe: probeNode },
-  npm:  { label: 'npm', required: true, probe: () => {
-    // 契约形态（安卓 = node 代跑 npm-cli.js）；无契约退回 ambient 'npm'。
+/** 目录（唯一来源）：有可执行名的条目才是「二进制条目」；tmp-redirect 那类运行时检查不属于这里。
+ *  required 是**就绪前置**语义：只有内核自身执行所必需的那几件才卡「环境就绪」。 */
+const ENTRIES = (TABLE.envUnits || []).filter((u) => u && typeof u.bin === 'string' && u.bin);
+
+/** 特殊探测：node 需达最低门槛；npm 走契约（安卓由 node 代跑 npm-cli.js，无契约退回 ambient）。 */
+const SPECIAL = {
+  'env-node': () => probeNode(),
+  'env-npm': () => {
     const inv = rc.npmInvocation('npm');
     return cachedWhichVersion(inv.bin, inv.args.concat(['--version']));
-  } },
-  git:  { label: 'git',     required: false, probe: () => cachedWhichVersion('git') },
+  },
 };
 
-class EnvCatalog {
+class EnvStatus {
   constructor(config) { this.config = config || {}; }
 
   /**
@@ -120,18 +128,23 @@ class EnvCatalog {
    */
   probe() {
     const out = {};
-    for (const [id, e] of Object.entries(SYSTEM_ENTRIES)) {
-      const v = e.probe() || null;
+    for (const u of ENTRIES) {
+      // 视图键去掉 env- 前缀，与既有消费方（面板/API）保持兼容：env-node → node。
+      const id = u.id.replace(/^env-/, '');
+      const label = u.capability || u.id;
+      const required = u.required === true;
+      const fn = SPECIAL[u.id] || (() => cachedWhichVersion(u.bin));
+      const v = fn() || null;
       if (v && typeof v === 'object' && typeof v.meets === 'boolean') {
         // Node 这类「有门槛」的条目：三态判定。
         out[id] = {
-          label: e.label, required: e.required,
+          label, required,
           state: v.meets ? 'ok' : 'outdated',
           version: v.version, min: v.min, meets: v.meets,
           detail: v.meets ? v.version : (v.version + '（低于最低要求 ' + v.min + '）'),
         };
       } else {
-        out[id] = { label: e.label, required: e.required, state: v ? 'ok' : 'missing', detail: v };
+        out[id] = { label, required, state: v ? 'ok' : 'missing', detail: v };
       }
     }
     return out;
@@ -162,4 +175,4 @@ class EnvCatalog {
   }
 }
 
-module.exports = { EnvCatalog };
+module.exports = { EnvStatus };

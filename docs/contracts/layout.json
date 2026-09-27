@@ -265,6 +265,11 @@
       "from": "kernel/adapters/dsh/agent.json",
       "to": "kernel/src/platform/agent-defaults.json",
       "kind": "file"
+    },
+    {
+      "from": "kernel/src/platform/env-catalog.js",
+      "to": "kernel/src/platform/env-status.js",
+      "kind": "file"
     }
   ],
   "legacyForbidden": [
@@ -397,13 +402,5 @@
       "paths": []
     }
   },
-  "deliveryDebt": [
-    {
-      "id": "env-catalog-dual",
-      "rule": "ENV-CATALOG",
-      "expiresAt": "2026-10-11",
-      "what": "环境目录两份：env-catalog.js 与 supply-table.json#envUnits，形状与消费方都不同",
-      "fix": "单一来源：一份环境目录，另一份改为由它生成或被它取代"
-    }
-  ]
+  "deliveryDebt": []
 }

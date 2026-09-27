@@ -115,10 +115,18 @@ try {
       if (p.libName && caps.indexOf(' ' + p.libName + ' ') < 0) add('D2-INVENTORY', 'D2 件 ' + p.id + ' 的 ' + p.libName + ' 不在随包清单里');
     }
   }
-  // 规则 5：环境目录单一来源
-  const stPath = path.join(ROOT, 'kernel', 'src', 'assembler', 'supply-table.json');
-  const envUnits = fs.existsSync(stPath) ? (JSON.parse(readSafe(stPath)).envUnits || []) : [];
-  if (ex('kernel/src/platform/env-catalog.js') && envUnits.length > 0) add('ENV-CATALOG', 'env-catalog.js 与 supply-table#envUnits 同时在场');
+  // 规则 5：环境目录**只有一份**（E 的登记表 #envUnits），状态视图必须是它的**投影**。
+  // 判据为什么长这样：债的形态不是「某文件存在」，而是「同一件事在两处各说一遍」——
+  // 所以既要查第二份目录不在，也要查投影**确实从登记表取目录**且不自持条目表。
+  const envCat = path.join(ROOT, 'kernel', 'src', 'platform', 'env-catalog.js');
+  const envStatus = path.join(ROOT, 'kernel', 'src', 'platform', 'env-status.js');
+  if (fs.existsSync(envCat)) add('ENV-CATALOG', 'kernel/src/platform/env-catalog.js 还在（第二份环境目录）');
+  else if (!fs.existsSync(envStatus)) add('ENV-CATALOG', 'kernel/src/platform/env-status.js 缺失（环境状态视图没了）');
+  else {
+    const st = readSafe(envStatus);
+    if (st.indexOf('supply-table.json') < 0) add('ENV-CATALOG', 'env-status.js 未从 E 的登记表取目录（又自持了一份？）');
+    if (/const\s+\w*ENTRIES\s*=\s*\{/.test(st)) add('ENV-CATALOG', 'env-status.js 里有硬编码条目表');
+  }
   // 规则 6：CI 工具不得住在 L0 车辆里（L0 目录里不该有构建 CLI）
   if (ex('container/engine/bin')) add('CI-TOOL-IN-L0', 'container/engine/bin');
   // 规则 7（原「D2 的件解析不得住 E 的目录」）已退役：该不变量现由内核门禁把守

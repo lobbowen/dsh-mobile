@@ -10,14 +10,14 @@ const { spawn } = require('node:child_process');
 const { execFile } = require('node:child_process');
 const ex = require('../../platform/exec');
 const netInfo = require('../../platform/os/netinfo');
-const { EnvCatalog } = require('../../platform/env-catalog');
+const { EnvCatalog } = require('../../platform/env-status');
 const { guardVersion } = require('../../platform/version'); // 拆分携带：守卫版本自报
 
 // 环境目录摘要（随设置块迁移；原为 supervisor.js 模块级函数，仅本块使用）。
 // 原 `extra.selfUpdate`（内核 npm 子包 corePackageName 条目）已删：
 // 安卓内核不经 npm 分发，更新 = 容器 OTA，内核没有"自己查自己新版本"这回事。
 function envCatalogSummary(that) {
-  const cat = new EnvCatalog(that.config);
+  const cat = new EnvStatus(that.config);
   const extra = {};
   const d = that.dshenvStatus();
   extra.dsh = cat.dshEntry(d.binOk, d.installed, d.bin);
@@ -33,7 +33,7 @@ class SettingsView {
   envStatus() {
     const rt = {};
     try { const f = path.join(path.dirname(this.config.stateFile), 'runtime.json'); if (fs.existsSync(f)) Object.assign(rt, JSON.parse(fs.readFileSync(f, 'utf8'))); } catch {}
-    const cat = new EnvCatalog(this.config).probe();
+    const cat = new EnvStatus(this.config).probe();
     const en = this.nativeManager && typeof this.nativeManager.checkEnvironment === 'function' ? this.nativeManager.checkEnvironment() : null;
     return {
       node: { detected: cat.node.detail || null, runtime: rt.nodeVersion || null, path: rt.nodePath || null },

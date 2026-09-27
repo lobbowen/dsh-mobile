@@ -104,7 +104,7 @@ locale 空、os.cpus() 返回 0、/tmp 不可写）。逐条修会修成"补丁"
 | C | **已按 §2.1 分层**：**内容** = C 自己的签名清单（对象存储 `userland-<channel>/userland-manifest.json` + `.sig`，带 C 的 `version`/`sequence`/件表；件命名**内容寻址**，文件名带 sha12，长缓存才安全）；**机制** = `kernel/src/supply/`（`manifest.js` 取回并对原始字节验签 + `materialize.js` 取件、验哈希、原子落位、写 `$PREFIX` 入口）。内核只留**通道锚** `channel.json` + **信任根** `userland-public.pem`（与内核 OTA 同一把）⇒ 加件/升级**只发清单，内核不动** |
 | D1 | `LANG=C.UTF-8`；`/tmp`→`$TMPDIR` 前缀重写（`container/native/d1/`：`open-fallback.c` + `tmp-paths.c` + `tmp-redirect.h`，**默认生效**）；`os.cpus()` 预载垫片（`assets/node/android-env-shim.cjs` + `NODE_OPTIONS`） |
 | D2 | `kernel/src/d2/pieces.json`（**件清单唯一处**：身份 + 上游按什么名字/位置找它 + 版本/哈希）+ `artifacts.js`（数据驱动的本机解析）。本体不在此（rg/bash 的本体是 B 种子、C 内容或 npm 树）。与 `.github/native-capabilities.txt` 的对账由 `native-supply-gate-test` 把守 |
-| E | `manager.js` 经 D2 解析工件；`supply-table.json` 的 `units` 即落位规则表。**欠账**：`envUnits`（C 的内容清单）与 `units`（E 的落位规则）同住一张表，两表该分开（§2.1 第 1 条） |
+| E | `manager.js` 经 D2 解析工件；`supply-table.json` 是**登记表**：`units` = dsh 平台件的落位规则，`envUnits` = **环境条目的唯一目录**（处置 + 能力判据 + 落位出口 + 可执行名 + 是否就绪前置）。状态视图 `platform/env-status.js` 只是它的**投影**（不再自持条目表）。两表仍同住一份文件（形状与消费方不同，未分文件） |
 | F | **实例住产品侧**：`<状态根>/agents/<id>.json`（可被产品安装器/运维改写，**不改内核**）；内核只留 **schema + 默认值**（`kernel/src/platform/agent-defaults.json`）与解析机制（`agent.js`，首次缺实例时幂等播种，损坏则退回默认值并如实标记来源）。`android.launchFlags`（`--expose-internals`）三处消费者同源 |
 
 ## 6. 明确不做 / 欠账

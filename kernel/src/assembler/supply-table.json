@@ -209,7 +209,9 @@
       "why": "由 L0 PrefixProvisioner 把 libbash.so 播到 $PREFIX/bin/bash；缺件时 DSH 的 bash 工具与所有子进程全灭。",
       "verify": {
         "notApplicable": "由 boot-env-contract 门禁（PATH 与 $PREFIX 装配）与 exec-domain 格覆盖，不在此重复第二把尺子"
-      }
+      },
+      "bin": "bash",
+      "required": false
     },
     {
       "id": "env-node",
@@ -219,7 +221,9 @@
       "why": "Node 是 init 赖以启动的运行时，由 NativeAssetRegistry 的 libnode.so 经 jniLibs 落地；无它整机无 OS。",
       "verify": {
         "notApplicable": "由 NativeAssetRegistry 的 exec-probe 与 native-assets 门禁覆盖（存在性/依赖/真跑三重）"
-      }
+      },
+      "bin": "node",
+      "required": true
     },
     {
       "id": "env-npm",
@@ -229,7 +233,9 @@
       "why": "npm 是纯 JS，随 APK assets/npm 投放、由 libnode.so 代跑，经 runtime.json 的 npmEntry 交给内核。",
       "verify": {
         "notApplicable": "由 npm-contract-chain-test 与 runtime-contract 门禁逐字对账（目录名/入口/前缀三处同源）"
-      }
+      },
+      "bin": "npm",
+      "required": true
     },
     {
       "id": "env-pnpm",
@@ -241,7 +247,9 @@
       "verify": {
         "criterion": "共享入口 $PREFIX/bin/pnpm 真能跑起来并打印版本 —— 文件在不算数",
         "node": "const fs=require('node:fs'),cp=require('node:child_process'),path=require('node:path'); const c=JSON.parse(fs.readFileSync(process.env.DSH_SUPERVISOR_HOME+'/supervisor/runtime.json','utf8')); const bin=path.join(c.prefix,'bin','pnpm'); const r=cp.spawnSync(bin,['--version'],{encoding:'utf8',timeout:90000}); const v=String(r.stdout||'').trim(); if(r.status!==0 || v.split('.').length<3) throw new Error('pnpm 不可用: rc='+r.status+' out='+v.slice(0,60)+' err='+String(r.stderr||'').slice(0,80)); process.stdout.write('DSH_PROBE_PASS pnpm='+v)"
-      }
+      },
+      "bin": "pnpm",
+      "required": false
     },
     {
       "id": "env-git",
@@ -256,7 +264,9 @@
       "why": "设备上无 git；Android 无现成 aarch64 产物，需自建配方（libcurl/zlib/pcre2）。缺口在册，到期未补即门禁红。",
       "verify": {
         "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力，写成待做反而伪造出判定"
-      }
+      },
+      "bin": "git",
+      "required": false
     },
     {
       "id": "env-python3",
@@ -271,7 +281,9 @@
       "why": "设备上无 python3；CPython 需按 bionic 交叉编译或投 Termux 式 $PREFIX，属独立立项。缺口在册。",
       "verify": {
         "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力"
-      }
+      },
+      "bin": "python3",
+      "required": false
     },
     {
       "id": "env-jq",
@@ -286,7 +298,9 @@
       "why": "设备上无 jq；可编静态 aarch64 单文件（无 DT_NEEDED），是最低档的一件，随 C 层工具批次补。",
       "verify": {
         "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力"
-      }
+      },
+      "bin": "jq",
+      "required": false
     },
     {
       "id": "env-sqlite3",
@@ -298,7 +312,9 @@
         "criterion": "sqlite3 CLI 起得来、能算一条 SQL 并把结果读回来（不是只看 --version）",
         "node": "const cp = require('node:child_process'); const r = cp.spawnSync('sqlite3', [':memory:', 'select 1+1;'], { encoding: 'utf8' }); if (r.error) { console.error('sqlite3 起不来: ' + r.error.message); process.exit(1); } if (r.status !== 0) { console.error('sqlite3 非零退出 rc=' + r.status + ' err=' + String(r.stderr || '').slice(0, 160)); process.exit(1); } const got = String(r.stdout || '').trim(); if (got !== '2') { console.error('sqlite3 回读不对: ' + JSON.stringify(got)); process.exit(1); } process.stdout.write('DSH_PROBE_PASS sqlite3 CLI 可用（select 1+1 => 2）');"
       },
-      "impl": "src/supply/materialize.js"
+      "impl": "src/supply/materialize.js",
+      "bin": "sqlite3",
+      "required": false
     }
   ]
 }

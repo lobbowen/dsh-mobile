@@ -22,7 +22,7 @@ const { TaskRegistry } = require('./platform/tasks');
 const { PluginManager } = require('./domains/plugin/plugins');
 const { DistributionManager } = require('./domains/dist/index');
 const { normalize } = require('./platform/config');
-// envCatalogSummary + EnvCatalog 已随「设置面」拆分至 guard/supervisor/settings-view.js（§7.6）
+// envCatalogSummary + EnvStatus 已随「设置面」拆分至 guard/supervisor/settings-view.js（§7.6）
 const { guardVersion } = require('./platform/version');
 const { Lifecycle } = require('./guard/lifecycle/guard-self');
 const { Health } = require('./guard/health');

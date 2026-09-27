@@ -127,9 +127,9 @@ check('R-4 manager.js node 探测走契约', /runtimeContract\.nodeBin\(/.test(n
 // 投放单元的 $PREFIX 只能来自契约：read() 在场 = _unitContext 走的是 runtime.json，
 // 不是进程环境（native-supply-gate 另有死词汇判据兜另一半）。
 check('R-4 manager.js 投放前置读契约', /runtimeContract\.read\(\)/.test(nm), 'ok');
-const ec = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'env-catalog.js'), 'utf8');
-check('R-4 env-catalog 用契约读 minNode', /runtime-contract/.test(ec), 'ok');
-check('R-4 env-catalog npm 探测走契约', /rc\.npmInvocation\(/.test(ec), 'ok');
+const ec = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'env-status.js'), 'utf8');
+check('R-4 env-status 用契约读 minNode', /runtime-contract/.test(ec), 'ok');
+check('R-4 env-status npm 探测走契约', /rc\.npmInvocation\(/.test(ec), 'ok');
 
 process.env.HOME = savedHome; process.env.USERPROFILE = savedUp;
 delete process.env.DSH_SUPERVISOR_HOME;
