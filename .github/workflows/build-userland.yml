@@ -70,8 +70,6 @@ jobs:
             node scripts/upload-qiniu.js "$f" "userland/$B" --cache-control=31536000
           done
           echo "[qiniu] userland/${{ matrix.tool }} 已发布"
-      - name: 归档到 Release（GitHub 在目标网络不可达，这里只是归档）
-        if: ${{ github.event.inputs.publish == 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash scripts/gh-release-upload.sh userland-canary --prune "^userland-${{ matrix.tool }}-" dist/*.tar.gz
+      # 刻意**不**归档到 GitHub Release：设备读的是对象存储（GitHub 在目标网络不可达），归档没有投递价值；
+      # 而 gh-release-upload.sh 在本仓被钉死为「只许五条链路调用」（门禁在册），多一条就是第六个调用方 ——
+      # 与其为一个无投递价值的动作去改那条不变量，不如不做。产物由 actions/upload-artifact 留存。
