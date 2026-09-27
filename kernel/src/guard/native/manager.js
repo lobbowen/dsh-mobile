@@ -345,9 +345,10 @@ class NativeManager {
       const cmd = (this.config && this.config.command) || [];
       const entry = String(cmd[1] || '');
       if (cmd.length >= 2 && entry.endsWith('.js') && fs.existsSync(entry)) {
-        // 容器契约形态（node 代跑）恒带 --expose-internals：dsh app-boot 硬 require
-        // 内部模块，JS 垫片与 cordis loader 的 no-native 路径都依赖该 flag（幂等无害）。
-        return { bin: String(cmd[0]), args: ['--expose-internals', entry] };
+        // 容器契约形态（node 代跑）携带**产品声明**的启动参数：哪个产品需要暴露 internals
+        // 由 adapters/<id>/agent.json 的 android.launchFlags 给出，内核不自持该知识
+        // （同一事实源另有两个消费者：main-process._androidLaunchReady、capability-probe）。
+        return { bin: String(cmd[0]), args: AGENT.android.launchFlags.concat([entry]) };
       }
     } catch {}
     return null;

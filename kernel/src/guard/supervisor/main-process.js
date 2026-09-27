@@ -16,6 +16,7 @@ const ports = require('../../guard/lifecycle/ports').shared;
 const { extractPortFromCommand } = require('../../platform/config');
 const guardian = require('../../guard/guardian/index');
 const runtimeContract = require('../../platform/runtime-contract');
+const AGENT = require('../../platform/agent').load();
 
 class MainProcess {
   spawnCommand() {
@@ -110,9 +111,14 @@ class MainProcess {
           this.logger && this.logger.warn('原生件投放异常（不影响本轮启动）: ' + e.message);
         }
       }
-      if (command.includes('--expose-internals') || !String(command[1] || '').endsWith('.js')) return command;
+      // 启动参数来自产品声明（adapters/<id>/agent.json 的 android.launchFlags）：
+      // 「哪个产品要暴露 internals」是产品契约，不是内核私有知识 —— 消费者同源。
+      if (!String(command[1] || '').endsWith('.js')) return command;
+      const flags = (AGENT && AGENT.android && AGENT.android.launchFlags) || [];
+      const missing = flags.filter((f) => !command.includes(f));
+      if (!missing.length) return command;
       const out = command.slice();
-      out.splice(1, 0, '--expose-internals');
+      out.splice(1, 0, ...missing);
       return out;
     } catch { return command; }
   }

@@ -16,6 +16,10 @@ const d = agent.load();
 check('描述符可加载且字段齐全', !!(d.id && d.npmPackage && d.entry && d.profileName && d.homeDirName), JSON.stringify(d));
 check('dataPaths 非空数组', Array.isArray(d.dataPaths) && d.dataPaths.length > 0);
 check('protectedPackages 非空数组', Array.isArray(d.protectedPackages) && d.protectedPackages.length > 0);
+check('android.launchFlags 是字符串数组（产品声明启动参数，内核不自持）',
+  Array.isArray(d.android && d.android.launchFlags) && d.android.launchFlags.every((x) => typeof x === 'string'));
+check('android.launchFlags 含 --expose-internals（dsh app-boot 硬 require 内部模块）',
+  Array.isArray(d.android && d.android.launchFlags) && d.android.launchFlags.includes('--expose-internals'));
 check('未知 id 抛错（不静默回退）', (() => { try { agent.load('__nope__'); return false; } catch { return true; } })());
 
 const cfg = require(path.join(ROOT, 'src', 'platform', 'config'));

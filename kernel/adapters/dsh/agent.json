@@ -5,6 +5,9 @@
   "entry": "lib/bin.js",
   "profileName": "web",
   "homeDirName": ".dsh",
+  "android": {
+    "launchFlags": ["--expose-internals"]
+  },
   "dataPaths": [
     "sessions",
     "storages",

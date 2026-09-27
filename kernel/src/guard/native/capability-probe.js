@@ -20,6 +20,7 @@
 // 不知道说成正常），要么假红（把容器没交付说成 Agent 能力缺失），两种都会把人支去做错的事。
 
 const ex = require('../../platform/exec');
+const AGENT = require('../../platform/agent').load();
 
 /** 通过标记：判据脚本必须显式打出来。只退 0 不算通过 —— 脚本被改空、被截断都会退 0。 */
 const PASS = 'DSH_PROBE_PASS';
@@ -56,11 +57,11 @@ function probeUnit(unit, ctx, deps) {
   if (!nodeBin) return out(unit.id, null, '探针无法启动：契约没给出被检 node 的路径', at);
   if (!packageDir) return out(unit.id, null, '探针无法启动：不知道 Agent 装在哪（包目录未知）', at);
 
-  // 恒带 --expose-internals：这不是探针的私有偏好，而是**照抄 dsh 的实际启动形态**
-  // （guard/supervisor/main-process.js 的 _androidLaunchReady 在 node 与脚本入口之间注入它）。
+  // 启动参数取自**产品声明**（adapters/<id>/agent.json 的 android.launchFlags），
+  // 与 guard/supervisor/main-process.js 的 _androidLaunchReady 同一事实源。
   // 探针测的必须是「Agent 真会用的那种调用」，否则 require 内部模块那一格在探针里通、
   // 在真实启动里不通，两个结论各说各话。
-  const args = ['--expose-internals', '-e', v.node];
+  const args = AGENT.android.launchFlags.concat(['-e', v.node]);
   const r = run(nodeBin, args, {
     cwd: packageDir,
     env: d.env || process.env,

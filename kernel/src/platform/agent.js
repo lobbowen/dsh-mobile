@@ -20,6 +20,14 @@ function load(id) {
   }
   d.dataPaths = Array.isArray(d.dataPaths) ? d.dataPaths : [];
   d.protectedPackages = Array.isArray(d.protectedPackages) ? d.protectedPackages : [];
+  // 平台适配声明（android 节）：产品在安卓容器里需要的内核侧适配。
+  // launchFlags = 启动该产品的 CLI / 主进程时，必须在 node 与脚本入口之间注入的参数
+  // （如 --expose-internals：dsh app-boot 硬 require 内部模块）。
+  // 为什么放描述符：这是**产品契约**，不是内核的私有知识 —— 内核只照单注入，不猜产品。
+  d.android = (d.android && typeof d.android === 'object' && !Array.isArray(d.android)) ? d.android : {};
+  d.android.launchFlags = Array.isArray(d.android.launchFlags)
+    ? d.android.launchFlags.filter((x) => typeof x === 'string' && x.length > 0)
+    : [];
   cached = d;
   return d;
 }
