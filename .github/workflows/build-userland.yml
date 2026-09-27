@@ -1,0 +1,71 @@
+name: Build Userland (C 层工具供给)
+
+# C 层（共享开发环境）里「上游没有 android 变体」的工具：由本仓交叉编译成 **动态链接** 的
+# bionic aarch64 产物，发到对象存储；内核启动时按 **钉死的 sha256** 取用
+# （kernel/src/platform/toolchain.js 的 TOOLS）。因此这些工具**随内核 OTA 上机，不需要重装 APK**。
+#
+# 为什么必须动态：容器全部 Linux 语义（link(2)/tmp/祖先目录）靠 libdshposix 经 LD_PRELOAD 落地，
+# 静态件会绕过整层（2026-09-27 对 bash/rg 的真机定罪）。verify-artifact 把这条钉住。
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: '发布到对象存储（设备真正读的那条）'
+        type: string
+        default: 'false'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-userland.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # C 层工具供给批次：逐件补齐。已供给的追加到这一行即可。
+        tool: [sqlite3]
+    steps:
+      - uses: actions/checkout@v4
+      - name: 定位 NDK
+        run: |
+          set -euo pipefail
+          NDK="${ANDROID_NDK_LATEST_HOME:-}"
+          [ -d "$NDK" ] || { echo "::error title=无 NDK::runner 上没有 ANDROID_NDK_LATEST_HOME"; exit 1; }
+          TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          [ -x "$TC/aarch64-linux-android21-clang" ] || { echo "::error title=无 clang::缺 $TC/aarch64-linux-android21-clang"; exit 1; }
+          { echo "CC=$TC/aarch64-linux-android21-clang"; echo "LLVM_STRIP=$TC/llvm-strip"; } >> "$GITHUB_ENV"
+      - name: 编译 ${{ matrix.tool }}
+        run: bash scripts/build-userland-${{ matrix.tool }}.sh
+      - name: 核对产物形态（aarch64 + 动态）
+        run: bash scripts/verify-userland-artifact.sh ${{ matrix.tool }}
+      - name: 打包 + sha256
+        run: bash scripts/package-userland.sh ${{ matrix.tool }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: userland-${{ matrix.tool }}
+          path: dist/
+      - name: 发布到对象存储（设备真正读的那条）
+        if: ${{ github.event.inputs.publish == 'true' }}
+        env:
+          QINIU_AK: ${{ secrets.QINIU_AK }}
+          QINIU_SK: ${{ secrets.QINIU_SK }}
+          QINIU_BUCKET: ${{ secrets.QINIU_BUCKET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${QINIU_AK:-}" ] || [ -z "${QINIU_SK:-}" ] || [ -z "${QINIU_BUCKET:-}" ]; then
+            echo "::error title=对象存储未配置::需要 secrets QINIU_AK / QINIU_SK / QINIU_BUCKET（GitHub 在目标网络不可达，设备只从对象存储取件）"
+            exit 1
+          fi
+          for f in dist/*.tar.gz; do
+            node scripts/upload-qiniu.js "$f" "userland/$(basename "$f")" --cache-control=31536000
+          done
+          echo "[qiniu] userland/${{ matrix.tool }} 已发布"
+      - name: 归档到 Release（GitHub 在目标网络不可达，这里只是归档）
+        if: ${{ github.event.inputs.publish == 'true' }}
+        run: bash scripts/gh-release-upload.sh userland-canary --prune "^userland-${{ matrix.tool }}-" dist/*.tar.gz
