@@ -36,7 +36,7 @@ const EXTERNAL = path.join(__dirname, 'userland-external-tools.json');
 const VERIFY = path.join(__dirname, 'userland-verify.json');
 const TTL_MS = 30 * 86400_000;
 
-/** 本次构建出的件（tar.gz 命名即契约：userland-<name>-<ver>-android-arm64.zip）。 */
+/** 本次构建出的件（zip 命名即契约：userland-<name>-<ver>-<sha12>-android-arm64.zip）。 */
 function toolsFromDist() {
   if (!fs.existsSync(DIST)) throw new Error('dist 目录不存在: ' + DIST);
   const out = [];

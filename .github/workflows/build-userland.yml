@@ -72,7 +72,7 @@ jobs:
             echo "::error title=对象存储未配置::需要 secrets QINIU_AK / QINIU_SK / QINIU_BUCKET（GitHub 在目标网络不可达，设备只从对象存储取件）"
             exit 1
           fi
-          for f in dist/*.tar.gz; do
+          for f in dist/*.zip; do
             B=$(basename "$f")
             node scripts/upload-qiniu.js "$f" "userland/$B" --cache-control=31536000
           done
