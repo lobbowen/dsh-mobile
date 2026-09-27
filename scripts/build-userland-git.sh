@@ -126,13 +126,15 @@ LINKED=0
 SLIMMED=0
 KEPT=0
 for f in "$GITCORE"/*; do
-  [ -e "$f" ] || continue
   NAME=$(basename "$f")
+  # 注意：**不要**用 `[ -e ]` 过滤 —— 断链（指向已被瘦身删掉的副本）也是要登记的链接，
+  #   `-e` 对它会返回假，等于把 145 项静默漏掉（CI 实证：173 项里只登记了 28）。
+  [ -L "$f" ] || [ -e "$f" ] || continue
   if [ -L "$f" ]; then
     TGT=$(readlink "$f")
     printf '%s\t%s\n' "libexec/git-core/$NAME" "$TGT" >> "$FARM"
     LINKED=$((LINKED+1))
-  elif [ -f "$f" ]; then
+  elif [ -f "$f" ] && [ ! -L "$f" ]; then
     FSIZE=$(stat -c%s "$f")
     FINODE=$(stat -c%i "$f")
     if [ "$FINODE" = "$BININODE" ] || [ "$FSIZE" = "$BINSIZE" ]; then
