@@ -70,7 +70,7 @@ fi
 rm -rf work/zlib && mkdir -p work/zlib
 tar xzf work/zlib.tar.gz -C work/zlib --strip-components=1
 cd "$ROOT_DIR/work/zlib"
-CHOST=aarch64-linux-android CC="$CC" AR="$AR" RANLIB="$RANLIB" ./configure --prefix="$DEPS" --static >/dev/null
+CHOST=aarch64-linux-android CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" ./configure --prefix="$DEPS" --static >/dev/null
 make -j2 >/dev/null
 make install >/dev/null
 echo "[git] zlib 就位：$(ls "$DEPS/lib" | tr " " " " | head -c 120)"
@@ -107,7 +107,7 @@ cd "$ROOT_DIR/work/curl"
   --disable-ftp --disable-file --disable-dict --disable-telnet --disable-tftp \
   --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-rtsp \
   --enable-http --enable-https \
-  CC="$CC" AR="$AR" RANLIB="$RANLIB" CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib" >/dev/null
+  CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib" >/dev/null
 if ! make -j2 >/dev/null; then
   echo "::error title=curl 编译失败::见上"
   exit 1
