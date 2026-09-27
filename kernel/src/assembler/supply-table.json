@@ -314,6 +314,11 @@
       "why": "【产品形态】运行时 ⇒ **打进 APK**（不进通道）。 【事实】Go 最新稳定 = **go1.27.1**（官方 JSON API 实测：go1.27.1 / go1.26.8；最新补丁随 1.x 系列滚动）。   官方发布物只有 `go1.27.1.linux-arm64.tar.gz`（63.9 MiB，**glibc**，无 android 包）—— 安卓上不能直接用，   必须用 Go 自身的 **android/arm64 port**（GOOS=android）自建工具链；Termux 有现成的 `golang` 包可作参照。 【待办】确定件集与体积：完整工具链（含 go 命令、编译器、stdlib 源码）体积可观，需按 APK 预算裁剪或分包。",
       "verify": {
         "notApplicable": "缺口在册（waived）：没有件可投就没有可验的能力；随 APK 投放后改写成带地板的真判据"
+      },
+      "waiver": {
+        "followUp": "随 APK 投放 Go 工具链（GOOS=android/arm64 自建；Termux golang 包作参照），并定件集与体积",
+        "verifiedAt": "2026-09-27",
+        "expiresAt": "2026-12-26"
       }
     },
     {
@@ -328,6 +333,11 @@
       "why": "【产品形态】运行时 ⇒ **打进 APK**（不进通道）。 【未查证·如实记录】我尚未查清安卓上 JVM 的现实路线与版本，**不填数字**。待查项：   ① 选型：OpenJDK 的 Android/bionic 移植（如 Termux 的 openjdk 系列） vs 复用系统 ART（ART 跑的是 dex，不等于通用 JVM）；   ② 版本与许可（GPLv2+CE / Classpath 例外）与分发形态；   ③ 体积（JDK vs 精简 JRE）与 APK 预算；   ④ 依赖件（libiconv/zlib/alsa/字体等）与本容器 D1 语义的交互。",
       "verify": {
         "notApplicable": "未查证且未投放：先查明再定判据（不写假判据）"
+      },
+      "waiver": {
+        "followUp": "查证 Android 上 JVM 的现实选型（OpenJDK/bionic 移植 vs 复用 ART）、版本、许可、体积与依赖，再定件集",
+        "verifiedAt": "2026-09-27",
+        "expiresAt": "2026-12-26"
       }
     },
     {
