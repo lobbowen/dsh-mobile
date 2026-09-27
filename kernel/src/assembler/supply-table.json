@@ -264,7 +264,7 @@
       "capability": "pnpm（dsh 插件管理链路）",
       "layer": "shared",
       "disposition": "supplied-by-us",
-      "impl": "src/supply/materialize.js",
+      "impl": "container/app/src/main/java/io/github/lobbowen/dshmobile/runtime/SupplyProvisioner.kt",
       "why": "dsh-plugin-manager 调用 pnpm；安卓无 /usr/bin/env，npm 生成的 bin shim 不可 execve，故由 C 层机制装到共享 $PREFIX 并自写 sh 入口。件表（版本/包/大小/哈希）住 **C 自己的签名清单**，内核只留通道锚 + 信任根 + 机制 —— 加件/升级只发清单，内核不动。",
       "verify": {
         "delegated": "判据随件下发：C 的清单 tools[].verify（发布侧副本 scripts/userland-verify.json）。内核只留判定框架，不认识具体工具。"
@@ -285,7 +285,7 @@
       "bin": "git",
       "required": false,
       "kind": "tool",
-      "impl": "src/supply/materialize.js",
+      "impl": "container/app/src/main/java/io/github/lobbowen/dshmobile/runtime/SupplyProvisioner.kt",
       "carrier": "$PREFIX(经 C 的签名清单投放)"
     },
     {
@@ -363,7 +363,7 @@
       "bin": "jq",
       "required": false,
       "kind": "tool",
-      "impl": "src/supply/materialize.js",
+      "impl": "container/app/src/main/java/io/github/lobbowen/dshmobile/runtime/SupplyProvisioner.kt",
       "carrier": "$PREFIX(经 C 的签名清单投放)"
     },
     {
@@ -375,7 +375,7 @@
       "verify": {
         "delegated": "判据随件下发：C 的清单 tools[].verify（发布侧副本 scripts/userland-verify.json）。内核只留判定框架，不认识具体工具。"
       },
-      "impl": "src/supply/materialize.js",
+      "impl": "container/app/src/main/java/io/github/lobbowen/dshmobile/runtime/SupplyProvisioner.kt",
       "bin": "sqlite3",
       "required": false,
       "kind": "tool"
@@ -406,7 +406,7 @@
       "verify": {
         "delegated": "判据随件下发：C 的清单 tools[].verify（发布侧副本 scripts/userland-verify.json，curl 那条真打 HTTPS）。"
       },
-      "impl": "src/supply/materialize.js"
+      "impl": "container/app/src/main/java/io/github/lobbowen/dshmobile/runtime/SupplyProvisioner.kt"
     },
     {
       "id": "env-coreutils",
