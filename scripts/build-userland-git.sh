@@ -137,26 +137,37 @@ export PKG_CONFIG_PATH="$DEPS/lib/pkgconfig"
 export CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN"
 export CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib"
 # --with-ca-path 指向安卓的系统信任库：https 校验要用它（不装 CA 包时这是唯一来源）。
-./configure --host=aarch64-linux-android --build=x86_64-pc-linux-gnu --prefix="$DEPS" \
+# 交叉编译要「我知道答案」：curl 对 openssl 的探测是几个链接测试，静态库下会误判为 no。
+#   ac_cv_* / curl_cv_* 就是 autoconf 给的口子。
+#
+# **纪律（本轮用 CI 换来的）**：这些说明必须写在命令**之外**。上一版把它们塞在反斜杠续行中间，
+#   bash 会从那行的 # 起当注释，把后面的变量、重定向、失败处理器**整块吃掉** ——
+#   症状是「预置不生效 + 诊断一行不打 + configure 输出直接冲进日志」，极费时间。
+if ! ./configure --host=aarch64-linux-android --build=x86_64-pc-linux-gnu --prefix="$DEPS" \
   --with-openssl="$DEPS" --with-zlib="$DEPS" --with-ca-path=/system/etc/security/cacerts \
   --disable-shared --enable-static --disable-ldap --without-libssh2 --without-libidn2 \
   --without-nghttp2 --without-brotli --without-zstd --disable-manual \
   --disable-ftp --disable-file --disable-dict --disable-telnet --disable-tftp \
   --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-rtsp \
   --enable-http \
-  # 交叉编译要「我知道答案」：curl 对 openssl 的探测是几个链接测试，静态库下它们常误判为 no。
-  #   这些 ac_cv_* 就是 autoconf 给的口子（比猜链接参数稳）。
   ac_cv_lib_crypto_HMAC_Update=yes ac_cv_lib_crypto_HMAC_Init_ex=yes \
   curl_cv_lib_crypto_HMAC_Update=yes curl_cv_lib_crypto_HMAC_Init_ex=yes \
   ac_cv_lib_ssl_SSL_new=yes ac_cv_lib_ssl_SSL_connect=yes ac_cv_lib_ssl_SSL_get_peer_certificate=yes \
   curl_cv_openssl_with_ldl=yes curl_cv_openssl_with_ldl_and_lpthread=yes \
-  LIBS="-lssl -lcrypto -lz -ldl" CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib" > "$ROOT_DIR/work/curl-configure.log" 2>&1 || { echo "::error title=curl Configure 失败::最后 30 行"; grep -i openssl "$ROOT_DIR/work/curl-configure.log" | tail -n 20 || true
-echo "---- 日志最后 15 行 ----"
-tail -n 15 "$ROOT_DIR/work/curl-configure.log" || true
-echo "---- config.log 尾 25 行（链接/工具链真因在这里）----"
-tail -n 25 "$ROOT_DIR/work/curl/config.log" || true
-echo "---- end ----"
-exit 1; }
+  LIBS="-lssl -lcrypto -lz -ldl" CC="$CC" AR="$AR_BIN" RANLIB="$RANLIB_BIN" CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib" > "$ROOT_DIR/work/curl-configure.log" 2>&1; then
+  true
+else
+  echo "::error title=curl Configure 失败::下面是真因"
+  echo "==== config.log 里 HMAC_Update 那段（编译/链接命令与报错都在这里）===="
+  grep -n -B 14 -A 8 "HMAC_Update" "$ROOT_DIR/work/curl/config.log" | head -n 90 || true
+  echo "==== config.log 尾 30 行 ===="
+  tail -n 30 "$ROOT_DIR/work/curl/config.log" || true
+  echo "==== config.log 定位 ===="
+  ls -la "$ROOT_DIR/work/curl/config.log" 2>/dev/null || find "$ROOT_DIR/work/curl" -maxdepth 2 -name config.log || true
+  echo "==== configure 输出尾 15 行 ===="
+  tail -n 15 "$ROOT_DIR/work/curl-configure.log" || true
+  exit 1
+fi
 CURL_LOG="$ROOT_DIR/work/curl-build.log"
 if ! make -j2 > "$CURL_LOG" 2>&1; then
   echo "::error title=curl 编译失败::最后 30 行"
