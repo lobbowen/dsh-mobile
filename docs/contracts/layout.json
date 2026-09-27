@@ -337,7 +337,9 @@
     "read-release-asset.sh": "cross",
     "check-apk-release-version.sh": "L0",
     "verify-apk-version-gate.sh": "L0",
-    "build-kernel-bundle.js": "cross"
+    "build-kernel-bundle.js": "cross",
+    "publish-userland-manifest.js": "cross",
+    "userland-external-tools.json": "cross"
   },
   "deliveryLayers": {
     "_note": "交付维（六层，与上面的发布维 layers 正交）：层=职责，上面 layers=车辆。物理组织必须同时满足两轴。这里每条 paths 是**目标位**；尚未达成的进 deliveryDebt（有到期日、修好必须销账，否则门禁红）。",

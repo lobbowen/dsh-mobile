@@ -1,8 +1,11 @@
 name: Build Userland (C 层工具供给)
 
 # C 层（共享开发环境）里「上游没有 android 变体」的工具：由本仓交叉编译成 **动态链接** 的
-# bionic aarch64 产物，发到对象存储；内核启动时按 **钉死的 sha256** 取用
-# （kernel/src/platform/toolchain.js 的 TOOLS）。因此这些工具**随内核 OTA 上机，不需要重装 APK**。
+# bionic aarch64 产物，发到对象存储；再由本 workflow 的 manifest 作业汇成 **C 自己的内容清单**
+# （对原始字节签名）发到对象存储。
+#
+# 内核只持有 **通道锚 + 信任根**，按清单取件并核验 —— 因此**加件/升级只发清单，内核不动**；
+# 工具随内核启动投放上机，**不需要重装 APK**。
 #
 # 为什么必须动态：容器全部 Linux 语义（link(2)/tmp/祖先目录）靠 libdshposix 经 LD_PRELOAD 落地，
 # 静态件会绕过整层（2026-09-27 对 bash/rg 的真机定罪）。verify-artifact 把这条钉住。
@@ -14,6 +17,10 @@ on:
         description: '发布到对象存储（设备真正读的那条）'
         type: string
         default: 'false'
+      channel:
+        description: 'C 的通道（清单与件都挂在 userland-<channel>/ 下）'
+        type: string
+        default: 'canary'
   push:
     branches: [main]
     paths:
@@ -73,3 +80,45 @@ jobs:
       # 刻意**不**归档到 GitHub Release：设备读的是对象存储（GitHub 在目标网络不可达），归档没有投递价值；
       # 而 gh-release-upload.sh 在本仓被钉死为「只许五条链路调用」（门禁在册），多一条就是第六个调用方 ——
       # 与其为一个无投递价值的动作去改那条不变量，不如不做。产物由 actions/upload-artifact 留存。
+
+  # C 的**内容清单**：把本次构建的件 + 外部件（npm 投放那类）汇成一份、对**原始字节**签名、
+  # 发到对象存储。内核只持通道锚 + 信任根，于是加件/升级只发清单 —— **内核不动**。
+  manifest:
+    needs: build
+    if: ${{ github.event.inputs.publish == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: 组装并签名清单（发前用 APK 焊死的公钥自检）
+        env:
+          OTA_PRIVATE_KEY_PEM: ${{ secrets.OTA_PRIVATE_KEY_PEM }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OTA_PRIVATE_KEY_PEM:-}" ]; then
+            echo "::error title=签名私钥未配置::需要 secrets.OTA_PRIVATE_KEY_PEM（与内核 OTA 同一把，公钥焊在 APK）"
+            exit 1
+          fi
+          mkdir -p keys release
+          printf '%s' "$OTA_PRIVATE_KEY_PEM" > keys/ota-private.pem
+          chmod 600 keys/ota-private.pem
+          node scripts/publish-userland-manifest.js dist release keys/ota-private.pem "${{ github.event.inputs.channel || 'canary' }}"
+      - name: 发布清单到对象存储
+        env:
+          QINIU_AK: ${{ secrets.QINIU_AK }}
+          QINIU_SK: ${{ secrets.QINIU_SK }}
+          QINIU_BUCKET: ${{ secrets.QINIU_BUCKET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${QINIU_AK:-}" ] || [ -z "${QINIU_SK:-}" ] || [ -z "${QINIU_BUCKET:-}" ]; then
+            echo "::error title=对象存储未配置::需要 secrets QINIU_AK / QINIU_SK / QINIU_BUCKET"
+            exit 1
+          fi
+          CH="userland-${{ github.event.inputs.channel || 'canary' }}"
+          # 清单短缓存（否则设备永远读到旧的，表现为「发了没更新」）；件本体长缓存（文件名带版本号）。
+          node scripts/upload-qiniu.js release/userland-manifest.json "$CH/userland-manifest.json" --cache-control=60
+          node scripts/upload-qiniu.js release/userland-manifest.json.sig "$CH/userland-manifest.json.sig" --cache-control=60
+          echo "[qiniu] $CH 已更新"
