@@ -56,11 +56,39 @@ class PluginManager {
     this._bundleOpQueue = Promise.resolve();    // 补丁层写串行队列（setBundleEnabled/scrub 共用，防丢失更新）
     this._updCache = {};                       // 插件更新检测缓存：name -> { latest, at }（TTL 6h，与实例更新对齐）
     this._updTTL = 6 * 3600 * 1000;
+    this.toolchain = opts.toolchain || null;    // C 层共享工具物化器（测试可注入）
+    this._pmTool = null;                        // 已就位的共享包管理器（只有成功才缓存）
+    this._pmToolPromise = null;                 // 同一拍的并发去重
   }
 
   /* ═══════ 目标系统（TargetRegistry）═══════ */
   _pathExtra() {
     return (process.env.PATH || '') + path.delimiter + path.join(os.homedir(), '.npm-global', 'bin');
+  }
+
+  /** C 层：确保插件 CLI 需要的共享包管理器（pnpm）在场。
+   * 首次调用安装（异步、有界、整树可杀），之后按盘上事实短路；**失败不缓存**（网络是外部事实，
+   * 不该钉死一个进程）。只在容器契约形态生效（无契约 = skipped），PC/测试逐字不变。
+   * 为什么在这里而不是容器：pnpm 与 npm 同属「开发环境」层，是共享工具、随产品无关；
+   * 由消费它的内核在**首次真正需要时**物化，才不用为它重出 APK。 */
+  async _ensurePackageManager() {
+    if (this._pmTool) return this._pmTool;
+    if (!this._pmToolPromise) {
+      const tc = this.toolchain || require('../../platform/toolchain');
+      this._pmToolPromise = Promise.resolve()
+        .then(() => tc.ensureSharedTool('pnpm'))
+        .catch((e) => ({ status: 'failed', name: 'pnpm', reason: e.message }));
+    }
+    const r = await this._pmToolPromise;
+    this._pmToolPromise = null;
+    if (r && (r.status === 'already' || r.status === 'applied' || r.status === 'skipped')) this._pmTool = r;
+    if (r && r.status !== 'already' && r.status !== 'skipped') {
+      const line = '共享工具 pnpm: ' + r.status + (r.reason ? '（' + r.reason + '）' : '');
+      if (r.status === 'applied') this.logger.info && this.logger.info(line);
+      else this.logger.warn && this.logger.warn(line);
+      if (this.events) this.events.append('toolchain_tool', { name: 'pnpm', status: r.status, reason: r.reason || null });
+    }
+    return r;
   }
 
   /** 原生目标（默认作用域）。 */
@@ -330,7 +358,10 @@ class PluginManager {
     return null;
   }
 
-  _runCli(target, args, opts) {
+  async _runCli(target, args, opts) {
+    // C 层：插件 CLI（dsh plugin → pnpm）所需的共享包管理器先就位。
+    // 只在容器契约形态动手（PC/测试 = skipped）；失败不致命 —— 真因由下面的 CLI 调用如实报出。
+    try { await this._ensurePackageManager(); } catch (_) {}
     const guardErr = this._assertSafeCliArgs(args);
     const o = opts || {};
     const timeoutMs = o.timeoutMs || CLI_TIMEOUT_MS;
