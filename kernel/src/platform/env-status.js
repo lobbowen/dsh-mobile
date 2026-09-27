@@ -82,30 +82,27 @@ function verAtLeast(a, b) {
   return true;
 }
 
-/** Node 探测：**不仅要能执行，还要达到最低门槛**。
- *
- * 旧实现只判 `which node` 是否成功 → 装了 v18 也报 ok，
- * 而壳的引导会因门槛不满足拒绝启动内核。现判据与壳对齐。
- *
- * @returns {{version:string, min:string, meets:boolean}|null}
- */
-function probeNode() {
-  const v = cachedWhichVersion(rc.nodeBin('node'), ['--version']);
-  if (!v) return null;
-  // `node --version` 输出形如 v22.12.0；取第一个 vX.Y.Z 片段。
-  const m = /v?(\d+\.\d+\.\d+)/.exec(String(v));
-  const ver = m ? m[1] : String(v).trim();
-  const min = String(runtimeMeta().minNode || MIN_NODE_DEFAULT);
-  return { version: 'v' + ver, min, meets: verAtLeast(ver, min) };
+/** Node 版本探测：只取版本号。**地板判定已交给目录**（envUnits 里 env-node 的
+ *  `kind: runtime` + `floorFrom: contract.minNode`）—— 原先这里给 node 写死了「有门槛」的特例，
+ *  结果是「运行时判地板」这条语义只对 node 成立，python3 落地时不会有同样的判定（2026-09-27 校正）。
+ *  地板默认值仍住本文件（必须与壳的 node.rs MIN_NODE 一致，见 MIN_NODE_DEFAULT 的注释）。 */
+function probeNodeVer() {
+  return cachedWhichVersion(rc.nodeBin('node'), ['--version']) || null;
 }
 
 /** 目录（唯一来源）：有可执行名的条目才是「二进制条目」；tmp-redirect 那类运行时检查不属于这里。
  *  required 是**就绪前置**语义：只有内核自身执行所必需的那几件才卡「环境就绪」。 */
 const ENTRIES = (TABLE.envUnits || []).filter((u) => u && typeof u.bin === 'string' && u.bin);
 
-/** 特殊探测：node 需达最低门槛；npm 走契约（安卓由 node 代跑 npm-cli.js，无契约退回 ambient）。 */
+/** 条目地板：目录说「地板从哪来」，本函数把它解析出来（node 来自契约 minNode，python3 是字面值）。 */
+function floorOf(u) {
+  if (u.floorFrom === 'contract.minNode') return String(runtimeMeta().minNode || MIN_NODE_DEFAULT);
+  return u.floor ? String(u.floor) : '';
+}
+
+/** 特殊探测：node 取契约投放的可执行；npm 走契约（安卓由 node 代跑 npm-cli.js，无契约退回 ambient）。 */
 const SPECIAL = {
-  'env-node': () => probeNode(),
+  'env-node': () => probeNodeVer(),
   'env-npm': () => {
     const inv = rc.npmInvocation('npm');
     return cachedWhichVersion(inv.bin, inv.args.concat(['--version']));
@@ -116,12 +113,15 @@ class EnvStatus {
   constructor(config) { this.config = config || {}; }
 
   /**
-   * 系统二进制条目探测：`{id:{label,required,state,detail}}`。
+   * 条目探测：`{id:{label,required,kind,state,detail}}`（kind = 目录里的运行时/工具分类）。
    *
    * `state` 三态：
-   * · `ok` —— 存在且**满足门槛**（Node 需 >= 壳投放的 minNode）；
-   * · `outdated` —— 存在但低于门槛（**旧实现会误报 ok → 面板谎报「环境就绪」**）；
-   * · `missing` —— 不存在。
+   * · `ok` —— 在，且（若是**运行时**）达到**地板**；
+   * · `outdated` —— 在但低于地板（**旧实现会误报 ok → 面板谎报「环境就绪」**）；
+   * · `missing` —— 不在。
+   *
+   * 地板来自目录（`envUnits[].floor` / `floorFrom`），不是本模块写死的：
+   * 加一个运行时（如 python3）只需在目录里写 kind + 地板，判定语义自动跟上。
    *
    * 兼容：`detail` 保持字符串（既有消费方按字符串用），
    * 新增字段放 `detail` 之外（`version` / `min` / `meets`），不破坏既有契约。
@@ -133,18 +133,24 @@ class EnvStatus {
       const id = u.id.replace(/^env-/, '');
       const label = u.capability || u.id;
       const required = u.required === true;
+      const kind = u.kind || 'tool';
       const fn = SPECIAL[u.id] || (() => cachedWhichVersion(u.bin));
       const v = fn() || null;
-      if (v && typeof v === 'object' && typeof v.meets === 'boolean') {
-        // Node 这类「有门槛」的条目：三态判定。
+      const floor = floorOf(u);
+      if (v && floor) {
+        // **运行时**（或任何带地板的条目）：低于地板 = outdated（旧实现会误报 ok → 面板谎报「环境就绪」）。
+        const m = /v?(\d+\.\d+\.\d+)/.exec(String(v));
+        const ver = m ? m[1] : String(v).trim();
+        const meets = verAtLeast(ver, floor);
         out[id] = {
-          label, required,
-          state: v.meets ? 'ok' : 'outdated',
-          version: v.version, min: v.min, meets: v.meets,
-          detail: v.meets ? v.version : (v.version + '（低于最低要求 ' + v.min + '）'),
+          label, required, kind,
+          state: meets ? 'ok' : 'outdated',
+          version: 'v' + ver, min: floor, meets,
+          detail: meets ? 'v' + ver : ('v' + ver + '（低于最低要求 v' + floor + '）'),
         };
       } else {
-        out[id] = { label, required, state: v ? 'ok' : 'missing', detail: v };
+        // **工具**：只判在不在（工具没有地板，硬给一个只会伪造判定）。
+        out[id] = { label, required, kind, state: v ? 'ok' : 'missing', detail: v };
       }
     }
     return out;

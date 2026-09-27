@@ -199,7 +199,8 @@
         "criterion": "/tmp 下的 open + mkdir + stat + unlink 全部落到 $TMPDIR —— 缺一片即红（真机定罪过 one-surface 假绿）",
         "node": "const fs=require('node:fs'),path=require('node:path'); const b='dsh-tmp-probe-'+process.pid, dir=process.env.TMPDIR; if(!dir) throw new Error('TMPDIR 未设'); try{ fs.writeFileSync('/tmp/'+b,'ok'); if(fs.readFileSync(path.join(dir,b),'utf8')!=='ok') throw new Error('open 未落到 TMPDIR'); fs.mkdirSync('/tmp/'+b+'-d'); if(!fs.statSync('/tmp/'+b+'-d').isDirectory()) throw new Error('mkdir/stat 未落到 TMPDIR'); fs.unlinkSync('/tmp/'+b); if(fs.existsSync(path.join(dir,b))) throw new Error('unlink 未生效'); fs.rmdirSync('/tmp/'+b+'-d'); process.stdout.write('DSH_PROBE_PASS open+mkdir+stat+unlink 全落 '+dir); }catch(e){ try{fs.unlinkSync('/tmp/'+b);}catch(_){} try{fs.rmdirSync('/tmp/'+b+'-d');}catch(_){} throw e; }"
       },
-      "why": "安卓根文件系统只读且 SELinux 不给 app 在 / 下建目录，Linux 习惯的硬编码 /tmp 必然失败；容器经 libdshposix 在 open/openat 上把 /tmp 前缀重写到 $TMPDIR（开关 DSH_TMP_REDIRECT），本格由设备端探针核验落点。"
+      "why": "安卓根文件系统只读且 SELinux 不给 app 在 / 下建目录，Linux 习惯的硬编码 /tmp 必然失败；容器经 libdshposix 在整张路径 syscall 面上把 /tmp 前缀重写到 $TMPDIR（**默认生效**，不依赖会被 DSH 剥掉的 DSH_* 开关），本格由设备端探针核验落点。",
+      "kind": "check"
     },
     {
       "id": "env-shell",
@@ -211,7 +212,8 @@
         "notApplicable": "由 boot-env-contract 门禁（PATH 与 $PREFIX 装配）与 exec-domain 格覆盖，不在此重复第二把尺子"
       },
       "bin": "bash",
-      "required": false
+      "required": false,
+      "kind": "runtime"
     },
     {
       "id": "env-node",
@@ -223,7 +225,9 @@
         "notApplicable": "由 NativeAssetRegistry 的 exec-probe 与 native-assets 门禁覆盖（存在性/依赖/真跑三重）"
       },
       "bin": "node",
-      "required": true
+      "required": true,
+      "kind": "runtime",
+      "floorFrom": "contract.minNode"
     },
     {
       "id": "env-npm",
@@ -235,7 +239,8 @@
         "notApplicable": "由 npm-contract-chain-test 与 runtime-contract 门禁逐字对账（目录名/入口/前缀三处同源）"
       },
       "bin": "npm",
-      "required": true
+      "required": true,
+      "kind": "tool"
     },
     {
       "id": "env-pnpm",
@@ -249,7 +254,8 @@
         "node": "const fs=require('node:fs'),cp=require('node:child_process'),path=require('node:path'); const c=JSON.parse(fs.readFileSync(process.env.DSH_SUPERVISOR_HOME+'/supervisor/runtime.json','utf8')); const bin=path.join(c.prefix,'bin','pnpm'); const r=cp.spawnSync(bin,['--version'],{encoding:'utf8',timeout:90000}); const v=String(r.stdout||'').trim(); if(r.status!==0 || v.split('.').length<3) throw new Error('pnpm 不可用: rc='+r.status+' out='+v.slice(0,60)+' err='+String(r.stderr||'').slice(0,80)); process.stdout.write('DSH_PROBE_PASS pnpm='+v)"
       },
       "bin": "pnpm",
-      "required": false
+      "required": false,
+      "kind": "tool"
     },
     {
       "id": "env-git",
@@ -266,11 +272,12 @@
         "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力，写成待做反而伪造出判定"
       },
       "bin": "git",
-      "required": false
+      "required": false,
+      "kind": "tool"
     },
     {
       "id": "env-python3",
-      "capability": "python3（脚本类任务）",
+      "capability": "Python 运行时（脚本类负载的共同地板，与 node 同级）",
       "layer": "shared",
       "disposition": "waived",
       "waiver": {
@@ -278,12 +285,14 @@
         "verifiedAt": "2026-09-27",
         "expiresAt": "2026-12-26"
       },
-      "why": "设备上无 python3；CPython 需按 bionic 交叉编译或投 Termux 式 $PREFIX，属独立立项。缺口在册。",
+      "why": "设备上无 python3；CPython 需按 bionic 交叉编译（或投 Termux 式 $PREFIX 布局），属于**运行时**而非顺手工具：它缺 = 一整类 Python 负载跑不起来，优先级高于 jq/curl/coreutils 这类工具。交付路径与其它 C 内容同一条：**清单加件，内核不动**（件名 python3、带版本地板 3.11）。缺口在册，到期未补即门禁红。",
       "verify": {
-        "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力"
+        "criterion": "python3 起得来、能跑一段脚本并把结果读回来，且版本不低于地板 3.11（不是只看 --version）"
       },
       "bin": "python3",
-      "required": false
+      "required": false,
+      "kind": "runtime",
+      "floor": "3.11"
     },
     {
       "id": "env-jq",
@@ -300,7 +309,8 @@
         "notApplicable": "缺口已豁免（见 waiver）：没有件可投就没有可验的能力"
       },
       "bin": "jq",
-      "required": false
+      "required": false,
+      "kind": "tool"
     },
     {
       "id": "env-sqlite3",
@@ -314,7 +324,14 @@
       },
       "impl": "src/supply/materialize.js",
       "bin": "sqlite3",
-      "required": false
+      "required": false,
+      "kind": "tool"
     }
-  ]
+  ],
+  "envKinds": {
+    "$comment": "环境条目按**性质**分类（2026-09-27 校正：此前把运行时与工具拍平成一个列表，等于让 python3 与 jq 同类）。分类是目录事实，消费方据此决定语义：运行时判**版本地板**（低于地板 = outdated），工具判**在不在**。",
+    "runtime": "地板：为**一整类负载**提供执行环境（node→JS、python3→Python、shell→一切子进程）。缺口是「一整类负载跑不起来」，量级远大于缺一个工具。",
+    "tool": "工具：为某项具体便利/能力服务（npm/pnpm/git/jq/sqlite3/rg/curl/coreutils）。缺口 = 该项能力降级。",
+    "check": "运行时检查：不是一个可投放的件，而是对容器/内核语义的一条核验（如 tmp-redirect）。"
+  }
 }
