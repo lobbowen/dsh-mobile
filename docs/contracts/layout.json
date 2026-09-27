@@ -368,12 +368,13 @@
     },
     "C": {
       "title": "开发环境层",
-      "vehicle": "channel",
+      "vehicle": "L0(运行时打进 APK) + 系统层($PREFIX 自装)",
       "paths": [
         "kernel/src/supply",
         "scripts/build-userland-sqlite3.sh",
         ".github/workflows/build-userland.yml"
-      ]
+      ],
+      "shape": "内容按**性质**分裂：运行时（node·python·go·java）随 APK 冻结（jniLibs+assets）；工具（npm·pnpm·git·jq·sqlite3·rg·curl·coreutils）由环境自己装进 $PREFIX、自适应、自更新，内核检测并触发"
     },
     "D1": {
       "title": "Linux 语义兑现",
