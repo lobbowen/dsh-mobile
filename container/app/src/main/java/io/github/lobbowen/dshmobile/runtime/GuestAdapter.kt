@@ -124,6 +124,14 @@ object GuestAdapter {
                 val caDirs = listOf("/apex/com.android.conscrypt/cacerts", "/system/etc/security/cacerts", "/data/misc/keychain/cacerts-added")
                     .filter { java.io.File(it).isDirectory }
                 if (caDirs.isNotEmpty()) put("SSL_CERT_DIR", caDirs.joinToString(":"))
+                // 信任根随产品走（首选）：$PREFIX/etc/ca-bundle.pem 由 PrefixProvisioner 从 assets 播下。
+                //   libcurl 认 CURL_CA_BUNDLE、OpenSSL 认 SSL_CERT_FILE —— 两者都设，谁被先读都不失效；
+                //   文件不在时上面那行 SSL_CERT_DIR 仍作兜底（系统 CA 在 app 域多半验不过，真机实证）。
+                val caBundle = java.io.File(java.io.File(java.io.File(i.base.filesDir, "usr"), "etc"), "ca-bundle.pem")
+                if (caBundle.isFile) {
+                    put("SSL_CERT_FILE", caBundle.absolutePath)
+                    put("CURL_CA_BUNDLE", caBundle.absolutePath)
+                }
             put("SHELL", i.bashBin?.absolutePath ?: "/system/bin/sh")
             i.npmEntry?.let { put("DSH_NPM_ENTRY", it.absolutePath) }
             // D1 Linux 语义：安卓取不到 cpu 信息（os.cpus() 空），由预载垫片在**空**时用

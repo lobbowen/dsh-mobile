@@ -32,9 +32,15 @@ object PrefixProvisioner {
      *  于是 npm 生命周期脚本、`#!/usr/bin/env node` 的 shim、以 node 自起的 MCP server 一律起不来。 */
     const val NODE_BIN_NAME = "node"
 
+    /** CA bundle 的文件名与 assets 名（信任根随产品走，见 provision 里的说明）。 */
+    const val CA_BUNDLE_NAME = "ca-bundle.pem"
+    private const val CA_BUNDLE_ASSET = "ca-bundle.pem"
+
     fun root(ctx: Context): File = File(ctx.filesDir, "usr")
     fun binDir(ctx: Context): File = File(root(ctx), "bin")
     fun libDir(ctx: Context): File = File(root(ctx), "lib")
+    fun etcDir(ctx: Context): File = File(root(ctx), "etc")
+    fun caBundle(ctx: Context): File = File(etcDir(ctx), CA_BUNDLE_NAME)
 
     /** 幂等复制 + 建 node 链，返回已就位条目名；缺件跳过（对应能力降级，由诊断上屏）。
      *  nodeBin 由调用方给（NativeAssetRegistry 是 libnode.so 位置的唯一事实源）。 */
@@ -57,6 +63,16 @@ object PrefixProvisioner {
                 ready += name
             }
         }
+        // 信任根随产品走：app 域里系统 CA 存储用不了（真机实测 API 37：OpenSSL 走默认路径验不过、
+        //   GIT_SSL_CAPATH 指到 conscrypt APEX 也验不过），所以把官方 CA bundle 像 ota-public.pem 一样
+        //   焊进 APK，开机播到 $PREFIX/etc/；环境侧由 GuestAdapter 指 SSL_CERT_FILE / CURL_CA_BUNDLE。
+        //   每次开机重播（188KB，代价可忽略）：APK 升级后 bundle 一定是新的，不会留旧信任根。
+        val caDst = caBundle(ctx)
+        try {
+            caDst.parentFile?.mkdirs()
+            ctx.assets.open(CA_BUNDLE_ASSET).use { input -> caDst.outputStream().use { out -> input.copyTo(out) } }
+            ready += CA_BUNDLE_NAME
+        } catch (_: Exception) { caDst.delete() }
         if (linkNode(ctx, nodeBin) != null) ready += NODE_BIN_NAME
         return ready
     }
@@ -86,5 +102,5 @@ object PrefixProvisioner {
     fun bashBin(ctx: Context): File? = File(binDir(ctx), "bash").takeIf { it.isFile }
 
     /** 供诊断比对：$PREFIX 里应当存在的条目（缺哪个 = 哪个能力没落地）。 */
-    val expected: List<String> = BINS.map { it.second } + DEPS.map { it.second } + LIBS.map { it.second } + NODE_BIN_NAME
+    val expected: List<String> = BINS.map { it.second } + DEPS.map { it.second } + LIBS.map { it.second } + NODE_BIN_NAME + CA_BUNDLE_NAME
 }
