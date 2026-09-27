@@ -15,7 +15,10 @@ set -euo pipefail
 
 TOOL="${1:?需要工具名}"
 VER=$(cat "dist/${TOOL}.version" 2>/dev/null || echo unknown)
-RAW="dist/.userland-${TOOL}-raw.tar.gz"
+# 中间 tar 写在 work/ 而不是 dist/：写在被 tar 的目录里会让 tar 报
+#   「.: file changed as we read it」并以非零退出（CI 实证，三件一起红）。
+RAW="work/.userland-${TOOL}-raw.tar.gz"
+mkdir -p work
 echo "[package] 打包整棵 dist 树（.version / SHA256SUMS / 中间 tar 已排除）"
 tar czf "$RAW" -C dist --exclude='*.version' --exclude='.userland-*' --exclude='SHA256SUMS' --exclude='*.tar.gz' .
 SHA=$(sha256sum "$RAW" | cut -c1-12)
