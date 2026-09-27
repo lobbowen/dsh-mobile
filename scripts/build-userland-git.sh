@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # git CLI —— C 层工具供给批次（供给表 env-git 的兑现）。
 #
-# 本件**不含 https**（NO_CURL=1）：https 远端要 openssl + libcurl 一整条依赖链，那是下一批 ——
-#   目录里 env-git-https 那格在册、有到期日。本批给的是**本地版本控制**（init/add/commit/log/diff/
-#   branch/checkout/stash/grep…），也就是 agent 最常用的那部分。
+# 本件**含 https**：zlib + openssl + libcurl 全部**静态**链进 git（见下面的依赖链），
+#   于是「一个件」就能 clone/fetch over https，不必再拖一串 .so（而 git 本体仍动态链 libc，
+#   因为容器 Linux 语义靠 LD_PRELOAD）。本地版本控制能力同样齐备（init/add/commit/log/…）。
 #
 # 为什么 RUNTIME_PREFIX=1：git 把 gitexecdir / template_dir **编进二进制**。我们构建时的 prefix 是
 #   CI 上的临时路径，编进去到设备上就指向不存在的地方（表现为「git 少了子命令」）。RUNTIME_PREFIX
@@ -46,6 +46,77 @@ fi
 [ -f work/git-src/Makefile ] || { echo "::error title=源码树异常::没有 Makefile"; exit 1; }
 echo "[git] 源码树就位"
 
+# ── https 依赖链：zlib + openssl + libcurl，全部**静态**装进 work/deps ──────────────
+# 为什么静态：git 的件只带 bin/git 与少数真独立二进制，不该再拖一串 .so；
+#   而 git **本体**仍动态链 libc —— 容器 Linux 语义靠 LD_PRELOAD，静态件会绕过整层
+#   （verify-userland-artifact.sh 的形态门禁就是钉这条）。
+DEPS="$ROOT_DIR/work/deps"
+ZLIB_VERSION=1.3.2
+OPENSSL_VERSION=3.6.3
+CURL_VERSION=8.22.0
+mkdir -p "$DEPS"
+TC_DIR=$(dirname "$CC")
+export ANDROID_NDK_ROOT="${ANDROID_NDK_LATEST_HOME:-}"
+if [ -z "$ANDROID_NDK_ROOT" ]; then
+  ANDROID_NDK_ROOT=$(cd "$TC_DIR/../../../../.." && pwd)
+fi
+echo "[git] NDK root = $ANDROID_NDK_ROOT"
+
+# ① zlib（curl 与 git 都要它）
+if ! curl -fsSL "https://zlib.net/fossils/zlib-$ZLIB_VERSION.tar.gz" -o work/zlib.tar.gz; then
+  echo "::error title=zlib 取不到::zlib-$ZLIB_VERSION 源码"
+  exit 1
+fi
+rm -rf work/zlib && mkdir -p work/zlib
+tar xzf work/zlib.tar.gz -C work/zlib --strip-components=1
+cd "$ROOT_DIR/work/zlib"
+CHOST=aarch64-linux-android CC="$CC" AR="$AR" RANLIB="$RANLIB" ./configure --prefix="$DEPS" --static >/dev/null
+make -j2 >/dev/null
+make install >/dev/null
+echo "[git] zlib 就位：$(ls "$DEPS/lib" | tr " " " " | head -c 120)"
+
+# ② OpenSSL（静态 libssl/libcrypto；https 的 TLS 由它提供）
+if ! curl -fsSL "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VERSION/openssl-$OPENSSL_VERSION.tar.gz" -o work/openssl.tar.gz; then
+  echo "::error title=openssl 取不到::openssl-$OPENSSL_VERSION 源码"
+  exit 1
+fi
+rm -rf work/openssl && mkdir -p work/openssl
+tar xzf work/openssl.tar.gz -C work/openssl --strip-components=1
+cd "$ROOT_DIR/work/openssl"
+PATH="$TC_DIR:$PATH" ./Configure android-arm64 -D__ANDROID_API__=21 --prefix="$DEPS" --openssldir="$DEPS/ssl" no-shared no-tests >/dev/null
+if ! make -j2 build_libs >/dev/null; then
+  echo "::error title=openssl 编译失败::见上"
+  exit 1
+fi
+make install_sw >/dev/null
+echo "[git] openssl 就位：$(ls "$DEPS/lib" | grep -c "[.]a") 个 .a"
+
+# ③ libcurl（只留 http/https，静态）
+if ! curl -fsSL "https://curl.se/download/curl-$CURL_VERSION.tar.gz" -o work/curl.tar.gz; then
+  echo "::error title=curl 取不到::curl-$CURL_VERSION 源码"
+  exit 1
+fi
+rm -rf work/curl && mkdir -p work/curl
+tar xzf work/curl.tar.gz -C work/curl --strip-components=1
+cd "$ROOT_DIR/work/curl"
+# --with-ca-path 指向安卓的系统信任库：https 校验要用它（不装 CA 包时这是唯一来源）。
+./configure --host=aarch64-linux-android --build=x86_64-pc-linux-gnu --prefix="$DEPS" \
+  --with-openssl="$DEPS" --with-zlib="$DEPS" --with-ca-path=/system/etc/security/cacerts \
+  --disable-shared --enable-static --disable-ldap --without-libssh2 --without-libidn2 \
+  --without-nghttp2 --without-brotli --without-zstd --disable-manual \
+  --disable-ftp --disable-file --disable-dict --disable-telnet --disable-tftp \
+  --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-rtsp \
+  --enable-http --enable-https \
+  CC="$CC" AR="$AR" RANLIB="$RANLIB" CPPFLAGS="-I$DEPS/include" LDFLAGS="-L$DEPS/lib" >/dev/null
+if ! make -j2 >/dev/null; then
+  echo "::error title=curl 编译失败::见上"
+  exit 1
+fi
+make install >/dev/null
+echo "[git] curl 就位（静态）"
+
+cd "$ROOT_DIR/work/git-src"
+
 cd "$ROOT_DIR/work/git-src"
 
 # ── Termux 的 bionic 补丁集（钉到它们的 commit，构建可复现）────────────────────────────
@@ -78,14 +149,15 @@ export RANLIB="$TC/llvm-ranlib"
 # 关键：这些必须**写在 make 命令行上**。git 的 Makefile 用的是简单赋值（CC = cc），环境变量覆盖不了它 ——
 #   上一轮 CI 因此用宿主 gcc 编出了 x86-64 的 git（形态门禁当场红）。
 # bionic 没有独立的 libpthread（pthread 就在 libc 里），清掉 PTHREAD_LIBS 才不会 -lpthread 链接失败。
-MAKE_ARGS="CC=$CC AR=$AR RANLIB=$RANLIB PTHREAD_LIBS= NO_RUST=1 uname_S=Linux uname_M=aarch64 prefix=$ROOT_DIR/$OUT CSPRNG_METHOD= HAVE_SYNC_FILE_RANGE= HAVE_GETRUSAGE= HAVE_SYSINFO= NO_CURL=1 NO_OPENSSL=1 NO_EXPAT=1 NO_GETTEXT=1 NO_ICONV=1 NO_TCLTK=1 NO_NSEC=1 NO_INSTALL_HARDLINKS=1 NO_PERL=1 NO_PYTHON=1 RUNTIME_PREFIX=1 ac_cv_fread_reads_directories=yes ac_cv_header_libintl_h=no ac_cv_iconv_omits_bom=no ac_cv_snprintf_returns_bogus=no"
+MAKE_ARGS="CC=$CC AR=$AR RANLIB=$RANLIB PTHREAD_LIBS= NO_RUST=1 CURLDIR=$ROOT_DIR/work/deps OPENSSLDIR=$ROOT_DIR/work/deps uname_S=Linux uname_M=aarch64 prefix=$ROOT_DIR/$OUT CSPRNG_METHOD= HAVE_SYNC_FILE_RANGE= HAVE_GETRUSAGE= HAVE_SYSINFO= NO_EXPAT=1 NO_GETTEXT=1 NO_ICONV=1 NO_TCLTK=1 NO_NSEC=1 NO_INSTALL_HARDLINKS=1 NO_PERL=1 NO_PYTHON=1 RUNTIME_PREFIX=1 ac_cv_fread_reads_directories=yes ac_cv_header_libintl_h=no ac_cv_iconv_omits_bom=no ac_cv_snprintf_returns_bogus=no"
 echo "[git] make（$MAKE_ARGS）"
-if ! make -j2 $MAKE_ARGS all; then
+# 带空格的项单独作为 make 的参数：放进 $MAKE_ARGS 会因为内层引号截断外层字符串。
+if ! make -j2 $MAKE_ARGS CURL_LIBS="-lcurl -lssl -lcrypto -lz" OPENSSL_LIBSSL="-lssl -lcrypto" CPPFLAGS="-I$ROOT_DIR/work/deps/include" LDFLAGS="-L$ROOT_DIR/work/deps/lib" all; then
   echo "::error title=make 失败::见上"
   exit 1
 fi
 echo "[git] make install"
-if ! make $MAKE_ARGS install; then
+if ! make $MAKE_ARGS CURL_LIBS="-lcurl -lssl -lcrypto -lz" OPENSSL_LIBSSL="-lssl -lcrypto" CPPFLAGS="-I$ROOT_DIR/work/deps/include" LDFLAGS="-L$ROOT_DIR/work/deps/lib" install; then
   echo "::error title=install 失败::见上"
   exit 1
 fi
