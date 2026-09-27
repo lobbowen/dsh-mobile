@@ -105,7 +105,7 @@ locale 空、os.cpus() 返回 0、/tmp 不可写）。逐条修会修成"补丁"
 | D1 | `LANG=C.UTF-8`；`/tmp`→`$TMPDIR` 前缀重写（`container/native/d1/`：`open-fallback.c` + `tmp-paths.c` + `tmp-redirect.h`，**默认生效**）；`os.cpus()` 预载垫片（`assets/node/android-env-shim.cjs` + `NODE_OPTIONS`） |
 | D2 | `kernel/src/d2/pieces.json`（**件清单唯一处**：身份 + 上游按什么名字/位置找它 + 版本/哈希）+ `artifacts.js`（数据驱动的本机解析）。本体不在此（rg/bash 的本体是 B 种子、C 内容或 npm 树）。与 `.github/native-capabilities.txt` 的对账由 `native-supply-gate-test` 把守 |
 | E | `manager.js` 经 D2 解析工件；`supply-table.json` 的 `units` 即落位规则表。**欠账**：`envUnits`（C 的内容清单）与 `units`（E 的落位规则）同住一张表，两表该分开（§2.1 第 1 条） |
-| F | `adapters/dsh/agent.json` 的 `android.launchFlags`（`--expose-internals` 三处消费者同源） |
+| F | **实例住产品侧**：`<状态根>/agents/<id>.json`（可被产品安装器/运维改写，**不改内核**）；内核只留 **schema + 默认值**（`kernel/src/platform/agent-defaults.json`）与解析机制（`agent.js`，首次缺实例时幂等播种，损坏则退回默认值并如实标记来源）。`android.launchFlags`（`--expose-internals`）三处消费者同源 |
 
 ## 6. 明确不做 / 欠账
 

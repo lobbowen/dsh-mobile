@@ -57,7 +57,7 @@ function probeUnit(unit, ctx, deps) {
   if (!nodeBin) return out(unit.id, null, '探针无法启动：契约没给出被检 node 的路径', at);
   if (!packageDir) return out(unit.id, null, '探针无法启动：不知道 Agent 装在哪（包目录未知）', at);
 
-  // 启动参数取自**产品声明**（adapters/<id>/agent.json 的 android.launchFlags），
+  // 启动参数取自**产品声明**（产品侧 <状态根>/agents/<id>.json 的 android.launchFlags；内核只留默认值），
   // 与 guard/supervisor/main-process.js 的 _androidLaunchReady 同一事实源。
   // 探针测的必须是「Agent 真会用的那种调用」，否则 require 内部模块那一格在探针里通、
   // 在真实启动里不通，两个结论各说各话。

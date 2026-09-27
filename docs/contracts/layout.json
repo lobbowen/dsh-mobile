@@ -260,6 +260,11 @@
       "from": "kernel/src/platform/toolchain.js",
       "to": "kernel/src/supply/materialize.js",
       "kind": "file"
+    },
+    {
+      "from": "kernel/adapters/dsh/agent.json",
+      "to": "kernel/src/platform/agent-defaults.json",
+      "kind": "file"
     }
   ],
   "legacyForbidden": [
@@ -393,14 +398,6 @@
     }
   },
   "deliveryDebt": [
-    {
-      "id": "f-in-kernel",
-      "rule": "F-IN-KERNEL",
-      "path": "kernel/adapters",
-      "expiresAt": "2026-10-11",
-      "what": "F 的产品声明住 L1（进 OTA 包）⇒ 改产品声明 = 发内核",
-      "fix": "声明随产品走（产品树/数据目录，产品安装器写）；内核只留 schema + 默认值"
-    },
     {
       "id": "env-catalog-dual",
       "rule": "ENV-CATALOG",
