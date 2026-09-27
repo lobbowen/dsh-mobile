@@ -47,6 +47,28 @@ fi
 echo "[git] 源码树就位"
 
 cd "$ROOT_DIR/work/git-src"
+
+# ── Termux 的 bionic 补丁集（钉到它们的 commit，构建可复现）────────────────────────────
+# 为什么必须打：git 上游按 Linux 假设写代码，安卓的 bionic 有几处不满足 ——
+#   · run-command.c：用了 pthread cancellation，bionic 没有（用 #ifndef __ANDROID__ 包起来）
+#   · config.mak.uname：去掉 HAVE_SYNC_FILE_RANGE（API 26 才有，我们 target 21）
+#   · disable-fdsan / disable_daemon_syslog：安卓的 fdsan 与无 syslog 的实情
+#   · compat-posix.h / config.c / help.c / tempfile.c：其余 bionic 缺口
+# 补丁失败必须**硬红**：静默失败会得到一个「看着编过了、其实少一块」的 git。
+TERMUX_COMMIT=a897f5641358fad33d5d6e76c65335695b1da0fc
+PATCHES="config.mak.uname.patch run-command.c.patch disable-fdsan.patch disable_daemon_syslog.patch compat-posix.h.patch config.c.patch help.c.patch tempfile.c.patch"
+for p in $PATCHES; do
+  URL="https://raw.githubusercontent.com/termux/termux-packages/$TERMUX_COMMIT/packages/git/$p"
+  if ! curl -fsSL "$URL" -o "$ROOT_DIR/work/$p"; then
+    echo "::error title=补丁取不到::$URL"
+    exit 1
+  fi
+  if ! patch -p1 -i "$ROOT_DIR/work/$p"; then
+    echo "::error title=补丁打不上::$p —— 上游 git 版本与 Termux 补丁集不匹配？"
+    exit 1
+  fi
+  echo "[git] 补丁已打：$p"
+done
 export CC
 # NDK 的 ar/ranlib：git 不改用 libtool，直接调 ar。
 TC=$(dirname "$CC")
@@ -55,7 +77,7 @@ export RANLIB="$TC/llvm-ranlib"
 
 # 关键：这些必须**写在 make 命令行上**。git 的 Makefile 用的是简单赋值（CC = cc），环境变量覆盖不了它 ——
 #   上一轮 CI 因此用宿主 gcc 编出了 x86-64 的 git（形态门禁当场红）。
-MAKE_ARGS="CC=$CC AR=$AR RANLIB=$RANLIB uname_S=Linux uname_M=aarch64 prefix=$ROOT_DIR/$OUT NO_CURL=1 NO_OPENSSL=1 NO_EXPAT=1 NO_GETTEXT=1 NO_ICONV=1 NO_TCLTK=1 NO_NSEC=1 NO_INSTALL_HARDLINKS=1 NO_PERL=1 NO_PYTHON=1 RUNTIME_PREFIX=1 ac_cv_fread_reads_directories=yes ac_cv_header_libintl_h=no ac_cv_iconv_omits_bom=no ac_cv_snprintf_returns_bogus=no"
+MAKE_ARGS="CC=$CC AR=$AR RANLIB=$RANLIB uname_S=Linux uname_M=aarch64 prefix=$ROOT_DIR/$OUT HAVE_SYNC_FILE_RANGE= NO_CURL=1 NO_OPENSSL=1 NO_EXPAT=1 NO_GETTEXT=1 NO_ICONV=1 NO_TCLTK=1 NO_NSEC=1 NO_INSTALL_HARDLINKS=1 NO_PERL=1 NO_PYTHON=1 RUNTIME_PREFIX=1 ac_cv_fread_reads_directories=yes ac_cv_header_libintl_h=no ac_cv_iconv_omits_bom=no ac_cv_snprintf_returns_bogus=no"
 echo "[git] make（$MAKE_ARGS）"
 if ! make -j2 $MAKE_ARGS all; then
   echo "::error title=make 失败::见上"
