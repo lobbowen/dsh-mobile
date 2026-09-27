@@ -17,7 +17,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const https = require('node:https');
-const runtimeContract = require('../platform/runtime-contract');
+const runtimeContract = require('./contract');
 const ANCHOR = require('./channel.json');
 
 const PUBKEY = fs.readFileSync(path.join(__dirname, 'userland-public.pem'), 'utf8');
