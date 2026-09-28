@@ -42,7 +42,7 @@ function toolsFromDist() {
   const out = [];
   for (const f of fs.readdirSync(DIST)) {
     // 命名契约（内容寻址）：userland-<name>-<ver>-<sha12>-android-arm64.zip
-    const m = /^userland-([a-z0-9-]+)-([0-9][^-]*)-([0-9a-f]{12})-android-arm64\.tar\.gz$/.exec(f);
+    const m = /^userland-([a-z0-9-]+)-([0-9][^-]*)-([0-9a-f]{12})-android-arm64\.zip$/.exec(f);
     if (!m) continue;
     const name = m[1];
     const ver = m[2];
