@@ -61,6 +61,16 @@ object SupplyProvisioner {
         }
     }
 
+    // 清单名/签名名**由通道锚驱动**：换对象键是避开「旧键被长 TTL 缓存钉死」的正规手段
+    //   （2026-09-29 实证：清单本身已正确发布 tools=5，但旧键被一年缓存挡住，新上传不作废旧条目）。
+    private fun anchorName(ctx: Context, field: String, dflt: String): String {
+        return try {
+            val t = ctx.assets.open(CHANNEL_ASSET).use { it.readBytes().toString(Charsets.UTF_8) }
+            val v = JSONObject(t).optString(field, "")
+            if (v.isEmpty()) dflt else v
+        } catch (e: Throwable) { dflt }
+    }
+
     private fun pemToDer(pem: String): ByteArray {
         val body = pem.replace("-----BEGIN PUBLIC KEY-----", "")
             .replace("-----END PUBLIC KEY-----", "")
@@ -198,8 +208,10 @@ object SupplyProvisioner {
         val tc = toolchainDir(ctx)
         tc.mkdirs()
         try {
-            val manifestBytes = httpGet(base + "/" + MANIFEST_NAME)
-            val sigBytes = httpGet(base + "/" + MANIFEST_NAME + ".sig").toString(Charsets.UTF_8).trim().let {
+            val manName = anchorName(ctx, "manifestName", MANIFEST_NAME)
+            val sigName = anchorName(ctx, "sigName", manName + ".sig")
+            val manifestBytes = httpGet(base + "/" + manName)
+            val sigBytes = httpGet(base + "/" + sigName).toString(Charsets.UTF_8).trim().let {
                 android.util.Base64.decode(it, android.util.Base64.DEFAULT)
             }
             if (!verifyEd25519(pubPem, manifestBytes, sigBytes)) {
