@@ -62,20 +62,50 @@ async function main() {
   if (!fs.existsSync(local)) { console.error('[qiniu] 文件不存在: ' + local); process.exit(2); }
 
   const buf = fs.readFileSync(local);
-  const token = uploadToken(AK, SK, BUCKET, key, 3600);
-  const fields = { key: key, token: token };
-  // 客户端缓存：manifest 要短（否则设备永远读到旧 manifest），包可以长（文件名带版本号）。
-  if (cacheSec !== null && Number.isFinite(cacheSec)) fields['x:Cache-Control'] = 'max-age=' + cacheSec;
-  const mp = multipart(fields, 'file', path.basename(local), buf);
 
-  const t0 = Date.now();
-  const r = await fetch(HOST, { method: 'POST', headers: { 'Content-Type': mp.contentType }, body: mp.body });
-  const text = await r.text();
-  if (r.status !== 200) {
-    console.error('[qiniu] 上传失败 key=' + key + ' status=' + r.status + ' body=' + text.slice(0, 300));
-    process.exit(1);
+  // ⚠ 重试是必需的，不是保险：大件（git 约 25 MB）单次 POST 遇到网络抖动就整步失败，
+  //   而「矩阵里一件失败 ⇒ manifest 作业被跳过」会把一次抖动放大成「清单没更新」
+  //   （2026-09-29 实证：连续两次 `[qiniu] FATAL fetch failed`，三件小的每次都成功）。
+  //   要点：① 每次重试**重新签发 token**（退避期间原 token 可能过期）；② 每次带上限时，
+  //   避免连接僵死占满整个 CI 步骤；③ 4xx（令牌/参数错）不重试 —— 重试不会让它变对。
+  const ATTEMPTS = 4;
+  const PER_ATTEMPT_MS = 300000;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    const token = uploadToken(AK, SK, BUCKET, key, 3600);
+    const fields = { key: key, token: token };
+    // 客户端缓存：manifest 要短（否则设备永远读到旧 manifest），包可以长（文件名带版本号）。
+    if (cacheSec !== null && Number.isFinite(cacheSec)) fields['x:Cache-Control'] = 'max-age=' + cacheSec;
+    const mp = multipart(fields, 'file', path.basename(local), buf);
+    const t0 = Date.now();
+    try {
+      const r = await fetch(HOST, {
+        method: 'POST',
+        headers: { 'Content-Type': mp.contentType },
+        body: mp.body,
+        signal: AbortSignal.timeout(PER_ATTEMPT_MS),
+      });
+      const text = await r.text();
+      if (r.status === 200) {
+        console.log('[qiniu] 已上传 ' + key + '（' + buf.length + ' 字节，' + (Date.now() - t0) + 'ms，第 ' + attempt + ' 次尝试）');
+        return;
+      }
+      if (r.status >= 400 && r.status < 500) {
+        console.error('[qiniu] 上传失败（4xx 不重试）key=' + key + ' status=' + r.status + ' body=' + text.slice(0, 300));
+        process.exit(1);
+      }
+      lastErr = new Error('status=' + r.status + ' body=' + text.slice(0, 200));
+    } catch (e) {
+      lastErr = e;
+    }
+    if (attempt < ATTEMPTS) {
+      const wait = 3000 * Math.pow(2, attempt - 1);
+      console.error('[qiniu] 第 ' + attempt + '/' + ATTEMPTS + ' 次失败（' + (lastErr && lastErr.message) + '），' + wait + 'ms 后重试 key=' + key);
+      await new Promise((res) => setTimeout(res, wait));
+    }
   }
-  console.log('[qiniu] 已上传 ' + key + '（' + buf.length + ' 字节，' + (Date.now() - t0) + 'ms）');
+  console.error('[qiniu] 连续 ' + ATTEMPTS + ' 次失败：key=' + key + ' last=' + (lastErr && lastErr.message));
+  process.exit(1);
 }
 
 main().catch((e) => { console.error('[qiniu] FATAL ' + e.message); process.exit(1); });
