@@ -68,8 +68,11 @@ async function main() {
   //   （2026-09-29 实证：连续两次 `[qiniu] FATAL fetch failed`，三件小的每次都成功）。
   //   要点：① 每次重试**重新签发 token**（退避期间原 token 可能过期）；② 每次带上限时，
   //   避免连接僵死占满整个 CI 步骤；③ 4xx（令牌/参数错）不重试 —— 重试不会让它变对。
-  const ATTEMPTS = 4;
-  const PER_ATTEMPT_MS = 300000;
+  // 单次上限按**实测带宽**定：同 run 对照 jq 353 KB/5.5s、sqlite3 901 KB/0.3s、curl 2.9 MB/47s
+  //   ⇒ 上传侧约 60 KB/s，git 件 20+ MB 需要约 6 分钟。原来设 5 分钟 = 每次都在半途被 abort，
+  //   重试只是把同一件做不到的事重做一遍（2026-09-29 实证：该步挂了 30 分钟）。故放宽到 15 分钟。
+  const ATTEMPTS = 3;
+  const PER_ATTEMPT_MS = 900000;
   let lastErr = null;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     const token = uploadToken(AK, SK, BUCKET, key, 3600);
