@@ -121,4 +121,10 @@ jobs:
           # 清单短缓存（否则设备永远读到旧的，表现为「发了没更新」）；件本体长缓存（文件名带版本号）。
           node scripts/upload-qiniu.js release/userland-manifest.json "$CH/userland-manifest.json" --cache-control=60
           node scripts/upload-qiniu.js release/userland-manifest.json.sig "$CH/userland-manifest.json.sig" --cache-control=60
+# 刷新 CDN：清单曾被以长 TTL 缓存过（2026-09-27 实证 max-age=31536000），新上传不会作废旧条目。
+          # 刷新 CDN：清单曾被以长 TTL 缓存过（2026-09-27 实证 max-age=31536000），新上传不会作废旧条目，
+          # 只能显式刷新 —— 否则设备一直读到旧清单（「发了没更新」）。
+          BASE="${USERLAND_BASE_URL:-https://hubcdn.zll.ink}"
+          BASE="${BASE%/}"
+          node scripts/refresh-qiniu.js "$BASE/$CH/userland-manifest.json" "$BASE/$CH/userland-manifest.json.sig"
           echo "[qiniu] $CH 已更新"
