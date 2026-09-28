@@ -358,6 +358,7 @@
     "attach-and-publish.sh": "cross",
     "inject-apk-keystore.sh": "cross",
     "verify-apk-signing.sh": "cross",
+    "verify-apk-release-form.sh": "cross",
     "gh-release-upload.sh": "cross",
     "verify-runtime-elf.sh": "cross",
     "verify-ota-anchor.sh": "cross",

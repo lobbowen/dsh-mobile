@@ -56,6 +56,9 @@
   （`container/app/build.gradle.kts:119-132` 让 debug 档也用 release keystore 签名，所以签名绿不代表形态绿，债 AUD-G33）。
   写 `apk-latest` 的三条链路（build-apk / publish / repack）都判非 debuggable；
   `fast-apk` 做**两侧对照**：debug 归档必须被读成 debuggable、控件构建出的 release 变体必须不是 —— 只测一侧的尺子分不清「包真干净」与「解析没生效」。
+- release 变体的构建由 `assembleRelease` 里的 AGP 自带门禁 `lintVitalRelease` 一起判（fatal 即构建红）。它唯一被关掉的规则是
+  `ExpiredTargetSdkVersion`（Google Play 的 targetSdk 下限），豁免只住在 `container/app/lint.xml` 一处：本包不走 Play，
+  而 `targetSdk = 28`（`container/app/build.gradle.kts:41`）是 ADR 钉死的能力取值，不是可抬的版本号。其余 fatal 项照常拦。
 - `scripts/verify-ota-anchor.sh`：强制锚点算法为 **Ed25519**，并在带 `--private` 时校验
   「私钥派生公钥 == 焊死锚点」，堵住轮换后 CI 全绿而设备全拒收的静默故障。
 
@@ -134,8 +137,9 @@ base64 -w0 keys/release.keystore > /tmp/ks.b64
 - 滚动别名上的**历史资产**：`app-debug.apk` 这个名字在形态收口（AUD-G33）之前一直是 latest 的资产名，
   线上那份 debug 形态的包要等写 latest 的三条链路里任意一条下一次真跑完才被 `--prune '^app-debug\.apk$'` 清掉。
   在那之前，按旧地址取包的人拿到的仍是 debuggable 包 —— 三个写者都已判形态，所以这是**投递滞后**，不是判定缺口。
-- `fast-apk` 未配 keystore 时，release 控件构建出的是 `app-release-unsigned.apk`：形态读得出（门禁只读 badging），
-  但它不是可投递的发布包。可投递的 release 包仍只由 build-apk / release-admin 产，而那两条要人按。
+- `fast-apk` 的 release 控件构建**带着稳定签名**（2026-09-29 run 36490042734 读到 `[lobos-signing] 使用稳定签名`），
+  但它只用来验形态，不投递；若哪天 fast-apk 撤掉 keystore，同一条会出 `app-release-unsigned.apk`——形态照样读得出，
+  只是不是可投递的发布包。可投递的 release 包仍只由 build-apk / release-admin 产，而那两条要人按。
 - 取证面：发布包非 debuggable 之后，`run-as` 只在 `v<versionName>` 的 debug 归档上可用；
   控制面起不来（内核没跑）时**没有**远程读法。这条不可约，见 `docs/runbook/system-device-verification.md` §0.1。
 

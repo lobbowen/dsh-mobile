@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- 本包不走 Google Play：交付渠道是 hubcdn / GitHub Release 的 apk-latest 侧载
+         （docs/runbook/release.md §5）。这条规则判的是 Play 的 targetSdk 下限，而
+         targetSdk=28 是被 ADR 钉死的能力取值（ADR-0001 D1：SELinux 域 untrusted_app_27
+         才允许在 app home execve；ADR-0003 §"保持不变"），不是可以顺手抬的版本号。
+         所以只关这一条 Play 政策检查，lintVitalRelease 的其余致命项照常拦 release 构建。
+         撤销条件：一旦改走 Play 分发，删除本行并做 targetSdk 迁移 + 真机回归。 -->
+    <issue id="ExpiredTargetSdkVersion" severity="ignore" />
+</lint>
