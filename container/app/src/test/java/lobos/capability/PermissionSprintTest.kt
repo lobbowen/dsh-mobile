@@ -59,6 +59,56 @@ class PermissionSprintTest {
         assertTrue(PermissionSprint.REQUIRED.contains(PermissionCatalog.POST_NOTIFICATIONS))
     }
 
+    @Test fun 冲刺首项必须是必要项_其余不得挡在前面() {
+        // 次序是拍板的事实，所以这条定罪用例换了内容但没换判据：**实测办不成的差集**
+        // 也不许挤到未满足的配对前置项前面（旧版钉的是「锚与 AppOps 待选项排在必要项之前」）。
+        val e = adbReady(
+            attempts = mapOf(
+                booked(PermissionCatalog.ACCESSIBILITY, AttemptOutcome.NEEDS_TAP),
+                booked(PermissionCatalog.BATTERY_OPTIMIZATION, AttemptOutcome.UNSUPPORTED),
+            )
+        )
+        assertTrue("前提：差集里确实有东西，否则这条排序断言是空的", PermissionSprint.residue(e).isNotEmpty())
+        assertEquals(PermissionSprint.REQUIRED.first(), PermissionSprint.pending(e).first())
+        assertEquals(
+            "顺序只能由 REQUIRED + 实测差集拼成，不许另插私货",
+            PermissionSprint.REQUIRED + PermissionSprint.residue(e),
+            PermissionSprint.pending(e),
+        )
+    }
+
+    @Test fun 保活锚从登记表推导_不是手写第二张清单() {
+        // 锚这一族没有因为「先配对后实试」被删掉：成员与数量仍由登记表的 anchor 位推导，
+        // 病根（真机 2026-09-26「锁屏后 App 被清理」）就在锚上，所以谁动锚都要在这里红。
+        val anchors = CapabilityCatalog.ALL.filter { it.keepAliveAnchor }.map { it.id }
+        assertEquals(
+            "锚仍由 keepAliveAnchor 推导，数量与成员不许悄悄变",
+            listOf(
+                PermissionCatalog.ACCESSIBILITY,
+                PermissionCatalog.BATTERY_OPTIMIZATION,
+                PermissionCatalog.NOTIFICATION_ACCESS,
+            ).sorted(),
+            anchors.sorted(),
+        )
+        // 本版修正的是**推导方向**：锚有 adb 静默路，所以通道在位时链首必须是静默项，
+        // 而不是像旧版那样按档位先钉成「只能人点」（= 未试先判，债表 SP-1）。
+        val ready = adbReady()
+        for (id in anchors) {
+            assertEquals("$id 在 adb 在手时必须先试静默路", AcquireKind.SILENT_VIA_ADB, firstKind(id, ready))
+        }
+        // 弹人差集里锚在前 —— 这是排序判据，取的是同一个 keepAliveAnchor 位，不是第二张手写清单。
+        val both = adbReady(
+            attempts = mapOf(
+                booked(PermissionCatalog.NOTIFICATION_ACCESS, AttemptOutcome.NEEDS_TAP),
+                booked(PermissionCatalog.MANAGE_EXTERNAL_STORAGE, AttemptOutcome.NEEDS_TAP),
+            )
+        )
+        assertEquals(
+            listOf(PermissionCatalog.NOTIFICATION_ACCESS, PermissionCatalog.MANAGE_EXTERNAL_STORAGE),
+            PermissionSprint.residue(both),
+        )
+    }
+
     @Test fun 配对之前只问必要项_其余一律不弹人() {
         // 全新设备（adb 还没连）：弹人清单必须恰好等于配对前置项。
         // 旧版在这里排着一串「只能人点」的推断项 —— 用户第一眼就被推去三个系统页，
@@ -120,6 +170,36 @@ class PermissionSprintTest {
         for (id in PermissionSprint.residue(e)) {
             assertEquals("$id 应回落人点", AcquireKind.USER_TAP, firstKind(id, e))
         }
+    }
+
+    @Test fun 需要人点的待选项仍然要问() {
+        // 「谁需要人点」不再按档位推断，但**要人点的一定要被问**这一条没变，而且它现在更难违反：
+        // 账上记着办不成的非可选权限项，一项都不许被静默吞掉。旧版的罪是「开屏不问 +
+        // 自动流办不到」= 双无状态（债表 SP-1）。
+        val gated = CapabilityCatalog.ALL
+            .filter {
+                PermissionCatalog.byId(it.id) != null && !it.optional &&
+                    !PermissionSprint.REQUIRED.contains(it.id)
+            }
+            .map { it.id }
+        val tried = adbReady(attempts = gated.associate { booked(it, AttemptOutcome.NEEDS_TAP) })
+        assertEquals(
+            "试完办不成的每一项都必须进弹人差集",
+            gated.sorted(), PermissionSprint.residue(tried).sorted(),
+        )
+        // 双向对照：同一批项在**没有实测账**时一条都不进差集 —— 那时它们该被 adb 试，不该被人点。
+        assertTrue(PermissionSprint.residue(adbReady()).isEmpty())
+        // 「既没人点也没人试」在本设计里只允许一种合法成因：每次会话那一档（屏幕捕获），
+        // 它在登记表上就标着 optional。任何新增的非可选权限项若既没有 adb 静默路、又不被
+        // 配对前置认领，就会在这里红 —— 那正是必须回去补静默路（或明确它是配对前置）的信号。
+        val stranded = CapabilityCatalog.ALL
+            .filter {
+                PermissionCatalog.byId(it.id) != null && !it.optional &&
+                    !PermissionSprint.REQUIRED.contains(it.id) &&
+                    firstKind(it.id, adbReady()) != AcquireKind.SILENT_VIA_ADB
+            }
+            .map { it.id }
+        assertEquals("非可选权限项必须有 adb 静默路，否则就是双无状态", emptyList<String>(), stranded)
     }
 
     @Test fun 账上是SILENT_OK而判据未绿_先无声要回来不弹人() {
