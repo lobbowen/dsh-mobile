@@ -26,16 +26,17 @@
 
     <!--
       悬浮窗（bridge:ui_automation 的辅助能力，也是无障碍不可用时的降级路径）。
-      同样属 AppOps 特殊权限：声明后还需 Settings.canDrawOverlays() 授权的跳转。
-      此档只能由用户在系统页手动授予，不接受任何静默授予。
+      同样属 AppOps 特殊权限：声明后还需系统页授权。
+      本档能否经 shell 静默授予不在这里规定 —— 以判据表 capability/CapabilityCatalog 的
+      APPOP 分支为准（docs/contracts/ui-onboarding-spec.md §2.0「档位归口」）。
     -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!--
       外部存储全量访问（bridge:storage 的代表能力）。
-      ⚠ 这是 AppOps 特殊权限（非运行时权限）：Manifest 声明后，还需跳到
-        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION 由用户手动授权，
-        授权后 Environment.isExternalStorageManager() 才为 true。
+      ⚠ 这是 AppOps 特殊权限（非运行时权限）：Manifest 声明本身不给权，判据是
+        Environment.isExternalStorageManager()。本档能否经 shell 静默授予同样以
+        capability/CapabilityCatalog 的 APPOP 分支为准，不在此复述。
       tools:ignore 抑制 Lint 对「全文件访问」的强提示（本应用定位即为受管设备上的容器）。
     -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"

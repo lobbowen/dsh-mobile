@@ -65,7 +65,7 @@ on:
       # 「改了版本却不触发构建 / 只改版本时无人验证」。
       - 'version.json'
       # 注意【不】包含 programs/console/**：ADR-0005 后 Program 不随 APK 分发（下面有专门断言），
-      # 内核改动走 program-ota.yml 出 OTA 包 —— 让 fast-apk 监听它只会白烧机时。
+      # Program 改动走 program-ota.yml 出 OTA 包 —— 让 fast-apk 监听它只会白烧机时。
     # 额外的 tag 触发：推 fast-<任意> 即可手动跑一次，不必改代码。
     # 维护环境（沙箱）无法操作网页、workflow_dispatch 点不了，
     # tag 是最干净的显式触发手段。
@@ -114,7 +114,7 @@ jobs:
           # 优先用显式传入的 input（workflow_dispatch 时）；tag 触发或 push 触发
           # 时 inputs 为空，则从 assets 清单里读 —— 这样"清单说用什么版本"
           # 与"实际下载哪份运行时"永远一致，不会出现两处硬编码各自漂移。
-          # 读取口唯一：scripts/read-node-versions.sh（ci.yml 内核 job 同源，门禁法①）。
+          # 读取口唯一：scripts/read-node-versions.sh（ci.yml Program job 同源，门禁法①）。
           V="${{ inputs.node_version }}"
           if [ -z "$V" ]; then
             V="$(bash scripts/read-node-versions.sh default)"
@@ -313,7 +313,7 @@ jobs:
           # 本链出的包就是设备上那个**唯一验签信任源**的载体（assets/ota-public.pem）。
           # 判据只住 scripts/verify-ota-anchor.sh（build-apk 与 program-ota 同调；配对那一问
           # 在 program-ota，因为只有它拿得到私钥）。这里缺的是「锚点本身能不能用」这一问：
-          # 焊一把解析不了的、或算法不是 ed25519 的公钥进 APK，此后每个内核包在所有设备上
+          # 焊一把解析不了的、或算法不是 ed25519 的公钥进 APK，此后每个 Program 包在所有设备上
           # 都判 signature-invalid，而这在打包期完全看不出来。
           bash scripts/ensure-tool.sh openssl openssl
           bash scripts/verify-ota-anchor.sh \
@@ -328,21 +328,21 @@ jobs:
         run: bash scripts/build-native-capabilities.sh
 
       - name: Stage pinned npm into APK assets
-        # npm 是**基础环境**的一部分（与 Node 版本锁死、几乎不变）⇒ 进 APK 而非内核包。
+        # npm 是**基础环境**的一部分（与 Node 版本锁死、几乎不变）⇒ 进 APK 而非 Program 包。
         # 版本/sha512 双钉与理由见 scripts/stage-npm-assets.sh 头部注释。
         run: |
           set -euo pipefail
           ./scripts/stage-npm-assets.sh
 
-      # ADR-0005：内核**不随 APK 分发**。这里刻意**什么都不做** —— 曾经这一步会现场拉内核源码、
-      # 签名、把 baseline.zip 塞进 APK，后果是"内核一改就要重出 APK"。现在内核只从 OTA 源安装
+      # ADR-0005：Program**不随 APK 分发**。这里刻意**什么都不做** —— 曾经这一步会现场拉 Program 源码、
+      # 签名、把 baseline.zip 塞进 APK，后果是"Program 一改就要重出 APK"。现在 Program 只从 OTA 源安装
       # （见 program-ota.yml）。若有人把 Program 塞回 assets/kernel，下面这条断言会直接红。
       - name: Assert the APK carries NO Program assets
         run: |
           set -euo pipefail
           KD=container/app/src/main/assets/kernel
           if [ -d "$KD" ] && [ -n "$(ls -A "$KD" 2>/dev/null)" ]; then
-            echo "::error title=APK 含内核资产::ADR-0005 规定 Program 不随 APK 分发；assets/kernel 必须为空或不存在。"
+            echo "::error title=APK 含 Program 资产::ADR-0005 规定 Program 不随 APK 分发；assets/kernel 必须为空或不存在。"
             ls -la "$KD"
             exit 1
           fi
@@ -357,7 +357,7 @@ jobs:
         # 退 2（配了却用不成）必须当场红，等 20 分钟后在签名步骤才炸会把真因
         # （base64 残缺）伪装成「密码/别名不对」。
         #
-        # secret 命名复用 release-admin repack 那一组，不另立一套；与 OTA 内核签名
+        # secret 命名复用 release-admin repack 那一组，不另立一套；与 OTA Program 签名
         # （ed25519）是两条独立信任根 —— 辨析见 scripts/keygen-android-keystore.sh 头注释。
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -392,7 +392,7 @@ jobs:
 
       - name: Audit APK contents
         # 判据的唯一实现是 scripts/verify-apk-native.sh（与 build-apk 同调，
-        # 缺件/内核资产/npm/adb-client 逐条硬红，动机见脚本头注释）。
+        # 缺件/Program 资产/npm/adb-client 逐条硬红，动机见脚本头注释）。
         run: |
           set -euo pipefail
           APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)"

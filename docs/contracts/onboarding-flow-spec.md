@@ -139,12 +139,17 @@ F4（补齐不挡门的能力）降级为**折叠欠账** `OnboardingFlow.debts(
 - `mediaprojection` —— 每次会话授权，物理不可预置。
 - `dev-options` / `wireless-debug` —— 环境开关不是「授权」，由 F1 的现场判定引导（§2.1）。
 
-三项锚（`battery_optimization` / `notification_access` / `accessibility`）的静默路径**不需要 DO**：
-`PostPairingAutoFlow` 走 `SILENT_VIA_ADB`（电池豁免是一次性系统页）就能办到，于是它们**完全撤出开屏**。
-AppOps 三项（`system_alert_window` / `request_install_packages` / `manage_external_storage`）的静默前提
-却是 **Device Owner**（`SILENT_VIA_DO`），而 DO 是**设备事实**：本机 4 用户 + 7 账户 → `dpm` 被
-"several users" 拒，**永远不可达**。所以它们留在开屏让人点完 —— `PermissionSprint` 刻意用
-`NO_DO_EVIDENCE`（`deviceOwner = false`）推导，而不是假设 DO 可达。
+三项锚（`battery_optimization` / `notification_access` / `accessibility`）的静默路径
+走 `SILENT_VIA_ADB`（电池豁免是一次性系统页）就能办到，于是它们**完全撤出开屏**。
+AppOps 三项（`system_alert_window` / `request_install_packages` / `manage_external_storage`）
+留在开屏让人点完 —— 但这是**欠账不是判定**：判据表的 APPOP 分支对除电池外的项直接写
+`usable = false`，而全仓从未下发过一条 `appops set` 去试它们（执行方案 D06「未试先判」）。
+「哪一档能经 adb 静默授予」只由判据表定义（归口见
+[`ui-onboarding-spec`](ui-onboarding-spec.md) §2.0 的「档位归口」段），本流程规范不复述；
+E1 起 AppOps 三项先经 adb 实试，试完仍未办掉的才回落人点。
+DO 已全面退出本产品，`AcquireKind` 里不存在任何 DO 静默档 —— 「静默前提 = Device Owner」的
+措辞属历史残留，出现即门禁判红；`PermissionSprint` 用 `NO_DO_EVIDENCE`（通道在线、无特权身份）
+推导静默集合，不假设任何特权身份可达。
 **不许静默吞掉**：若开屏不问、自动流又办不到，三项授权就此消失（取法链首项回落 `USER_TAP`，
 自动流也不会把它算成静默项）—— 这是被真机定罪过一次的坑。
 这条由 `PermissionSprintTest.保活锚从登记表推导_不是手写第二张清单` 与

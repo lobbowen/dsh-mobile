@@ -43,6 +43,13 @@ v1 把**页面顺序**当成了**依赖关系**，由此产生四处硬伤，全
 v1 §2 的「S2 静默授予主路径必须经 DO」不成立；`AndroidManifest.xml` 里「通知使用权 DO 也无法
 静默授予、必须用户手开」的注释同样按本条改写。
 
+**档位归口**：「哪一档能经 adb shell 静默授予」这件事在仓内只有一个规范定义处 —— 判据表
+`permissions/PermissionCatalog.kt`（分档与取法）＋ `capability/CapabilityCatalog.kt`（能力→取法链，
+`usable` 决定链条首项是不是 `SILENT_VIA_ADB`）。本段与 `AndroidManifest.xml` 的通知监听注释只承载
+**实测事实与修正轨迹**，不另立档位；其余文档（ADR / runbook / 流程规范）一律引用本段指向的判据表，
+不许各写一遍 —— 两处措辞一旦分叉，流水线只按其中一处实现，另一处就变成永不为真的断言
+（2026-09-29 执行方案 E6-b；"能不能静默"必须要么被试过、要么如实标为待试，见 D06）。
+
 ### 2.1 能力规格（Capability）
 
 一条能力的完整规格 = 下列九项，缺一项即视为规格不合格（评审否决）。签名与
@@ -101,7 +108,9 @@ Capability(id, title, segment, optional, requires, judge, acquirer, bridgeToken,
 
 1. **S0 的绿 = `adb-channel`，不是 `adb-credentials`。** 凭据在册只回答「密钥与配对记录在不在」，
    通道通不通必须靠活探针 —— 这条区分是 §2.0-1 的唯一解。
-2. **`device_owner` 不在任何能力的 `requires` 里。** 它只出现在取法链的降级位。
+2. **`device_owner` 不在任何能力的 `requires` 里，也不在任何取法链里。** DO 已整体退出本产品，
+   `AcquireKind` 根本没有 DO 静默档（只有 `AUTO/USER_TAP/RUNTIME_DIALOG/USER_CODE/SILENT_VIA_ADB`），
+   所以"降级位"就是 `USER_TAP`；写「静默前提=DO」的措辞出现即门禁判红。
 3. **`post-notifications` 属 S0，不属 S2**（2026-09-25 真机定罪后补）：S0 主路径的输码交互
    走通知栏 RemoteInput（§3.2），通知权限被拒 = 输码入口根本不存在 = S0 死锁。把它登记在 S2
    就是 §3.4 反对的「顺序倒挂」的漏网一条 —— 而 `nm.notify()` 在缺权限时不抛异常、只是不显示，
@@ -152,9 +161,9 @@ runtime ─→ program-bundle ─→ workbench（派生行，非 Capability）
 | 表达式 | 唯一合法宿主 |
 |---|---|
 | `"state.json"`、`"adbkey.pem"` 的存在性判定 | `capability/`（凭据判据）+ `assets/node/adb-client/`（写方，不在本表扫描范围） |
-| `isDeviceOwnerApp(` | `capability/CapabilityCriteria.kt` |
+| `isDeviceOwnerApp(`、`dpm set-device-owner` | **全仓不得出现**（DO 已整体退出，现读两处 0 命中）。反向钉死点 = `capability-single-source-gate-test.js:84/:86`：`CapabilityBroker`/`CapabilityCriteria` 回读 DO 即红 |
 | `"development_settings_enabled"`、`"adb_wifi_enabled"` | `capability/`（S0 前置开关只在 CapabilityCriteria 读） |
-| `"uid=2000"`、`dpm set-device-owner` | `capability/`（通道断言在 AdbChannelProbe，取法命令在 CapabilityAcquisitionRunner） |
+| `"uid=2000"` | `capability/` 层（通道断言在 AdbChannelProbe，取法命令在 CapabilityAcquisitionRunner） |
 | `canDrawOverlays(`、`isExternalStorageManager(`、`canRequestPackageInstalls(`、`isIgnoringBatteryOptimizations(`、`checkSelfPermission(` | `permissions/PermissionCenter.kt` |
 | `enabled_notification_listeners`、`enabled_accessibility_services`（**裸串**） | `permissions/PermissionCatalog.kt` 各声明一次（`SECURE_KEY_*`）；读侧 PermissionCenter 与下发侧 `CapabilityAcquisitionRunner` 都引用它 |
 | `"android.settings.WIRELESS_DEBUGGING_SETTINGS"`（带引号的字面量） | `capability/CapabilityNavigation.kt` 唯一（§7③ 的现场降级判定也只许住这一处；别处再抄 = 同一个 action 两套落点） |

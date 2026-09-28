@@ -75,13 +75,12 @@
 
 | # | 项 | 解锁 | 档 |
 |---|---|---|---|
-| 1 | **NotificationListenerService** | `notif.read`（当前 ⏳） | T1 用户手动 |
-| 2 | Shizuku 可选集成 | shell uid 2000（T3） | T3 |
-| 3 | phantom-killer / 电池优化引导 | 保活质量 | —（P3 已落地检测） |
+| 1 | **NotificationListenerService** | `notif.read`（当前 ⏳） | 档位/取法不在本表规定 —— 以 [`ui-onboarding-spec`](../contracts/ui-onboarding-spec.md) §2 实测修正段与判据表 `permissions/PermissionCatalog.kt`、`capability/CapabilityCatalog.kt` 为准，本表只列"还差这一项" |
+| 2 | phantom-killer / 电池优化引导 | 保活质量 | —（P3 已落地检测） |
 
 **保持不变（这些就是最大能力的正确取值）**：`targetSdk=28`（app-home `execve` 地基）、
-`minSdk=24`、仅 `arm64-v8a`、`specialUse` + `mediaProjection` 前台服务类型、
-DO 与无障碍留在同一包（一次预置拿到全部策略面）。
+`minSdk=24`、仅 `arm64-v8a`、`specialUse` + `mediaProjection` 前台服务类型。
+（原列「DO 与无障碍留在同一包」已删 —— DO 全面退出本产品，机制与能力都不保留。）
 
 ---
 

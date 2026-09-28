@@ -75,7 +75,7 @@
 
 **代价与约束**：
 
-- **用户必须手动启用无障碍服务**（系统政策不允许 adb/代码代授）；首启引导把 accessibility 标为保活必选项。
+- **无障碍服务的取法（能否静默、由谁开）不在本 ADR 规定** —— 「哪一档能静默授予」以 [`docs/contracts/ui-onboarding-spec.md`](../contracts/ui-onboarding-spec.md) §2 的实测修正段与代码判据表 `permissions/PermissionCatalog.kt` 为准；首启引导把 accessibility 标为保活必选项。
 - 无障碍是重权限（可读全屏内容），本产品用途（ui_automation）与该权限相称，须如实申报。
 - **不承诺 100% 不被杀**（无 root / 无 DO 下厂商二次回收确实杀得掉）：承诺的是「被杀一定能看见」。
 - **验收判据**（真机，装上含本改造的 APK 后）：

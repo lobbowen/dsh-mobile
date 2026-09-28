@@ -1,8 +1,8 @@
 name: CI (gates)
 
-# 统一门禁：容器引擎（契约/对账/原生资产/桥）+ 内核回归 + 面板前端。
+# 统一门禁：容器引擎（契约/对账/原生资产/桥）+ Program 回归 + 面板前端。
 # 单一事实源与红线见 docs/standards/storage.md、docs/standards/testing.md。
-# 出包（APK/内核 OTA）不在这里，见 fast-apk / build-apk / program-ota。
+# 出包（APK/Program OTA）不在这里，见 fast-apk / build-apk / program-ota。
 
 on:
   push:
@@ -14,7 +14,9 @@ on:
       - '.github/gate-policy.json'
       - 'THIRD-PARTY.md'
       - 'scripts/gate-scan.js'
-      - 'docs/contracts/**'
+      # doc-gate 扫的是**全部** docs（死链、旧身份措辞、判据表归口），debt-gate 读 docs/plans 债表；
+      # 白名单只写 docs/contracts/** 等于「改了 ADR/runbook/债表不必过门」，与门禁实际覆盖面不符。
+      - 'docs/**'
       - 'scripts/**'
       - '.github/native-assets.txt'
       - '.github/workflows/**'
@@ -26,8 +28,12 @@ on:
     paths:
       - 'container/**'
       - 'programs/**'
-      - 'docs/contracts/**'
+      - 'docs/**'
       - 'scripts/**'
+      # 与 push 侧**逐字对称**（同上条理由）：gate-policy.json 是禁词门唯一的**输入**，
+      # 只改它就能让一条规则从能红变成空转 —— PR 侧不触发等于「尺子被改短」没人查。
+      - '.github/gate-policy.json'
+      - 'THIRD-PARTY.md'
       # 与上面 push 的清单**必须对称**：.github/native-assets.txt 是 NativeAssetRegistry 的投影，
       # container job 会重跑 gen-native-assets.js 并 `git diff --exit-code` 它。只改这一份清单的 PR
       # 若被 paths 挡在门外，等于「线上下载清单被人改错」这条路只能等合进 main 才第一次被检查。
@@ -132,7 +138,7 @@ jobs:
       - name: 读设备那份 node 版本
         id: device-node
         # 原生件供给门禁要答「设备上 npm 会装出什么」，而 npm 的 engines 检查吃的是 process.version，
-        # 所以内核 job 的 node 必须与设备同源。版本事实源是 assets/node-versions.json 的 default
+        # 所以本 Program job 的 node 必须与设备同源。版本事实源是 assets/node-versions.json 的 default
         # （fast-apk 出包时读同一格）；读取口唯一：scripts/read-node-versions.sh。
         # 门禁会核对现场 process.version 并当场红。
         working-directory: .
@@ -160,7 +166,7 @@ jobs:
           npm install -g "npm@$NPMV"
           echo "探针用 npm: $(npm --version)"
 
-      - name: 内核回归测试（安卓路径 · LOBOS_ANDROID=1）
+      - name: Program 回归测试（安卓路径 · LOBOS_ANDROID=1）
         env:
           LOBOS_ANDROID: '1'
         run: npm test
@@ -217,7 +223,7 @@ jobs:
   # 为什么单独一个 job：它需要 JDK + Android SDK，比上面两个 Node job 重得多；
   # 但两者互不依赖 —— 并行跑，Node 侧仍能秒级给出快速反馈。
   #
-  # 为什么必须有：内核下载器（ResumableDownloader）这类**纯 JVM 逻辑**此前完全没有夹具，
+  # 为什么必须有：Program 下载器（ResumableDownloader）这类**纯 JVM 逻辑**此前完全没有夹具，
   # 「断点续传 / 416 / 提前断 / sha256 不符」这些分支只能靠真机碰运气。
   # 现在用 JUnit + JDK 自带的 com.sun.net.httpserver 起本地 HTTP 服务逐分支验证。
   #
