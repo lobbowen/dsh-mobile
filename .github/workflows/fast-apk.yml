@@ -434,10 +434,12 @@ jobs:
           else
             VCHANNEL=auto
           fi
-          # 日常链**不写任何滚动别名**（滚动别名 apk-latest 只有发布面 build-apk/release-admin 写）。
-          # 门禁仍对 apk-latest 做只读比对：防止日常链产出的 versionCode 低于已发布版本。
-          # 通道按 explicit：日常链允许同版本重建（产物只进 v<versionName> 这个独立 tag，不覆盖线上别名）。
-          bash scripts/check-apk-release-version.sh version.json apk-latest explicit
+          # 日常链**不写任何滚动别名**（滚动别名只有发布面 build-apk/release-admin 写）；
+          # 但版本门禁仍以发布面别名 apk-latest 作**只读参照**：防止日常链产出的 versionCode
+          # 低于已发布版本。通道按 explicit：日常链允许同版本重建（产物只进 v<versionName>
+          # 这个独立 tag，不覆盖线上别名）。
+          TAG="apk-latest"
+          bash scripts/check-apk-release-version.sh version.json "$TAG" explicit
 
           # 版本化资产进**独立 tag**（v<versionName>），**不放**滚动 latest：
           # 否则 latest 会随每次发布无限堆积历史 APK（滚动通道只该有"当前"）。
