@@ -14,6 +14,8 @@
     "scripts",
     "THIRD-PARTY.md",
     "brand-scan-report.txt",
+    "doc-gate-report.txt",
+    "debt-gate-report.txt",
     "gradle",
     "gradlew",
     "gradlew.bat",
@@ -123,8 +125,8 @@
       "from": "dsh-android-kernel",
       "to": "programs/console",
       "kind": "dir",
-      "expectFiles": 150,
-      "countNote": "迁移基线原为 234；W2 把系统级职责下沉 OS 原生后 console 按设计收缩（当前约 169 件），基线随之下调。"
+      "expectFiles": 101,
+      "countNote": "迁移基线原为 234，后 150。2026-09-28 复检：旧 kernel/ 共 236 件，其中 src/guard/**（guardian/health/lifecycle/monitor）、src/assembler/**、src/d2/**、src/domains/**、bin/dsh-supervisor 等 ~135 件按 v4 分层**移出 console** —— 监督链下沉 OS 原生（lifecycle/AnchorPolicy/ResidencyAudit）、供给下沉 runtime/SupplyProvisioner、dsh 专有域归载荷自己。按设计的收缩不是丢件：基线随之下调到实测 101（下限语义，再少即红）。"
     },
     {
       "from": "docs/ADR-001-android-execution-domain.md",
@@ -336,6 +338,8 @@
     "gen-native-assets.js": "cross",
     "gen-version.js": "cross",
     "require-ci.js": "cross",
+    "doc-gate.js": "cross",
+    "debt-gate.js": "cross",
     "run-engine-tests.sh": "L0",
     "build-native-capabilities.sh": "L0",
     "build-userland-sqlite3.sh": "L1",

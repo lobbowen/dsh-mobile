@@ -150,7 +150,9 @@ jobs:
         # 设备上跑的 npm 是 APK 投放的那一份（scripts/stage-npm-assets.sh 钉版本+sha512）。
         # runner 自带的 npm 10 会**静默忽略** --os/--cpu，实测两份计划各 575 项、两侧差集皆空；
         # 设备侧 npm 版本的唯一锚点 = container/app/src/main/assets/node-versions.json 的 npm 字段
-        # （复检 AUD-G27：原锚点随 assembler 删除，现已重建）。
+        # （复检 AUD-G27：原锚点随 assembler 删除，现已重建；路径按**仓根**读，
+        #   因为本 job 默认工作目录是 programs/console）。
+        working-directory: .
         run: |
           set -euo pipefail
           echo "runner 自带 npm: $(npm --version)"

@@ -39,6 +39,9 @@ class MdnsWatcher(private val context: Context) {
         context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
     private var multicastLock: WifiManager.MulticastLock? = null
 
+    private val releaseHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val releaseRunnable = Runnable { releaseMulticast() }
+
     // 每种类型只 browse 一条；重入前先 stop，防 NSD 重复注册抛 IllegalArgumentException。
     private val browses = mutableMapOf<String, NsdManager.DiscoveryListener>()
 
@@ -114,13 +117,17 @@ class MdnsWatcher(private val context: Context) {
         multicastLock = runCatching {
             wifi?.createMulticastLock("lobos-adb-mdns")?.apply {
                 setReferenceCounted(false)
-                // 超时兜底（AUD-G22）：组播锁曾经只 acquire 不设时限，异常路径下等于永久持锁。
-                acquire(MULTICAST_LOCK_TIMEOUT_MS)
+                acquire()
             }
         }.getOrNull()
+        // 超时兜底（AUD-G22）：WifiManager.MulticastLock **没有** acquire(timeout)
+        // （只有 WifiLock 有），所以超时自己排一次释放，防异常路径永久持锁。
+        releaseHandler.removeCallbacks(releaseRunnable)
+        releaseHandler.postDelayed(releaseRunnable, MULTICAST_LOCK_TIMEOUT_MS)
     }
 
     private fun releaseMulticast() {
+        releaseHandler.removeCallbacks(releaseRunnable)
         runCatching { multicastLock?.release() }
         multicastLock = null
     }

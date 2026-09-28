@@ -1,6 +1,7 @@
 package lobos.lifecycle
 
 import android.content.Context
+import lobos.os.KillAudit
 import android.os.SystemClock
 import java.io.File
 import java.text.SimpleDateFormat

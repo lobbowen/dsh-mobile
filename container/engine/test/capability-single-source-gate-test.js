@@ -192,7 +192,8 @@ rule('R8 唤醒层', appFiles.length, () => {
   const ota = read(path.join(APP, 'src/main/java/lobos/ota/ProgramOtaUpdater.kt'));
   if (!/PowerLocks\.wifi\(/.test(ota)) bad.push('OTA 联网路径未持 WifiLock');
   const mdns = read(path.join(APP, 'src/main/java/lobos/bridge/MdnsWatcher.kt'));
-  if (!/acquire\(\s*MULTICAST_LOCK_TIMEOUT_MS\s*\)/.test(mdns)) bad.push('MulticastLock 未设超时');
+  // MulticastLock 没有 acquire(timeout)：超时靠 postDelayed 排释放，两种形态都认。
+  if (!/acquire\(\s*MULTICAST_LOCK_TIMEOUT_MS\s*\)/.test(mdns) && !/postDelayed\(\s*releaseRunnable\s*,\s*MULTICAST_LOCK_TIMEOUT_MS\s*\)/.test(mdns)) bad.push('MulticastLock 未设超时');
   const manifest = read(path.join(APP, 'src/main/AndroidManifest.xml'));
   if (!manifest.includes('DozeBackstopReceiver')) bad.push('Doze 兜底接收器未声明');
   const os = appFiles.filter((f) => f.endsWith('OsHostService.kt'));

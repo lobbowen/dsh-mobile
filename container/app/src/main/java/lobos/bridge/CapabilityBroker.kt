@@ -7,7 +7,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.ComponentName
 import android.content.Context
-import android.content.IntentWrapper
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.LocalServerSocket
@@ -43,7 +43,6 @@ import lobos.os.PortBroker
 import lobos.os.ProgramAuthorizer
 import lobos.os.ProgramSettings
 import lobos.os.RegistryStore
-import lobos.lifecycle.OsHostService
 import lobos.os.TaskRegistry
 import lobos.runtime.InstanceHost
 import lobos.runtime.NodeVersionManager
@@ -290,23 +289,12 @@ class CapabilityBroker(private val host: Service) : ContextWrapper(host) {
         OsAccessibilityService.instance
             ?: throw BridgeError(CODE_CAPABILITY_MISSING, "无障碍服务未连接（请在系统设置中开启 Lob OS 无障碍服务）")
 
-    // ── os.* 方法面（契约：docs/components/console-system-api.md）────────────────────────
-    // 定位：console 是普通 Program，系统能力一律经此转发到原生 lobos.os.*。已落地的方法给出真实读数，
-    // 尚未落地的**显式 not-implemented**（CODE_NOT_IMPLEMENTED），绝不返回伪造的系统状态。
-    // 缺口清单与原因见 container/app/src/main/java/lobos/os/METHOD-GAPS.md。
-    private fun notImplemented(method: String): Nothing =
-        throw BridgeError(CODE_NOT_IMPLEMENTED, "未实现: " + method + "（见 lobos/os/METHOD-GAPS.md）")
-
     private fun entryJson(e: AppRegistry.Entry): JSONObject = JSONObject().apply {
         put("id", e.id)
         put("version", e.version ?: JSONObject.NULL)
         put("role", e.role)
         put("desired", e.desired.name.lowercase(Locale.US))
         put("port", e.port ?: JSONObject.NULL)
-    }
-
-    private fun programsJson(): JSONArray = JSONArray().apply {
-        AppRegistry.all(this@CapabilityBroker).forEach { put(entryJson(it)) }
     }
 
     // ── os.* 方法面（契约：docs/components/console-system-api.md）────────────────────

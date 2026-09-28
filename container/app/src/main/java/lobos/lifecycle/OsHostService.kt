@@ -224,8 +224,8 @@ class OsHostService : Service() {
         }
         val anchor = when (AccessibilityAnchor.state(this)) {
             AnchorState.BOUND -> "锚在位"
-            AnchorState.UNBOUND -> "锚掉线",
-            AnchorState.UNKNOWN -> "锚未知",
+            AnchorState.UNBOUND -> "锚掉线"
+            AnchorState.UNKNOWN -> "锚未知"
         }
         // 定罪结论排最前：它是"这条常驻断过"的唯一可见出口。
         val interrupted = ResidencyAudit.interruption()?.let { it + " · " } ?: ""
