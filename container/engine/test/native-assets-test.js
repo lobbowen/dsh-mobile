@@ -1082,7 +1082,7 @@ check('APK 原生件审计宿主 scripts/verify-apk-native.sh 存在', fs.exists
     rLoNoAbi.rc === 2 && rLoNoAbi.out.includes('ABI'), JSON.stringify({ rc: rLoNoAbi.rc }));
 
   // 不该有的东西单独红：内核资产进门 = ADR-0005 被改回去。
-  const withProgram = mkZip('wprogram', { 'lib/arm64-v8a/libnode.so': 'ELFAKE', 'assets/program/k.zip': 'x' });
+  const withProgram = mkZip('wprogram', { 'lib/arm64-v8a/libnode.so': 'ELFAKE', 'assets/kernel/k.zip': 'x' });
   const rK = runVan([withProgram, 'arm64-v8a']);
   check('verify-apk-native：APK 含内核资产 → 立刻退 1（ADR-0005，先于其它条目拦）',
     rK.rc === 1 && rK.out.includes('APK 含内核资产'), JSON.stringify({ rc: rK.rc, out: rK.out.slice(0, 140) }));

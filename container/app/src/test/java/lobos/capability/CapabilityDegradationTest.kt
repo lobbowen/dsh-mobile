@@ -51,7 +51,12 @@ class CapabilityDegradationTest {
 
     @Test fun 全新安装_没有任何一段被误判为已完成() {
         val rows = steps(Evidence(nowMs = 1_000_000L))
-        assertFalse("全新设备不该有 DONE 段", rows.values.any { it.status == StepStatus.DONE })
+        // S1（旧"加速器"段）在受管能力全面退出后**按设计为空**，project 会如实给
+        // 「本段无待办」= DONE；它不参与"全新设备不该有 DONE"这条判据。
+        assertFalse(
+            "全新设备不该有 DONE 段（S1 空段除外）",
+            rows.filterKeys { it != "S1" }.values.any { it.status == StepStatus.DONE },
+        )
         // 段行取「最可推进」的那一项：S0 亮 ACTION（差人点开关），S1 加速器则如实 BLOCKED 在通道后。
         assertEquals(StepStatus.ACTION, rows.getValue("S0").status)
         assertEquals(StepStatus.DONE, rows.getValue("S1").status)

@@ -160,49 +160,49 @@ object CapabilityCatalog {
             bridgeToken = "mediaprojection",
         ),
         Capability(
-            id = OemGuards.STARTUP_MANAGER, title = "自启动管理", segment = S2, optional = true,
-            judge = { e ->
-                if (e.oemGuards.contains(OemGuards.STARTUP_MANAGER)) CapVerdict(CapStatus.GRANTED, "已确认")
-                else CapVerdict(CapStatus.ACTION, "厂商开关无公开读接口：拨完请点「我已完成」")
-            },
-            acquirer = { listOf(
-                Acquisition(AcquireKind.USER_TAP, "去启动管理页", NAV_OEM_STARTUP),
-                Acquisition(AcquireKind.AUTO, "我已完成", EXEC_OEM_CONFIRM),
-            ) },
-        ),
-        Capability(
-            id = OemGuards.CARD_LOCK, title = "卡片锁/后台弹窗", segment = S2, optional = true,
-            judge = { e ->
-                if (e.oemGuards.contains(OemGuards.CARD_LOCK)) CapVerdict(CapStatus.GRANTED, "已确认")
-                else CapVerdict(CapStatus.ACTION, "厂商开关无公开读接口：拨完请点「我已完成」")
-            },
-            acquirer = { listOf(
-                Acquisition(AcquireKind.USER_TAP, "去权限管理页", NAV_OEM_CARD_LOCK),
-                Acquisition(AcquireKind.AUTO, "我已完成", EXEC_OEM_CONFIRM),
-            ) },
-        ),
-        Capability(
-            id = OemGuards.FULL_BACKGROUND, title = "完全后台运行", segment = S2, optional = true,
-            judge = { e ->
-                if (e.oemGuards.contains(OemGuards.FULL_BACKGROUND)) CapVerdict(CapStatus.GRANTED, "已确认")
-                else CapVerdict(CapStatus.ACTION, "厂商开关无公开读接口：拨完请点「我已完成」")
-            },
-            acquirer = { listOf(
-                Acquisition(AcquireKind.USER_TAP, "去省电管理页", NAV_OEM_FULL_BG),
-                Acquisition(AcquireKind.AUTO, "我已完成", EXEC_OEM_CONFIRM),
-            ) },
-        ),
-        Capability(
-            id = OemGuards.FREEZE_WHITELIST, title = "速冻白名单", segment = S2, optional = true,
-            judge = { e ->
-                if (e.oemGuards.contains(OemGuards.FREEZE_WHITELIST)) CapVerdict(CapStatus.GRANTED, "已确认")
-                else CapVerdict(CapStatus.ACTION, "厂商开关无公开读接口：拨完请点「我已完成」")
-            },
-            acquirer = { listOf(
-                Acquisition(AcquireKind.USER_TAP, "去白名单页", NAV_OEM_FREEZE),
-                Acquisition(AcquireKind.AUTO, "我已完成", EXEC_OEM_CONFIRM),
-            ) },
-        ),
+                id = OemGuards.STARTUP_MANAGER, title = "自启动管理", segment = S3,
+                judge = { e ->
+                    if (e.oemGuards.contains(OemGuards.STARTUP_MANAGER)) CapVerdict(CapStatus.GRANTED, "已确认")
+                    else CapVerdict(CapStatus.ACTION, "厂商开关无公开读接口：拨完请点「我已完成」")
+                },
+                acquirer = { listOf(
+                    Acquisition(AcquireKind.USER_TAP, "去启动管理页", NAV_OEM_STARTUP),
+                    Acquisition(AcquireKind.AUTO, "我已完成", EXEC_OEM_CONFIRM),
+                ) },
+            ),
+            Capability(
+                id = OemGuards.CARD_LOCK, title = "卡片锁/后台弹窗", segment = S3,
+                judge = { e ->
+                    if (e.oemGuards.contains(OemGuards.CARD_LOCK)) CapVerdict(CapStatus.GRANTED, "已确认")
+                    else CapVerdict(CapStatus.ACTION, "厂商开关无公开读接口：拨完请点「我已完成」")
+                },
+                acquirer = { listOf(
+                    Acquisition(AcquireKind.USER_TAP, "去权限管理页", NAV_OEM_CARD_LOCK),
+                    Acquisition(AcquireKind.AUTO, "我已完成", EXEC_OEM_CONFIRM),
+                ) },
+            ),
+            Capability(
+                id = OemGuards.FULL_BACKGROUND, title = "完全后台运行", segment = S3,
+                judge = { e ->
+                    if (e.oemGuards.contains(OemGuards.FULL_BACKGROUND)) CapVerdict(CapStatus.GRANTED, "已确认")
+                    else CapVerdict(CapStatus.ACTION, "厂商开关无公开读接口：拨完请点「我已完成」")
+                },
+                acquirer = { listOf(
+                    Acquisition(AcquireKind.USER_TAP, "去省电管理页", NAV_OEM_FULL_BG),
+                    Acquisition(AcquireKind.AUTO, "我已完成", EXEC_OEM_CONFIRM),
+                ) },
+            ),
+            Capability(
+                id = OemGuards.FREEZE_WHITELIST, title = "速冻白名单", segment = S3,
+                judge = { e ->
+                    if (e.oemGuards.contains(OemGuards.FREEZE_WHITELIST)) CapVerdict(CapStatus.GRANTED, "已确认")
+                    else CapVerdict(CapStatus.ACTION, "厂商开关无公开读接口：拨完请点「我已完成」")
+                },
+                acquirer = { listOf(
+                    Acquisition(AcquireKind.USER_TAP, "去白名单页", NAV_OEM_FREEZE),
+                    Acquisition(AcquireKind.AUTO, "我已完成", EXEC_OEM_CONFIRM),
+                ) },
+            ),
         Capability(
             id = RUNTIME, title = "运行时", segment = S3,
             judge = { e ->
@@ -344,6 +344,13 @@ object CapabilityCatalog {
      * 而 onboarding-flow-spec §2.2 的认领规则要求那些授权落回 F6 补齐清单，不是让 F3/F4 变红。
      * BLOCKED 回答的是「前置没齐，现在还不该做」，不能回答「已经做完的事没做」。
      */
+    /**
+     * 厂商省电白名单（豁免层，AUD-G21）：**独立清单，不进 S0–S3 引导管线**。
+     *
+     * 为什么独立：它们是"常驻卫生"清单（可随时回来补），不是开场必经步骤；
+     * 混进 S2 会破坏「S2 = 权限档一一对应」这条钉死的不变量（能力退化测试 §登记表）。
+     */
+
     fun evaluate(e: Evidence): Map<String, CapVerdict> {
         val out = LinkedHashMap<String, CapVerdict>()
         for (c in ALL) {

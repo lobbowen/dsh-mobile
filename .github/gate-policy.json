@@ -292,6 +292,7 @@
     "scripts/verify-apk-native.sh",
     ".github/workflows/fast-apk.yml",
     "container/native/d1/exec-path.c",
-    "scripts/build-userland-git.sh"
+    "scripts/build-userland-git.sh",
+    "container/engine/test/native-assets-test.js"
   ]
 }
