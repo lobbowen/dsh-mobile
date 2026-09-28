@@ -115,7 +115,7 @@ async function main() {
       } catch (e) { lastErr2 = e; if (a < 3) await new Promise((res) => setTimeout(res, 2000 * a)); }
     }
     if (!done) throw new Error('mkfile 三次失败: ' + (lastErr2 && lastErr2.message));
-    console.log('[qiniu] 已上传（分片）' + key + '（' + buf.length + ' 字节，' + ctxs.length + ' 片）');
+    console.log('[qiniu] 已上传（分片）' + key + '（' + buf.length + ' 字节，' + ctxs.length + ' 片）服务端: ' + JSON.stringify(done).slice(0, 200));
   }
 
   if (buf.length > 8 * 1024 * 1024) {
@@ -136,7 +136,7 @@ async function main() {
     try {
       const r = await fetch(HOST, { method: 'POST', headers: { 'Content-Type': mp.contentType }, body: mp.body, signal: AbortSignal.timeout(PER_ATTEMPT_MS) });
       const text = await r.text();
-      if (r.status === 200) { console.log('[qiniu] 已上传 ' + key + '（' + buf.length + ' 字节，' + (Date.now() - t0) + 'ms，第 ' + attempt + ' 次尝试）'); return; }
+      if (r.status === 200) { console.log('[qiniu] 已上传 ' + key + '（' + buf.length + ' 字节，' + (Date.now() - t0) + 'ms，第 ' + attempt + ' 次尝试）服务端: ' + text.slice(0, 200)); return; }
       if (r.status >= 400 && r.status < 500) { console.error('[qiniu] 上传失败（4xx 不重试）key=' + key + ' status=' + r.status + ' body=' + text.slice(0, 300)); process.exit(1); }
       lastErr = new Error('status=' + r.status + ' body=' + text.slice(0, 200));
     } catch (e) { lastErr = e; }

@@ -126,4 +126,10 @@ jobs:
           echo "[qiniu] 目标键: $CH/$MAN 与 $CH/$SIG"
           node scripts/upload-qiniu.js release/userland-manifest.json "$CH/$MAN" --cache-control=60
           node scripts/upload-qiniu.js release/userland-manifest.json.sig "$CH/$SIG" --cache-control=60
+          # CI 自证：上传后立刻从 CDN 回读该键 —— 区分「传上去了但 CDN 不认」与「没传到那个键」。
+          BASE2="${USERLAND_BASE_URL:-https://hubcdn.zll.ink}"
+          BASE2="${BASE2%/}"
+          CODE=$(curl -s -o /tmp/m.json -w "%{http_code}" "$BASE2/$CH/$MAN?ts=$(date +%s)")
+          echo "[readback] $BASE2/$CH/$MAN → HTTP $CODE"
+          if [ "$CODE" = "200" ]; then node -e "const j=require('/tmp/m.json'); console.log('[readback] version=' + j.version + ' tools=' + j.tools.length)"; else echo "[readback] 内容前 200 字节: $(head -c 200 /tmp/m.json)"; fi
           echo "[qiniu] $CH 已更新"
