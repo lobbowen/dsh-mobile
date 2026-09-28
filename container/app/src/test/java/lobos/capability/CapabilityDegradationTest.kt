@@ -90,7 +90,9 @@ class CapabilityDegradationTest {
 
     @Test fun 登记表每一段都有能力_新增档位漏登记会在这里变红() {
         val segs = CapabilityCatalog.ALL.map { it.segment }.toSet()
-        assertEquals(setOf("S0", "S1", "S2", "S3"), segs)
+        // S1（旧「加速器」段）在受管能力全面退出后**保留段号但已无能力**：
+        // PipelineProjection 仍会为它渲染「本段无待办」，所以这里只断言有能力的段。
+        assertEquals(setOf("S0", "S2", "S3"), segs)
         // 通知权限登记在 S0（它是配对的物理前置），其余权限档仍在 S2
         val s0 = CapabilityCatalog.ALL.filter { it.segment == CapabilityCatalog.S0 }.map { it.id }.toSet()
         assertTrue("通知发送必须登记在 S0：S0 输码靠通知栏", s0.contains(PermissionCatalog.POST_NOTIFICATIONS))

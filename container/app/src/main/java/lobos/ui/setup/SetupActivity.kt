@@ -607,7 +607,8 @@ class SetupActivity : AppCompatActivity() {
                     appendLine("---- 配对尝试（与通知同源） ----")
                     appendLine(AttemptStore.humanPairTimeline().joinToString("\n").ifBlank { "无" })
                     appendLine("---- 能力判据 ----")
-                    CapabilityCatalog.ALL.forEach { c ->
+                    // 诊断页把"豁免层"（厂商省电四项）一并列出：它不进引导管线，但必须可见可核。
+                    (CapabilityCatalog.ALL + CapabilityCatalog.OEM_GUARDS).forEach { c ->
                         val v = verdicts[c.id]
                         appendLine(
                             "${c.segment} ${c.id}${if (c.optional) "*" else ""} " +

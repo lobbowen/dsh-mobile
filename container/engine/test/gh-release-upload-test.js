@@ -273,7 +273,7 @@ const asset = (c, n) => path.join(c.ST, 'assets', n);
   // 判据是**集合相等**而非「包含」—— 多出第六个调用方必须在此显式登记，
   // 否则「上传判据只住宿主」这条纪律会被悄悄抄出第二份。
   check('上传宿主被五条链路同调（日常/全量/内核/小件固化/管理）',
-    JSON.stringify(callers) === JSON.stringify(['build-apk.yml', 'fast-apk.yml', 'program-ota.yml', 'pin-capabilities.yml', 'release-admin.yml']),
+    JSON.stringify(callers) === JSON.stringify(['build-apk.yml', 'fast-apk.yml', 'pin-capabilities.yml', 'program-ota.yml', 'release-admin.yml']),
     callers.join(','));
   const ko = wfs.find(([f]) => f === 'program-ota.yml')[1];
   // 先展平反斜杠续行：这条链路盯的是「同一宿主被调两次、两档政策各自表达」，
