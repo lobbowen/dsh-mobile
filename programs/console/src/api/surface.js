@@ -19,7 +19,7 @@ const CATEGORIES = ['public', 'operational', 'internal', 'deprecated'];
 /** 精确路由（pathname ===）。 */
 const SURFACE = [
   // ── 生命周期域（lifecycle.js）──
-  { path: '/status',         methods: ['GET'],  domain: 'lifecycle', category: 'public',      consumers: ['UI(polling)', 'CLI(status)'], note: '面板 + OS 状态摘要（OS 未接线时显式 degraded）' },
+  { path: '/status',         methods: ['GET'],  domain: 'lifecycle', category: 'public',      consumers: ['UI(polling)', 'CLI(status)'], note: '面板 + OS 状态摘要（OS 未接线时显式 osOnline=false；degraded 只由 OS 相位给）' },
   { path: '/events',         methods: ['GET'],  domain: 'lifecycle', category: 'public',      consumers: ['UI(timeline)'], note: 'OS journal 增量事件（打断可见）' },
   { path: '/healthz',        methods: ['GET'],  domain: 'lifecycle', category: 'public',      consumers: ['容器(握手探针)'], note: '面板存活探针' },
   { path: '/readyz',         methods: ['GET'],  domain: 'lifecycle', category: 'operational', consumers: ['监控/编排探针'], note: '面板就绪探针' },

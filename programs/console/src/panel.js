@@ -113,7 +113,9 @@ class Panel {
 
   /**
    * 对外状态摘要：只汇总 OS 的单一状态源（os.state.get）+ 面板自身事实。
-   * OS 未接线时明确标注 degraded/osOnline=false —— 不伪造系统状态。
+   * `degraded` 在整份载荷里只说一件事：OS 相位等于 DEGRADED（读 state.json 那一份）。
+   * OS 未接线是面板自己的事实，只说 `osOnline=false` —— 顶层再放一个 `degraded:true`
+   * 就是第二把尺子：同一份 JSON 里两个 degraded 各说各话。
    */
   async statusSummary() {
     const base = {
@@ -121,7 +123,7 @@ class Panel {
     };
     const st = await this.os.call('os.state.get', {});
     if (st && st.ok) return Object.assign(base, { osOnline: true, os: st.result });
-    return Object.assign(base, { osOnline: false, os: null, degraded: true, note: 'OS 原生能力 API 未接线（接口清单见 docs/components/console-system-api.md）' });
+    return Object.assign(base, { osOnline: false, os: null, note: 'OS 原生能力 API 未接线（接口清单见 docs/components/console-system-api.md）' });
   }
 
   /** 启动面板 HTTP 服务（唯一对外承载面；不拉任何子进程）。 */

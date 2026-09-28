@@ -368,7 +368,6 @@ class SetupActivity : AppCompatActivity() {
         StageStatus.NEXT -> "[待办]"
         StageStatus.BLOCKED -> "[等待]"
         StageStatus.FAILED -> "[失败]"
-        StageStatus.UNREACHABLE -> "[不可得]"
     }
 
     /** 判据核对行（段投影）的标记：与阶段卡的词分开，两处口径不同不要混用。 */
@@ -377,7 +376,6 @@ class SetupActivity : AppCompatActivity() {
         StepStatus.ACTION -> "[待办]"
         StepStatus.BLOCKED -> "[等待]"
         StepStatus.FAILED -> "[失败]"
-        StepStatus.UNREACHABLE -> "[不可得]"
     }
 
     // ---- 动作：一律转交 capability 层 ----

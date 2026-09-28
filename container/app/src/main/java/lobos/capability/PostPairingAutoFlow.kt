@@ -11,7 +11,7 @@ object PostPairingAutoFlow {
     fun ready(e: Evidence): Boolean =
         e.credentials == CredentialsState.PAIRED && e.channelLive()
 
-    /** 静默可办的项（id 升序，稳定输出）。已 GRANTED / UNREACHABLE 的项不在其中。 */
+    /** 静默可办的项（id 升序，稳定输出）。已 GRANTED 的项不在其中。 */
     fun plan(e: Evidence): List<String> {
         if (!ready(e)) return emptyList()
         val verdicts = CapabilityCatalog.evaluate(e)

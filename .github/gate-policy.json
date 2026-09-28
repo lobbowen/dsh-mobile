@@ -331,6 +331,21 @@
       "A-system-ota"
     ]
   },
+  "citations": {
+    "note": "引用核验（scripts/doc-gate.js，债表 AUD-G48）的数据宿主：反引号里的代码引用必须指得到仓内真实文件、行号不越界。strictScope 只圈**规范面**（照着它改代码的那几类文档）—— ADR 与 archive 是历史记账，刻意排除（同 dead-path-gate 不扫 docs 的理由：把被否决方案的原文留下来是刻意的，逼人改文档去迎合门禁等于烧证据）。external 是**外部包里**的文件名，本仓不该有它们：每条都要写为什么，条目本身即申报。",
+    "strictScope": [
+      "docs/contracts/",
+      "docs/standards/",
+      "docs/runbook/",
+      "README.md"
+    ],
+    "external": [
+      {
+        "file": "npm-cli.js",
+        "why": "npm 自带入口，住在设备上投放的那份 npm 包里（runtime.json 的 npmEntry 键），不在本仓源码树内"
+      }
+    ]
+  },
   "ignoreFiles": [
     "brand-scan-report.txt",
     ".github/gate-policy.json",

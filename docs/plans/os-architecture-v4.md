@@ -192,7 +192,13 @@ files/
 
 ## 10. 状态机、Journal 与对外状态
 
-- `BOOTING → RUNNING → DEGRADED → RECOVERING → STOPPING`；Program 状态是其子状态，对外只汇总成 OS 一个状态。
+- `BOOTING → RUNNING ⇄ DEGRADED → STOPPING`；Program 状态是其子状态，对外只汇总成 OS 一个状态。
+  - **DEGRADED 只由一拍实测产生**：判据唯一住在 `lobos/os/OsState.kt` 的 `OsPhaseRule`（控制面不在线 **或** 锚不在位），
+    生产者唯一住在 `OsInit.refresh`（宿主节拍调用）。真机 2026-09-28 定罪的就是这一档**永远不可达**：
+    全仓只有 RUNNING/STOPPING 两个迁移点，而通知正文自己现场拼「锚掉线·运行时未响应」——相位串同源、结论不同源。
+  - `RECOVERING` 已删（债表 D11）：它和 D10 那条 `UNREACHABLE` 是同一个形状——有消费点、零生产者，
+    留着就是允许散文里出现一句「正在恢复」而没有任何实测能产出它。恢复 = 读数不再构成降级，直接回 RUNNING。
+  - 锚读数 `UNKNOWN`（采集失败）既不判降级也不判保护生效：相位维持不动，状态行必须显式写「锚未知」。
 - Journal 追加落盘；重启按 journal 重放（这是"OS 的 boot"）。
 - 对外唯一状态：`state.json` + **一条通知** + 控制面板首行，**三处同源**。
 

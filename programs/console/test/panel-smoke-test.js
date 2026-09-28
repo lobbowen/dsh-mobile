@@ -38,7 +38,7 @@ function get(port, p) {
   let sj = {};
   try { sj = JSON.parse(status.body); } catch {}
   check('S-2 /status 200', status.code === 200, String(status.code));
-  check('S-3 /status 明确标注 OS 未接线（不伪造）', sj.osOnline === false && sj.degraded === true, JSON.stringify(sj.osOnline));
+  check('S-3 /status 明确标注 OS 未接线（不伪造）', sj.osOnline === false && sj.degraded === undefined, JSON.stringify(sj.osOnline));
   check('S-4 /status 带面板自身事实', !!(sj.panel && sj.panel.id === 'console' && sj.panel.version), JSON.stringify(sj.panel || {}));
 
   const health = await get(port, '/healthz');

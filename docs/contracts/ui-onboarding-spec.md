@@ -80,7 +80,7 @@ Capability(id, title, segment, optional, requires, judge, acquirer, bridgeToken,
 - `optional`：加速器/旁路能力置 true。今天唯一一项是 `mediaprojection`（截屏授权，每次会话），
   DO 已整体退出产品，不再是一个能力，因此也不作为例子。`optional` 能力**永不**参与 S4 放行判定，
   也**永不**作为他人的前置（规则 2，`CapabilityCatalog` 装载时 `require` 钉死）；它自己可以显示
-  BLOCKED/UNREACHABLE，但那只是灰字提示。开屏冲刺同理：`PermissionSprint.residue` 只收非 optional 项。
+  BLOCKED，但那只是灰字提示。开屏冲刺同理：`PermissionSprint.residue` 只收非 optional 项。
 - `keepAliveAnchor`：这一项是**后台存活的锚**（电池豁免 / 通知读取 / 无障碍）。它必须是字段而不是
   冲刺层手写的清单 —— 清单必然与登记表漂移。开屏授权冲刺（onboarding-flow-spec §2.2 的
   `PermissionSprint.residue(e)`，锚排在其前）与折叠欠账都从这一位推导。定罪依据：ColorOS HANS 只认
@@ -89,12 +89,16 @@ Capability(id, title, segment, optional, requires, judge, acquirer, bridgeToken,
 - 没有独立的 `failure` 字段：归因是 `CapVerdict.detail` 的职责，证据缺失由 `Evidence` 的初值表达。
 
 状态枚举：`GRANTED`（判据为真）/ `ACTION`（前置就绪，差用户一步）/ `BLOCKED`（硬前置未达成）/
-`FAILED`（试过且失败，带归因）/ `UNREACHABLE`（平台拒绝且非用户可补救：灰显「不可得」，**不阻塞下游**）。
-`UNREACHABLE` 今天**没有任何生产者** —— DO 退出后不再有「平台永远不给」的项，`judge` 里没有人返回它，
-消费链（`OnboardingFlow` / `PipelineProjection` / `PostPairingAutoFlow` / 报告文案）却仍在为它让路。
-这是一个**在册档位**而不是在册状态：留着它是因为「灰显且不阻塞」的语义仍可能被真机测出来（例如某 ROM
-永久拒绝一项锚），但它必须由实测账或 ROM 侧事实产生，不许预先点名。台账见
-`docs/plans/os-v4-debt-registry.json` 的 `D10`。
+`FAILED`（试过且失败，带归因）。
+
+**没有 `UNREACHABLE` 这一档**（债表 D10 于 2026-09-29 收口，取「删」这一支）。它原来的语义是
+「平台拒绝且非用户可补救：灰显不可得、不阻塞下游」，但 DO 退出后 `judge` 里再没有人返回它，
+而消费链（`OnboardingFlow` / `PipelineProjection` / 报告文案）仍在为它让路。一个零生产者的档位
+不是储备，是**「预先判死」的入口形状**：留着它，任何时候都能不改判据、只在某个 judge 里顺手
+写一句「这项不可得」，把债表 `SP-1` 定罪的「未试先判」原地复活。真机如果测出「某项被这台 ROM
+永久拒绝」，那条事实的正确归宿是实测账里的 `AttemptOutcome.UNSUPPORTED`（带 `human` 归因，
+进 `PermissionSprint.residue` 或进报告），而不是新造一个静态档位 —— 将来若真需要
+「不可得且不挡下游」，它必须**带着生产者一起来**。
 
 ### 2.2 能力登记表（唯一事实源）
 
@@ -151,7 +155,7 @@ runtime ─→ program-bundle ─→ workbench（派生行，非 Capability）
 
 - S0–S4 五段是能力按 `requires` **拓扑排序后的呈现视图**（用户要的简单），不再是模型本身。
 - 段状态聚合规则（写死，便于单测）：段内**任一 FAILED → FAILED**；否则**任一 ACTION → ACTION**；
-  否则**任一 BLOCKED → BLOCKED**；否则**存在 UNREACHABLE → UNREACHABLE**；否则 DONE。
+  否则**任一 BLOCKED → BLOCKED**；否则 DONE。
   `optional` 能力不参与取 worst（它只把自己单列一行灰字，供极客核对）。
 - **退化恢复**：任一能力日常退化（权限被 ROM 回收、端口轮换、Program 掉线）→ 该段变黄/红并直达
   该能力的取法动作。活探针的 TTL 保证「拔开关后 ≤30s 必然变红」，不允许凭缓存续绿。

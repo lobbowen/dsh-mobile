@@ -18,8 +18,8 @@ import lobos.bridge.CapabilityBroker
 import lobos.bridge.ScreenCaptureController
 import lobos.capability.AdbChannelProbe
 import lobos.capability.CapabilityEvidenceCollector
-import lobos.capability.ProbeOutcome
 import lobos.os.AppRegistry
+import lobos.os.OsFacts
 import lobos.os.OsInit
 import lobos.os.OsPhase
 import lobos.ota.ProgramManager
@@ -46,11 +46,6 @@ class OsHostService : Service() {
     private var thread: HandlerThread? = null
     private var handler: Handler? = null
     private var lastNotifyMs = 0L
-
-    /** 控制面在线读数：与首页同源（CapabilityEvidenceCollector.controlPlaneUp）。 */
-    @Volatile private var controlPlaneUp = false
-    /** 是否至少采过一次读数：默认值不许当结论播出去。 */
-    @Volatile private var readingsCollected = false
 
     private var instance: InstanceHost? = null
     private var broker: CapabilityBroker? = null
@@ -101,7 +96,7 @@ class OsHostService : Service() {
 
     private fun promoteToForeground() {
         try {
-            startForeground(NOTIF_ID, buildNotification(statusLine()))
+            startForeground(NOTIF_ID, buildNotification(OsInit.statusLine(this)))
         } catch (t: Throwable) {
             RuntimeDiagnostics.append(
                 this, "host", false, "转前台失败",
@@ -135,8 +130,11 @@ class OsHostService : Service() {
     private val tick: Runnable = Runnable {
         try {
             val now = SystemClock.elapsedRealtime()
-            observeAnchorTransition()
-            refreshStatusNotice(now)
+            // 一拍只读一次锚：观测边与状态行必须拿同一份读数，读两次就可能各说各话
+            // （相邻两拍之间系统真的会重绑，那时「告警说在位、正文说掉线」又是一处同源破口）。
+            val anchor = AccessibilityAnchor.state(this)
+            observeAnchorTransition(anchor)
+            refreshStatusNotice(now, anchor)
         } catch (e: Throwable) {
             Log.e(TAG, "宿主节拍异常（不致命，下一拍继续）", e)
         } finally {
@@ -145,20 +143,21 @@ class OsHostService : Service() {
     }
 
     /** 常驻通知 = 状态出口；心跳与状态同拍（这一拍落盘 = 这一刻进程还活着）。 */
-    private fun refreshStatusNotice(now: Long) {
+    private fun refreshStatusNotice(now: Long, anchor: AnchorState) {
         if (now - lastNotifyMs < NOTIFY_MS) return
         lastNotifyMs = now
         ResidencyAudit.heartbeat(this)
-        controlPlaneUp = try {
-            CapabilityEvidenceCollector.controlPlaneUp()
-        } catch (_: Throwable) {
-            false
-        }
-        readingsCollected = true
-        try {
+        val facts = OsFacts(
+            readingsCollected = true,
+            controlPlaneUp = runCatching { CapabilityEvidenceCollector.controlPlaneUp() }.getOrDefault(false),
+            channel = AdbChannelProbe.cached().outcome,
+            anchor = anchor,
+        )
+        // 先落盘再上屏：通知渲染的是 state.json 那一份，不是另一把现场拼出来的尺子。
+        OsInit.refresh(this, facts, ResidencyAudit.interruption())
+        runCatching {
             (getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager)
-                .notify(NOTIF_ID, buildNotification(statusLine()))
-        } catch (_: Throwable) {
+                .notify(NOTIF_ID, buildNotification(OsInit.statusLine(this)))
         }
     }
 
@@ -172,9 +171,8 @@ class OsHostService : Service() {
      * 不在这里。本方法唯一的职责是让状态翻转**可见**：掉线那一刻上屏一条判决降级告警，
      * 系统重绑成功上屏一条恢复，其余节拍保持安静（重复告警不是可见性，是噪音）。
      */
-    private fun observeAnchorTransition() {
-        val st = AccessibilityAnchor.state(this)
-        if (st == AnchorState.UNKNOWN) return          // 读不到是采集失败，不是锚的状态
+    private fun observeAnchorTransition(st: AnchorState) {
+        if (st == AnchorState.UNKNOWN) return      // 读不到是采集失败，不是锚的状态
         val bound = st == AnchorState.BOUND
         val prev = anchorBoundLastTick
         anchorBoundLastTick = bound
@@ -191,28 +189,6 @@ class OsHostService : Service() {
                     "本设计不做复活，下一次挂锚的时机是进程重生（见 AnchorPolicy）",
             )
         }
-    }
-
-    private fun statusLine(): String {
-        val runtime = when {
-            !readingsCollected -> "状态采集中…"
-            controlPlaneUp -> "运行时在线"
-            else -> "运行时未响应"
-        }
-        val channel = when (AdbChannelProbe.cached().outcome) {
-            ProbeOutcome.LIVE -> "通道通"
-            ProbeOutcome.DEAD -> "通道不通"
-            ProbeOutcome.NEVER_RUN -> "通道未验"
-        }
-        val anchor = when (AccessibilityAnchor.state(this)) {
-            AnchorState.BOUND -> "锚在位"
-            AnchorState.UNBOUND -> "锚掉线"
-            AnchorState.UNKNOWN -> "锚未知"
-        }
-        // 定罪结论排最前：它是"这条常驻断过"的唯一可见出口。
-        val interrupted = ResidencyAudit.interruption()?.let { it + " · " } ?: ""
-        // 相位文案与 console 的 os.state.get 同源（lobos.os.OsInit 的 state.json 是单一源）。
-        return interrupted + OsInit.stateLine(this) + " · " + runtime + " · " + channel + " · " + anchor
     }
 
     override fun onDestroy() {

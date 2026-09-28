@@ -382,7 +382,7 @@ object CapabilityCatalog {
             if (verdict.status == CapStatus.GRANTED) { out[c.id] = verdict; continue }
             val waiting = c.requires.firstOrNull { req ->
                 val v = out[req]
-                v != null && v.status != CapStatus.GRANTED && v.status != CapStatus.UNREACHABLE
+                v != null && v.status != CapStatus.GRANTED
             }
             out[c.id] = if (waiting != null) CapVerdict(CapStatus.BLOCKED, "等待 " + titleOf(waiting)) else verdict
         }

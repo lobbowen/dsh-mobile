@@ -6,7 +6,7 @@ import lobos.capability.CapabilityCatalog.S2
 import lobos.capability.CapabilityCatalog.S3
 
 /** 段行的渲染状态（[CapStatus] 的段级聚合结果，spec §2.3）。 */
-enum class StepStatus { DONE, ACTION, BLOCKED, FAILED, UNREACHABLE }
+enum class StepStatus { DONE, ACTION, BLOCKED, FAILED }
 
 /**
  * 一行段：状态 + 人话 + **该点的那个按钮**（[pending] 来自能力登记表的取法链首项）。
@@ -58,8 +58,7 @@ object PipelineProjection {
         CapStatus.FAILED -> 0
         CapStatus.ACTION -> 1
         CapStatus.BLOCKED -> 2
-        CapStatus.UNREACHABLE -> 3
-        CapStatus.GRANTED -> 4
+        CapStatus.GRANTED -> 3
     }
 
     private fun toStep(s: CapStatus): StepStatus = when (s) {
@@ -67,7 +66,6 @@ object PipelineProjection {
         CapStatus.ACTION -> StepStatus.ACTION
         CapStatus.BLOCKED -> StepStatus.BLOCKED
         CapStatus.FAILED -> StepStatus.FAILED
-        CapStatus.UNREACHABLE -> StepStatus.UNREACHABLE
     }
 
     fun project(e: Evidence, verdicts: Map<String, CapVerdict>): List<PipelineStep> {

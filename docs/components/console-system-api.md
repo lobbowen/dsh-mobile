@@ -61,7 +61,7 @@ OS 承载控制面板时会在 WebView 里注入一个原生桥；**payload 只�
 
 | 方法 | 语义 | params | result | console 调用方 |
 |---|---|---|---|---|
-| `os.state.get` | 对外唯一状态（`BOOTING/RUNNING/DEGRADED/RECOVERING/STOPPING` + 汇总） | `{}` | `{ phase, since, uptimeMs, degraded, programs: [...] }` | `GET /status`（lifecycle.js）、`bin/panel status` |
+| `os.state.get` | 对外唯一状态：读 **`files/os/state.json` 那一份**（= 常驻通知 = 控制台首行，三处同源），面板侧**不现场重算结论**。相位集合 `BOOTING/RUNNING/DEGRADED/STOPPING`（`RECOVERING` 因零生产者已删，见债表 D11） | `{}` | `{ phase, label, since, uptimeMs, degraded, statusLine, facts: { readingsCollected, controlPlaneUp, channel, anchor }, programs: [...] }`（`degraded` 就是 `phase == DEGRADED`，不是第二把尺子） | `statusSummary()`（`programs/console/src/panel.js:120`）经 `GET /status`（`programs/console/src/api/lifecycle.js:17`）与 `bin/panel status` |
 | `os.journal.read` | 增量事件（gseq 全局有序，跨 OS 重启连续） | `{ after, limit, internal }` | `{ seq, events: [{ seq, ts, type, source, data, internal }] }` | `GET /events` |
 | `os.journal.logTail` | 各 stream 日志尾部 | `{ stream, n }`（stream: os/programs/error） | `{ stream, lines: [...] }` | `GET /logs/tail` |
 | `os.journal.export` | journal JSONL 导出（审计） | `{ after, limit }` | `{ seq, exported, lines }` | `GET /logs/export` |

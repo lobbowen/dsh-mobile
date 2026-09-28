@@ -14,6 +14,7 @@ import lobos.lifecycle.AnchorState
 import lobos.lifecycle.OsHostService
 import lobos.os.KillAudit
 import lobos.lifecycle.AnchorPolicy
+import lobos.lifecycle.AnchorVerdict
 
 /**
  * 应用入口（进程生命周期内各跑一次）。
@@ -73,25 +74,27 @@ class OsApplication : Application() {
                 // 判决状态两个方向都要留痕 —— 可度量才谈得上验证「加固是否有效」。
                 // 这是告警，不是恢复：锚没挂上 = 判决掉出 accessibility = 即将被杀。
                 runCatching {
-                    when {
-                        outcome == null -> RuntimeDiagnostics.append(
-                            appCtx, "anchor", false, "判决降级告警：锚状态未知",
-                            "ensureBound 调用失败 耗时=${elapsedMs}ms（保护激活上界 " +
-                                "${AnchorPolicy.ACTIVATION_BUDGET_MS}ms）—— " +
-                                "本设计不提供死后恢复，判据与机制见 AnchorPolicy"
-                        )
-                        AnchorPolicy.verdictDegraded(outcome.state != AnchorState.BOUND) ->
-                            RuntimeDiagnostics.append(
-                                appCtx, "anchor", false, "判决降级告警：锚未生效",
-                                "state=${outcome.state} healed=${outcome.healed} 耗时=${elapsedMs}ms" +
-                                    "（保护激活上界 ${AnchorPolicy.ACTIVATION_BUDGET_MS}ms）—— " +
-                                    "锚不在位则 ColorOS 判决停在 importance=traffic，随后会被 o-kill；" +
-                                    "本设计不提供死后恢复"
-                            )
-                        else -> RuntimeDiagnostics.append(
+                    // 判决逐项列举 AnchorVerdict：**没有 else**。旧写法用 `when { … else -> … }`，
+                    // 于是「读不到锚状态」和「锚在位」共用一条 else —— 采集失败会被播成保护生效。
+                    when (AnchorPolicy.verdict(outcome?.state ?: AnchorState.UNKNOWN)) {
+                        AnchorVerdict.PROTECTED -> RuntimeDiagnostics.append(
                             appCtx, "anchor", true, "保护生效：锚在位",
-                            "state=${outcome.state} 耗时=${elapsedMs}ms —— " +
+                            "state=${outcome?.state} healed=${outcome?.healed} 耗时=${elapsedMs}ms —— " +
                                 "ColorOS 判决停在 importance=accessibility"
+                        )
+                        AnchorVerdict.DEGRADED -> RuntimeDiagnostics.append(
+                            appCtx, "anchor", false, "判决降级告警：锚未生效",
+                            "state=${outcome?.state} healed=${outcome?.healed} 耗时=${elapsedMs}ms" +
+                                "（保护激活上界 ${AnchorPolicy.ACTIVATION_BUDGET_MS}ms）—— " +
+                                "锚不在位则 ColorOS 判决停在 importance=traffic，随后会被 o-kill；" +
+                                "本设计不提供死后恢复"
+                        )
+                        AnchorVerdict.UNKNOWN -> RuntimeDiagnostics.append(
+                            appCtx, "anchor", false,
+                            if (outcome == null) "判决降级告警：锚状态未知" else "判决降级告警：锚读数取不到",
+                            (if (outcome == null) "ensureBound 调用失败" else "state=UNKNOWN：组件名解析不出或系统服务查不动") +
+                                " 耗时=${elapsedMs}ms（保护激活上界 ${AnchorPolicy.ACTIVATION_BUDGET_MS}ms）—— " +
+                                "取不到读数不等于保护生效，也不许记成「adb 办不成」，判据见 AnchorPolicy"
                         )
                     }
                 }

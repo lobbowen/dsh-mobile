@@ -59,8 +59,12 @@ jobs:
           node-version: '22'
       - name: Gate — naming/brand/structure scan
         run: node scripts/gate-scan.js
-      - name: Gate — docs relative links (strict)
-        run: node scripts/doc-gate.js --strict
+      - name: Gate — docs links + file:line citations (strict)
+        # 死链一直强制。引用核验（债表 AUD-G48）：反引号里的代码文件必须真实存在、`:NN` 不许越界。
+        # 转强制只圈**规范面**（contracts/standards/runbook/README，范围住在 gate-policy.citations）：
+        # 本次接入时那一面存量=0，红只可能来自新写的假引用。ADR 与迁移对照表指名旧模块是历史证据，
+        # 扫进强制只会逼人改写记录，所以那部分数字留在报告里（doc-gate-report.txt）。
+        run: node scripts/doc-gate.js --strict --strict-cites
       - name: Gate — debt registry (report mode)
         run: node scripts/debt-gate.js
       - name: Upload gate reports

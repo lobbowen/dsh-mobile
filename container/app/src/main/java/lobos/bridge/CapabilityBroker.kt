@@ -39,6 +39,7 @@ import lobos.os.AppRegistry
 import lobos.os.Journal
 import lobos.os.KillAudit
 import lobos.os.OsInit
+import lobos.os.OsPhase
 import lobos.os.PortBroker
 import lobos.os.ProgramAuthorizer
 import lobos.os.ProgramSettings
@@ -400,17 +401,26 @@ class CapabilityBroker(private val host: Service) : ContextWrapper(host) {
         return JSONObject().apply { put("ok", true); put("accepted", true); put("taskId", id) }
     }
 
-    private fun osDegraded(): Boolean =
-        !runCatching { CapabilityEvidenceCollector.controlPlaneUp() }.getOrDefault(false)
-
     private val OS_METHODS: Map<String, MethodDef> = mapOf(
         "os.state.get" to MethodDef(listOf("base"), false) { _ ->
-            val since = OsInit.since(this@CapabilityBroker)
+            // 三处同源的第三处：控制台读 **state.json 那一份**，不现场重算结论。
+            // 以前这里拿「此刻」的 controlPlaneUp 现判 degraded，而通知与磁贴渲染的是上一拍
+            // 实测落盘的相位 —— 同一台设备可以同时对面板和通知说两种话（真机 2026-09-28 定罪）。
+            val s = OsInit.snapshot(this@CapabilityBroker)
+            val since = s.atMs
             JSONObject().apply {
-                put("phase", OsInit.current(this@CapabilityBroker).name.lowercase(Locale.US))
+                put("phase", s.phase.name.lowercase(Locale.US))
+                put("label", s.phase.label)
                 put("since", since)
                 put("uptimeMs", if (since > 0) System.currentTimeMillis() - since else 0L)
-                put("degraded", osDegraded())
+                put("degraded", s.phase == OsPhase.DEGRADED)
+                put("statusLine", OsInit.statusLine(this@CapabilityBroker))
+                put("facts", JSONObject().apply {
+                    put("readingsCollected", s.facts.readingsCollected)
+                    put("controlPlaneUp", s.facts.controlPlaneUp)
+                    put("channel", s.facts.channel.name.lowercase(Locale.US))
+                    put("anchor", s.facts.anchor.name.lowercase(Locale.US))
+                })
                 put("programs", programsJson())
             }
         },

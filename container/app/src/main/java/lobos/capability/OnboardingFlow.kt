@@ -1,7 +1,7 @@
 package lobos.capability
 
 /** 阶段卡状态。[CURRENT] 全列表**至多一个** —— 首页因此永远只有一个可点动作。 */
-enum class StageStatus { DONE, CURRENT, NEXT, BLOCKED, FAILED, UNREACHABLE }
+enum class StageStatus { DONE, CURRENT, NEXT, BLOCKED, FAILED }
 
 /**
  * 一张阶段卡：标题 + 为什么排在这里（[why]）+ 当前读数 + 动作。
@@ -110,7 +110,6 @@ object OnboardingFlow {
                 i == current -> when (r.verdict?.status) {
                     CapStatus.FAILED -> StageStatus.FAILED
                     CapStatus.BLOCKED -> StageStatus.BLOCKED
-                    CapStatus.UNREACHABLE -> StageStatus.UNREACHABLE
                     else -> StageStatus.CURRENT
                 }
                 r.verdict?.status == CapStatus.BLOCKED -> StageStatus.BLOCKED
@@ -138,8 +137,7 @@ object OnboardingFlow {
         if (cred?.status != CapStatus.GRANTED) claimed += F1_OWNS
         if (!readyToEnter(v)) claimed += F3_OWNS
         return CapabilityCatalog.ALL.filter {
-            !it.optional && it.id !in claimed &&
-                v[it.id]?.status != CapStatus.GRANTED && v[it.id]?.status != CapStatus.UNREACHABLE
+            !it.optional && it.id !in claimed && v[it.id]?.status != CapStatus.GRANTED
         }
     }
 

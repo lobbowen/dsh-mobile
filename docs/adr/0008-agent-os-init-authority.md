@@ -51,6 +51,8 @@ OS 语义是 **init 域申报所需能力，特权域去满足并回递证据**�
 
 ### C2 能力合同（Program ↔ 特权域）
 Program 按 manifest 申报 capability → 特权域按「可静默 / 需人点 / 不可得」三出口执行 →
+「不可得」在实现里的归宿是**实测账**的 `AttemptOutcome.UNSUPPORTED`（试过且被系统拒绝，带归因），
+不是一个静态档位 —— 见 `docs/contracts/ui-onboarding-spec.md` §2.1 与债表 `D10`。
 结果以类型化 Evidence 回递（不扫日志、不猜）。桥的每次调用带 capability id 记进 bridge-audit。
 
 ### C3 死亡与归因合同（全层 → 观测域）

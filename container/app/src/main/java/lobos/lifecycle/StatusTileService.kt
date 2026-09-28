@@ -30,7 +30,7 @@ class StatusTileService : TileService() {
         tile.state = Tile.STATE_ACTIVE
         tile.label = "Lob OS"
         tile.icon = Icon.createWithResource(this, R.drawable.ic_lobos_logo)
-        tile.subtitle = OsInit.stateLine(this)
+        tile.subtitle = OsInit.statusLine(this)
         tile.updateTile()
     }
 }

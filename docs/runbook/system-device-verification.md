@@ -117,27 +117,35 @@ adb shell run-as lobos.app cat files/diagnostics.txt
 
 | 项 | 内容 |
 |---|---|
-| **触发** | 装完/升级完 DSH 后重启内核（安装那一轮必核验一次），或在面板上等 `/status` 刷新一轮 |
-| **看哪里** | ① 面板 DSH 卡片第二排「能力…」；② `files/console/native-manifest.json` 的 `nativeCaps`（内核重启后仍能看到上次结论）；③ `files/console/events/guard.events.log` 里的 `native_capability` |
-| **判据** | `ok=true` 才是可用；`false` = 探针跑起来了而判据不过（能力确实坏了）；`null` = 探针没条件跑 / 判据待做 / 免检 —— **未知，不算通过** |
-| **与投放结局对照** | 同一格在 `nativeUnits` 里完全可能是 `applied`，那只代表「我们补装动过手」。两排不一致是设计如此，读能力以 `nativeCaps` 为准 |
-| **为什么重要** | 真机 2026-09-26：`sharp-image` 报 applied（`@img/sharp-wasm32` 就在依赖树里）而 sharp 取不到绑定，`read_image` 全灭，界面上零痕迹 —— ADR-0001 P4 因此把「已解决」写了出去（现已作废） |
+| **触发** | **按需**：探针唯一的生产入口是桥方法 `sys.nativeAssets`（实现 `lobos/bridge/CapabilityBroker.kt:684`，契约 `container/engine/src/bridge/methods.js:142`）。装完/升级完**不会自动跑一轮核验** —— 「没人调就没人知道能力坏没坏」这条缺口记在债表 D12（可见面批次），别把它读成「已经自动验过」 |
+| **看哪里** | ① `sys.nativeAssets` 的返回：逐格 `status` + `detail`/`missingDep`/`hint`（默认每次真跑一次 exec-probe；传 `{"walkProbes": false}` 只做存在性+依赖检查，避免频繁 spawn）；② 落盘 `files/diagnostics.txt`（人读）与机读 `files/os/diag.jsonl` 的三行结论：`stage=native-assets`（大件 libcxx / node）、`stage=capability-assets`（能力件 bash / rg / flock / posix / PTY 探针）、`stage=prefix`（`$PREFIX` 缺件）；③ 开机快照 `files/provisioning.json`（`ProvisioningProbe`） |
+| **判据** | `status` 是闭集：`ready` 才算可用；`missing_from_lib` / `missing_dependency` / `not_executable` / `probe_failed` 都是**坏或未知**，一律不许报通过。`File.canExecute()` 对 `filesDir` 也返回 `true`，对 SELinux 的 W^X **完全无感（假阳性）** —— 所以判据必须真 exec 一次，不能只查权限位 |
+| **与投放结局对照** | 「补装动过手」与「能力可用」是两个正交结论：前者看 ③ 那份 `provisioning.json`，后者只看 ① ② 的读数。两排不一致是设计如此，读能力以 `sys.nativeAssets` 为准 |
+| **为什么重要** | 真机 2026-09-26：`sharp-image` 那格报「已投放」（`@img/sharp-wasm32` 就在依赖树里）而 sharp 取不到绑定，`read_image` 全灭，界面上零痕迹 —— ADR-0001 P4 因此把「已解决」写了出去（现已作废） |
 
-判据本体（每格一段交给**被检那份 node** 跑的 JS）住在 `programs/console/src/assembler/supply-table.json`
-的 `units[].verify`，执行器唯一：`capability-probe.js`。改判据就是改表，CI 逐格盯得住
-（`native-supply-gate-test.js`）。当前表里 `node-pty` 那格按拍板挂起到终端批次，面板恒读「未知」——
-那不是 bug，别替它报通过。
+判据本体（每个能力件该验什么、验不过算哪一档）住在 `container/app/src/main/java/lobos/native/NativeAssetRegistry.kt`，
+由 `scripts/gen-native-assets.js` 投影成 `.github/native-capabilities.txt` 供 shell 与测试读取 —— 手改那份投影必红
+（`container/engine/test/native-assets-test.js`）。构建期与打包期的校验分别是 `scripts/verify-apk-native.sh`
+与链接期的 `scripts/verify-runtime-elf.sh`。**没有第二张表**：改判据就是改 `NativeAssetRegistry`，
+不在散文里复述结论，也不在面板侧另拼一把尺子。
 
-**回传要求**：任何一格是 `false` 或 `null`，把该格 `detail` 原文带回来 —— 它就是探针的完整结论。
-面板上 `detail` 挂在 chip 的 `title`（桌面浏览器悬停可见）；手机上直接看 ② 那份文件：
+表里 `CAPABILITY` 那几格（bash / ripgrep / flock / posix / PTY 探针）都是 `required = false`：
+它们缺件不会让装配失败，而是各自把功能打成降级（每格的 `note` 写着缺件后果，例如 ripgrep 缺件时
+glob/grep 报 `SEARCH_FAILED`）。**「能装上」不等于「能力在」** —— 读数以 `sys.nativeAssets` 的 `status` 为准，
+别替不是 `ready` 的格报通过。
+
+**回传要求**：任何一格不是 `ready`，把该格 `status` 与 `detail` 原文带回来 —— 它就是探针的完整结论。
+手机上直接看落盘那两份：
 
 ```bash
-adb shell run-as lobos.app cat files/console/native-manifest.json
+adb shell run-as lobos.app cat files/os/diag.jsonl
+adb shell run-as lobos.app cat files/diagnostics.txt
 ```
 
-（`console/` 这一段不能省：`NativeManager` 的 `stateDir` = `dirname(config.stateFile)`，
-而 OS 状态文件是 `files/os/state.json`（`lobos.os.OsInit`）—— 已无 Program 侧 state 文件（旧 `platform/config.js` 随内核删除）。
-设备侧 `LOBOS_SUPERVISOR_HOME` 就是应用 `filesDir` —— 见 `runtime/GuestAdapter.kt:90`。）
+（`diag.jsonl` 的住址唯一：`RuntimeDiagnostics.structFile()`；设备侧 `LOBOS_SUPERVISOR_HOME` 就是应用
+`filesDir` —— 见 `runtime/GuestAdapter.kt:90`。）
+
+> 已废止的旧形态（随「D4 职责下沉」整段删除，本节不再指向它们）：旧供给表 `programs/console/src/assembler/supply-table.json` 的 `units[].verify`、执行器 `capability-probe.js`、CI 门 `native-supply-gate-test.js`、落盘 `files/console/native-manifest.json` 与 `nativeUnits`/`nativeCaps` 两排。
 
 ---
 
