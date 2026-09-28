@@ -233,7 +233,8 @@ object NativePreparer {
         }
         val report = PrepareReport(entries)
 
-        // 一次落盘完整快照，省得逐项刷屏
+        // 一次落盘完整快照，省得逐项刷屏。data = 逐格结构化结论：机读消费者
+        // （os.nativeAssets.status）取这一份，不再 parse 文案、也不现场重跑探针（债 D12）。
         RuntimeDiagnostics.append(
             ctx, "native-assets", report.allRequiredReady,
             if (report.allRequiredReady) "原生资产全部就位（${entries.size} 项）"
@@ -242,17 +243,20 @@ object NativePreparer {
                 "依赖解析方式=二进制自带 \$ORIGIN RUNPATH；探针裸环境跑，不设 LD_LIBRARY_PATH\n" +
                 "lib 目录内容（${listing.lines().size - 3} 项）:\n" +
                 listing.lineSequence().drop(2).joinToString("\n") { "  $it" } + "\n" +
-                report.toDiagnosticLines().joinToString("\n")
+                report.toDiagnosticLines().joinToString("\n"),
+            data = report.toJson(),
         )
         // 能力件逐项探针上屏；不参与 allRequiredReady，不阻断启动。
         val capEntries = NativeAssetRegistry.CAPABILITY.map { exe ->
             exe to verifyInternal(ctx, exe, libDir, listing, apkLibNames)
         }
+        val capReport = PrepareReport(capEntries)
         val capReady = capEntries.count { it.second is AssetStatus.Ready }
         RuntimeDiagnostics.append(
             ctx, "capability-assets", capReady == capEntries.size,
             "能力件 $capReady/${capEntries.size} 就位",
-            PrepareReport(capEntries).toDiagnosticLines().joinToString("\n")
+            capReport.toDiagnosticLines().joinToString("\n"),
+            data = capReport.toJson(),
         )
         return report
     }

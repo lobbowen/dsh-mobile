@@ -76,6 +76,10 @@ const OS_METHODS = {
   'os.runtime.nodeLts': { group: 'os', caps: ['base'], audit: false },
   'os.env.status': { group: 'os', caps: ['base'], audit: false },
   'os.env.programs': { group: 'os', caps: ['base'], audit: false },
+  // 上一轮原生件核验的落盘结论（只读 files/os/diag.jsonl，不重跑探针）。
+  // 与 sys.nativeAssets 的分工见 docs/runbook/system-device-verification.md §9：
+  // 那一个是「现在就验一次」，这一个回答「启动链最近那一轮验出了什么」。
+  'os.nativeAssets.status': { group: 'os', caps: ['base'], audit: false },
 };
 
 const METHODS = {

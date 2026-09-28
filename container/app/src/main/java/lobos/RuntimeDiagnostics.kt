@@ -13,8 +13,13 @@ import org.json.JSONObject
  *
  * 过去是自由文本：能看不能算。现在每条诊断都同时落两份：
  *  · files/diagnostics.txt —— 人读（保持既有渲染/轮询不变）；
- *  · files/os/diag.jsonl   —— 机读（stage / level / message / detail 字段化），
+ *  · files/os/diag.jsonl   —— 机读（stage / level / message / detail 字段化，
+ *    [DiagEvent.data] 承载探针的原始结构化结论），
  *    并镜像进 [Journal]，与 os/state.json 一道构成"对外唯一状态"的单一来源（C1）。
+ *
+ * [DiagEvent.data] 是这一轮才补上的：**没有它，机读面只剩人读文案的副本** ——
+ * 探针把逐格结论算好就丢了，下游要想用只能把 detail 再 parse 回结构（那就是第二把尺子），
+ * 或者现场重跑一次探针（那就是把「按需」当成「已核验」）。债表 D12。
  *
  * 纪律：诊断是**观测面**，不是恢复机制 —— 这里不提供 checkpoint / replay。
  */
@@ -28,6 +33,8 @@ object RuntimeDiagnostics {
         val level: Level,
         val message: String,
         val detail: String,
+        /** 探针的原始结构化结论（可空）：机读消费者取这里，不解析 [detail]。 */
+        val data: JSONObject? = null,
     ) {
         fun toJson(): JSONObject = JSONObject().apply {
             put("at", atMs)
@@ -35,6 +42,7 @@ object RuntimeDiagnostics {
             put("level", level.name)
             put("message", message)
             put("detail", detail)
+            data?.let { put("data", it) }
         }
     }
 
@@ -63,15 +71,23 @@ object RuntimeDiagnostics {
     /**
      * 追加一条诊断（兼容既有调用点）。
      * @param ok null=进行中/信息, true=成功, false=失败
+     * @param data 探针的结构化结论；只在「这一条诊断本身就算结构化结果」时传（见 [DiagEvent.data]）
      */
     @Synchronized
-    fun append(ctx: Context, stage: String, ok: Boolean?, message: String, detail: String = "") {
+    fun append(
+        ctx: Context,
+        stage: String,
+        ok: Boolean?,
+        message: String,
+        detail: String = "",
+        data: JSONObject? = null,
+    ) {
         val level = when (ok) {
             true -> Level.OK
             false -> Level.FAIL
             null -> Level.INFO
         }
-        appendEvent(ctx, DiagEvent(System.currentTimeMillis(), stage, level, message, detail))
+        appendEvent(ctx, DiagEvent(System.currentTimeMillis(), stage, level, message, detail, data))
     }
 
     /** 结构化入口：文本 + JSONL + Journal 三处同步写（同一次调用）。 */
@@ -118,11 +134,28 @@ object RuntimeDiagnostics {
                             .getOrDefault(Level.INFO),
                         message = o.optString("message"),
                         detail = o.optString("detail"),
+                        data = o.optJSONObject("data"),
                     )
                 )
             }
         }
         return out.takeLast(limit)
+    }
+
+    /**
+     * 每个 stage **最新一条**落盘诊断（机读消费者用）。
+     *
+     * 取的是已经落盘的结论，绝不现场重跑探针 —— 「按需再验一次」和「上一轮验过什么」
+     * 是两个事实，混在一个读法里就等于把没验过说成验过（债 D12）。
+     * 某档没有记录就**不出现在返回里**：缺失要能被下游看出来，不给初值充当结论。
+     */
+    @Synchronized
+    fun latestByStage(ctx: Context, vararg stages: String, limit: Int = 400): Map<String, DiagEvent> {
+        val wanted = stages.toSet()
+        val out = LinkedHashMap<String, DiagEvent>()
+        // events() 按写入序返回（最新在最后），逐档覆盖即为该档最新一条。
+        events(ctx, limit).forEach { ev -> if (wanted.contains(ev.stage)) out[ev.stage] = ev }
+        return out
     }
 
     @Synchronized

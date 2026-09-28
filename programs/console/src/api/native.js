@@ -17,6 +17,12 @@ function handle(ctx) {
   if (req.method === 'GET' && pathname === '/native/status') {
     return call(send, panel, 'os.programs.overview', {}, { offlineBody: { installed: false, programs: [], versionInfo: null, upgrade: null } });
   }
+  // 随包原生件/能力件的**上一轮核验结论**（读落盘，不重跑探针）。
+  // 桥不可用就 503 OS_OFFLINE：这里没有可以代答的本地事实，把「读不到」写成
+  // 「都就位」就是 ADR-0001 那条「投放≠能力却零痕迹」的复发（债 D12）。
+  if (req.method === 'GET' && pathname === '/native/capabilities') {
+    return call(send, panel, 'os.nativeAssets.status', {});
+  }
   if (req.method === 'POST' && pathname === '/native/check-update') {
     if (!originAllowed(req, panel.config.apiPort)) { req.resume(); return send(403, { ok: false, error: 'cross-origin request rejected' }); }
     req.resume();

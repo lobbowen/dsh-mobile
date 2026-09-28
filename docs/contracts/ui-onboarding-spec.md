@@ -285,8 +285,8 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
    RemoteInput 槽收手工 `IP:Port`（未实现，届时按 §3.1 的失焦约束做）。
 2. **RemoteInput 不可用**（§7① 的反事实；本机已成立，故未启用）→ 输码改走常驻通知的
    「点按→浮层输码」；再不行走 S1 前的桌面小组件。
-3. **全部自动路径失败** → 手工页：完整走桥 `shell.pair(host, port, code)`
-   （`container/engine/src/bridge/methods.js:67-70`，与现内核配对页删除前的能力等价，
+3. **全部自动路径失败** → 手工页：完整走桥 `shell.pair(host, pairPort, code)`
+   （实现 `lobos/bridge/CapabilityBroker.kt:932`，与现内核配对页删除前的能力等价，
    物理位置在 L0，不依赖面板）。
 4. **彻底没救** → 灾难兜底诊断页 + 复制自检，交人工。
 

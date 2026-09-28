@@ -49,6 +49,13 @@ function get(port, p) {
   try { nj = JSON.parse(nat.body); } catch {}
   check('S-6 /native/status 桥不可用 → 503 OS_OFFLINE', nat.code === 503 && nj.code === 'OS_OFFLINE', nat.code + ' ' + (nj.code || ''));
 
+  // 原生件核验的落盘面：桥不可用时**不许**退化成「视为就位」——这正是 ADR-0001 那条
+  // 「投放≠能力却零痕迹」的复发形状，所以单独钉一条（债 D12）。
+  const cap = await get(port, '/native/capabilities');
+  let cj = {};
+  try { cj = JSON.parse(cap.body); } catch {}
+  check('S-6b /native/capabilities 桥不可用 → 503 OS_OFFLINE（不代答就位）', cap.code === 503 && cj.code === 'OS_OFFLINE' && cj.collected === undefined, cap.code + ' ' + JSON.stringify(cj).slice(0, 60));
+
   await panel.stop();
   check('S-7 面板可停（stop 完成）', true);
 

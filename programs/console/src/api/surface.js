@@ -33,6 +33,7 @@ const SURFACE = [
 
   // ── Program 原生管理（native.js）──
   { path: '/native/status',       methods: ['GET'],  domain: 'native', category: 'public', consumers: ['UI(OverviewPage)', 'CLI(status)'], note: 'OS 已装 Program 概览 + 升级状态机' },
+  { path: '/native/capabilities', methods: ['GET'],  domain: 'native', category: 'operational', consumers: ['诊断/远程核验'], note: '上一轮原生件核验的落盘结论（读 files/os/diag.jsonl，不重跑探针）' },
   { path: '/native/check-update', methods: ['POST'], domain: 'native', category: 'public', consumers: ['UI(OverviewPage)'], note: '触发 OS 版本检查' },
   { path: '/native/install',      methods: ['POST'], domain: 'native', category: 'public', consumers: ['UI(OverviewPage)', 'CLI'], note: '经 OS AppManager 安装 Program' },
   { path: '/native/uninstall',    methods: ['POST'], domain: 'native', category: 'public', consumers: ['UI(OverviewPage)'], note: '经 OS AppManager 卸载 Program' },

@@ -55,7 +55,7 @@ class CapabilityDegradationTest {
             "全新设备不该有 DONE 段（S1 空段除外）",
             rows.filterKeys { it != "S1" }.values.any { it.status == StepStatus.DONE },
         )
-        // 段行取「最可推进」的那一项：S0 亮 ACTION（差人点开关），S1 加速器则如实 BLOCKED 在通道后。
+        // 段行取「最可推进」的那一项：S0 亮 ACTION（差人点开关），S1 因本段无登记项而如实 DONE。
         assertEquals(StepStatus.ACTION, rows.getValue("S0").status)
         assertEquals(StepStatus.DONE, rows.getValue("S1").status)
         assertEquals(StepStatus.ACTION, rows.getValue("S3").status)

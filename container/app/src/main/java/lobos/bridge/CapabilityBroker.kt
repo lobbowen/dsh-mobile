@@ -656,6 +656,31 @@ class CapabilityBroker(private val host: Service) : ContextWrapper(host) {
         "os.env.programs" to MethodDef(listOf("base"), false) { _ ->
             JSONObject().apply { put("programs", programsJson()) }
         },
+        // 上一轮原生件核验的**落盘结论**（只读，不重跑探针）。
+        //
+        // 与 sys.nativeAssets 的分工必须分清：那一个是「现在就验一次」（会 spawn 探针），
+        // 这一个回答的是「启动链最近那一轮验出了什么」。合成一个读法就只有两种坏：
+        // 面板每刷新一次就重跑一轮 exec-probe，或者把「从没验过」渲染成「已经验过」（债 D12）。
+        // 没有落盘记录时 collected=false 且不编造结论 —— 状态丢了要看得见。
+        "os.nativeAssets.status" to MethodDef(listOf("base"), false) { _ ->
+            val landed = RuntimeDiagnostics.latestByStage(
+                this@CapabilityBroker, "native-assets", "capability-assets", "prefix",
+            )
+            JSONObject().apply {
+                put("collected", landed.isNotEmpty())
+                put("rounds", JSONArray().apply {
+                    landed.forEach { (stage, ev) ->
+                        put(JSONObject().apply {
+                            put("stage", stage)
+                            put("at", ev.atMs)
+                            put("level", ev.level.name.lowercase(Locale.US))
+                            put("message", ev.message)
+                            ev.data?.let { put("report", it) }
+                        })
+                    }
+                })
+            }
+        },
         "capability.invoke" to MethodDef(listOf("base"), true) { _ -> notImplemented("capability.invoke") },
     )
 

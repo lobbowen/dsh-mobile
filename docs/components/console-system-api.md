@@ -125,6 +125,11 @@ OS 承载控制面板时会在 WebView 里注入一个原生桥；**payload 只�
 | `os.runtime.nodeLts` | 当前 vs 官方最新 LTS | `{}` | `{ current, latest, updateAvailable }` | `GET /env/node-lts` |
 | `os.env.status` | 平台能力矩阵 + 环境 | `{}` | `{ platform, apiLevel, capabilities, catalog }` | `GET /env/status` |
 | `os.env.programs` | Program 环境条目 | `{}` | `{ programs }` | `GET /env/programs` |
+| `os.nativeAssets.status` | 上一轮原生件/能力件核验的**落盘结论**（读 `files/os/diag.jsonl`，不重跑探针） | `{}` | `{ collected, rounds: [{ stage, at, level, message, report? }] }` | `GET /native/capabilities` |
+
+`os.nativeAssets.status` 与桥方法 `sys.nativeAssets` 是两个问题，不许合用一个读法：后者「现在就验一次」
+（会真 spawn exec-probe），前者「启动链最近那一轮验出了什么」。没有落盘记录时 `collected=false` 且不编造
+结论 —— 判据与落盘时点见 [../runbook/system-device-verification.md](../runbook/system-device-verification.md) §9。
 
 ### 2.6 Android 能力（CapabilityBroker）
 
