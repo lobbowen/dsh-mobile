@@ -25,15 +25,26 @@ async function main() {
   const body = JSON.stringify({ urls: urls });
   const data = '/refresh' + String.fromCharCode(10) + body;
   const sign = crypto.createHmac('sha1', SK).update(data).digest();
-  const r = await fetch('https://fusion.qiniuapi.com/refresh', {
-    method: 'POST',
-    headers: { 'Authorization': 'QBox ' + AK + ':' + B64URL(sign), 'Content-Type': 'application/json' },
-    body: body,
-    signal: AbortSignal.timeout(60000),
-  });
-  const text = await r.text();
-  if (r.status !== 200) { console.error('[refresh] 失败 status=' + r.status + ' body=' + text.slice(0, 300)); process.exit(1); }
-  console.log('[refresh] 已刷新 ' + urls.length + ' 个 URL: ' + text.slice(0, 200));
+  // 管理凭证 scheme 试两种：现行是 `Qiniu`，老文档写 `QBox`。谁通记谁 —— 不猜，也不静默。
+  const schemes = ['Qiniu', 'QBox'];
+  let last = null;
+  for (const scheme of schemes) {
+    const r = await fetch('https://fusion.qiniuapi.com/refresh', {
+      method: 'POST',
+      headers: { 'Authorization': scheme + ' ' + AK + ':' + B64URL(sign), 'Content-Type': 'application/json' },
+      body: body,
+      signal: AbortSignal.timeout(60000),
+    });
+    const text = await r.text();
+    if (r.status === 200) {
+      console.log('[refresh] 已刷新 ' + urls.length + ' 个 URL（凭证 scheme=' + scheme + '）: ' + text.slice(0, 200));
+      return;
+    }
+    last = 'scheme=' + scheme + ' status=' + r.status + ' body=' + text.slice(0, 200);
+    console.error('[refresh] ' + last);
+  }
+  console.error('[refresh] 两种 scheme 都失败: ' + last);
+  process.exit(1);
 }
 
 main().catch((e) => { console.error('[refresh] FATAL ' + e.message); process.exit(1); });
