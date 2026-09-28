@@ -612,7 +612,7 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
                 var childShown = 0
                 stream.bufferedReader().use { r ->
                     r.forEachLine { line ->
-                        Log.i("Kernel:$tag", line)
+                        Log.i("Program:$tag", line)
                         if (tag == "stderr") {
                             RuntimeDiagnostics.recordNodeStderr(this, line + "\n")
                             // stderr 必须上屏：实例/守卫的启动崩溃**只往 stderr 抛栈**，此前只有
@@ -642,7 +642,7 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
                     }
                 }
             } catch (e: Throwable) {
-                Log.w("Kernel:$tag", "转发线程结束（不影响运行时存活）", e)
+                Log.w("Program:$tag", "转发线程结束（不影响运行时存活）", e)
                 RuntimeDiagnostics.append(
                     this, "program-$tag", null,
                     "转发线程结束：${e::class.java.simpleName}: ${e.message}",

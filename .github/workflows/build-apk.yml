@@ -86,7 +86,7 @@ jobs:
               echo "run  : $RUN_ID"
               echo "sha  : $SHA"
               # 内存水位：这是判断「会不会被 OOM 杀掉」的关键指标。
-              # 上一轮就是内存耗尽导致进程被内核杀掉、连收尾步骤都没记录，
+              # 上一轮就是内存耗尽导致进程被系统杀掉（OOM）、连收尾步骤都没记录，
               # 而当时的心跳里完全没有内存信息，只能靠猜。现在把它带上。
               # MemAvailable 取 /proc/meminfo；cgroup 限额另记一行便于对照。
               echo "mem  : $(awk '/^MemAvailable:/{printf "avail=%.1fGB", $2/1048576}' /proc/meminfo 2>/dev/null)"
@@ -101,7 +101,7 @@ jobs:
                 echo "logsize: $(wc -c < /tmp/node-build.log 2>/dev/null || echo 0)"
                 prog="$(tail -c 200000 /tmp/node-build.log 2>/dev/null | grep -o 'host=[0-9]* target=[0-9]*' | tail -1)"
                 echo "objs   : ${prog:-$(tail -c 400000 /tmp/node-build.log 2>/dev/null | grep -c 'clang++\|cc1plus' || echo 0)}"
-                # 是否已经出现 OOM 痕迹（内核会打 oom-kill 或进程报 Killed）
+                # 是否已经出现 OOM 痕迹（系统会打 oom-kill 或进程报 Killed）
                 echo "oomhits: $(tail -c 200000 /tmp/node-build.log 2>/dev/null | grep -c 'Killed signal\|out of memory\|oom-kill' || echo 0)"
                 echo "lastprog: $(tail -3 /tmp/node-build.log 2>/dev/null | tr '\n' ' ' | cut -c1-160)"
               else
@@ -183,7 +183,7 @@ jobs:
       # secret（PEM 文本）则以其为准覆盖，便于私钥轮换后重焊。
       # 判据（存在 / 可解析 / 算法必须是 Ed25519）只住 scripts/verify-ota-anchor.sh 一份：
       # 这里原先的写法是「openssl 退码 0 就算有效，否则打一条 ::warning:: 继续出包」——
-      # 坏锚点被焊进 APK 后，所有设备对每个内核包都判 signature-invalid，而这条链是绿的。
+      # 坏锚点被焊进 APK 后，所有设备对每个 Program 包都判 signature-invalid，而这条链是绿的。
       # 且「退码 0」并不回答算法问题：RSA 公钥一样能被 openssl pkey -pubin 读成功。
       # （与签名私钥的**配对**校验在 program-ota 那条链，只有它拿得到私钥。）
       # ---------------------------------------------------------------------------
@@ -223,7 +223,7 @@ jobs:
         id: enginetests
         # 本 workflow 产出的是**发布版 APK**（全量交叉编译 3 小时），
         # 它比 fast-apk 那条日常路径更不该裸奔：容器引擎里的
-        # zip 解包 / 内核打包 / 桥方法表任何一处坏了，打出来的 APK
+        # zip 解包 / Program 打包 / 桥方法表任何一处坏了，打出来的 APK
         # 都是"能装但跑不起来"，而排查代价是一轮 3 小时的构建。
         #
         # 放在这里（gradle 之前、setup-java 之前）的理由：
@@ -653,7 +653,7 @@ jobs:
       - name: Audit APK contents (must contain libc++_shared.so)
         # 判据的唯一实现是 scripts/verify-apk-native.sh，与 fast-apk 同调。
         # 本链路此前只查 native-assets 清单，且 lib/ 零条目只 echo 不红、
-        # 不查内核资产（ADR-0005）/npm/小体积件 —— 收口后一并变严：
+        # 不查 Program 资产（ADR-0005）/npm/小体积件 —— 收口后一并变严：
         # 这条链路发的是 apk-latest，没有理由比日常链路松。
         run: |
           echo "8.5/9 audit-apk" > /tmp/ci-stage

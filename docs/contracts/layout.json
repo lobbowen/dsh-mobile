@@ -367,6 +367,7 @@
     "verify-apk-version-gate.sh": "L0",
     "build-program-bundle.js": "cross",
     "gate-scan.js": "cross",
+    "delivery-gate.js": "cross",
     "publish-userland-manifest.js": "cross",
     "userland-external-tools.json": "cross",
     "build-userland-jq.sh": "cross",

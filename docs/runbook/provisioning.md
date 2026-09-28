@@ -40,7 +40,7 @@
 
 ### 3.3 通知使用权
 - 设置 → 通知 → 通知使用权 → Lob OS → 允许。
-- 注意：**无法静默授予**（DO 已退出，也不再需要）；只能由用户手动开。
+- 取法与档位以 [`ui-onboarding-spec`](../contracts/ui-onboarding-spec.md) §2 实测修正 + 代码判据表 `permissions/PermissionCatalog.kt` 为准。
 
 ### 3.4 无线调试配对（shell 通道，Android 11+）
 - 设备：开发者选项 → 无线调试 → 「使用配对码配对设备」；面板填 host:pairPort + 6 位码（桥 `shell.pair`）。
@@ -64,6 +64,6 @@
 全部开启后能力面完整；任一缺失，对应桥方法返回 `ERR_CAPABILITY_MISSING`，上层**如实降级**（不得伪造可用）。
 
 ## 5. 安全与边界
-- 所有敏感能力（无障碍、MediaProjection、通知使用权、全盘访问）都必须由**用户在系统界面明确同意**；应用只做引导，不做规避。
-- **不做**：静默装卸、强制密码、远程擦除、kiosk/LockTask、代授特殊权限（这些都属于已退出的 Device Owner 能力面）。
+- 敏感能力（无障碍、MediaProjection、通知使用权、全盘访问）的**取法与档位只由判据表定义**（[`ui-onboarding-spec`](../contracts/ui-onboarding-spec.md) §2 实测修正 + `permissions/PermissionCatalog.kt`）；本 runbook 里的手动路径是"判据表要求人点时"的操作说明，不是对能否静默的结论。应用只做引导，不做规避。
+- **不做**：静默装卸、强制密码、远程擦除、kiosk/LockTask（这些都属于已退出的 Device Owner 能力面）。
 - 审计日志（见 [bridge-protocol](../contracts/bridge-protocol.md) §5）记录所有特权操作，便于追溯。

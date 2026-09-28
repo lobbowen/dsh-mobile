@@ -4,8 +4,8 @@ name: Build Userland (C 层工具供给)
 # bionic aarch64 产物，发到对象存储；再由本 workflow 的 manifest 作业汇成 **C 自己的内容清单**
 # （对原始字节签名）发到对象存储。
 #
-# 内核只持有 **通道锚 + 信任根**，按清单取件并核验 —— 因此**加件/升级只发清单，内核不动**；
-# 工具随内核启动投放上机，**不需要重装 APK**。
+# Program 只持有 **通道锚 + 信任根**，按清单取件并核验 —— 因此**加件/升级只发清单，Program 不动**；
+# 工具随 Program 启动投放上机，**不需要重装 APK**。
 #
 # 为什么必须动态：容器全部 Linux 语义（link(2)/tmp/祖先目录）靠 liblobosposix 经 LD_PRELOAD 落地，
 # 静态件会绕过整层（2026-09-27 对 bash/rg 的真机定罪）。verify-artifact 把这条钉住。
@@ -28,6 +28,10 @@ on:
       - 'scripts/build-userland-*.sh'
       - 'scripts/verify-userland-artifact.sh'
       - 'scripts/package-userland.sh'
+      # 设备读的是**这两个文件声明的对象键**。键改了却不触发任何东西，就是「仓内声明」与
+      # 「线上内容」变成两个宇宙的入口（2026-09-29 定罪 D02：新键声明后从未投过）。
+      - 'container/app/src/main/assets/supply/channel.json'
+      - 'container/app/src/main/assets/program-feed.json'
 
 permissions:
   contents: write
@@ -82,7 +86,7 @@ jobs:
       # 与其为一个无投递价值的动作去改那条不变量，不如不做。产物由 actions/upload-artifact 留存。
 
   # C 的**内容清单**：把本次构建的件 + 外部件（npm 投放那类）汇成一份、对**原始字节**签名、
-  # 发到对象存储。内核只持通道锚 + 信任根，于是加件/升级只发清单 —— **内核不动**。
+  # 发到对象存储。Program 只持通道锚 + 信任根，于是加件/升级只发清单 —— **Program 不动**。
   manifest:
     needs: build
     if: ${{ github.event.inputs.publish == 'true' }}
@@ -99,7 +103,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${OTA_PRIVATE_KEY_PEM:-}" ]; then
-            echo "::error title=签名私钥未配置::需要 secrets.OTA_PRIVATE_KEY_PEM（与内核 OTA 同一把，公钥焊在 APK）"
+            echo "::error title=签名私钥未配置::需要 secrets.OTA_PRIVATE_KEY_PEM（与 Program OTA 同一把，公钥焊在 APK）"
             exit 1
           fi
           mkdir -p keys release

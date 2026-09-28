@@ -98,11 +98,11 @@ try {
   // 规则 2：C 的内容不得住内核（内容清单只在 C 通道；内核只留通道锚 + 装配动作）
   for (const abs of walkFiles(path.join(ROOT, 'programs/console', 'src'), [])) {
     const t = readSafe(abs);
-    if (t.indexOf('hubcdn.zll.ink/userland/') >= 0) add('C-IN-KERNEL', rel(abs));
-    else if (/https:\/\/[^'"\s]+\.tar\.gz/.test(t)) add('C-IN-KERNEL', rel(abs) + '（内核里出现制品 URL）');
+    if (t.indexOf('hubcdn.zll.ink/userland/') >= 0) add('C-IN-PROGRAM', rel(abs));
+    else if (/https:\/\/[^'"\s]+\.tar\.gz/.test(t)) add('C-IN-PROGRAM', rel(abs) + '（Program 包里出现制品 URL）');
   }
   // 规则 3：F 的产品声明不得住内核
-  if (ex('programs/console/adapters')) add('F-IN-KERNEL', 'programs/console/adapters');
+  if (ex('programs/console/adapters')) add('F-IN-PROGRAM', 'programs/console/adapters');
   // 规则 4：D2 件清单唯一处在**原生侧**（lobos/native/NativeAssetRegistry.kt），与随包投递清单对账。
   const d2Reg = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'lobos', 'native', 'NativeAssetRegistry.kt');
   const capsTxt = path.join(ROOT, '.github', 'native-capabilities.txt');
@@ -162,7 +162,7 @@ try {
   //   更不该住内核（内核只做检测 + 触发）。由来：用户 2026-09-29 复核「加到内核里就只有内核能适配，
   //   我再装一个其它 Program，这些还要再加一遍 —— 它们是共用的」。未搬完以前，用带到期日的 deliveryDebt 挂账。
   const matMechPath = path.join(ROOT, 'programs/console', 'src', 'supply', 'materialize.js');
-  if (fs.existsSync(matMechPath)) add('SUPPLY-MECH-IN-KERNEL', 'programs/console/src/supply/materialize.js');
+  if (fs.existsSync(matMechPath)) add('SUPPLY-MECH-IN-PROGRAM', 'programs/console/src/supply/materialize.js');
 
   // 规则 11：C 的供给层**必须是 Android 原生实现** —— 它已属 APK 层，职责是向下供给；
   //   再借 node/运行时等于又多欠一层依赖（用户 2026-09-29 复核：「不应该用 node，而是用安卓原生的逻辑」）。
