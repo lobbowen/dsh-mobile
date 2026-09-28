@@ -1084,8 +1084,8 @@ check('APK 原生件审计宿主 scripts/verify-apk-native.sh 存在', fs.exists
   // 不该有的东西单独红：内核资产进门 = ADR-0005 被改回去。
   const withProgram = mkZip('wprogram', { 'lib/arm64-v8a/libnode.so': 'ELFAKE', 'assets/kernel/k.zip': 'x' });
   const rK = runVan([withProgram, 'arm64-v8a']);
-  check('verify-apk-native：APK 含内核资产 → 立刻退 1（ADR-0005，先于其它条目拦）',
-    rK.rc === 1 && rK.out.includes('APK 含内核资产'), JSON.stringify({ rc: rK.rc, out: rK.out.slice(0, 140) }));
+  check('verify-apk-native：APK 含 Program 资产 → 立刻退 1（ADR-0005，先于其它条目拦）',
+    rK.rc === 1 && rK.out.includes('APK 含 Program 资产'), JSON.stringify({ rc: rK.rc, out: rK.out.slice(0, 140) }));
 
   // report 模式对同一份坏包：必须退 0，且把缺项打成事实而不是吞掉。
   const rRep = runVan([libOnly, 'arm64-v8a', '--report']);

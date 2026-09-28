@@ -7,7 +7,7 @@
  *   的只读环境状态瓦片。
  */
 import {
-  Activity, LayoutDashboard, ListChecks, Package, Settings,
+  LayoutDashboard, ListChecks, Package, Settings,
   type LucideIcon,
 } from "lucide-react";
 
