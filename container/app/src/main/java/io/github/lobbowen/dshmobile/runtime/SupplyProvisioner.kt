@@ -238,6 +238,12 @@ object SupplyProvisioner {
                     continue
                 }
                 applyLinkFarm(staging)
+                // 包内存的是链接**目标文本**（打包用 zip -y 不跟随），所以这里核验链接真的建成了 ——
+                //   没建成即记账，不静默（否则设备上会得到一堆装着路径文本的小文件，表现为「git 装上了但子命令全废」）。
+                val brokenLinks = farmBroken(staging)
+                if (brokenLinks > 0) {
+                    RuntimeDiagnostics.append(ctx, "supply", false, "C 层件链接农场有 " + brokenLinks + " 条没建成", name)
+                }
                 root.deleteRecursively()
                 if (!staging.renameTo(root)) {
                     RuntimeDiagnostics.append(ctx, "supply", false, "C 层件落位失败", name)
