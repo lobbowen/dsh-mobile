@@ -9,6 +9,7 @@ import lobos.capability.CapStatus
 import lobos.capability.Evidence
 import lobos.ota.ProgramManager
 import lobos.permissions.LifecycleChecks
+import org.json.JSONObject
 import java.io.File
 
 /**
@@ -32,6 +33,23 @@ object ProvisioningProbe {
 
     /** 生命周期风险行（不属于能力登记表：它描述保活质量，不是控制面能力）。 */
     const val LIFECYCLE = "lifecycle"
+
+    /**
+     * 快照文件的唯一住址。写侧与读侧共用同一个常量：曾经两处各自拼
+     * `File(ctx.filesDir, "provisioning.json")`，谁改文件名都不会有人红。
+     */
+    const val SNAPSHOT = "provisioning.json"
+
+    fun snapshotFile(ctx: Context): File = File(ctx.filesDir, SNAPSHOT)
+
+    /**
+     * 最近一次体检的落盘快照；**探针还没跑过 = null**。
+     * 不给空对象当结论 —— 「没体检过」必须能被下游读成一件事（同 D12 的纪律）。
+     */
+    fun snapshot(ctx: Context): JSONObject? = runCatching {
+        val f = snapshotFile(ctx)
+        if (f.isFile) JSONObject(f.readText()) else null
+    }.getOrNull()
 
     /**
      * 跑全量体检并把结果写入诊断日志。
@@ -99,7 +117,7 @@ object ProvisioningProbe {
      */
     fun refreshProgramOtaVersions(ctx: Context) {
         try {
-            val f = File(ctx.filesDir, "provisioning.json")
+            val f = snapshotFile(ctx)
             if (!f.isFile) return
             val km = ProgramManager(ctx)
             val obj = org.json.JSONObject(f.readText())
@@ -146,7 +164,7 @@ object ProvisioningProbe {
                     }
                 })
             }
-            File(ctx.filesDir, "provisioning.json").writeText(obj.toString(2))
+            snapshotFile(ctx).writeText(obj.toString(2))
         } catch (_: Throwable) {
             // 探针失败绝不影响启动流程
         }

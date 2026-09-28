@@ -11,7 +11,7 @@
 // - 不返回 CORS 头（面板同源托管）→ 其他网站浏览器请求读不到响应；
 // - 带 Origin 的写请求必须来自本机/局域网面板来源。
 //
-// 路由按域拆分（lifecycle/native/tasks/guard/plugins/dist/adb），每域导出 owns+handle。
+// 路由按域拆分（lifecycle/native/diagnostics/tasks/guard/plugins/dist/adb），每域导出 owns+handle。
 
 const http = require('node:http');
 const fs = require('node:fs');
@@ -22,6 +22,7 @@ const API_DOMAINS = [
   require('./tasks'),
   require('./lifecycle'),
   require('./native'),
+  require('./diagnostics'),
   require('./guard'),
   require('./plugins'),
   require('./dist'),

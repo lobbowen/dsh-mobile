@@ -231,7 +231,7 @@ F1/F3 之所以在通知权限被回收后仍算成立，靠的是判据层的**
 3. **F1 入口自证**兜最后一格：`startProbe()` 缺权限时**不起 browse、不发 `notify()`**，
    并置 `notificationBlocked` —— 向导因此不会停在「监听中」这种误导文案。
 4. **灾难兜底**：仍走不通时导出案底（`copyReport` → P0 冲刺实况 + 配对现场判定 + 判据核对 + `ProbeJournal`），
-   或退回 `bridge` 手工配对（`shell.pair`，`container/engine/src/bridge/methods.js:108`）。
+   或退回 `bridge` 手工配对（`shell.pair`，`container/engine/src/bridge/methods.js:112`）。
 
 ---
 

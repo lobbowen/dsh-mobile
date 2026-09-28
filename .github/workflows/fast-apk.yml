@@ -477,7 +477,7 @@ jobs:
             echo "mode    : fast-apk (no Node rebuild)"
             echo "runtime : ${{ env.runtime-tag }}"
             echo "sha     : ${GITHUB_SHA:0:7}"
-            echo "apk     : app-debug.apk"
+            echo "apk     : ${VAPK}"
             echo "apk_sha : $APK_SHA"
             echo "url     : https://github.com/${{ github.repository }}/releases/download/v${VN}/${VAPK}"
           } > ci-ok.txt
@@ -487,3 +487,29 @@ jobs:
           git add ci-ok.txt
           git commit -q -m "ci: fast-apk ok (${GITHUB_SHA:0:7})" || true
           git push origin HEAD:ci-ok --force && echo "[ok] ci-ok 已更新"
+
+      - name: Gate — APK 形态（两侧对照，含 release 变体控件构建）
+        id: formgate
+        # 判据的唯一实现是 scripts/verify-apk-release-form.sh。本链路发的是版本化归档
+        # （debug 形态，取证要用），**不写滚动别名**，所以这里不拦发布，只做两件事：
+        # ① 让这把尺子每次合并都被两侧检验：debug 档必须被读成 debuggable。
+        #    只测「release 侧判绿」的尺子分不清「包真的干净」与「解析根本没生效」——
+        #    对照组红点会直接说「形态门禁失灵」，这是这条门禁不空转的前提。
+        # ② 每次合并都真的构建一次 release 变体。发布面（build-apk 三小时手动、
+        #    release-admin 按人触发）从未系统跑过 assembleRelease，所以「这个变体到底
+        #    构建得出来吗、出来的是不是非 debuggable」以前只能等那条几十分钟的链路去试
+        #    （债 AUD-G33 的成因之一就是发布路径长期不被执行）。
+        # 排在 ci-ok 上报之后：控件构建坏了要让人看见（job 判红），但不该把当天的
+        # 取证归档投递一起咽掉。
+        # 这里【不】跑签名门禁：无 keystore 时 AGP 出的是 app-release-unsigned.apk，
+        # 拿它去查签名只会得到「读不出证书」这种与形态无关的噪音。
+        run: |
+          set -euo pipefail
+          DAPK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)" \
+            || { echo "[error] 没有可核验的 debug APK —— 门禁不许空跑"; exit 1; }
+          bash scripts/verify-apk-release-form.sh "$DAPK" --expect-debuggable
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+          RAPK="$(bash scripts/pick.sh apk-release container/app/build/outputs/apk/release -name '*.apk' -type f)" \
+            || { echo "[error] release 变体没产出 APK —— 形态无从核验，判红"; exit 1; }
+          bash scripts/verify-apk-release-form.sh "$RAPK"

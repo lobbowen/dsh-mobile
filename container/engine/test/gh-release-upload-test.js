@@ -29,6 +29,7 @@ const { spawnSync } = require('child_process');
 const makeRunner = require('./harness');
 
 const { check, finish } = makeRunner('gh-release-upload');
+const stripComments = makeRunner.stripComments;
 
 const ROOT = path.resolve(__dirname, '..', '..', '..');
 const HOST = path.join(ROOT, 'scripts/gh-release-upload.sh');
@@ -285,7 +286,31 @@ const asset = (c, n) => path.join(c.ST, 'assets', n);
     '政策标记丢了就等于把「提升」判成错误');
   const ra = wfs.find(([f]) => f === 'release-admin.yml')[1];
   check('repack 用「改名进临时目录」换资产名（`#` 只改 label 不改名，2026-09-26 的 404 根因）',
-    /cp \/tmp\/app-signed\.apk "\$STAGE\/app-debug\.apk"/.test(ra), '又回到 # 后面当改名用，latest 地址会再次 404');
+    /cp \/tmp\/app-signed\.apk "\$STAGE\/app-release\.apk"/.test(ra), '又回到 # 后面当改名用，latest 地址会再次 404');
+
+  // 滚动别名上的资产名就是装机地址本身。形态收口后它必须是 app-release.apk，
+  // 且废止的 app-debug.apk 要主动清掉 —— 留着等于线上仍可达一个 debug 形态的历史包，
+  // 而任何按旧地址取包的入口都不会告诉我们它拿到了什么。
+  const byName = Object.fromEntries(wfs);
+  const STAGED_DEBUG_ASSET = /(?:\/tmp|\$STAGE)\/app-debug\.apk/;
+  check('资产名判据自证：收口前真实出现过的两种暂存写法必被抓',
+    STAGED_DEBUG_ASSET.test('cp "$APK" /tmp/app-debug.apk')
+      && STAGED_DEBUG_ASSET.test('cp /tmp/app-signed.apk "$STAGE/app-debug.apk"'),
+    '判据形状与仓库里真实出现过的写法脱节了');
+  check('资产名判据不误伤：版本化归档名与 --prune 里的废止名不算暂存目标',
+    !STAGED_DEBUG_ASSET.test('cp "$APK" "$VDIR/app-debug-${VN}+${VC}.apk"')
+      && !STAGED_DEBUG_ASSET.test("--prune '^app-debug\\.apk$'"),
+    '把归档命名规则当成 latest 资产名会把 fast-apk 抓成回潮');
+  for (const f of ['build-apk.yml', 'release-admin.yml']) {
+    const src = stripComments(byName[f]);
+    check(`${f} 写 latest 的暂存名不再叫 app-debug.apk`, !STAGED_DEBUG_ASSET.test(src),
+      '滚动别名上会出现一个 debug 形态的资产名');
+  }
+  const PRUNE = /--prune '\^app-debug\\\.apk\$'/g;
+  const pruneCount = (t) => (stripComments(t).match(PRUNE) || []).length;
+  check('两个 latest 写文件都带废止资产名清理（build-apk 1 处、release-admin 的 publish+repack 2 处）',
+    pruneCount(byName['build-apk.yml']) === 1 && pruneCount(byName['release-admin.yml']) === 2,
+    JSON.stringify({ bc: pruneCount(byName['build-apk.yml']), ra: pruneCount(byName['release-admin.yml']) }));
 }
 
 finish();

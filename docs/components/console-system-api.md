@@ -68,6 +68,14 @@ OS 承载控制面板时会在 WebView 里注入一个原生桥；**payload 只�
 | `os.journal.metrics` | 事件流派生遥测（只读投影） | `{}` | `{ gseq, events, bySource, topTypes, sinceLastMs }` | `GET /metrics` |
 | `os.journal.tasks` | 安装/升级/卸载任务列表 | `{ kind?, running? }` | `{ tasks, current }` | `GET /tasks`、`GET /tasks/{kind}/current` |
 | `os.journal.task` | 单任务详情 | `{ id }` | `{ task }` | `GET /tasks/{id}` |
+| `os.diagnostics.events` | 启动链**逐事件**机读面：读 `files/os/diag.jsonl` 已落盘的结论（含探针 `data`），不重跑探针 | `{ stage?, level?, limit? }`（stage 为**前缀**匹配，level ∈ `INFO/OK/FAIL`，limit=读取窗口 1..2000，默认 200） | `{ collected, total, matched, events: [{ at, stage, level, message, detail, data? }] }` | `GET /diagnostics/events` |
+| `os.provisioning.get` | 开机体检快照 `files/provisioning.json` 原文（五项体检 + 三条版本流身份） | `{}` | `{ present, snapshot }`（探针未跑过 = `present:false` + `snapshot:null`） | `GET /diagnostics/provisioning` |
+
+**取证这三条的分工**（别混成一条）：`os.journal.*` 是**事件流水**（面向时间线，镜像诊断时把
+detail 截到 300 字且不带 `data`）；`os.nativeAssets.status` 只给三个核验 stage 的**最新一条**；
+`os.diagnostics.events` 给**任意 stage 的原始事件**（含结构化 `data`）。发布包不再 debuggable 后
+`adb shell run-as` 这条路就断了，这三条 + `/diagnostics/*` 是设备私有目录读数的**唯一常规通道**
+（回环 HTTP，见 [../runbook/system-device-verification.md](../runbook/system-device-verification.md) §0）。
 
 **语义边界（ADR-0006 / 债 A16）**：journal **只做「打断可见」**，**不提供 checkpoint / replay / 续跑**。
 不得出现任何「恢复/续跑」接口。

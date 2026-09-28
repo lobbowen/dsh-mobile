@@ -56,6 +56,40 @@ function get(port, p) {
   try { cj = JSON.parse(cap.body); } catch {}
   check('S-6b /native/capabilities 桥不可用 → 503 OS_OFFLINE（不代答就位）', cap.code === 503 && cj.code === 'OS_OFFLINE' && cj.collected === undefined, cap.code + ' ' + JSON.stringify(cj).slice(0, 60));
 
+  // 取证两路同理：这条通道存在的意义就是「把读不到如实读成读不到」，所以它比别的域
+  // 更不能代答 —— 桥断了却回 `collected:false` / `present:false`，设备上看会一模一样。
+  const devs = await get(port, '/diagnostics/events');
+  let devj = {};
+  try { devj = JSON.parse(devs.body); } catch {}
+  check('S-6c /diagnostics/events 桥不可用 → 503 OS_OFFLINE（不代答「没有记录」）', devs.code === 503 && devj.code === 'OS_OFFLINE' && devj.collected === undefined, devs.code + ' ' + JSON.stringify(devj).slice(0, 60));
+
+  const prov = await get(port, '/diagnostics/provisioning');
+  let provj = {};
+  try { provj = JSON.parse(prov.body); } catch {}
+  check('S-6d /diagnostics/provisioning 桥不可用 → 503 OS_OFFLINE', prov.code === 503 && provj.code === 'OS_OFFLINE' && provj.snapshot === undefined, prov.code + ' ' + JSON.stringify(provj).slice(0, 60));
+
+  // 桥在时：查询串必须**原样**到达桥方法（取证的人给的 stage/level 被吞掉，就等于
+  // 让他读了一份自己没要的东西）。用一个记账 stub 代替真桥，只验路由→方法→参数这条线。
+  const seen = [];
+  panel.call = async (method, params) => {
+    seen.push({ method, params });
+    return { ok: true, result: { collected: true, total: 0, matched: 0, events: [] } };
+  };
+  await get(port, '/diagnostics/events?stage=program-ota&level=fail&limit=50');
+  check('S-6e /diagnostics/events 转发的方法与参数与查询串一致', seen.length === 1
+    && seen[0].method === 'os.diagnostics.events'
+    && seen[0].params.stage === 'program-ota' && seen[0].params.level === 'fail' && seen[0].params.limit === 50,
+    JSON.stringify(seen[0] || {}));
+
+  seen.length = 0;
+  await get(port, '/diagnostics/events?limit=99999');
+  check('S-6f limit 越界收到达上限而不是原样透传（桥侧还有第二道 coerce，两头都得有界）',
+    seen.length === 1 && seen[0].params.limit === 2000, JSON.stringify(seen[0] || {}));
+
+  seen.length = 0;
+  await get(port, '/diagnostics/events?limit=abc');
+  check('S-6g 非数字 limit 退回默认值而不是 NaN', seen.length === 1 && seen[0].params.limit === 200, JSON.stringify(seen[0] || {}));
+
   await panel.stop();
   check('S-7 面板可停（stop 完成）', true);
 

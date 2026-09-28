@@ -19,6 +19,7 @@ import android.provider.Settings
 import android.util.Log
 import lobos.MainActivity
 import lobos.OsApplication
+import lobos.ProvisioningProbe
 import lobos.R
 import lobos.RuntimeDiagnostics
 import lobos.capability.BridgeTokens
@@ -681,9 +682,42 @@ class CapabilityBroker(private val host: Service) : ContextWrapper(host) {
                 })
             }
         },
+        // 取证读数：启动链**逐事件**的机读面（含探针的 `data` 结构化结论）。
+        //
+        // 为什么要单开一条而不复用 os.journal.*：journal 镜像诊断时把 detail 截到 300 字、
+        // 且不带 data 字段（见 RuntimeDiagnostics.appendEvent），而排查「哪一格为什么坏」
+        // 要的正是那两份原文。与 os.nativeAssets.status 的分工：那一个只给三个核验 stage 的
+        // 最新一条，这一个给任意 stage 的事件流；两者都只读已落盘的，绝不现场重跑探针。
+        //
+        // limit 是**读取窗口**（文件末尾 N 条），stage/level 在窗口内过滤 —— total/matched
+        // 分开回，是为了让「窗口开小了」这件事看得见，而不是被误读成「设备上没有这条」。
+        "os.diagnostics.events" to MethodDef(listOf("base"), false) { p ->
+            val stage = p.optString("stage", "").takeIf { it.isNotBlank() }
+            val level = p.optString("level", "").takeIf { it.isNotBlank() }?.uppercase(Locale.US)
+            val limit = p.optInt("limit", 200).coerceIn(1, 2000)
+            val window = RuntimeDiagnostics.events(this@CapabilityBroker, limit)
+            val matched = window.filter { ev ->
+                (stage == null || ev.stage.startsWith(stage)) && (level == null || ev.level.name == level)
+            }
+            JSONObject().apply {
+                put("collected", window.isNotEmpty())
+                put("total", window.size)
+                put("matched", matched.size)
+                put("events", JSONArray().apply { matched.forEach { put(it.toJson()) } })
+            }
+        },
+        // 开机体检快照（五项体检 + 三条版本流身份）。release 包不再 debuggable 后，
+        // 这是 `provisioning.json` 唯一的对外读法；没有快照就回 present=false，
+        // 不把「探针还没跑过」渲染成「一切正常」。
+        "os.provisioning.get" to MethodDef(listOf("base"), false) { _ ->
+            val snap = ProvisioningProbe.snapshot(this@CapabilityBroker)
+            JSONObject().apply {
+                put("present", snap != null)
+                put("snapshot", snap ?: JSONObject.NULL)
+            }
+        },
         "capability.invoke" to MethodDef(listOf("base"), true) { _ -> notImplemented("capability.invoke") },
     )
-
     private val METHODS: Map<String, MethodDef> = mapOf(
         // 3.8 system
         "sys.info" to MethodDef(listOf("base"), false) { _ ->

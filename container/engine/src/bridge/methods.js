@@ -80,6 +80,10 @@ const OS_METHODS = {
   // 与 sys.nativeAssets 的分工见 docs/runbook/system-device-verification.md §9：
   // 那一个是「现在就验一次」，这一个回答「启动链最近那一轮验出了什么」。
   'os.nativeAssets.status': { group: 'os', caps: ['base'], audit: false },
+  // 取证两条：都只读**已落盘**的结论，绝不现场重跑探针（分工见
+  // docs/runbook/system-device-verification.md §9 与契约 §2.1）。
+  'os.diagnostics.events': { group: 'os', caps: ['base'], audit: false },
+  'os.provisioning.get': { group: 'os', caps: ['base'], audit: false },
 };
 
 const METHODS = {

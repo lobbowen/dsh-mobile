@@ -2,7 +2,8 @@ name: Build Lob OS APK
 
 # 这个工作流存在的意义：CI 运行器有完整的公网（能访问 dl.google.com），
 # 而本仓库作者所在的沙箱环境外网被白名单限制、无法下载 Android SDK/NDK。
-# 因此“出包”交给 GitHub Actions：一键编译出可安装的 debug APK 作为构件(artifact)下载。
+# 因此“出包”交给 GitHub Actions：一键编译出可安装的 **release 形态** APK（非 debuggable，
+# 形态由 scripts/verify-apk-release-form.sh 判）作为构件(artifact)下载，并投给 apk-latest。
 #
 # 用法：Actions → 手动 Run workflow（仅改 Node 运行时/编译脚本时才需要；
 # 日常出包走 fast-apk，不碰这条路）。
@@ -634,12 +635,18 @@ jobs:
           set -euo pipefail
           ./scripts/stage-npm-assets.sh
 
-      - name: Build debug APK
+      - name: Build release APK
         id: gradlebuild
         run: |
           echo "8/9 gradle-apk" > /tmp/ci-stage
           set -o pipefail
           chmod +x gradlew
+          # 本链路发的是 apk-latest（存量设备的更新通道），产物必须是 **release 形态**（非 debuggable）。
+          # 原先这里是 assembleDebug：debuggable 的包意味着设备私有目录对任意 `adb shell run-as`
+          # 敞开、可被调试器附加 —— 而签名门禁查的是「谁签的」，与「哪种形态」是两个事实：
+          # build.gradle.kts:120-123 让 debug 档也用 release keystore 签名，于是「稳定签名」与
+          # 「debug 形态」同时为真，发布链一路绿（债 AUD-G33）。形态由下面的形态门禁判，
+          # 判据只住 scripts/verify-apk-release-form.sh。
           # 注意：这里【不要】写 env: ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}。
           # workflow 级从未定义过 ANDROID_SDK_ROOT，该表达式展开为空字符串，
           # 于是把 runner 自带的正确值覆盖成空 —— gradle 随即告警
@@ -648,7 +655,7 @@ jobs:
           # 本步骤没显式传 env，runner 自带的 ANDROID_SDK_ROOT/ANDROID_HOME 自然生效。
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
           echo "ANDROID_HOME=${ANDROID_HOME:-<unset>}"
-          ./gradlew assembleDebug --no-daemon 2>&1 | tee /tmp/gradle-build.log
+          ./gradlew assembleRelease --no-daemon 2>&1 | tee /tmp/gradle-build.log
 
       - name: Audit APK contents (must contain libc++_shared.so)
         # 判据的唯一实现是 scripts/verify-apk-native.sh，与 fast-apk 同调。
@@ -659,7 +666,7 @@ jobs:
           echo "8.5/9 audit-apk" > /tmp/ci-stage
           # `|| exit 1`：本 step 没开 set -e，pick.sh 报错后脚本会继续往下走 ——
           # 继续就意味着拿空 APK 去审计，红点会落在一个和真因无关的地方。
-          APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)" \
+          APK="$(bash scripts/pick.sh apk-release container/app/build/outputs/apk/release -name '*.apk' -type f)" \
             || { echo "[error] 没有可审计的 APK —— 审计这一步不许空跑"; exit 1; }
           bash scripts/verify-apk-native.sh "$APK" arm64-v8a
 
@@ -667,8 +674,20 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lobos-apk
-          path: container/app/build/outputs/apk/debug/*.apk
+          path: container/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+
+      - name: Gate — APK 形态（发布必须是 release 形态）
+        id: formgate
+        # 与签名门禁是两个事实：签名答「能不能覆盖安装」，形态答「这个包是不是 debug 包」。
+        # 排在签名门禁之前：形态坏了直接说明「这条链路在发 debug 包」，
+        # 比让人先去查 keystore 配置更快指向真因。
+        run: |
+          set -euo pipefail
+          echo "8.6/9 gate-form" > /tmp/ci-stage
+          APK="$(bash scripts/pick.sh apk-release container/app/build/outputs/apk/release -name '*.apk' -type f)" \
+            || { echo "[error] 没有可核验的 APK —— 门禁不许空跑"; exit 1; }
+          bash scripts/verify-apk-release-form.sh "$APK"
 
       - name: Gate — APK 签名身份（发布必须稳定）
         id: signgate
@@ -681,7 +700,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "8.7/9 gate-signing" > /tmp/ci-stage
-          APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)" \
+          APK="$(bash scripts/pick.sh apk-release container/app/build/outputs/apk/release -name '*.apk' -type f)" \
             || { echo "[error] 没有可核验的 APK —— 门禁不许空跑"; exit 1; }
           ARGS=(--require-stable)
           [ -z "${LOBOS_APK_CERT_FILE:-}" ] || ARGS+=(--cert "$LOBOS_APK_CERT_FILE")
@@ -711,14 +730,22 @@ jobs:
         run: |
           set -o pipefail
           TAG="apk-latest"
-          APK="container/app/build/outputs/apk/debug/app-debug.apk"
-          ls -la container/app/build/outputs/apk/debug/ || true
+          APK="$(bash scripts/pick.sh apk-release container/app/build/outputs/apk/release -name '*.apk' -type f)" \
+            || { echo "[error] 没有可发布的 APK —— 发布这一步不许空跑"; exit 1; }
+          ls -la container/app/build/outputs/apk/release/ || true
           if [ ! -f "$APK" ]; then
             echo "[error] 未找到 $APK，跳过发布"
             exit 1
           fi
           SIZE="$(du -h "$APK" | cut -f1)"
           echo "APK 大小: $SIZE"
+          # 资产名 = 交出去那份文件的 basename（gh-release-upload.sh 头部那条事实），
+          # 所以先把副本放进临时目录、取名 app-release.apk 再传：这样下面打印的下载网址
+          # 与真上传的名字是同一个串，不靠「AGP 恰好把它签成这个名字」的运气
+          # （没签时 AGP 出的是 app-release-unsigned.apk —— 那样网址就 404，
+          #   而这正是 repack 在 2026-09-26 踩过的形态）。
+          STAGE="$(mktemp -d)"
+          cp "$APK" "$STAGE/app-release.apk"
           # ── 版本门禁（VERSION-GATE 2/4：判据 scripts/verify-apk-version-gate.sh，取数外壳
           #    scripts/check-apk-release-version.sh）─────────────────────────────
           # 为什么这条链路上原来没有门禁：它是手动触发（3 小时全量），写的时候只想着「能不能发出」，
@@ -731,19 +758,23 @@ jobs:
           fi
           # tag 固定为 apk-latest：存在则覆盖、不存在则创建。整段「确保在 → 覆盖 → 事后
           # 逐字节确认」的判据只住 scripts/gh-release-upload.sh 一处（含同名资产记录还在、
-          # 后端对象已孤立时的「按名删旧记录再传」回退）。
+          # 后端对象已孤立时的「按名删旧值再传」回退）。
           # APK 与 version.json 同批上传：否则 latest 的 version.json 说的不是 latest 那个包，
           # 下一次门禁就是拿假读数比真产物（版本化归档 v<versionName> 仍只由 fast-apk 写，
           # 这条链路的产物由 Actions artifact 保留）。
+          # --prune 那份废止的资产名：滚动通道只该有「当前」那一个包。留着 app-debug.apk
+          # 就等于线上仍可达一个 debug 形态的历史包，而任何按旧网址装的入口都不会告诉我们它拿到了。
           # 本步没有 set -e（见上方版本门禁那条注释），所以显式判宿主退出码。
           bash scripts/gh-release-upload.sh "$TAG" \
             --title "Lob OS APK (latest)" --notes "自动构建产物，持续覆盖更新。" \
-            "$APK" version.json \
+            --prune '^app-debug\.apk$' \
+            "$STAGE/app-release.apk" version.json \
             || { echo "::error title=发布失败::上方宿主已说明哪一步没成 —— 不许把这一步当发布成功。"; exit 1; }
+          rm -rf "$STAGE"
           echo "=== 发布完成 ==="
-          echo "下载地址: https://github.com/${{ github.repository }}/releases/download/${TAG}/app-debug.apk"
+          echo "下载地址: https://github.com/${{ github.repository }}/releases/download/${TAG}/app-release.apk"
           # 把网址写进 ci-ok 便于外部读取
-          echo "APK_URL=https://github.com/${{ github.repository }}/releases/download/${TAG}/app-debug.apk" >> "$GITHUB_OUTPUT"
+          echo "APK_URL=https://github.com/${{ github.repository }}/releases/download/${TAG}/app-release.apk" >> "$GITHUB_OUTPUT"
 
       # ---------------------------------------------------------------------------
       # 成功自报：把构建成功标记推到 ci-ok 分支（raw 通道可读）。
@@ -763,9 +794,9 @@ jobs:
             echo "BUILD_OK"
             echo "time : $(date -u)"
             echo "node : ${{ steps.nodever.outputs.tag }}"
-            echo "apk  : container/app/build/outputs/apk/debug/app-debug.apk"
+            echo "apk  : container/app/build/outputs/apk/release/app-release.apk"
             # 可直接下载的稳定网址（Release 资产，见上方 Publish APK 步骤的说明）。
-            echo "url  : https://github.com/${{ github.repository }}/releases/download/apk-latest/app-debug.apk"
+            echo "url  : https://github.com/${{ github.repository }}/releases/download/apk-latest/app-release.apk"
           } > ci-ok.txt
           git config user.email "ci@workbuddy.local"
           git config user.name "CI Diagnostic Bot"
@@ -823,6 +854,9 @@ jobs:
             echo "node-build  : ${{ steps.nodebuild.outcome }}"
             # signing 决定产物"能不能装到已有设备上"，必须登记（同 enginetests 的理由）。
             echo "signing     : ${{ steps.signing.outcome }}"
+            # formgate 判「这个包是不是 release 形态」，signgate 判「谁签的」—— 两个事实，
+            # 少一个读数都会把不该投的包投给存量设备（债 AUD-G33 的形态侧）。
+            echo "formgate    : ${{ steps.formgate.outcome }}"
             # signgate 是发布前的最后一道身份门禁，红在它身上 = 这个包不该投给存量设备。
             echo "signgate    : ${{ steps.signgate.outcome }}"
             echo "gradle-build: ${{ steps.gradlebuild.outcome }}"
@@ -901,6 +935,9 @@ jobs:
             echo "node-build  : ${{ steps.nodebuild.outcome }}"
             # signing 决定产物"能不能装到已有设备上"，必须登记（同 enginetests 的理由）。
             echo "signing     : ${{ steps.signing.outcome }}"
+            # formgate 判「这个包是不是 release 形态」，signgate 判「谁签的」—— 两个事实，
+            # 少一个读数都会把不该投的包投给存量设备（债 AUD-G33 的形态侧）。
+            echo "formgate    : ${{ steps.formgate.outcome }}"
             # signgate 是发布前的最后一道身份门禁，红在它身上 = 这个包不该投给存量设备。
             echo "signgate    : ${{ steps.signgate.outcome }}"
             echo "gradle-build: ${{ steps.gradlebuild.outcome }}"

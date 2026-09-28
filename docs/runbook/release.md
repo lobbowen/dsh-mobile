@@ -50,20 +50,24 @@
 
 - `scripts/verify-apk-signing.sh`（唯一实现；注入侧 `scripts/inject-apk-keystore.sh`）：
   - 配了 keystore → APK 内证书 SHA-256 指纹与注入锚点**逐指纹比对**，不符即硬红；
-  - 发布链路（`build-apk` / `release-admin` 的 repack）带 `--require-stable`：debug 身份、没配 keystore、锚点本身是 debug 三种情况都硬红；
-  - **日常链路 `fast-apk` 允许 debug 档**，只打 `::warning::`（已知缺口：该链路仍会写 `apk-latest`，见 §11）。
+  - 发布链路（`build-apk` / `release-admin` 的 publish 与 repack）带 `--require-stable`：debug 身份、没配 keystore、锚点本身是 debug 三种情况都硬红；
+  - **日常链路 `fast-apk` 允许 debug 档**，只打 `::warning::` —— 它的产物是 `v<versionName>` 下的取证归档，不写滚动别名。
+- `scripts/verify-apk-release-form.sh`（唯一实现）：读 `android:debuggable`，判的是**形态**，与「谁签的」是两个独立事实
+  （`container/app/build.gradle.kts:119-132` 让 debug 档也用 release keystore 签名，所以签名绿不代表形态绿，债 AUD-G33）。
+  写 `apk-latest` 的三条链路（build-apk / publish / repack）都判非 debuggable；
+  `fast-apk` 做**两侧对照**：debug 归档必须被读成 debuggable、控件构建出的 release 变体必须不是 —— 只测一侧的尺子分不清「包真干净」与「解析没生效」。
 - `scripts/verify-ota-anchor.sh`：强制锚点算法为 **Ed25519**，并在带 `--private` 时校验
   「私钥派生公钥 == 焊死锚点」，堵住轮换后 CI 全绿而设备全拒收的静默故障。
 
 ## 5. 发布物与命名
 
-**壳**（`apk-latest` Release）：
+**壳**：
 
-| 资产 | 用途 |
-|---|---|
-| `app-debug.apk` | 稳定别名（latest 地址永久不变） |
-| `app-debug-<versionName>+<versionCode>.apk` | 版本化归档（在 `v<versionName>` tag 下） |
-| `version.json` | 壳版本清单（下次单调性检查的输入） |
+| 资产 | Release tag | 用途 |
+|---|---|---|
+| `app-release.apk` | `apk-latest` | 稳定别名（latest 地址永久不变），**release 形态**；装机/升级用的就是这个地址 |
+| `app-debug-<versionName>+<versionCode>.apk` | `v<versionName>` | 版本化归档（debug 形态，`run-as` 取证只在它上面可用） |
+| `version.json` | `apk-latest` | 壳版本清单（下次单调性检查的输入） |
 
 **内核**（GitHub Release 只作归档；设备实际读对象存储）：
 
@@ -127,15 +131,20 @@ base64 -w0 keys/release.keystore > /tmp/ks.b64
 
 ## 11. 已知缺口（待修）
 
-- `fast-apk` 的签名门禁**允许 debug 档**，且该链路仍会把产物写 `apk-latest`（自动通道）。
-  未配 keystore 时，main 合并即把一次性 debug 签名包推给存量设备 → `INSTALL_FAILED_UPDATE_INCOMPATIBLE`（不可逆）。
-  修法：写 `apk-latest` 的链路一律带 `--require-stable`。
+- 滚动别名上的**历史资产**：`app-debug.apk` 这个名字在形态收口（AUD-G33）之前一直是 latest 的资产名，
+  线上那份 debug 形态的包要等写 latest 的三条链路里任意一条下一次真跑完才被 `--prune '^app-debug\.apk$'` 清掉。
+  在那之前，按旧地址取包的人拿到的仍是 debuggable 包 —— 三个写者都已判形态，所以这是**投递滞后**，不是判定缺口。
+- `fast-apk` 未配 keystore 时，release 控件构建出的是 `app-release-unsigned.apk`：形态读得出（门禁只读 badging），
+  但它不是可投递的发布包。可投递的 release 包仍只由 build-apk / release-admin 产，而那两条要人按。
+- 取证面：发布包非 debuggable 之后，`run-as` 只在 `v<versionName>` 的 debug 归档上可用；
+  控制面起不来（内核没跑）时**没有**远程读法。这条不可约，见 `docs/runbook/system-device-verification.md` §0.1。
 
 ## 12. 发布前自检
 
+- [ ] 形态门禁输出「[lobos-form] [ok] 非 debuggable（release 形态）」
 - [ ] 签名门禁输出「APK 证书指纹与注入锚点一致」（配了 keystore 时）
 - [ ] `OTA_PRIVATE_KEY_PEM` 已配置，且 `verify-ota-anchor.sh --private` 通过
 - [ ] `keys/release.keystore` + 口令已离线备份
-- [ ] `fast-apk` 日志出现 `[version] 本次发布 x.y.z (versionCode=N)` **和** `[version] 版本前进（M → N）`
+- [ ] `fast-apk` 日志出现 `[version] 本次归档 x.y.z (versionCode=N)` **和** `[version] 版本前进（M → N）`
 - [ ] 只更新内核时：`program-ota` 成功，且**壳版本未变**
-- [ ] 设备 `provisioning.json` 的 `appVersion` / `programVersion` / `bridgeProtocol` 三者自洽
+- [ ] 设备 snapshot 的 `programVersion` / `programFloor` / `bridgeProtocol` 三者自洽（取法见 `system-device-verification.md` §0.1）

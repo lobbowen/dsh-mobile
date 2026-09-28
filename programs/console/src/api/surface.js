@@ -41,6 +41,10 @@ const SURFACE = [
   { path: '/native/settings',     methods: ['POST'], domain: 'native', category: 'public', consumers: ['UI(OverviewPage)'], note: 'Program 元数据补丁（经 OS）' },
   { path: '/native/access',       methods: ['GET'],  domain: 'native', category: 'public', consumers: ['UI(进入 Program)'], note: '带令牌 Program Web 直连 URL（仅回环下发）' },
 
+  // ── 取证（diagnostics.js）──
+  { path: '/diagnostics/events',       methods: ['GET'], domain: 'diagnostics', category: 'operational', consumers: ['远程取证(adb forward + curl)'], note: '启动链逐事件机读面（含探针 data 结论）；读已落盘的，不重跑探针' },
+  { path: '/diagnostics/provisioning', methods: ['GET'], domain: 'diagnostics', category: 'operational', consumers: ['远程取证(adb forward + curl)'], note: '开机体检快照 provisioning.json 原文（release 包非 debuggable 后唯一读法）' },
+
   // ── 任务（tasks.js）──
   { path: '/tasks', methods: ['GET'], domain: 'tasks', category: 'public', consumers: ['UI(TasksPage)'], note: 'OS journal 任务列表（+ /tasks/{id}）' },
 
@@ -74,6 +78,7 @@ const SURFACE = [
 
 /** 前缀路由（pathname.startsWith）。 */
 const PREFIXES = [
+  { prefix: '/diagnostics', domain: 'diagnostics', category: 'operational', consumers: ['远程取证(adb forward + curl)'], note: '/diagnostics/{events|provisioning}' },
   { prefix: '/dist/',     domain: 'dist',      category: 'public',      consumers: ['UI'], note: '/dist/registry/{refresh|set|probe}' },
   { prefix: '/guard/',    domain: 'guard',     category: 'public',      consumers: ['UI'], note: '/guard/version|changelog 等' },
   { prefix: '/lifecycle', domain: 'lifecycle', category: 'public',      consumers: ['UI', 'CLI'], note: '/lifecycle/{id}[/{action}]（唯一启停入口）' },

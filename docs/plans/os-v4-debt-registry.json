@@ -1134,14 +1134,14 @@
     {
       "group": "AUDIT-recheck",
       "id": "AUD-G33",
-      "desc": "§5.10 release 出包：fast-apk 允许 debug 签名包且仍推 apk-latest",
-      "where": "fast-apk.yml:375/445、docs/runbook/release.md:130",
-      "action": "写 apk-latest 的链路一律 --require-stable",
+      "desc": "§5.10 发布面形态：写 apk-latest 的链路从未判过 android:debuggable（签名绿 ≠ 非 debug 形态）",
+      "where": "scripts/verify-apk-release-form.sh、.github/workflows/build-apk.yml + release-admin.yml(publish·repack) + fast-apk.yml、docs/runbook/release.md §4/§5/§11",
+      "action": "assembleRelease + 形态门禁（判据单一宿主），latest 资产名改 app-release.apk 并 --prune 废止名；fast-apk 两侧对照自证",
       "status": "in-progress",
       "evidence": "A5-判据10",
       "workstream": "W-未分配",
       "updated": "2026-09-29",
-      "note": "原 note「keystore 未配置即 exit 1」与代码不符：fast-apk.yml:351 是 \"Inject release keystore (optional, for stable signing)\"，scripts/inject-apk-keystore.sh 退 10 =「本次就是 debug 签名包」的**合法档位**（日常链放行 + ::warning::），:380 仍是 assembleDebug。debug 包继续占发布位这件事没收口，发布链 release-admin 已连续失败并被弃用。",
+      "note": "本轮（B5-b.2）落地：① 判据收口到 scripts/verify-apk-release-form.sh（读 aapt/aapt2 的 badging，取不到读数一律退 1，另带 --expect-debuggable 对照档）；② build-apk 改 assembleRelease，publish/repack 在上传前判形态，三个写 latest 的口子都 --prune '^app-debug\\.apk$'，资产名统一 app-release.apk；③ fast-apk 每次合并做两侧对照并真构建一次 release 变体（发布路径长期不被执行正是本债成因）；④ 行为+接线+回潮门禁住 container/engine/test/apk-release-form-test.js。判据形态与签名身份是两个事实：build.gradle.kts:119-132 让 debug 档也用 release keystore 签名，所以「稳定签名」与「debug 形态」会同时为真。仍未清：线上 apk-latest 现存的 app-debug.apk 要等这三条链路下一次真跑完才被清掉（投递滞后，非判定缺口）；且 assembleRelease/lintVitalRelease 在 CI 里第一次真跑的结果还没读到 —— 走完 build-apk 成功 + latest 资产名回读确认才转 done。",
       "evidenceTier": "online",
       "evidenceRef": "2026-09-29 00:44–00:52 现读：release v1.1.8 唯一资产 = app-debug-1.1.8+35.apk；release-admin.yml 最近 3 次 run（#21/#20/#19，均 push 触发）completed:failure，最后一次 2026-09-26T18:56:59Z 之后再没跑"
     },

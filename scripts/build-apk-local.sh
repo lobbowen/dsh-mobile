@@ -15,7 +15,8 @@
 #    export ANDROID_NDK=/path/to/ndk
 #    ./scripts/build-apk-local.sh
 #
-#  产出：app/build/outputs/apk/debug/app-debug.apk
+#  产出：app/build/outputs/apk/debug/app-debug.apk —— debug 形态（取证档，run-as 可用）。
+#  发布档（release 形态、apk-latest 的那个地址）由 CI 出，见 docs/runbook/release.md §5。
 # ============================================================================
 set -euo pipefail
 

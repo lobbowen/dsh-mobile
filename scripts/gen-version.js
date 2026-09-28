@@ -93,4 +93,6 @@ line('console', consolePkg.name + ' ' + consolePkg.version);
 line('ui', ui.name + ' ' + ui.version);
 line('runtime', 'node-runtime-' + nodeVersions.default + '-' + nodeVersions.abi);
 line('protocol', 'os v' + shell.bridgeProtocol + '  /  console requires v' + (consolePkg.lobos || {}).requiresProtocol);
-line('apk', 'app-debug-' + shell.versionName + '+' + shell.versionCode + '.apk  （发布资产名）');
+// 归档名由版本号算出来，这里印的是可推出来的事实；滚动别名不随版本变，
+// 在这里印一份就是造第二个事实源（它由三个 latest 写者的形态接线断言钉住）。
+line('archive', 'app-debug-' + shell.versionName + '+' + shell.versionCode + '.apk  （v<versionName> 版本化归档）');

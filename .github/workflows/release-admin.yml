@@ -375,8 +375,27 @@ jobs:
           { find /tmp/dl -type f | head -20 || true; }
           APK="$(bash scripts/pick.sh inject-apk /tmp/dl -name '*.apk' -type f)"
           echo "找到 APK: $APK ($(du -h "$APK" | cut -f1))"
-          cp "$APK" /tmp/app-debug.apk
-          ls -la /tmp/app-debug.apk
+          # 交给下一步的名字就是线上资产名（gh-release-upload.sh 头部：资产名取 basename）。
+          # 本链路写的是 apk-latest —— 存量设备的更新通道，所以这里只认 release 形态；
+          # 上一轮 build-apk 若来自形态收口（AUD-G33）之前，取到的会是 debug 包，
+          # 由下面的形态门禁判红，而不是照旧投出去。
+          cp "$APK" /tmp/app-release.apk
+          ls -la /tmp/app-release.apk
+
+      - name: Gate — 来源包形态与签名身份
+        id: srcgate
+        # 这两个门禁在 build-apk 里已经跑过一次，为什么这里还要跑：本 job 投的是
+        # **另一个 run** 的产物（可由人指定 run_id，也可以自动取最近一次成功 run）。
+        # 那个 run 可能早于形态收口（AUD-G33：debug 档也用 release keystore 签名，
+        # 于是「稳定签名」与「debug 形态」同时为真），它的绿色不代表这批字节合格。
+        # 门禁判的是**交出去的那份文件**，不是「产它那次跑有没有红」。
+        # --cert 这里给不出来：本 job 不碰 keystore，没有本次注入的锚点。
+        # verify-apk-signing.sh 对「没有锚点」的处置是放行并明说「只证明了不是 debug」，
+        # 这是如实的弱档，不是假装强档（对照 repack：它签了，所以有锚点可比）。
+        run: |
+          set -euo pipefail
+          bash scripts/verify-apk-release-form.sh /tmp/app-release.apk
+          bash scripts/verify-apk-signing.sh /tmp/app-release.apk --require-stable
 
       - name: Publish to Release
         env:
@@ -406,18 +425,21 @@ jobs:
           # version.json 描述的是上一个包 —— 下一次门禁拿假读数比真产物。
           # 资产名取 file 的 basename（`#` 后面只是 label），所以 MANIFEST 必须是门禁
           # 留出来的、真名叫 version.json 的那份文件；取数只在 check-apk-release-version.sh 一处。
-          EXTRA=(/tmp/app-debug.apk)
+          EXTRA=(/tmp/app-release.apk)
           if [ -n "$MANIFEST" ]; then
             EXTRA+=("$MANIFEST")
             echo "[version] latest 清单将与 APK 同批覆盖（来源 run ${{ steps.get.outputs.run_id }}）"
           fi
+          # --prune 那份废止的资产名：滚动通道只该有「当前」那一个包。留着 app-debug.apk
+          # 就等于线上仍可达一个 debug 形态的历史包，而任何按旧网址装的入口都不会告诉我们它拿到了。
           bash scripts/gh-release-upload.sh "$TAG" \
             --title "Lob OS APK (latest)" \
             --notes "Android 原生 Node 容器 APK。来源 run: ${{ steps.get.outputs.run_id }}" \
+            --prune '^app-debug\.apk$' \
             "${EXTRA[@]}"
           echo
           echo "下载地址:"
-          echo "https://github.com/${{ github.repository }}/releases/download/${TAG}/app-debug.apk"
+          echo "https://github.com/${{ github.repository }}/releases/download/${TAG}/app-release.apk"
 
       - name: Record URL to ci-ok branch
         # 把可下载地址写进 ci-ok 自报分支，便于外部读取（环境限制下这是主要通道）。
@@ -434,8 +456,8 @@ jobs:
             echo "BUILD_OK"
             echo "time : $(date -u)"
             echo "from : published from run ${{ steps.get.outputs.run_id }}"
-            echo "apk  : app-debug.apk"
-            echo "url  : https://github.com/${{ github.repository }}/releases/download/${{ inputs.tag }}/app-debug.apk"
+            echo "apk  : app-release.apk"
+            echo "url  : https://github.com/${{ github.repository }}/releases/download/${{ inputs.tag }}/app-release.apk"
           } > ci-ok.txt
           git config user.email "ci@workbuddy.local"
           git config user.name "CI Diagnostic Bot"
@@ -613,6 +635,11 @@ jobs:
           # 「是哪把 key 签的」），别名取错或 keystore 换过都会照常投给存量设备。
           bash scripts/verify-apk-signing.sh /tmp/app-signed.apk \
             --require-stable --cert "$RUNNER_TEMP/keys/release.cert"
+          # 形态门禁与签名门禁判的是两个事实，这里两个都要判：repack 只换签名块和注入的
+          # .so，android:debuggable 是从来源包**原样带过来**的。来源 run 若早于形态收口
+          # （AUD-G33），重签出来的包结构完全有效、签名也稳定，却仍是个 debug 包 ——
+          # 而 repack 的默认发布目标就是 apk-latest。
+          bash scripts/verify-apk-release-form.sh /tmp/app-signed.apk
           ls -la /tmp/app-signed.apk
 
       - name: Publish to Release
@@ -640,9 +667,11 @@ jobs:
           # /tmp/app-signed.apk 投成了 app-signed.apk、还把 app-debug.apk 先删了，
           # latest 的下载地址当场 404。所以先改名进临时目录再交出去，
           # 「线上真有了这个名字、字节也对」由宿主事后回读确认。
+          # 名字随形态一起改（app-release.apk）：三个写 latest 的口子用同一个名字，
+          # 否则 repack 会把 build-apk 刚立的资产名又换回 debug 那串。
           STAGE="$(mktemp -d)"
-          cp /tmp/app-signed.apk "$STAGE/app-debug.apk"
-          EXTRA=("$STAGE/app-debug.apk")
+          cp /tmp/app-signed.apk "$STAGE/app-release.apk"
+          EXTRA=("$STAGE/app-release.apk")
           if [ -n "$MANIFEST" ]; then
             EXTRA+=("$MANIFEST")
             echo "[version] latest 清单将与重签包同批覆盖（来源 run ${{ steps.src.outputs.run_id }}）"
@@ -650,6 +679,7 @@ jobs:
           bash scripts/gh-release-upload.sh "$TAG" \
             --title "Node Container APK ($TAG)" \
             --notes "repack from run ${{ steps.src.outputs.run_id }}：注入 libc++_shared.so，修复 cannot locate symbol。" \
+            --prune '^app-debug\.apk$' \
             "${EXTRA[@]}"
           rm -rf "$STAGE"
 

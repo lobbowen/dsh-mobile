@@ -34,8 +34,8 @@
 
 | Tag | 触发方 | 产物 / 作用 |
 |---|---|---|
-| `v<versionName>` | fast-apk / ci | 壳的**版本化归档**（`app-debug-<VN>+<VC>.apk`）；`v*` 也触发 ci.yml |
-| `apk-latest` | fast-apk / build-apk / release-admin | 滚动通道（`app-debug.apk` + `version.json`） |
+| `v<versionName>` | fast-apk / ci | 壳的**版本化归档**（`app-debug-<VN>+<VC>.apk`，debug 形态，取证用）；`v*` 也触发 ci.yml |
+| `apk-latest` | build-apk / release-admin(publish·repack) | 滚动通道（`app-release.apk` + `version.json`），设备真正去读的那个地址；写入前必过形态+签名门禁 |
 | `node-runtime-<version>-<abi>` | build-apk 的 pin job | 预编译 Node 运行时（如 `node-runtime-24.21.0-arm64-v8a`） |
 | `program-<version>` | program-ota | Program 版本化归档（`program-<v>.zip` + manifest） |
 | `program-<channel>` | program-ota | 内核通道滚动归档（canary / stable） |
