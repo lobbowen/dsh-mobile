@@ -16,12 +16,21 @@ const strict = process.argv.includes('--strict') || policy.enforce === true;
 const ignoreSeg = new Set(policy.ignoreSegments || []);
 const ignoreExt = new Set(policy.ignoreExt || []);
 const ignoreFiles = new Set(policy.ignoreFiles || []);
-const allowFiles = new Set(policy.allowFiles || []);
+// 白名单按**词条**授予：整文件豁免会让该文件对其它规则也隐形（旧形态就是这个洞）。
+const allowFiles = new Map((policy.allowFiles || []).map((e) => [e.file, new Set(e.terms)]));
 
 function rel(p) { return path.relative(root, p).split(path.sep).join('/'); }
 function allowed(relPath, term) {
-  const rules = term.allow || [];
-  for (const a of rules) if (relPath === a || relPath.startsWith(a)) return true;
+  const granted = allowFiles.get(relPath);
+  if (granted && granted.has(term.id)) return true;
+  for (const a of term.allow || []) if (relPath === a || relPath.startsWith(a)) return true;
+  return false;
+}
+// term.paths：把规则收在**声明面**内（如只禁交付面用旧名），仓内散文不受管。
+function inScope(relPath, term) {
+  const p = term.paths || [];
+  if (p.length === 0) return true;
+  for (const a of p) if (relPath === a || relPath.startsWith(a)) return true;
   return false;
 }
 function makesRegex(term) {
@@ -37,6 +46,7 @@ function isTextFile(p) {
   try { const fd = fs.openSync(p, 'r'); const b = Buffer.alloc(1024); const n = fs.readSync(fd, b, 0, 1024, 0); fs.closeSync(fd); return !b.subarray(0, n).includes(0); } catch { return false; }
 }
 const hits = [];   // {file, term, count, samples:[]}
+const liveSurface = new Map(); // termId → 该规则真正覆盖到的文件数（0 = 死规则）
 function walk(dir) {
   let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
   for (const e of ents) {
@@ -46,10 +56,11 @@ function walk(dir) {
     if (!e.isFile() || !isTextFile(p)) continue;
     const relPath = rel(p);
     if (ignoreFiles.has(relPath) || ignoreFiles.has(e.name)) continue;
-    if (allowFiles.has(relPath)) continue; // 负向判据文件：按设计引用违禁词
     let text; try { text = fs.readFileSync(p, 'utf8'); } catch { continue; }
     for (const term of policy.terms) {
-      if (allowed(relPath, term)) continue;
+      if (!inScope(relPath, term)) continue;
+      if (allowed(relPath, term)) continue; // 负向判据：按设计引用违禁词的**具体词条**
+      liveSurface.set(term.id, (liveSurface.get(term.id) || 0) + 1);
       const re = makesRegex(term);
       let m, count = 0; const samples = [];
       while ((m = re.exec(text)) !== null) {
@@ -66,6 +77,11 @@ function walk(dir) {
   }
 }
 walk(root);
+
+// ── 死规则自检 ───────────────────────────────────────────────────────────────
+// 一条规则若覆盖面为 0（词条被白名单/豁免全吃掉，或 paths 作用域里根本没人），它永远不会红，
+// 于是「门禁通过」变成假证据。这里按零覆盖直接判红，逼规则要么有用要么删掉。
+const deadTerms = policy.terms.filter((t) => (liveSurface.get(t.id) || 0) === 0).map((t) => t.id);
 
 
 // ── Kotlin 未解析 import 检查（捕捉"引用了但从未定义"的编译断点）──────────────
@@ -104,6 +120,7 @@ lines.push('# Lob OS 门禁扫描报告（' + new Date().toISOString() + '）');
 lines.push('');
 lines.push('模式：' + (strict ? '**强制**' : '报告（enforce=false）'));
 lines.push('Kotlin 未解析 import：' + ktCheck.imports + ' 个 import，缺失 ' + ktCheck.missing.length + (ktCheck.missing.length ? ' → ' + ktCheck.missing.join(', ') : ''));
+lines.push('死规则（覆盖面 0，永不变红）：' + (deadTerms.length ? deadTerms.join(', ') : '无'));
 lines.push('');
 lines.push('命中文件数：' + new Set(hits.map(h => h.file)).size + ' · 命中总数：' + total);
 lines.push('');
@@ -115,8 +132,10 @@ for (const h of hits.slice(0, 200)) lines.push('- ' + h.file + ' [' + h.id + ' x
 fs.writeFileSync(path.join(root, policy.reportFile), lines.join('\n') + '\n');
 
 console.log('gate-scan: kt-imports=' + ktCheck.imports + ' kt-missing=' + ktCheck.missing.length);
-console.log('gate-scan: files=' + new Set(hits.map(h => h.file)).size + ' hits=' + total + ' mode=' + (strict ? 'strict' : 'report'));
+console.log('gate-scan: hit-files=' + new Set(hits.map(h => h.file)).size + ' hits=' + total + ' dead-terms=' + deadTerms.length + ' mode=' + (strict ? 'strict' : 'report'));
+for (const t of policy.terms) console.log('  coverage[' + t.id + ']= ' + (liveSurface.get(t.id) || 0) + ' files');
 for (const [id, c] of Object.entries(byTerm).sort((a, b) => b[1] - a[1]).slice(0, 12)) console.log('  ' + id + ': ' + c);
+if (strict && deadTerms.length > 0) { console.error('gate-scan: FAIL（死规则，覆盖面 0：' + deadTerms.join(', ') + '）—— 门禁不能只看起来在跑'); process.exit(1); }
 if (strict && ktCheck.missing.length > 0) { console.error('gate-scan: FAIL（未解析 Kotlin import：' + ktCheck.missing.join(', ') + '）'); process.exit(1); }
 if (strict && total > 0) { console.error('gate-scan: FAIL（上面命中项必须先清零）'); process.exit(1); }
 process.exit(0);

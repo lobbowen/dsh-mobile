@@ -263,8 +263,17 @@
       "id": "B-kernel",
       "term": "kernel",
       "word": true,
+      "caseInsensitive": true,
       "allow": [
         "docs/"
+      ]
+    },
+    {
+      "id": "A-kernel-cn",
+      "term": "内核",
+      "word": false,
+      "paths": [
+        ".github/workflows/"
       ]
     },
     {
@@ -276,8 +285,52 @@
         "programs/dsh/",
         "THIRD-PARTY.md"
       ]
+    },
+    {
+      "id": "A-silent-via-do",
+      "term": "SILENT_VIA_DO",
+      "word": true
+    },
+    {
+      "id": "A-system-ota",
+      "term": "system-ota",
+      "word": false
+    },
+    {
+      "id": "A-grant-claim",
+      "term": "不接受任何静默授予",
+      "word": false
+    },
+    {
+      "id": "A-grant-claim-do",
+      "term": "DO 也无法",
+      "word": false,
+      "allow": [
+        "docs/contracts/ui-onboarding-spec.md"
+      ]
     }
   ],
+  "grantSingleSource": {
+    "note": "A19 / E6-b：「adb 能静默授予哪一档」在仓内只有一处规范定义 —— 判据表 permissions/PermissionCatalog.kt（分档/取法）＋ capability/CapabilityCatalog.kt（能力→取法链，usable 决定首项是否 SILENT_VIA_ADB）。上面三条禁词把「第二处自立档位判定」钉死：SILENT_VIA_DO 是 DO 退出后的历史残留档位名；「不接受任何静默授予」「DO 也无法…」是已被真机/实测推翻的旧断言，只许在 ui-onboarding-spec §2.0 的修正段里作为**被纠正对象**出现。散文可以引用判据表，不许复述结论。",
+    "terms": [
+      "A-silent-via-do",
+      "A-grant-claim",
+      "A-grant-claim-do"
+    ]
+  },
+  "delivery": {
+    "note": "交付面门禁（scripts/delivery-gate.js）的废止身份词表 —— 按 id 引用上面同一份 terms，不在脚本里另写一份。判据：这些词出现在**线上已发布**的清单/资产内容里即红。",
+    "terms": [
+      "A-k1",
+      "A-k3",
+      "A-k4",
+      "A-lnc",
+      "A-label",
+      "B-kernel",
+      "A-kernel-cn",
+      "A-system-ota"
+    ]
+  },
   "ignoreFiles": [
     "brand-scan-report.txt",
     ".github/gate-policy.json",
@@ -286,13 +339,63 @@
     "debt-gate-report.txt"
   ],
   "allowFiles": [
-    "container/engine/test/capability-single-source-gate-test.js",
-    "container/engine/test/dead-path-gate-test.js",
-    "container/engine/test/dependency-rule-test.js",
-    "scripts/verify-apk-native.sh",
-    ".github/workflows/fast-apk.yml",
-    "container/native/d1/exec-path.c",
-    "scripts/build-userland-git.sh",
-    "container/engine/test/native-assets-test.js"
+    {
+      "file": "container/engine/test/capability-single-source-gate-test.js",
+      "terms": [
+        "B-node",
+        "B-nwp",
+        "B-km",
+        "C-do1",
+        "C-do2",
+        "C-do3",
+        "C-do4",
+        "C-do5",
+        "C-do6",
+        "B-kernel"
+      ]
+    },
+    {
+      "file": "container/engine/test/dead-path-gate-test.js",
+      "terms": [
+        "A-env"
+      ]
+    },
+    {
+      "file": "container/engine/test/dependency-rule-test.js",
+      "terms": [
+        "A-deep"
+      ]
+    },
+    {
+      "file": "scripts/verify-apk-native.sh",
+      "terms": [
+        "B-kernel"
+      ]
+    },
+    {
+      "file": ".github/workflows/fast-apk.yml",
+      "terms": [
+        "B-kernel"
+      ]
+    },
+    {
+      "file": "container/native/d1/exec-path.c",
+      "terms": [
+        "B-kernel"
+      ]
+    },
+    {
+      "file": "scripts/build-userland-git.sh",
+      "terms": [
+        "B-kernel"
+      ]
+    },
+    {
+      "file": "container/engine/test/native-assets-test.js",
+      "terms": [
+        "B-path",
+        "B-kernel"
+      ]
+    }
   ]
 }

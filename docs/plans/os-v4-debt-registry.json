@@ -1,7 +1,8 @@
 {
   "version": 1,
-  "updated": "2026-09-28",
+  "updated": "2026-09-29",
   "note": "Lob OS 总施工图的机器可读债务台账；status ∈ pending|in-progress|done；D8 前必须全 done。",
+  "evidenceRule": "done 必须写 evidenceTier ∈ {static, ci, online, device}：static=只在仓内 grep/静态核对过；ci=CI 上跑过判据；online=交付面（CDN/Release/Workflow）线上现读过；device=真机读数过。未标 evidenceTier 的历史 done 项一律按 static 记账，**不得当作交付证据**（D24：原 115 个 done 里没有任何 online/device 档）。既有自由文本 `evidence` 字段记的是\"当初看到的现场\"，与 evidenceTier（这个 done 站得住到哪一层）是两回事，两者不得互相代替。本轮凡结论来自线上/真机的，都带 evidenceRef 写明现读时间与读数。",
   "items": [
     {
       "group": "A-structure",
@@ -642,11 +643,13 @@
       "desc": "program-* 命名统一（feed/manifest/verify/OTA 类）跨 W1↔W4 同步",
       "where": "assets + lobos.ota + Programs",
       "action": "按第6轮裁定执行",
-      "status": "done",
+      "status": "in-progress",
       "workstream": "W1",
       "dependsOn": "W4",
-      "note": "program-* 已统一：program-ota.yml / build-program-bundle.* / sign-program-manifest.js（W3）+ ProgramOta* 类（W1）",
-      "updated": "2026-09-28"
+      "note": "命名在**仓内**已统一（program-ota.yml / build-program-bundle.* / sign-program-manifest.js / ProgramOta* 类），但交付面没跟上：Program 这条流一次都没发布过，线上唯一在架的仍是 kernel-* 身份。static 层成立不等于交付完成 ⇒ 降级，收口条件 = E3.1 发布 + delivery-gate 现读 200。",
+      "updated": "2026-09-29",
+      "evidenceTier": "static",
+      "evidenceRef": "2026-09-29 00:44–00:52 现读：program-ota.yml runs total_count=0（该工作流从未跑过）；CDN program-canary/program-manifest.json=404；线上滚动 tag 仍是 kernel-0.1.0-android.47（名 \"Kernel OTA 0.1.0-android.47\"，资产 kernel-*.zip / kernel-manifest.json，体内 \"name\":\"dsh-kernel\"）"
     },
     {
       "group": "INT-integration",
@@ -733,10 +736,12 @@
       "desc": "设备协议名 kernel-<channel>/kernel-<version>.zip 待统一 program-*",
       "where": "ota/** + program-ota.yml + docs/runbook",
       "action": "W6 改设备侧与测试；W3 改 workflow/docs",
-      "status": "done",
+      "status": "in-progress",
       "workstream": "W6",
-      "note": "已统一 program-*：设备 tag \"program-\"+channel、zip program-<version>.zip、临时名 program-ota-*、bridge build.programInstall/programStatus、能力令牌 program_update、workflow job build-program / artifact release/program-<version>.zip / ROLL=\"program-$PROGRAM_CHANNEL\" / tag program-ota-*、scripts 同步。非 docs 残留 0；受影响 engine 测试全 PASS",
-      "updated": "2026-09-28"
+      "note": "仓内侧协议名确已改 program-*（tag/zip/临时名/桥方法/能力令牌/workflow ROLL），但**线上没有任何 program-* 产物**，在架的只有 kernel-* —— 设备照声明去取会 404，照旧名才拿得到东西。\"非 docs 残留 0\" 只覆盖仓内文本，不覆盖交付面 ⇒ 降级到 E3.1 发布完成。",
+      "updated": "2026-09-29",
+      "evidenceTier": "static",
+      "evidenceRef": "2026-09-29 00:44–00:52 现读：照 program-feed.json 声明取 userland-canary/userland-manifest-2.json 与 program-canary/program-manifest.json 均 404；旧键 userland-canary/userland-manifest.json=200（version 2026.09.27.103）；kernel-canary/kernel-manifest.json=200（\"name\":\"dsh-kernel\"）"
     },
     {
       "group": "INT-integration",
@@ -786,9 +791,11 @@
       "desc": "§5.8\"kernel 一词在仓内消失\"未达成：文件名 6 个含 kernel；非 docs 内容 65 个文件命中（含 OTA 链功能性残留）",
       "where": "全仓",
       "action": "需定夺：或清理到 0，或把 §5.8 判据收敛为可执行形式（禁 kernel/ 与 kernel.json 已由门禁把守）",
-      "status": "done",
-      "updated": "2026-09-28",
-      "note": "代码与活文档侧达成：非 docs 仅剩探测器字面量、layout.json 迁移台账、archive 路径（按设计豁免）；门禁已强制裸词 kernel"
+      "status": "in-progress",
+      "updated": "2026-09-29",
+      "note": "原 note 的「非 docs 仅剩探测器字面量」是在**大小写敏感**词表下得出的（D25：那条规则看不见 Kernel 的大写形态），本轮加严后当场被 58 处命中否证；标识符层清零仍未做。",
+      "evidenceTier": "static",
+      "evidenceRef": "2026-09-29 门禁加严后实测：docs 外整词 kernel（大小写不敏感）命中 9 处、「内核」49 处 —— 本批已全部改名并转强制（改后 0 命中）；但 *Kernel* 标识符仍有 39 处 / 12 个文件（见 AUD-G11）；文件名残留 docs/plans/archive/kernel-android-plan.md（archive 按设计豁免）"
     },
     {
       "group": "AUDIT-recheck",
@@ -839,8 +846,10 @@
       "action": "① policy 增裸词 kernel（allow docs/）；② 统一改名 kernel-version.js/KernelInputs/kernelPlan/kernelDir/kernelRoot/readKernelJson/kernel_update/build.kernelInstall|Status/kernel-<channel>|kernel-<version>.zip",
       "status": "done",
       "evidence": "A1 实测：非 docs 74 文件/559 次；文件名 6 个；gate 反而 0 命中",
-      "updated": "2026-09-28",
-      "note": "已补门禁裸词 kernel + 连字符 android-node-container，strict 0 命中；历史 ADR/plans/policy 词表按设计保留"
+      "updated": "2026-09-29",
+      "note": "门禁现已**不弱于**判据：词表含大小写不敏感的 kernel 与中文「内核」，白名单不再整文件豁免，覆盖面为 0 的规则直接判红。",
+      "evidenceTier": "ci",
+      "evidenceRef": "2026-09-29 E6-a：B-kernel 加 caseInsensitive + 新增中文词 A-kernel-cn（作用域 .github/workflows/）+ allowFiles 改按词条授予 + 覆盖面 0 判死规则。同一份策略改名前 strict 命中 7 文件 / 58 处（exit 1），改名后 0 命中（exit 0）—— 双向对照组各一次"
     },
     {
       "group": "AUDIT-recheck",
@@ -881,10 +890,12 @@
       "desc": "B4 遗留：Kernel* 标识符 ≥15 处",
       "where": "GuestAdapter.KernelInputs/KERNEL_CONTROL_PORT/kernelPlan、ProgramManager.kernelRoot/kernelDir/readKernelJson、InstanceHost 等",
       "action": "统一 Program*/program*",
-      "status": "done",
+      "status": "in-progress",
       "evidence": "",
-      "updated": "2026-09-28",
-      "note": "Kernel* 标识符清零：KERNEL_CONTROL_PORT→CONSOLE_PORT、bootKernelOnce→bootProgramOnce、KernelInputs→ProgramInputs、kernelPlan/Entry/Json/Version/Checks→program*、测试夹具同步"
+      "updated": "2026-09-29",
+      "note": "原 note 列的几处（KERNEL_CONTROL_PORT→CONSOLE_PORT 等）确已改，但「Kernel* 标识符清零」不成立。词形不再命中门禁是因为规则用词边界 + 大小写敏感，不是因为标识符没了。",
+      "evidenceTier": "static",
+      "evidenceRef": "2026-09-29 grep [A-Za-z_]Kernel[A-Za-z_]：39 处 / 12 文件。活代码位点：MainActivity.kt(4，handleKernelUpdateRequest 等)、InstanceHost.kt(8)、ProgramVerifier.kt(1)、NodeProvisioner.kt(1)、CapabilityAcquisitionRunner.kt(1)、CapabilityEvidenceCollector.kt(1)、engine/src/program-bundle.js(3，buildKernelJson 正是**产出线上那份清单**的函数)"
     },
     {
       "group": "AUDIT-recheck",
@@ -1112,11 +1123,13 @@
       "desc": "OTA 设备协议名仍 kernel：tag kernel-<channel>、zip kernel-<version>.zip、临时名 kernel-ota-*、桥方法 build.kernelInstall/Status、workflow ROLL=kernel-<channel>、artifact release/kernel-<version>.zip",
       "where": "ProgramOtaUpdater.kt:52/113/183、program-feed.json、program-ota.yml、build-program-bundle.js、methods.js",
       "action": "统一 program-*（与 INT16 合并执行）",
-      "status": "done",
+      "status": "in-progress",
       "evidence": "A4-F6/A5-INT8 冲突",
       "workstream": "W-未分配",
-      "updated": "2026-09-28",
-      "note": "同 INT16：OTA 链 kernel-* → program-* 完成（含桥方法与能力令牌，跨语言门 10/0 复绿）"
+      "updated": "2026-09-29",
+      "note": "与 INT16/INT8 同一事实：仓内协议名已统一，线上协议名仍是 kernel-*（tag、zip、manifest 体内 name 三处都是），因为 Program 流从未发布。",
+      "evidenceTier": "static",
+      "evidenceRef": "同 INT16（2026-09-29 00:44–00:52 现读）"
     },
     {
       "group": "AUDIT-recheck",
@@ -1124,11 +1137,13 @@
       "desc": "§5.10 release 出包：fast-apk 允许 debug 签名包且仍推 apk-latest",
       "where": "fast-apk.yml:375/445、docs/runbook/release.md:130",
       "action": "写 apk-latest 的链路一律 --require-stable",
-      "status": "done",
+      "status": "in-progress",
       "evidence": "A5-判据10",
       "workstream": "W-未分配",
-      "updated": "2026-09-28",
-      "note": "fast-apk 不再允许 debug 档：keystore 未配置即 exit 1，签名校验加 --require-stable（写 apk-latest 的链路必须稳定签名）"
+      "updated": "2026-09-29",
+      "note": "原 note「keystore 未配置即 exit 1」与代码不符：fast-apk.yml:351 是 \"Inject release keystore (optional, for stable signing)\"，scripts/inject-apk-keystore.sh 退 10 =「本次就是 debug 签名包」的**合法档位**（日常链放行 + ::warning::），:380 仍是 assembleDebug。debug 包继续占发布位这件事没收口，发布链 release-admin 已连续失败并被弃用。",
+      "evidenceTier": "online",
+      "evidenceRef": "2026-09-29 00:44–00:52 现读：release v1.1.8 唯一资产 = app-debug-1.1.8+35.apk；release-admin.yml 最近 3 次 run（#21/#20/#19，均 push 触发）completed:failure，最后一次 2026-09-26T18:56:59Z 之后再没跑"
     },
     {
       "group": "AUDIT-recheck",
@@ -1211,8 +1226,10 @@
       "status": "done",
       "evidence": "A5-四",
       "workstream": "W-未分配",
-      "updated": "2026-09-28",
-      "note": "15 项全部处理：3 死链修复、runbook/components/standards/contracts 旧名批量清理、onboarding 两 spec 去 device_owner/SILENT_VIA_DO、base-spec 收敛、console.md 测试表改为真实 5 份、console-ui job 名、native.md assembler 引用、architecture 顶部加「正文按历史读」、survey 媒体行标「评估过不采用」、program-ota §6 改为与实现一致、schema managedAgents 移除、runtime-json 标题、branding 子包/门禁名、README 方案规则、ADR-0003/0007/0009 errata。doc-gate 0 死链"
+      "updated": "2026-09-29",
+      "note": "15 项全部处理：3 死链修复、runbook/components/standards/contracts 旧名批量清理、onboarding 两 spec 去 device_owner/SILENT_VIA_DO、base-spec 收敛、console.md 测试表改为真实 5 份、console-ui job 名、native.md assembler 引用、architecture 顶部加「正文按历史读」、survey 媒体行标「评估过不采用」、program-ota §6 改为与实现一致、schema managedAgents 移除、runtime-json 标题、branding 子包/门禁名、README 方案规则、ADR-0003/0007/0009 errata。doc-gate 0 死链（2026-09-29 复检：本项原按 static 记 done，实有 4 处未清；现全部收口并补上禁词门，见 evidenceRef）",
+      "evidenceTier": "ci",
+      "evidenceRef": "gate-policy 新词条 A-silent-via-do / A-system-ota / A-grant-claim 全仓禁（scripts/gate-scan.js 死规则自检报覆盖面 395/395/395 文件）；本轮补正该 done 的四处置信不足：onboarding-flow-spec 残留 SILENT_VIA_DO 1 处、ui-onboarding-spec §2.5 表两行把已删除的 isDeviceOwnerApp(/dpm set-device-owner 写成\"有合法宿主\"、program-feed notes 仍用 system-ota、ADR-0003 附加表仍列 Shizuku 与\"DO 与无障碍同包\""
     },
     {
       "group": "AUDIT-recheck",
@@ -1272,6 +1289,19 @@
       "evidence": "AUD-G6 的剩余面",
       "updated": "2026-09-28",
       "note": "环境限制（非债务）：本机缺 readelf / openssl / python3 / gh / 签名 env，以下测试只能在 CI 跑 —— verify-runtime-elf-test（readelf）、ota-anchor-test（openssl）、program-selfboot-test（python3，已实测 spawnSync python3 ENOENT）、apk-signing-gate-test（keystore env）、gh-release-upload-test（gh CLI）。已逐项取证归因，本地不伪造通过。"
+    },
+    {
+      "group": "EXEC-v4",
+      "id": "EXEC-G1",
+      "desc": "交付面门禁 scripts/delivery-gate.js 已落地，但尚未接进 ci.yml（现读三处声明键全 404，接上即红）",
+      "where": "scripts/delivery-gate.js + .github/workflows/ci.yml",
+      "action": "E3.1 用 program-ota.yml workflow_dispatch(publish=true) 把 Program 清单投到声明的键上，同 PR 把本门接进 ci.yml 的 gate job（输入=线上读数，不是仓内镜像）",
+      "status": "pending",
+      "evidenceTier": "online",
+      "evidenceRef": "2026-09-29 00:44 首跑：userland-canary/userland-manifest-2.json=404、同名 .sig=404、program-canary/program-manifest.json=404 ⇒ exit 1（3 项）。这是设计内的红，不是链路故障",
+      "workstream": "MAIN",
+      "note": "门禁先于绿存在：它现在能红（真实读数），发布完成后才进 CI —— 不为把它提前接上而把 404 判成\"还没发而已\"。",
+      "updated": "2026-09-29"
     }
   ],
   "progressNote": "D0 完成：快照、债表、禁词/品牌门（报告模式）、文档清场。D1a 物理完成：kernel→programs/console、system→container/rom、bin/panel、programs/{console,dsh,pi} manifest、console package.json 改名、CI/scripts/layout.json 路径更新；engine 测试路径部分更新。 | 2026-09-28 第二轮：拆 W1–W4 四个子代理并行执行；简报 docs/plans/lobos-workstream-brief.md。 | 第二轮验证：gen-version --check 通过（修 requiresProtocol 字段名）；layout-manifest-test 报告模式 1 passed / 0 failed，登记 INT1–INT3 三项集成待办。 | 第三轮：W1 包迁移完成（61 文件 package lobos，旧包残留 0）；纠正 applicationId 单段错误（INT4）；根 settings/version 归位（INT5 done）；登记 INT6。 | 第四轮：确认子代理在活跃写入（mtime 15:20）；MAIN 落定 applicationId=lobos.app（INT4 done）；向 W3 出裁定、向 W4 转达 W3 重命名引用点（INT7）；登记集成复验清单。 | 第五轮：W2 删除 guard/assembler/console（D9/A10 销账）；W2 给出 4 条 layout 处置，已转 W3（INT3）；SYSTEM-API.md 尚未落盘。 | 第六轮：layout missing=0（INT3 done）；归档目录建立（D4 done）；出 program-* 命名裁定（INT8）并纠偏 privapp 命名。 | 第七轮：W4 完成 container/rom 改名（B9 done）；W1 完成 kernelota→ota（B4）；W3 完成 schema/组件文档改名（D5/D8）；SYSTEM-API.md 与 ADR-0010 仍缺。 | 第七轮续：W2 交付 SYSTEM-API.md（解 W1 阻塞），登记 INT9。 | 第八轮：W3 落 ADR-0010 且 program-* 对齐（program-ota.yml / build-program-bundle.* / sign-program-manifest.js）；W1 范围收窄；新开 W5 专攻 D2 与 DO 清除。 | INT8 done（program-* 全链统一）。 | 第九轮：W5 前台服务已收敛为唯一 OsHostService（startForeground 1 处）；W1 落 lobos/os 骨架并完成 Registry liblobos 改名；已解锁 W3 重生成原生件清单。 | 第十轮：gate 998/150；lobos/os 扩到 7 文件 435 行；对 W5（两轮无落地）与 W3（清单未重生成/ADR 未改）各发催办+可执行微任务。 | 第十一轮：W5 滞速被停，MAIN 接手完成 A1–A6/A8/A13/A15（Manifest 与服务类名对齐、单进程单 FGS、watchdog/DO 清除）；gate 560→341。 | 第十二轮：W2 交付（A10/A11/A12/A16/B2/B3/B7/D9 done）；MAIN 完成 A7 并补 AccessibilityAnchor 缺失实现、修 Manifest（OsAccessibilityService/Theme.LobOs/WRITE_SECURE_SETTINGS）、修 KillAudit import。 | 第十二轮：W2/W4 交付并收工；MAIN 补缺（AccessibilityAnchor/PostPairingAutoFlow/未解析 import=0）、修 Manifest/WRITE_SECURE_SETTINGS/KillAudit import、对齐 lobos_hostbridge 与 panel-update 契约；新开 W6 清扫 OS 侧旧名与 engine DO 方法组。gate 337→190。 | 第十三轮：W2 收尾确认（UI 目录/router 死类型）；W3 完成 README 并入 docs → layout 契约全绿；MAIN 把 Kotlin 未解析 import 检查固化进 gate-scan。 | 第十四轮：发现接口契约被收敛到 docs/components/console-system-api.md 并修齐全仓引用；抽样确认 os.* 接线=0/36，新开 W7 专攻接线（含诚实降级与 gap 清单）。 | 第十五轮：MAIN 交付 D8 验收 runner（work/lobos-verify.sh）并首跑 PASS=11 FAIL=0（os.* 接线 0/6 抽样为信息项）。 | 第十五轮续：确认 W3 的 ADR 修订已落地（0004/0005 改名、0006 重写、0010 新增）→ INT10 done。 | 第十六轮：runner 升级为\"全量契约接线检查\"（2/49，缺失清单落 work/contract-missing.txt）；W6 已删 engine 的 DO 方法组（device_owner 14→0），gate 166→156。 | 第十七轮：W3 收工（A-pkg/A-pkg2=0，scripts/.github/README 0 命中）；MAIN 修掉 layout 交付维 4 条违规（D2/E 归原生 + 测试规则 4/5 改判）→ layout 违规 0；裁定设备协议名 program-*（INT16/17 派给 W6/W3）。 | 第十九轮：W7 停摆被停，MAIN 接手 os.* 接线（36 方法入 CapabilityBroker.OS_METHODS；真实读数/诚实降级二分）→ 接线 2/49→39/49，缺口清单落 lobos/os/METHOD-GAPS.md。 | runner 抽取修正：接线 33/34（唯一 missing 是文档简写伪影）。 | 第二十轮：全部子代理收工；发现 capability-single-source-gate-test.js 已失效（旧架构断言）；新开 W8（门禁测试重写）与 W9（D8 前缀重命名）。 | 第二十一轮：MAIN 清理 CapabilityBroker 的 A-dsh/C-do2 文案（gate 82→79）；落 enforcePrerequisites（P1–P9），其中 P2–P6 已 pass，P1/P7/P8 待 W8/W9，P9 待真机。 | 第二十三轮（里程碑）：MAIN 接手 W8/W9 —— D8 前缀重命名完成、失效门禁重写（5/0）并修 dead-path 生成物误判；gate 77→**0 命中**；**enforce=true 已在 strict 模式通过（exit=0）**；债表批量销账。 | 第二十四轮：MAIN 完成 C1（通知与 console 状态同源）与 C5（退避去重确认）；新开 W10 做 A14 Tile + E8 拆分。 | 第二十六轮：MAIN 接手 W10 —— A14（QS Tile）与 E8（Setup/Console 拆分）完成；gate strict 仍 0/0；债表 71/71（除 P9 外部依赖）。 | 复检轮（新目标）：拆 A1–A5 五个只读审计子代理；MAIN 做 A6（§5 判据逐条）。已发现 AUD-G1..G4 并纠正 INT16 误判。 | 复检第2轮：A1 分区审计回报（§5.8 重灾、§3.2 子包偏差、DO 文档残留、用例表断链等）；MAIN 实跑 engine 全量 26 测试，发现并修好 3 处真断（crosslang/ota-engine/boot-env），另有 5 处环境依赖必红；新增 AUD-G5..G15。 | 复检第3轮：修 G4/G12/G13/G14（活引用/债表 note/ROM 命名/version 注释）与 G3（engine 5 个 kernel-* 文件重命名，链完整性 26/26）。 | 复检第3轮：A2/A4 回报；MAIN 修复 P0（OTA 安装 stageRoot）+ 三处 Manifest 死声明 + BootReceiver 兜底边 + ACTION_RESTART 断路 + console 测试路径，共 5 处；新增 AUD-G16..G26，重开 A5/C5/D6/E5。 | 复检第4轮：A3/A4/A5 全部回报（五分区审计完成）；MAIN 修 P0 CapStatus.TODO（编译断）、悬空 import、Journal.seq 连续性、OsHostService 状态机接线、capability.invoke 登记、F13/F3 残留、CI PR paths；新增 AUD-G27..G46。 | 修复轮1：①OTA 链统一 program-*（INT16/G32 done）；②kernel 去词（G7/G11 代码侧完成，门禁新增裸词 kernel 且绿）；③修复 capability.invoke 引入的跨语言门回归（10/0）。 | 修复轮2：③ 完成 —— os.* 17 个已实现方法全部按契约 §2 形状重写 + 新增形状门禁 R6（6 passed/0 failed）；programs.json 写路径接通（AUD-G37）。 | 修复轮3：④ 起步 —— 新增文档门与债表门（均接线 CI 报告模式），修 3 处死链（doc-gate 0）、批量清 docs 旧名、ADR-0007 改写 + 0003/0009 errata（AUD-G41 done）。 | 修复轮4：④ 收尾 —— 文档门转强制(0 死链)、债表门上线、计划 §6 对齐现实；docs 15 项收口 + AUD-G44/G46 完成；artifact 名去品牌化。 | 目标收口：四项（OTA 链统一 / kernel 去词+词表 / os.* 形状+programs.json / docs 收口+债表门+文档门）全部完成，证据为 gate-scan strict 0、doc-gate 0 死链、debt-gate 88/115、10 项引擎门禁测试 PASS、lobos-verify PASS=12 FAIL=0。 | 清债轮A：C5/G25/G29/G30/G31/G36/G38 done（退避单源、R7 生命周期门、两套 manifest schema+校验、WebView 桥裁定+N-7、UI 命名清零、os.* 跨语言镜像、三向接线门）；顺带把 lodestar 修正：运行时交接文件目录 supervisor/ 与文档对齐。",
