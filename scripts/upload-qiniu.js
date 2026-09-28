@@ -62,53 +62,86 @@ async function main() {
   if (!fs.existsSync(local)) { console.error('[qiniu] 文件不存在: ' + local); process.exit(2); }
 
   const buf = fs.readFileSync(local);
+  const B64URLSTR = (s) => B64URL(Buffer.from(s, 'utf8'));
 
-  // ⚠ 重试是必需的，不是保险：大件（git 约 25 MB）单次 POST 遇到网络抖动就整步失败，
-  //   而「矩阵里一件失败 ⇒ manifest 作业被跳过」会把一次抖动放大成「清单没更新」
-  //   （2026-09-29 实证：连续两次 `[qiniu] FATAL fetch failed`，三件小的每次都成功）。
-  //   要点：① 每次重试**重新签发 token**（退避期间原 token 可能过期）；② 每次带上限时，
-  //   避免连接僵死占满整个 CI 步骤；③ 4xx（令牌/参数错）不重试 —— 重试不会让它变对。
-  // 单次上限按**实测带宽**定：同 run 对照 jq 353 KB/5.5s、sqlite3 901 KB/0.3s、curl 2.9 MB/47s
-  //   ⇒ 上传侧约 60 KB/s，git 件 20+ MB 需要约 6 分钟。原来设 5 分钟 = 每次都在半途被 abort，
-  //   重试只是把同一件做不到的事重做一遍（2026-09-29 实证：该步挂了 30 分钟）。故放宽到 15 分钟。
+  async function post(url, body, token) {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Authorization': 'UpToken ' + token, 'Content-Type': 'application/octet-stream' },
+      body: body,
+      signal: AbortSignal.timeout(PER_ATTEMPT_MS),
+    });
+    const text = await r.text();
+    if (r.status !== 200) throw new Error('status=' + r.status + ' ' + text.slice(0, 200));
+    try { return JSON.parse(text); } catch (e) { throw new Error('响应不是 JSON: ' + text.slice(0, 120)); }
+  }
+
+  /** 分片上传：每片独立重试。大件必须走这条 —— 整块 POST 在实测带宽下会被连接层切断。
+   *  实测（2026-09-29）：60 KB/s、连接约 7~8 分钟被切断，而 git 件树允许到 60 MiB ⇒ 整块必然失败；
+   *  4 MB 一片约 70 秒一片，每片自带重试，连接抖动只影响一片。 */
+  async function uploadResumable() {
+    const BLOCK = 4 * 1024 * 1024;
+    let host = HOST;
+    let offset = 0;
+    const ctxs = [];
+    while (offset < buf.length) {
+      const chunk = buf.subarray(offset, Math.min(offset + BLOCK, buf.length));
+      const url = offset === 0 ? host + '/mkblk/' + chunk.length : host + '/bput/' + ctxs[ctxs.length - 1] + '/' + offset;
+      let got = null, lastErr = null;
+      for (let a = 1; a <= 3 && !got; a++) {
+        try {
+          const token = uploadToken(AK, SK, BUCKET, key, 3600);
+          const r = await post(url, chunk, token);
+          if (!r || !r.ctx) throw new Error('缺 ctx: ' + JSON.stringify(r).slice(0, 150));
+          got = r;
+        } catch (e) {
+          lastErr = e;
+          if (a < 3) { const w = 2000 * a; console.error('[qiniu] 分片 ' + offset + ' 第 ' + a + '/3 次失败（' + e.message + '），' + w + 'ms 后重试'); await new Promise((res) => setTimeout(res, w)); }
+        }
+      }
+      if (!got) throw new Error('分片 ' + offset + ' 三次失败: ' + (lastErr && lastErr.message));
+      ctxs.push(got.ctx);
+      if (got.host) host = 'https://' + String(got.host).replace(/^https?:\/\//, '');
+      offset += chunk.length;
+      console.log('[qiniu] 分片 ' + ctxs.length + ' 完成（' + offset + '/' + buf.length + ' 字节）');
+    }
+    const cc = (cacheSec !== null && Number.isFinite(cacheSec)) ? '/x:Cache-Control/' + B64URLSTR('max-age=' + cacheSec) : '';
+    const mk = host + '/mkfile/' + buf.length + '/key/' + B64URLSTR(key) + cc;
+    let done = null, lastErr2 = null;
+    for (let a = 1; a <= 3 && !done; a++) {
+      try {
+        const token = uploadToken(AK, SK, BUCKET, key, 3600);
+        done = await post(mk, Buffer.from(ctxs.join(','), 'utf8'), token);
+      } catch (e) { lastErr2 = e; if (a < 3) await new Promise((res) => setTimeout(res, 2000 * a)); }
+    }
+    if (!done) throw new Error('mkfile 三次失败: ' + (lastErr2 && lastErr2.message));
+    console.log('[qiniu] 已上传（分片）' + key + '（' + buf.length + ' 字节，' + ctxs.length + ' 片）');
+  }
+
+  if (buf.length > 8 * 1024 * 1024) {
+    await uploadResumable();
+    return;
+  }
+
+  // 小件走表单（已验证可用；单次限时按实测带宽给足）
   const ATTEMPTS = 3;
   const PER_ATTEMPT_MS = 900000;
   let lastErr = null;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     const token = uploadToken(AK, SK, BUCKET, key, 3600);
     const fields = { key: key, token: token };
-    // 客户端缓存：manifest 要短（否则设备永远读到旧 manifest），包可以长（文件名带版本号）。
     if (cacheSec !== null && Number.isFinite(cacheSec)) fields['x:Cache-Control'] = 'max-age=' + cacheSec;
     const mp = multipart(fields, 'file', path.basename(local), buf);
     const t0 = Date.now();
     try {
-      const r = await fetch(HOST, {
-        method: 'POST',
-        headers: { 'Content-Type': mp.contentType },
-        body: mp.body,
-        signal: AbortSignal.timeout(PER_ATTEMPT_MS),
-      });
+      const r = await fetch(HOST, { method: 'POST', headers: { 'Content-Type': mp.contentType }, body: mp.body, signal: AbortSignal.timeout(PER_ATTEMPT_MS) });
       const text = await r.text();
-      if (r.status === 200) {
-        console.log('[qiniu] 已上传 ' + key + '（' + buf.length + ' 字节，' + (Date.now() - t0) + 'ms，第 ' + attempt + ' 次尝试）');
-        return;
-      }
-      if (r.status >= 400 && r.status < 500) {
-        console.error('[qiniu] 上传失败（4xx 不重试）key=' + key + ' status=' + r.status + ' body=' + text.slice(0, 300));
-        process.exit(1);
-      }
+      if (r.status === 200) { console.log('[qiniu] 已上传 ' + key + '（' + buf.length + ' 字节，' + (Date.now() - t0) + 'ms，第 ' + attempt + ' 次尝试）'); return; }
+      if (r.status >= 400 && r.status < 500) { console.error('[qiniu] 上传失败（4xx 不重试）key=' + key + ' status=' + r.status + ' body=' + text.slice(0, 300)); process.exit(1); }
       lastErr = new Error('status=' + r.status + ' body=' + text.slice(0, 200));
-    } catch (e) {
-      lastErr = e;
-    }
-    if (attempt < ATTEMPTS) {
-      const wait = 3000 * Math.pow(2, attempt - 1);
-      console.error('[qiniu] 第 ' + attempt + '/' + ATTEMPTS + ' 次失败（' + (lastErr && lastErr.message) + '），' + wait + 'ms 后重试 key=' + key);
-      await new Promise((res) => setTimeout(res, wait));
-    }
+    } catch (e) { lastErr = e; }
+    if (attempt < ATTEMPTS) { const wait = 3000 * Math.pow(2, attempt - 1); console.error('[qiniu] 第 ' + attempt + '/' + ATTEMPTS + ' 次失败（' + (lastErr && lastErr.message) + '），' + wait + 'ms 后重试'); await new Promise((res) => setTimeout(res, wait)); }
   }
   console.error('[qiniu] 连续 ' + ATTEMPTS + ' 次失败：key=' + key + ' last=' + (lastErr && lastErr.message));
   process.exit(1);
 }
-
-main().catch((e) => { console.error('[qiniu] FATAL ' + e.message); process.exit(1); });
