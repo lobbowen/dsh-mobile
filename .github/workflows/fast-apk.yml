@@ -411,14 +411,10 @@ jobs:
         run: |
           set -euo pipefail
           APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)"
-          # 日常链（fast-apk）**不得占用 apk-latest**：那是发布面（build-apk / release-admin，
-          # 带 --require-stable）的滚动别名。日常链允许 debug 档，一旦写 latest 就会把
-          # "装了就是稳定签名"这个前提静默破坏（复检 AUD-G33）。
-          TAG="apk-daily"
           VN="$(node -p "require('./version.json').shell.versionName")"
           VC="$(node -p "require('./version.json').shell.versionCode")"
           VAPK="app-debug-${VN}+${VC}.apk"
-          echo "[version] 本次发布 $VN (versionCode=$VC) → $VAPK"
+          echo "[version] 本次归档 $VN (versionCode=$VC) → $VAPK"
 
           # 先改名再交出去：gh 的资产名取 file 的 basename（`#` 后面只是 label，不改名），
           # 所以"版本化资产名"只能靠这份临时目录里的副本实现。
@@ -438,31 +434,23 @@ jobs:
           else
             VCHANNEL=auto
           fi
-          bash scripts/check-apk-release-version.sh version.json "$TAG" "$VCHANNEL"
-
-          # ── 覆盖上传（含孤立资产回退 + 发布后逐字节确认）────────────────────
-          # 判据只住 scripts/gh-release-upload.sh：同名资产记录还在、后端对象却孤立时
-          # --clobber 会 404（2026-09-23 实证），回退成「按名字删旧记录再普通上传」；
-          # 上传命令退 0 也不算数，宿主会回读清单比对字节数才报 [ok]。
-          # 自有滚动 tag（apk-daily）下载网址要稳定，所以固定 tag、每轮覆盖。
-          bash scripts/gh-release-upload.sh "$TAG" \
-            --title "Lob OS APK (daily)" \
-            --notes "Android 原生 Node 容器 APK（由 fast-apk 构建，运行时来自 ${{ env.runtime-tag }}）。" \
-            "$APK" version.json
+          # 日常链**不写任何滚动别名**（滚动别名 apk-latest 只有发布面 build-apk/release-admin 写）。
+          # 门禁仍对 apk-latest 做只读比对：防止日常链产出的 versionCode 低于已发布版本。
+          # 通道按 explicit：日常链允许同版本重建（产物只进 v<versionName> 这个独立 tag，不覆盖线上别名）。
+          bash scripts/check-apk-release-version.sh version.json apk-latest explicit
 
           # 版本化资产进**独立 tag**（v<versionName>），**不放**滚动 latest：
           # 否则 latest 会随每次发布无限堆积历史 APK（滚动通道只该有"当前"）。
           VTAG="v$VN"
           bash scripts/gh-release-upload.sh "$VTAG" \
             --title "Lob OS $VN" \
-            --notes "版本化归档：versionName=$VN，versionCode=$VC。日常滚动别名见 apk-daily（发布面用 apk-latest）。" \
+            --notes "版本化归档：versionName=$VN，versionCode=$VC。日常链不写滚动别名；发布面滚动别名仍是 apk-latest。" \
             "$VDIR/$VAPK"
 
           rm -rf "$VDIR"
           echo
-          echo "下载地址:"
-          echo "  https://github.com/${{ github.repository }}/releases/download/${TAG}/app-debug.apk   （latest 别名）"
-          echo "  https://github.com/${{ github.repository }}/releases/download/$VTAG/${VAPK}   （版本化归档）"
+          echo "下载地址（日常链只发版本化归档，滚动别名 apk-latest 由发布面维护）:"
+          echo "  https://github.com/${{ github.repository }}/releases/download/$VTAG/${VAPK}"
 
       - name: Report to ci-ok
         if: success()
@@ -485,7 +473,7 @@ jobs:
             echo "sha     : ${GITHUB_SHA:0:7}"
             echo "apk     : app-debug.apk"
             echo "apk_sha : $APK_SHA"
-            echo "url     : https://github.com/${{ github.repository }}/releases/download/apk-daily/${VAPK}"
+            echo "url     : https://github.com/${{ github.repository }}/releases/download/v${VN}/${VAPK}"
           } > ci-ok.txt
 
           git config user.email "ci@workbuddy.local"
