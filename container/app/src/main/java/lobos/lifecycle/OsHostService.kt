@@ -56,12 +56,8 @@ class OsHostService : Service() {
     private var broker: CapabilityBroker? = null
     private var capture: ScreenCaptureController? = null
 
-    // ---- 锚层：低频监护（复用本服务 tick，不新起闹钟/心跳） ----
-    private var a11yTicks = 0L
-    private var a11yAttempts = 0
-    private var a11yBackoffMs = A11Y_BACKOFF_BASE_MS
-    private var a11yNextAttemptMs = 0L
-    private var a11yGaveUp = false
+    // ---- 锚层：只观测状态翻转（复用本服务 tick，不新起闹钟/心跳，也不在这里自愈） ----
+    private var anchorBoundLastTick: Boolean? = null
 
     /** 本服务不对外提供调用面（同进程组件直连），仅维持自身生命周期。 */
     override fun onBind(intent: Intent?): IBinder? = null
@@ -139,7 +135,7 @@ class OsHostService : Service() {
     private val tick: Runnable = Runnable {
         try {
             val now = SystemClock.elapsedRealtime()
-            monitorAccessibilityAnchor(now)
+            observeAnchorTransition()
             refreshStatusNotice(now)
         } catch (e: Throwable) {
             Log.e(TAG, "宿主节拍异常（不致命，下一拍继续）", e)
@@ -167,46 +163,32 @@ class OsHostService : Service() {
     }
 
     /**
-     * 锚层监护（预防，不是死后自愈）：低频、只读缓存通道、失败退避有上限。
-     * 锚掉 = 判决降级 = 即将被 o-kill；恢复窗口在**被杀之前**。
+     * 锚层监护：**只观测，不复活**。
+     *
+     * 为什么删掉自愈重试环（2026-09-28 拍板）：锚掉线意味着 ColorOS 的判决已经降到
+     * importance=traffic（AnchorPolicy 头注的真机实证），此时反复 `settings put` 是把「已经输掉
+     * 的判决」用重试伪装成正常 —— 那是兜底，不是判据。恢复窗口在**进程出生的第一毫秒**
+     * （OsApplication / BootReceiver 各戳一次，硬上界见 [AnchorPolicy.ACTIVATION_BUDGET_MS]），
+     * 不在这里。本方法唯一的职责是让状态翻转**可见**：掉线那一刻上屏一条判决降级告警，
+     * 系统重绑成功上屏一条恢复，其余节拍保持安静（重复告警不是可见性，是噪音）。
      */
-    private fun monitorAccessibilityAnchor(now: Long) {
-        a11yTicks++
-        if (a11yTicks % A11Y_MONITOR_TICKS != 0L) return
-        if (AccessibilityAnchor.isBound(this)) {
-            if (a11yAttempts > 0 || a11yGaveUp) {
-                RuntimeDiagnostics.append(this, "accessibility", true, "锚已恢复（闸门重开）", "此前尝试 " + a11yAttempts + " 次")
-            }
-            a11yAttempts = 0
-            a11yBackoffMs = A11Y_BACKOFF_BASE_MS
-            a11yNextAttemptMs = 0L
-            a11yGaveUp = false
-            return
-        }
-        if (a11yGaveUp || now < a11yNextAttemptMs) return
-        // 只认缓存读数：绝不在心跳节拍里 spawn 探针（探针会拉 Node 进程）。
-        if (AdbChannelProbe.cached().outcome != ProbeOutcome.LIVE) return
-        val outcome = try {
-            AccessibilityAnchor.ensureBound(this, A11Y_HEAL_TIMEOUT_MS)
-        } catch (t: Throwable) {
-            HealOutcome(AnchorState.UNKNOWN, false, t::class.java.simpleName + ": " + t.message)
-        }
-        if (outcome.healed) {
-            RuntimeDiagnostics.append(this, "accessibility", true, "锚自愈成功（闸门重开）", outcome.detail)
-            a11yAttempts = 0
-            a11yBackoffMs = A11Y_BACKOFF_BASE_MS
-            a11yNextAttemptMs = 0L
-            return
-        }
-        a11yAttempts++
-        RuntimeDiagnostics.append(this, "accessibility", false, "锚自愈未成（第 " + a11yAttempts + "/" + A11Y_MAX_ATTEMPTS + " 次）", outcome.detail)
-        a11yNextAttemptMs = now + a11yBackoffMs
-        a11yBackoffMs = (a11yBackoffMs * 2).coerceAtMost(A11Y_BACKOFF_MAX_MS)
-        if (a11yAttempts >= A11Y_MAX_ATTEMPTS) {
-            a11yGaveUp = true
+    private fun observeAnchorTransition() {
+        val st = AccessibilityAnchor.state(this)
+        if (st == AnchorState.UNKNOWN) return          // 读不到是采集失败，不是锚的状态
+        val bound = st == AnchorState.BOUND
+        val prev = anchorBoundLastTick
+        anchorBoundLastTick = bound
+        if (prev == null || prev == bound) return
+        if (bound) {
             RuntimeDiagnostics.append(
-                this, "accessibility", false, "锚自愈放弃（连续 " + a11yAttempts + " 次）",
-                "锚不在位 = importance=traffic，随时被 o-kill；后续只由系统重绑恢复",
+                this, "accessibility", true, "锚已回到位（闸门重开）",
+                "系统完成重绑，判决回到 importance=accessibility",
+            )
+        } else {
+            RuntimeDiagnostics.append(
+                this, "accessibility", false, "判决降级告警：锚掉线",
+                "锚不在位 = 判决停在 importance=traffic，随时被 o-kill；" +
+                    "本设计不做复活，下一次挂锚的时机是进程重生（见 AnchorPolicy）",
             )
         }
     }
@@ -272,12 +254,6 @@ class OsHostService : Service() {
         /** 心跳/状态节拍：60s（计划要求「≥60s 低频」；状态不是死亡判据，变化时另有立即刷新）。 */
         private const val TICK_MS = 60_000L
         private const val NOTIFY_MS = 60_000L
-        /** 锚监护间隔（拍数）：60s x 1 = 60s。 */
-        private const val A11Y_MONITOR_TICKS = 1L
-        private const val A11Y_HEAL_TIMEOUT_MS = 8_000L
-        private const val A11Y_BACKOFF_BASE_MS = 40_000L
-        private const val A11Y_BACKOFF_MAX_MS = 5 * 60_000L
-        private const val A11Y_MAX_ATTEMPTS = 5
 
         /** 拉起宿主（幂等，普通 startService；本服务自己在 onStartCommand 转前台）。 */
         fun ensureRunning(context: Context) {

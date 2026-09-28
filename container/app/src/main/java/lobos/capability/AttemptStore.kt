@@ -5,11 +5,14 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 配对与系统特权的**类型化**尝试记录。
+ * 配对尝试的**类型化**记录。
  *
  * 为什么不用日志反解（v1 的做法：`ProbeJournal` 里扫 `[pair]` 行再 `substringAfter` 猜
  * 成功失败）：判据输入变成文案的函数，改一句提示语就会静默改变状态机语义，而且 JVM 单测
  * 钉不住。案底仍然照常写 [lobos.ui.ProbeJournal]，但那是给人看的。
+ *
+ * 这里只留配对一类：另一类尝试挂在已整体退出的系统特权身份上，随该身份一起删了；
+ * adb 静默取法的结局也不在这儿 —— 那是跨进程重启的设备事实，住 [PermissionLedger]。
  *
  * 存活在 :main 进程内存里即可：配对服务与首页同进程（AndroidManifest 未给这两者指定
  * 独立 process），进程重启后 FAILED 归零、由探针与用户动作重新得出事实 —— 这比
@@ -33,19 +36,11 @@ object AttemptStore {
     @Volatile
     private var pairCount = 0
 
-    @Volatile
-    var lastOwner: OwnerAttempt? = null
-        private set
-
     fun recordPair(atMs: Long, ok: Boolean, reason: String = "") {
         val attempt = PairAttempt(atMs, ok, reason)
         lastPair = attempt
         pairCount += 1
         pairAttempts = (pairAttempts + attempt).takeLast(TIMELINE_KEEP)
-    }
-
-    fun recordOwner(atMs: Long, outcome: OwnerAttemptOutcome, reason: String = "") {
-        lastOwner = OwnerAttempt(atMs, outcome, reason)
     }
 
     /**

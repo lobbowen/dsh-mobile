@@ -490,7 +490,7 @@ class MainActivity : AppCompatActivity() {
                 )
                 ?.firstOrNull()
             val result = acq?.let {
-                runCatching { CapabilityAcquisitionRunner.dispatch(ctx, it) }.getOrNull()
+                runCatching { CapabilityAcquisitionRunner.dispatch(ctx, CapabilityCatalog.ADB_CHANNEL, it) }.getOrNull()
             }
             handler.post {
                 refreshChannelBar()

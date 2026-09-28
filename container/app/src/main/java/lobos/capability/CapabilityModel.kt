@@ -10,7 +10,11 @@ enum class CapStatus {
     BLOCKED,
     /** 试过且失败，detail 带类型化归因。 */
     FAILED,
-    /** 平台层面拒绝且非用户可补救（如多用户设备的平台限制）：灰显，不阻塞下游。 */
+    /**
+     * 平台拒绝且非用户可补救：灰显，不阻塞下游。
+     * **今天没有任何 judge 返回它**（DO 退出后「平台永远不给」的那一项已经不存在），
+     * 生产者必须由实测账/ROM 侧事实出现，不许预先点名 —— 债务见债表 D10（spec §2.1）。
+     */
     UNREACHABLE,
 }
 
@@ -38,12 +42,12 @@ data class Acquisition(
 data class CapVerdict(val status: CapStatus, val detail: String = "")
 
 /**
- * 一条能力的完整规格（spec §2.1 的八项里，`evidence`/`failure` 体现在 [judge] 的
+ * 一条能力的完整规格（spec §2.1 的九项里，`evidence`/`failure` 两项体现在 [judge] 的
  * 输入输出类型上，不再有独立的字符串猜测通道）。
  *
- * [requires] 是**硬**前置：只有这里未达成才允许渲染 BLOCKED。取法链是软依赖
- * （DO 在位就多一条静默路径，不在位就少一条），所以 `device-owner` 不出现在任何
- * requires 集合里 —— v1 把加速器当前置，是 S0–S4 永久锁死的根因（spec §2.0-2）。
+ * [requires] 是**硬**前置：只有这里未达成才允许渲染 BLOCKED。取法链是软依赖（通道在位且
+ * adb 没被实测撞回过多一条静默项，否则少一条），所以任何特权身份都不出现在 requires 集合里 ——
+ * v1 把加速器当前置，是 S0–S4 永久锁死的根因（spec §2.0-2）。
  */
 data class Capability(
     val id: String,

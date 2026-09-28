@@ -22,6 +22,11 @@ data class PermissionSpec(
     val settingsAction: String? = null,
     /** 未授权时的补充说明（会被拼进诊断行）。 */
     val note: String = "",
+    /**
+     * `appops set <pkg> <这里> allow` 用的操作名；null = 这项不归 AppOps 管。
+     * 操作名是**档位事实**，所以和档位住在同一张表里 —— 执行器只按它拼命令，不自己认项。
+     */
+    val appOpsOp: String? = null,
 )
 
 object PermissionCatalog {
@@ -54,7 +59,7 @@ object PermissionCatalog {
         PermissionSpec(
             MANAGE_EXTERNAL_STORAGE, "MANAGE_EXTERNAL_STORAGE", PermTier.APPOP,
             settingsAction = Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-            note = "已声明，需跳设置页由用户手动开启",
+            appOpsOp = "MANAGE_EXTERNAL_STORAGE",
         ),
         PermissionSpec(
             NOTIFICATION_ACCESS, "通知访问", PermTier.SETTINGS,
@@ -68,12 +73,12 @@ object PermissionCatalog {
         PermissionSpec(
             REQUEST_INSTALL_PACKAGES, "REQUEST_INSTALL_PACKAGES", PermTier.APPOP,
             settingsAction = Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-            note = "系统弹窗，由用户手动确认",
+            appOpsOp = "REQUEST_INSTALL_PACKAGES",
         ),
         PermissionSpec(
             SYSTEM_ALERT_WINDOW, "SYSTEM_ALERT_WINDOW", PermTier.APPOP,
             settingsAction = Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-            note = "需跳系统设置页，由用户手动开启",
+            appOpsOp = "SYSTEM_ALERT_WINDOW",
         ),
         // 这两项以前**不在权限表里**，于是首页 S2 能报「权限集全绿」而 bridge:ui_automation /
         // ui.screenshot 依旧返回 -32001（spec §2.0-4）。收进同一张表 = 同一把尺子。

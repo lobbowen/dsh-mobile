@@ -8,9 +8,9 @@ import lobos.permissions.PermissionCatalog
  * 三条硬规则，违反任何一条都算架构回归：
  * 1. 判据只住这里（`judge` 是纯函数），别处一律通过 [CapabilityCriteria] / 本表取结论；
  *    CI 里 `capability-single-source-gate-test.js` 会扫判据表达式在表外的复写。
- * 2. [Capability.requires] 只放**硬**前置。`device-owner` 不在任何 requires 里 ——
- *    多用户设备上这类特权路径根本不可得（平台级拒绝），
- *    v1 把它当前置导致 S2/S3/S4 永久锁死。
+ * 2. [Capability.requires] 只放**硬**前置。取法链是**软**依赖：链里排哪条由 [PermissionLedger]
+ *    的实测结局决定（见 [permAcquirers]），任何一项都不许因为「某条路大概走不通」而被预判成
+ *    BLOCKED —— v1 把特权身份当前置，S2/S3/S4 在真机上永久锁死。
  * 3. 除 [ADB_CHANNEL] 外，任何能力的绿都必须能在**没有 ADB** 的机器上达成
  *    （取法链自动落到 USER_TAP/RUNTIME_DIALOG）。
  *
@@ -59,10 +59,19 @@ object CapabilityCatalog {
     const val EXEC_BATTERY_WHITELIST = "dumpsys-battery-whitelist"
 
     /**
-     * 平台级拒绝（多用户设备）不再重试、不阻塞，也不把用户推去 3 个 AppOps 系统页
-     * （那是旧「按钮墙」的路）。
+     * AppOps 试开的执行器：命令按项拼（操作名住 `PermissionCatalog.appOpsOp`，别处不再抄一份），
+     * 结局进 [PermissionLedger]。它存在的全部理由是先前的「未试先判」——
+     * 这三项从没被 adb 试过，就先被档位钉成了人点项。
      */
-    const val OWNER_REJECTED_MARK = "several users"
+    const val EXEC_APPOPS_ALLOW = "appops-set-allow"
+
+    /**
+     * 运行时权限试授的执行器。这里过去写死过一句「Android 17 的 shell 不能 `pm grant`」，
+     * 而那句话从没被真机试过 —— 它和 AppOps 那三项犯的是同一个罪（未试先判，债表 SP-1 定罪）。
+     * 现在由这条命令去撞一次真实答案，结局进 [PermissionLedger]；权限名一律取自
+     * `PermissionCatalog.permission`，本层不认项、不猜字符串。
+     */
+    const val EXEC_PM_GRANT = "pm-grant-runtime-permission"
 
     val ALL: List<Capability> = listOf(
         Capability(
@@ -134,7 +143,6 @@ object CapabilityCatalog {
         //      取法链里不再排一条人点的降级项；见 [permAcquirers] 与其上方的注释）----
         perm(
             PermissionCatalog.MANAGE_EXTERNAL_STORAGE, "全部文件访问", PermTierClass.APPOP,
-            note = "AppOps 档：shell 已无 MANAGE_APP_OPS_MODES，只能人点",
             bridgeToken = "manage_external_storage",
         ),
         perm(PermissionCatalog.REQUEST_INSTALL_PACKAGES, "安装未知应用", PermTierClass.APPOP),
@@ -215,59 +223,72 @@ object CapabilityCatalog {
             bridgeToken = bridgeToken, keepAliveAnchor = anchor,
             judge = { e ->
                 if (e.granted(id)) CapVerdict(CapStatus.GRANTED, "已授权")
-                else CapVerdict(CapStatus.ACTION, if (note.isEmpty()) "未授权" else "未授权（$note）")
+                else {
+                    val attempt = e.permissionAttempts[id]
+                    val why = if (note.isEmpty()) "未授权" else "未授权（$note）"
+                    CapVerdict(
+                        // 实测过就把结局说在前面：用户看到的「未授权」必须同时回答「adb 试过没有」。
+                        CapStatus.ACTION,
+                        if (attempt == null) "$why｜adb 未试" else "$why｜" + attempt.outcome.human,
+                    )
+                }
             },
             acquirer = { e -> permAcquirers(id, tier, e) },
         )
     }
 
     /**
-     * 取法链（主 → 降级）。核心不变式：DO/ADB **缺席**时链条只是变短，能力不会变成 BLOCKED。
+     * 取法链。**「这项归 adb 还是归人」只由实测账（[PermissionLedger]）决定，不由档位推断**：
+     *  - 没有实测账 → 排静默项（先试；「从没试过」永远不是「只能人点」的理由）；
+     *  - 账上是 SILENT_OK 而判据仍未绿 = 授权被 ROM 回收 → 同样重排静默项，先无声要回来；
+     *  - 账上是 NEEDS_TAP / UNSUPPORTED → 只排人点项：adb 已经在这台机上撞过一次，
+     *    不再每开一次屏就把同一条命令重放一遍（那是兜底，不是判据）。
      *
-     * 2026-09-27 起「静默即唯一入口」：静默通道在位时链里**只**有 SILENT_*，不再把
-     * 「去系统页点一下」排在同一轮降级位 —— 那会让开屏的 P0 冲刺把人甩去系统页。
-     * 静默不可用（通道不通 / DO 不在位）才回落 USER_TAP；那是欠账，归工作台能力面板，
-     * 不是开屏动作。AppOps 档的静默前提是 DO，DO 不可达时判 UNREACHABLE，不复用这回落。
+     * 通道不在位时静默项一律不排：现在试不了，静默的第一次机会排在配对成功之后
+     * （flow-spec §2.2「开屏不问、自动流又办不到 = 静默吞掉」的反面）。
      */
     private fun permAcquirers(id: String, tier: PermTierClass, e: Evidence): List<Acquisition> {
-        // 回落项：静默通道不在位时，用户手动授权的落点（按档位决定跳哪类系统页）。
         val tap = when (tier) {
             PermTierClass.RUNTIME -> Acquisition(AcquireKind.RUNTIME_DIALOG, "系统弹窗授权", id)
             PermTierClass.IN_APP -> Acquisition(AcquireKind.USER_TAP, "去诊断页授权", NAV_DIAGNOSTICS)
             PermTierClass.SECURE_SETTINGS -> Acquisition(AcquireKind.USER_TAP, "去系统授权页", id)
             PermTierClass.APPOP -> Acquisition(AcquireKind.USER_TAP, "去系统授权页", id)
         }
-        var silent: Acquisition? = null
-        var usable = false
-        when (tier) {
-            // Secure 服务开关：shell 写设置串就能办，用不着 DO。
-            PermTierClass.SECURE_SETTINGS -> {
-                silent = when (id) {
-                    PermissionCatalog.NOTIFICATION_ACCESS ->
-                        Acquisition(AcquireKind.SILENT_VIA_ADB, "经 ADB 静默开启", EXEC_NOTIFICATION_LISTENER)
-                    PermissionCatalog.ACCESSIBILITY ->
-                        Acquisition(AcquireKind.SILENT_VIA_ADB, "经 ADB 静默开启", EXEC_ACCESSIBILITY)
-                    else -> null
-                }
-                usable = e.channelLive()
-            }
-            // AppOps 档：电池白名单走 ADB（`dumpsys deviceidle whitelist +<pkg>`，uid=2000
-            // 实证可用，与 AppOps 权限面无关）；其余 AppOps 项只能由用户人点。
-            PermTierClass.APPOP -> {
-                silent = if (id == PermissionCatalog.BATTERY_OPTIMIZATION) {
-                    Acquisition(AcquireKind.SILENT_VIA_ADB, "经 ADB 加入 Doze 白名单", EXEC_BATTERY_WHITELIST)
-                } else {
-                    null
-                }
-                usable = if (id == PermissionCatalog.BATTERY_OPTIMIZATION) e.channelLive() else false
-            }
-            else -> {
-                silent = null
-                usable = false
-            }
+        val silent = silentAcquisition(id, tier) ?: return listOf(tap)
+        if (!e.channelLive()) return listOf(tap)
+        return when (e.attemptOutcome(id)) {
+            null, AttemptOutcome.SILENT_OK -> listOf(silent)
+            AttemptOutcome.NEEDS_TAP, AttemptOutcome.UNSUPPORTED -> listOf(tap)
         }
-        val silentAcq = silent
-        return if (silentAcq != null && usable) listOf(silentAcq) else listOf(tap)
+    }
+
+    /**
+     * 这一档在这一项上**有没有** adb 静默路（只回答「用哪条命令试」，不回答「试不试得通」——
+     * 后者是实测账的事）。null = 这一档压根不归 shell 管。
+     *
+     * 四个档位逐项列举，不留 `else`：新增档位时编译逼这里表态，免得一条静默路被静默漏掉。
+     */
+    private fun silentAcquisition(id: String, tier: PermTierClass): Acquisition? = when (tier) {
+        // Secure 服务开关：shell 写设置串就能办。
+        PermTierClass.SECURE_SETTINGS -> when (id) {
+            PermissionCatalog.NOTIFICATION_ACCESS ->
+                Acquisition(AcquireKind.SILENT_VIA_ADB, "经 ADB 静默开启", EXEC_NOTIFICATION_LISTENER)
+            PermissionCatalog.ACCESSIBILITY ->
+                Acquisition(AcquireKind.SILENT_VIA_ADB, "经 ADB 静默开启", EXEC_ACCESSIBILITY)
+            else -> null
+        }
+        // 运行时权限：`pm grant` 归不归 shell 管，同样由实测说话（不许再抄一句「不能 pm grant」）。
+        PermTierClass.RUNTIME ->
+            if (PermissionCatalog.byId(id)?.permission.isNullOrBlank()) null
+            else Acquisition(AcquireKind.SILENT_VIA_ADB, "经 ADB 试授这项运行时权限", EXEC_PM_GRANT)
+        PermTierClass.APPOP -> when (id) {
+            PermissionCatalog.BATTERY_OPTIMIZATION ->
+                Acquisition(AcquireKind.SILENT_VIA_ADB, "经 ADB 加入 Doze 白名单", EXEC_BATTERY_WHITELIST)
+            else -> if (PermissionCatalog.byId(id)?.appOpsOp == null) null
+            else Acquisition(AcquireKind.SILENT_VIA_ADB, "经 ADB 试开这项 AppOps", EXEC_APPOPS_ALLOW)
+        }
+        // 截屏授权每次会话都要用户点一下「立即开始」，系统没有可下发的入口。
+        PermTierClass.IN_APP -> null
     }
 
     init {
@@ -291,21 +312,6 @@ object CapabilityCatalog {
             "桥令牌重复：" + tokens.groupBy { it }.filter { it.value.size > 1 }.keys
         }
     }
-
-    /**
-     * 按声明（= 拓扑）序求值；[Capability.requires] 未达成才下 BLOCKED。
-     *
-     * **实测优先于推断**：judge 直接读到「已经达成」（凭据在册、探针 LIVE、控制面在线）时不再被
-     * 前置的缺位改成 BLOCKED。否则 ROM 回收掉通知权限会把一台通道明明在线的老设备整页判红 ——
-     * 而 onboarding-flow-spec §2.2 的认领规则要求那些授权落回 F6 补齐清单，不是让 F3/F4 变红。
-     * BLOCKED 回答的是「前置没齐，现在还不该做」，不能回答「已经做完的事没做」。
-     */
-    /**
-     * 厂商省电白名单（豁免层，AUD-G21）：**独立清单，不进 S0–S3 引导管线**。
-     *
-     * 为什么独立：它们是"常驻卫生"清单（可随时回来补），不是开场必经步骤；
-     * 混进 S2 会破坏「S2 = 权限档一一对应」这条钉死的不变量（能力退化测试 §登记表）。
-     */
 
     /**
      * 厂商省电白名单（豁免层，AUD-G21）：**独立清单，不进 S0–S3 引导管线**。
@@ -361,6 +367,14 @@ object CapabilityCatalog {
             ),
     )
 
+    /**
+     * 按声明（= 拓扑）序求值；[Capability.requires] 未达成才下 BLOCKED。
+     *
+     * **实测优先于推断**：judge 直接读到「已经达成」（凭据在册、探针 LIVE、控制面在线）时不再被
+     * 前置的缺位改成 BLOCKED。否则 ROM 回收掉通知权限会把一台通道明明在线的老设备整页判红 ——
+     * 而 onboarding-flow-spec §2.2 的认领规则要求那些授权落回 F6 补齐清单，不是让 F3/F4 变红。
+     * BLOCKED 回答的是「前置没齐，现在还不该做」，不能回答「已经做完的事没做」。
+     */
     fun evaluate(e: Evidence): Map<String, CapVerdict> {
         val out = LinkedHashMap<String, CapVerdict>()
         for (c in ALL + OEM_GUARDS) {

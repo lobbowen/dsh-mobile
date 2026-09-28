@@ -311,7 +311,7 @@
     }
   ],
   "grantSingleSource": {
-    "note": "A19 / E6-b：「adb 能静默授予哪一档」在仓内只有一处规范定义 —— 判据表 permissions/PermissionCatalog.kt（分档/取法）＋ capability/CapabilityCatalog.kt（能力→取法链，usable 决定首项是否 SILENT_VIA_ADB）。上面三条禁词把「第二处自立档位判定」钉死：SILENT_VIA_DO 是 DO 退出后的历史残留档位名；「不接受任何静默授予」「DO 也无法…」是已被真机/实测推翻的旧断言，只许在 ui-onboarding-spec §2.0 的修正段里作为**被纠正对象**出现。散文可以引用判据表，不许复述结论。",
+    "note": "定罪记录 = 债表 SP-1（docs/plans/os-v4-debt-registry.json）：「adb 能静默授予哪一档」在仓内只有一处规范定义 —— 判据表 permissions/PermissionCatalog.kt（分档/取法）＋ capability/CapabilityCatalog.kt（能力→取法链：silentAcquisition 只回答「用哪条命令试」，链首最终是不是 SILENT_VIA_ADB 由 files/os/permission-ledger.json 的实测结局决定）。本对象下的三条禁词把「第二处自立档位判定」钉死：SILENT_VIA_DO 是 DO 退出后的历史残留档位名；「不接受任何静默授予」「DO 也无法…」是已被真机/实测推翻的旧断言，只许在 ui-onboarding-spec §2.0 的修正段里作为**被纠正对象**出现。SP-1 又加一条同类罪：按档位把没试过的取法预先判死（旧实现写作 usable = false），现在它必须由实测账说话 —— 散文可以引用判据表，不许复述结论，更不许替判据表抢先写「办不成」。",
     "terms": [
       "A-silent-via-do",
       "A-grant-claim",

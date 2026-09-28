@@ -8,33 +8,46 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * P0 首启授权冲刺 golden（flow-spec §2.2）。
+ * P0 首启授权冲刺 golden（flow-spec §2.2；次序是 2026-09-28 拍板的事实）：
  *
- * 2026-09-27 收敛：开屏只留 [PermissionSprint.REQUIRED]（通知发送一项）。
- * 凡取法链首项是 SILENT_* 的能力（无障碍 / 通知读取 / 电池白名单 / DO 派生的 AppOps）
- * 一律撤出开屏，改由 [PostPairingAutoFlow] 在配对成功的**同一前台会话内**静默办。
+ *   ① 配对/adb 是第一步且跳不过 → 配对前只问「没有它就够不到配对」的那几项（[PermissionSprint.REQUIRED]）；
+ *   ② 连上之后每一项都先经 adb **实试** → 没有实测账时，有静默路的项其取法链首项必须是 SILENT_*；
+ *   ③ 实测没开掉的才回落人点 → 只有账上是 [AttemptOutcome.NEEDS_TAP] / [AttemptOutcome.UNSUPPORTED]
+ *      的项才进弹人清单（[PermissionSprint.residue]），锚在前。
  *
- * 因此本测试钉的是新事实：ANCHORS/OPTIONAL 均为空、ORDER 只剩必要项，
- * 以及「能经 ADB 无感的三项不得出现在开屏链上」。顺序错了仍会直接改变用户体验
- * （通知排第一是硬事实：它挡配对的输码入口）。
+ * 本版为什么**反着钉**：旧版在这里钉的是「AppOps 三项只能人点」，而那三项从没被 adb 下发过
+ * —— 那就是被真机定罪的「未试先判」。所以「有静默路就先试」与「试完才弹人」两条都必须
+ * 由实测账说话，谁再把档位当判据预先判死，这里就红。
  */
 class PermissionSprintTest {
 
-    private fun ev(grants: Set<String> = emptySet()) = Evidence(nowMs = 1_000_000L, grants = grants)
+    /** 通道从没探过 = 全新设备还没配对。此时 adb 一条命令都下不去。 */
+    private fun ev(attempts: Map<String, SilentAttempt> = emptyMap(), grants: Set<String> = emptySet()) =
+        Evidence(nowMs = 1_000_000L, grants = grants, permissionAttempts = attempts)
 
-    /**
-     * 理想证据：通道在线 + DO 在位，用于复算「这条能不能静默办」。
-     * 与 [PermissionSprint] 内部的 SILENT_DEFERRABLE 推导同一姿势 —— 测试自己复算一遍，
-     * 而不是去读私有字段，这样推导逻辑变了这里会红。
-     */
-    private fun ideal() = Evidence(
-        nowMs = 0L,
+    /** adb 真的能下发（凭据在册 + 通道 LIVE 且未过期）。 */
+    private fun adbReady(
+        attempts: Map<String, SilentAttempt> = emptyMap(),
+        grants: Set<String> = emptySet(),
+    ) = Evidence(
+        nowMs = 1_000_000L,
         credentials = CredentialsState.PAIRED,
-        channel = ChannelProbe(ProbeOutcome.LIVE, 0L, "推导用理想读数"),
+        channel = ChannelProbe(ProbeOutcome.LIVE, 1_000_000L, "uid=2000 shell"),
+        grants = grants,
+        permissionAttempts = attempts,
     )
 
     private fun firstKind(id: String, e: Evidence): AcquireKind? =
         CapabilityCatalog.byId(id)?.acquirer?.invoke(e)?.firstOrNull()?.kind
+
+    private fun booked(id: String, outcome: AttemptOutcome) =
+        id to SilentAttempt(outcome, 999_000L, "单测造的读数")
+
+    /** 有 adb 静默路的权限项（通道在位、无实测账时的链首 = SILENT_*），由登记表推导。 */
+    private fun silentlyAcquirable(): List<String> = CapabilityCatalog.ALL
+        .filter { PermissionCatalog.byId(it.id) != null }
+        .map { it.id }
+        .filter { firstKind(it, adbReady()) == AcquireKind.SILENT_VIA_ADB }
 
     @Test fun 必要项从登记表的配对前置推导_不是手写第二张清单() {
         assertEquals(
@@ -46,108 +59,109 @@ class PermissionSprintTest {
         assertTrue(PermissionSprint.REQUIRED.contains(PermissionCatalog.POST_NOTIFICATIONS))
     }
 
-    @Test fun 冲刺首项必须是必要项_其余不得挡在前面() {
-        // 契约原名里的「首项」=这条：锚与待选项不许挤到必要项前面（本版 REQUIRED 只剩通知发送一项）。
-        assertEquals(PermissionSprint.REQUIRED.first(), PermissionSprint.ORDER.first())
-        assertEquals(
-            "顺序只能由 REQUIRED + ANCHORS + OPTIONAL 拼成，不许另插私货",
-            PermissionSprint.REQUIRED + PermissionSprint.ANCHORS + PermissionSprint.OPTIONAL,
-            PermissionSprint.ORDER,
+    @Test fun 配对之前只问必要项_其余一律不弹人() {
+        // 全新设备（adb 还没连）：弹人清单必须恰好等于配对前置项。
+        // 旧版在这里排着一串「只能人点」的推断项 —— 用户第一眼就被推去三个系统页，
+        // 而那些页在 adb 在手之后根本不需要人点。
+        assertEquals(PermissionSprint.REQUIRED, PermissionSprint.pending(ev()))
+        assertTrue("通道没起来时 adb 还没试过，一条都不许算「办不成」", PermissionSprint.residue(ev()).isEmpty())
+        // 已授予的项不再要：清单必须跟着系统侧回读走。
+        assertTrue(
+            PermissionSprint.pending(ev(grants = setOf(PermissionCatalog.POST_NOTIFICATIONS)))
+                .none { it == PermissionCatalog.POST_NOTIFICATIONS },
         )
-        // 本版硬事实：锚（不需要 DO 就能静默）全部撤出开屏；AppOps 三项留在开屏由人点完。
-        assertTrue("三项锚都有「不需要 DO」的静默路径，不应再占开屏位", PermissionSprint.ANCHORS.isEmpty())
+    }
+
+    @Test fun 有静默路的项_没有实测账就先试_不许未试先判() {
+        val ready = adbReady()
         assertEquals(
-            "需要人点的 AppOps 三项必须在开屏冲刺里",
-            listOf(
+            "adb 在位时，静默路覆盖这几项（AppOps 三项与运行时权限都在内：它们从没被试过就先被钉成人点项）",
+            setOf(
+                PermissionCatalog.POST_NOTIFICATIONS,
                 PermissionCatalog.MANAGE_EXTERNAL_STORAGE,
                 PermissionCatalog.REQUEST_INSTALL_PACKAGES,
                 PermissionCatalog.SYSTEM_ALERT_WINDOW,
-            ).sorted(),
-            PermissionSprint.OPTIONAL.sorted(),
-        )
-        assertEquals(
-            "开屏顺序 = 配对前置 + 需要人点的待选项",
-            PermissionSprint.REQUIRED + PermissionSprint.OPTIONAL,
-            PermissionSprint.ORDER,
-        )
-    }
-
-    @Test fun 保活锚从登记表推导_不是手写第二张清单() {
-        // 本版补充：锚没有被删，只是不再由开屏抢问（见下面的断言）。
-        // 反事实钉死（真机 2026-09-26「锁屏后 App 被清理」的病根是锚掉了）：
-        // 锚没有被删，只是不再由开屏抢问 —— 它们都有 SILENT_* 的取法链首项，
-        // 由配对后的 [PostPairingAutoFlow] + OsHostService 的低频监护无感自愈。
-        val anchors = CapabilityCatalog.ALL.filter { it.keepAliveAnchor }.map { it.id }
-        assertEquals(
-            "锚仍由登记表的 keepAliveAnchor 位推导，数量与成员不许悄悄变",
-            listOf(
-                PermissionCatalog.ACCESSIBILITY,
                 PermissionCatalog.BATTERY_OPTIMIZATION,
                 PermissionCatalog.NOTIFICATION_ACCESS,
-            ).sorted(),
-            anchors.sorted(),
+                PermissionCatalog.ACCESSIBILITY,
+            ),
+            silentlyAcquirable().toSet(),
         )
-        for (id in anchors) {
-            val kind = firstKind(id, ideal())
-            assertTrue(
-                "$id 应有静默首项（否则不能从开屏撤下它）：$kind",
-                kind == AcquireKind.SILENT_VIA_ADB,
-            )
-            assertFalse("$id 有静默路径，不该再进开屏 ANCHORS", PermissionSprint.ANCHORS.contains(id))
-            assertFalse("$id 有静默路径，不该再进开屏 ORDER", PermissionSprint.ORDER.contains(id))
+        for (id in silentlyAcquirable()) {
+            assertEquals("$id 的链首必须是静默下发", AcquireKind.SILENT_VIA_ADB, firstKind(id, ready))
+            assertFalse("$id 还没实测过，不许进弹人清单", PermissionSprint.residue(ready).contains(id))
         }
-        // 锚与待选项是互斥档位，不许重复出现（老不变式，继续钉）。
-        assertTrue(PermissionSprint.ANCHORS.intersect(PermissionSprint.OPTIONAL.toSet()).isEmpty())
+        // 只有「每次会话」那一档真的没有静默路：adb 替不了用户那一下「立即开始」。
+        assertEquals(AcquireKind.USER_TAP, firstKind(PermissionCatalog.MEDIAPROJECTION, ready))
+        // 双向对照：运行时权限在**通道还没起来**时仍由系统弹窗承担 —— 配对之前就得先拿到它，
+        // 静默路是配对之后的事。把这条改成静默优先，S0 就会被自己的前置锁死。
+        assertEquals(AcquireKind.RUNTIME_DIALOG, firstKind(PermissionCatalog.POST_NOTIFICATIONS, ev()))
     }
 
-    @Test fun 能经ADB无感的三项不得出现在开屏ORDER里() {
-        // 收敛的**核心断言**：无障碍 / 通知读取 / 电池白名单都有 SILENT_VIA_ADB 首项，
-        // 开屏再抢问一遍 = 让用户对着三个系统页点，正是本次要消灭的按钮墙。
-        val three = listOf(
-            PermissionCatalog.ACCESSIBILITY,
-            PermissionCatalog.NOTIFICATION_ACCESS,
-            PermissionCatalog.BATTERY_OPTIMIZATION,
+    @Test fun adb试完没开掉的才弹人_锚排在最前() {
+        val e = adbReady(
+            attempts = mapOf(
+                booked(PermissionCatalog.MANAGE_EXTERNAL_STORAGE, AttemptOutcome.NEEDS_TAP),
+                booked(PermissionCatalog.ACCESSIBILITY, AttemptOutcome.UNSUPPORTED),
+                booked(PermissionCatalog.BATTERY_OPTIMIZATION, AttemptOutcome.NEEDS_TAP),
+            )
         )
-        for (id in three) {
-            assertEquals("$id 的静默路径必须是取法链首项", AcquireKind.SILENT_VIA_ADB, firstKind(id, ideal()))
-            assertFalse("$id 必须由配对后的自动流办，不许出现在开屏 ORDER", PermissionSprint.ORDER.contains(id))
-            assertFalse("$id 不许出现在开屏 pending 里", PermissionSprint.pending(ev()).contains(id))
+        // 锚（无障碍 / 电池豁免）在前：锚掉了整条常驻会被 ROM 清掉，其余只是功能降级。
+        // 同为锚取登记表声明序（电池豁免声明在无障碍之前）。
+        assertEquals(
+            listOf(
+                PermissionCatalog.BATTERY_OPTIMIZATION,
+                PermissionCatalog.ACCESSIBILITY,
+                PermissionCatalog.MANAGE_EXTERNAL_STORAGE,
+            ),
+            PermissionSprint.residue(e),
+        )
+        // 账上记着「adb 在这台机办不成」，链首就不再排静默项（同一命令不每开一次屏重放一遍）。
+        for (id in PermissionSprint.residue(e)) {
+            assertEquals("$id 应回落人点", AcquireKind.USER_TAP, firstKind(id, e))
         }
+    }
+
+    @Test fun 账上是SILENT_OK而判据未绿_先无声要回来不弹人() {
+        // ROM 回收掉已授予的静默项是真机会发生的事（HANS/osense 案底）。
+        // 正确处理是再无声要一次（自动流），而不是把用户推去系统页。
+        val e = adbReady(attempts = mapOf(booked(PermissionCatalog.ACCESSIBILITY, AttemptOutcome.SILENT_OK)))
+        assertEquals(AcquireKind.SILENT_VIA_ADB, firstKind(PermissionCatalog.ACCESSIBILITY, e))
+        assertFalse(PermissionSprint.residue(e).contains(PermissionCatalog.ACCESSIBILITY))
+        assertTrue(
+            "回收项必须由配对后的自动流认领（否则它会既不进冲刺也不进自动流 = 静默吞掉）",
+            PostPairingAutoFlow.plan(e).contains(PermissionCatalog.ACCESSIBILITY),
+        )
+    }
+
+    @Test fun 通道掉线时静默项回落人点_但不进弹人清单() {
+        // adb 半路死了（端口轮换 / 配对被系统清掉）：此刻只有人能开，链首回落 USER_TAP；
+        // 而「弹人清单」仍以实测账为据 —— 没试过的项不许因为掉线就被记成办不成。
+        val e = ev(attempts = mapOf(booked(PermissionCatalog.ACCESSIBILITY, AttemptOutcome.SILENT_OK)))
+        assertEquals(AcquireKind.USER_TAP, firstKind(PermissionCatalog.ACCESSIBILITY, e))
+        assertTrue(PermissionSprint.residue(e).isEmpty())
     }
 
     @Test fun 需要通道或每次会话的能力不进冲刺() {
-        // mediaprojection 每次会话授权 —— 不能在开屏静默要。
-        assertFalse(PermissionSprint.ORDER.contains(PermissionCatalog.MEDIAPROJECTION))
-        // 环境开关不是权限，也不该被当成「授权」去要
-        assertFalse(PermissionSprint.ORDER.contains(CapabilityCatalog.DEV_OPTIONS))
-        assertFalse(PermissionSprint.ORDER.contains(CapabilityCatalog.WIRELESS_DEBUG))
-    }
-
-    @Test fun 需要人点的待选项仍然要问() {
-        // AppOps 三项没有可用的静默路径（取法链首项 = USER_TAP），必须人点。
-        // 按用户拍板：需要人点的**就在开屏一次点完**，点完再配对 —— 不许「开屏不问 +
-        // 自动流办不到」地静默吞掉。
-        assertTrue(
-            "AppOps 三项必须留在开屏冲刺里（它们只能人点）",
-            PermissionSprint.OPTIONAL.containsAll(
-                listOf(
-                    PermissionCatalog.MANAGE_EXTERNAL_STORAGE,
-                    PermissionCatalog.REQUEST_INSTALL_PACKAGES,
-                    PermissionCatalog.SYSTEM_ALERT_WINDOW,
-                ),
-            ),
+        val tried = adbReady(
+            attempts = CapabilityCatalog.ALL
+                .filter { PermissionCatalog.byId(it.id) != null }
+                .associate { booked(it.id, AttemptOutcome.NEEDS_TAP) }
         )
-        // 人点这条路确实还在（取法链首项 = USER_TAP），不是被做成不可达。
-        assertEquals(AcquireKind.USER_TAP, firstKind(PermissionCatalog.MANAGE_EXTERNAL_STORAGE, ev()))
+        assertFalse("屏幕捕获每次会话授权，冲刺里要了也白要",
+            PermissionSprint.residue(tried).contains(PermissionCatalog.MEDIAPROJECTION))
+        for (env in listOf(CapabilityCatalog.DEV_OPTIONS, CapabilityCatalog.WIRELESS_DEBUG)) {
+            assertFalse("$env 是环境开关不是权限，不许被当成授权去要",
+                PermissionSprint.residue(tried).contains(env) || PermissionSprint.REQUIRED.contains(env))
+        }
     }
 
     @Test fun 一次开屏只闹一回_问过的项不再重复抛给用户() {
         val e = ev()
-        val first = PermissionSprint.next(e, emptySet())
-        assertEquals(PermissionSprint.REQUIRED.first(), first?.first)
-        // 本轮只有一项：问过即结束（欠账交给配对后的自动流 / 工作台，不靠开屏骚扰）。
-        assertNull(PermissionSprint.next(e, PermissionSprint.ORDER.toSet()))
-        assertTrue(PermissionSprint.pending(e, PermissionSprint.ORDER.toSet()).isEmpty())
+        assertEquals(PermissionSprint.REQUIRED.first(), PermissionSprint.next(e, emptySet())?.first)
+        assertNull("本轮问完就结束：欠账由折叠清单继续可见，不靠开屏骚扰",
+            PermissionSprint.next(e, PermissionSprint.REQUIRED.toSet()))
+        assertTrue(PermissionSprint.pending(e, PermissionSprint.REQUIRED.toSet()).isEmpty())
     }
 
     @Test fun 下一项给的是它的取法链首项_手段由登记表决定() {
@@ -156,8 +170,5 @@ class PermissionSprintTest {
         // 通知是 RUNTIME 档 → 系统弹窗；这条如果被改成 USER_TAP，开屏就会多出一个授权按钮。
         assertEquals(AcquireKind.RUNTIME_DIALOG, acq.kind)
         assertEquals(id, acq.target)
-        // 已授予的项不再出现在 pending 里
-        assertTrue(PermissionSprint.pending(ev(setOf(PermissionCatalog.POST_NOTIFICATIONS)))
-            .none { it == PermissionCatalog.POST_NOTIFICATIONS })
     }
 }

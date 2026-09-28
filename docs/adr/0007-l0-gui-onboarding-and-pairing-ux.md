@@ -2,6 +2,7 @@
 
 - 状态：**已决定**（2026-09-25；主路径细节待 §5 真机验证清单定罪，未定罪前不得写死）
 - **2026-09-28 errata**：Device Owner 已全面退出（台账 §J，见 [ADR-0010](0010-lob-os-container-form.md)）；本 ADR 中 S1=Device Owner、`dpm set-device-owner`、`DeviceAdminReceiver` 等叙述**一并作废**，开场管线收敛为 **S0 ADB 配对 → S1 权限集 → S2 运行时 + Program 就绪 → S3 工作台**（少一段）。
+- **2026-09-29 errata（债表 `SP-1` 定罪）**：§2.1 那句「Android 17 实测 shell 已不能 `pm grant`/`appops set`」**从未被真机实测过**，是把没试过的取法预先判死（仓内规矩叫它「未试先判」）。它同时是本 ADR 里第二处自立档位判定的地方 —— 「adb 能静默授予哪一档」的唯一规范定义处是判据表 `permissions/PermissionCatalog.kt` ＋ `capability/CapabilityCatalog.kt`，实测结局落 `files/os/permission-ledger.json`，见 [ui-onboarding-spec §2.0 / §2.1](../contracts/ui-onboarding-spec.md)。§2.1 其余结论（顺序即依赖、ADB 是杠杆、不做 DO）不变。
 - 关联：[ADR-0001 执行域](0001-android-execution-domain.md) · [ADR-0005 内核只走 OTA](0005-program-via-ota-only.md) · [ADR-0006 后台生命周期](0006-background-lifecycle-keepalive.md) · 完整设计见 [ui-onboarding-spec.md](../contracts/ui-onboarding-spec.md)
 
 ---

@@ -43,14 +43,18 @@ import lobos.capability.StepStatus
 import lobos.lifecycle.ResidencyAudit
 import lobos.ui.PairingProbeService
 import lobos.ui.ProbeJournal
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * 开场首页：渲染 [OnboardingFlow] 的两张阶段卡（**当前阶段 + 一个动作**），下面是 S0–S4
  * 判据核对（[PipelineProjection] 的段行，探针期兼作证据出口）。
  *
- * 开屏的**授权冲刺不在这里出现**：P0（[PermissionSprint]）在每次采集后静默把「还该要的
- * 第一项」抛给系统弹窗/系统授权页，界面上没有一排「请先授权」的卡 —— 用户第一眼看到的
- * 就是 F1「开始配对」（onboarding-flow-spec §2）。
+ * 开屏的**授权冲刺不在这里出现**：次序是拍过板的事实（flow-spec §2.2）—— 先把 adb 配上，
+ * 连上之后 [PostPairingAutoFlow] 把每一项**都经 adb 实测试一遍**，只有实测没开掉的才由
+ * [PermissionSprint] 抛给系统弹窗/系统授权页。界面上没有一排「请先授权」的卡 ——
+ * 用户第一眼看到的就是 F1「开始配对」。
  *
  * 职责边界（ui-onboarding-spec §4）：这里只渲染枚举、按 [Acquisition.kind] 把动作转交
  * capability 层。判据、命令、intent 目标、按钮文案全部来自登记表；「下一步是什么」来自
@@ -472,7 +476,7 @@ class SetupActivity : AppCompatActivity() {
         toast("${acq.label} 执行中…")
         Thread {
             val ctx = applicationContext
-            val result = runCatching { CapabilityAcquisitionRunner.dispatch(ctx, acq) }.getOrNull()
+            val result = runCatching { CapabilityAcquisitionRunner.dispatch(ctx, capId, acq) }.getOrNull()
             handler.post {
                 actionInFlight = false
                 btn?.isEnabled = true
@@ -596,14 +600,26 @@ class SetupActivity : AppCompatActivity() {
                     OnboardingFlow.stages(e, verdicts).forEach {
                         appendLine("${it.id} ${it.title} ${it.status} ${it.detail}")
                     }
-                    // P0 不在界面上出现，所以报告是它唯一的可核对出口：本轮要过哪些、还缺哪些。
+                    // P0 不在界面上出现，所以报告是它唯一的可核对出口：静默优先项、adb 实测账、
+                    // 实测没开掉因而该弹人的差集，三者都要能从这一帧读出来。
                     appendLine(
-                        "---- P0 授权冲刺（静默） ----" +
-                            "\n顺序 ${PermissionSprint.ORDER.joinToString()}" +
+                        "---- P0 授权冲刺 ----" +
+                            "\n配对前必要项 ${PermissionSprint.REQUIRED.joinToString().ifBlank { "无" }}" +
+                            "\nadb 实测办不成（弹人，锚在前）${PermissionSprint.residue(e).joinToString().ifBlank { "无" }}" +
                             "\n已抛问题 ${sprintAsked.joinToString().ifBlank { "无" }}" +
                             "\n仍待要 ${PermissionSprint.pending(e, sprintAsked).joinToString().ifBlank { "无" }}" +
                             "\n配对现场判定 " + PairingGate.decide(e, verdicts).notice,
                     )
+                    appendLine("---- adb 实测账（files/os/permission-ledger.json） ----")
+                    if (e.permissionAttempts.isEmpty()) {
+                        appendLine("还没有一次静默下发：配对成功后自动流会逐项试一遍")
+                    } else {
+                        e.permissionAttempts.entries.sortedBy { it.key }.forEach { (id, a) ->
+                            appendLine("· ${CapabilityCatalog.titleOf(id)}（$id）：${a.outcome.human}" +
+                                "｜${SimpleDateFormat("MM-dd HH:mm:ss", Locale.US).format(Date(a.atMs))}" +
+                                "｜${a.detail}")
+                        }
+                    }
                     appendLine("---- 配对尝试（与通知同源） ----")
                     appendLine(AttemptStore.humanPairTimeline().joinToString("\n").ifBlank { "无" })
                     appendLine("---- 能力判据 ----")

@@ -238,6 +238,47 @@ rule('R9 豁免层', appFiles.length, () => {
   return bad;
 });
 
+// R10 实测账单源（债表 SP-1）：「这项归 adb 还是归人」只由 files/os/permission-ledger.json 的结局推导。
+// 定罪对象是「未试先判」—— 旧实现按档位把没试过的取法预先钉死人点（写作 usable = false），
+// 于是 AppOps 三项与运行时权限从没被 adb 下发过就已经"只能人点"。本规则三个方向都要真：
+// ① 死词汇不回潮；② 每一档都有实测路且执行器真的下发+回读；③ 锚的自愈不得住回监督者。
+// 双向对照组：匹配器对人造反例必须红（判据被掏空时 ① ② 会恒绿，"零命中"就成了假清白）。
+rule('R10 实测账单源（不许未试先判）', appFiles.length, () => {
+  const bad = [];
+  // 只扫代码行：KDoc/注释里引用旧写法是**被纠正对象**（历史不可改写），剥掉注释行再匹配。
+  const strip = (s) => s.split(/\r?\n/).filter((l) => !/^\s*(?:\/\/|\*|\/\*)/.test(l)).join('\n');
+  if (!strip('val usable = false').includes('usable')) bad.push('自证失败：剥离器把代码行也剥没了');
+  if (strip(' * 旧写法 `usable = false` 已废止').includes('usable')) bad.push('自证失败：注释没被剥掉（散文引用会误判红）');
+  const kt = appFiles.filter((f) => f.endsWith('.kt'));
+  for (const t of ['usable', 'A11Y_', 'LISTED_NOT_BOUND', 'PermissionSprint.ORDER',
+    'PermissionSprint.ANCHORS', 'SILENT_DEFERRABLE', 'NO_DO_EVIDENCE', 'OwnerAttempt', 'recordOwner']) {
+    const files = kt.filter((f) => strip(read(f)).includes(t)).map(rel);
+    if (files.length) bad.push('死词汇回潮 ' + t + ' @ ' + files.join(','));
+  }
+  const cat = read(path.join(APP, 'src/main/java/lobos/capability/CapabilityCatalog.kt'));
+  const runner = read(path.join(APP, 'src/main/java/lobos/capability/CapabilityAcquisitionRunner.kt'));
+  const sprint = read(path.join(APP, 'src/main/java/lobos/capability/PermissionSprint.kt'));
+  // 每一档都要有 adb 实测路：少一档 = 那一档又被预先判死。
+  const noPath = (txt) => ['EXEC_APPOPS_ALLOW', 'EXEC_PM_GRANT'].filter((k) => !txt.includes(k));
+  if (!noPath('EXEC_APPOPS_ALLOW').includes('EXEC_PM_GRANT')) bad.push('自证失败：静默档判据对反例不红');
+  if (noPath(cat).length) bad.push('档位没有 adb 实测路（未试先判回潮）: ' + noPath(cat).join(','));
+  if (noPath(runner).length) bad.push('执行器未注册: ' + noPath(runner).join(','));
+  if (!/pm grant /.test(runner) || !/appops set /.test(runner)) bad.push('静默执行器没有真下发命令');
+  if (!/PermissionCenter\(ctx\)\.isGranted\(spec\)/.test(runner)) bad.push('静默执行器缺系统侧回读（exit 0 就当成了）');
+  if (!strip(cat).includes('e.attemptOutcome(id)')) bad.push('取法链首没读实测账');
+  if (!strip(sprint).includes('attemptOutcome')) bad.push('弹人清单没读实测账');
+  // ③ 父责非限制、不设兜底：监督者只观测锚的翻转，发起点只有进程出生/开机/用户与自动流。
+  const host = strip(read(path.join(APP, 'src/main/java/lobos/lifecycle/OsHostService.kt')));
+  if (host.includes('ensureBound')) bad.push('OsHostService 又在自愈锚（复活式兜底）');
+  if (!host.includes('observeAnchorTransition')) bad.push('OsHostService 缺锚状态观测（掉线要看得见）');
+  const healers = kt.filter((f) => strip(read(f)).includes('ensureBound('))
+    .map((f) => path.basename(f)).sort().join(',');
+  if (healers !== 'AccessibilityAnchor.kt,BootReceiver.kt,CapabilityAcquisitionRunner.kt,OsApplication.kt') {
+    bad.push('锚激活点漂移: ' + healers);
+  }
+  return bad;
+});
+
 console.log('capability-single-source-gate (v4)');
 for (const p of passes) console.log('  PASS  ' + p);
 for (const f of fails) console.log('  FAIL  ' + f);

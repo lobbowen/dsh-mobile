@@ -1302,6 +1302,66 @@
       "workstream": "MAIN",
       "note": "门禁先于绿存在：它现在能红（真实读数），发布完成后才进 CI —— 不为把它提前接上而把 404 判成\"还没发而已\"。",
       "updated": "2026-09-29"
+    },
+    {
+      "group": "startup-pipeline",
+      "id": "SP-1",
+      "desc": "首启流水线次序倒置＋未试先判：旧实现先弹人后配对，并按档位把没试过的 adb 取法预先钉成「只能人点」（AppOps 三项、运行时权限），静默失败也不回落人点",
+      "where": "capability/PermissionSprint.kt + capability/CapabilityCatalog.kt(permAcquirers/silentAcquisition) + capability/PermissionLedger.kt + lifecycle/AccessibilityAnchor.kt",
+      "action": "次序按 2026-09-28 拍板落地：配对（跳不过）→ 连上后每一项都经 adb 实试 → 结局落 files/os/permission-ledger.json 对账 → 实测没开掉的才弹人（锚在前）。本机结局核销分给 E9/E10 两项设备档债务，本项只记「代码与判据已收口」",
+      "status": "done",
+      "evidenceTier": "static",
+      "workstream": "W1",
+      "note": "本项是仓内**唯一**给这套「整改编号」落脚点的条目：文档、ADR、门禁注释此后只引 SP-1（及其子项 E9/E10/D10），不再写「执行方案 D06 / E6-b / A19」—— 那些编号在仓内没有对应行，引它们等于让下一轮人去追一个不存在的清单。判据次序的正文住址是 contracts/onboarding-flow-spec.md §2.2，档位归口正文是 contracts/ui-onboarding-spec.md §2.0。",
+      "updated": "2026-09-29"
+    },
+    {
+      "group": "E-logic",
+      "id": "E9",
+      "desc": "运行时权限的 adb 静默路（pm grant）已接进取法链，但本机结局未测",
+      "where": "capability/CapabilityCatalog.kt(silentAcquisition/RUNTIME) + capability/CapabilityAcquisitionRunner.kt(grantRuntimePerm)",
+      "action": "真机跑一次配对后自动流，现读 files/os/permission-ledger.json 里 post-notifications 的 outcome：SILENT_OK 就确认弹窗那一档从此只作降级；UNSUPPORTED/NEEDS_TAP 就确认弹人路径仍可达（不许出现「adb 办不成 + 也没人点」的双无状态）",
+      "status": "pending",
+      "evidenceTier": "device",
+      "workstream": "W1",
+      "note": "SP-1 把「Android 17 shell 不能 pm grant」这句未试先判删掉了，代价是这条静默路目前只有静态证据。R10 门禁钉的是「有实测路＋回读」，钉不了「这台机答不答应」—— 那必须真机撞一次。",
+      "updated": "2026-09-29"
+    },
+    {
+      "group": "E-logic",
+      "id": "E10",
+      "desc": "post-notifications 判据（checkSelfPermission）绿 ≠ 通知一定可见（系统还有 POST_NOTIFICATION appop）",
+      "where": "permissions/PermissionCenter.kt(POST_NOTIFICATIONS) + ui/PairingProbeService.kt",
+      "action": "真机取证：pm grant 之后 dumpsys 现读该 appop 模式；若 permission=GRANTED 而 appop=IGNORED，判据必须换成能代表「可见」的那把尺子，并与发通知的执行体同源",
+      "status": "pending",
+      "evidenceTier": "device",
+      "workstream": "W1",
+      "note": "判据与执行体已同源（首页绿、桥 notif.post、PairingProbeService 读同一个 spec），本条钉的是「这把尺子量的是权限还是可见性」这一层还没被实证。S0 的输码入口全靠通知可见，量错就是整条主链假绿。",
+      "updated": "2026-09-29"
+    },
+    {
+      "group": "D-deadcode",
+      "id": "D10",
+      "desc": "CapStatus.UNREACHABLE 有消费点、零生产者（DO 退出后没人再返回它）",
+      "where": "capability/CapabilityModel.kt + OnboardingFlow.kt / PipelineProjection.kt / PostPairingAutoFlow.kt / ui/setup/SetupActivity.kt",
+      "action": "收口时拍板：要么由实测账/ROM 侧事实给它一个真生产者（某项被平台永久拒绝且非用户可补救），要么把这一档连同四个消费点一起删。不许保留成「预先给某项判死」的入口 —— 那正是 SP-1 定罪的未试先判",
+      "status": "pending",
+      "evidenceTier": "static",
+      "workstream": "W1",
+      "note": "ui-onboarding-spec §2.1 已把它写成「在册档位而非在册状态」，并指名本条为账。仓内 grep：返回 UNREACHABLE 的 judge 有 0 处，读取它的分支有 4 处。",
+      "updated": "2026-09-29"
+    },
+    {
+      "group": "AUDIT-recheck",
+      "id": "AUD-G48",
+      "desc": "docs/contracts 里的 file:NN 行号引用没有门禁（doc-gate 只验链接可达），所以规范可以指着不存在的类和过期行号而不红",
+      "where": "scripts/doc-gate.js + docs/contracts/*.md",
+      "action": "把 contracts 层的引用纳入门禁：反引号里的 `xxx.kt` 必须真实存在；带 `:NN` 的必须 NN ≤ 该文件行数。先报告模式统计存量违规，再随「判据与单一真值」那一批转强制（转强制的前提是存量违规已清零，不为把它接上而把历史违规判成已完成）",
+      "status": "pending",
+      "evidenceTier": "static",
+      "workstream": "MAIN",
+      "note": "SP-1 落地那一轮逐条人工复核并把 OnboardingActivity / NodeContainerApp / KernelSelfCheck / HostBridgeService 四处假引用改成真实类名与行号，才看清这是**结构性缺口**：靠人记住改哪些行，下一轮一定再犯。空口规矩不算门禁，必须能红。",
+      "updated": "2026-09-29"
     }
   ],
   "progressNote": "D0 完成：快照、债表、禁词/品牌门（报告模式）、文档清场。D1a 物理完成：kernel→programs/console、system→container/rom、bin/panel、programs/{console,dsh,pi} manifest、console package.json 改名、CI/scripts/layout.json 路径更新；engine 测试路径部分更新。 | 2026-09-28 第二轮：拆 W1–W4 四个子代理并行执行；简报 docs/plans/lobos-workstream-brief.md。 | 第二轮验证：gen-version --check 通过（修 requiresProtocol 字段名）；layout-manifest-test 报告模式 1 passed / 0 failed，登记 INT1–INT3 三项集成待办。 | 第三轮：W1 包迁移完成（61 文件 package lobos，旧包残留 0）；纠正 applicationId 单段错误（INT4）；根 settings/version 归位（INT5 done）；登记 INT6。 | 第四轮：确认子代理在活跃写入（mtime 15:20）；MAIN 落定 applicationId=lobos.app（INT4 done）；向 W3 出裁定、向 W4 转达 W3 重命名引用点（INT7）；登记集成复验清单。 | 第五轮：W2 删除 guard/assembler/console（D9/A10 销账）；W2 给出 4 条 layout 处置，已转 W3（INT3）；SYSTEM-API.md 尚未落盘。 | 第六轮：layout missing=0（INT3 done）；归档目录建立（D4 done）；出 program-* 命名裁定（INT8）并纠偏 privapp 命名。 | 第七轮：W4 完成 container/rom 改名（B9 done）；W1 完成 kernelota→ota（B4）；W3 完成 schema/组件文档改名（D5/D8）；SYSTEM-API.md 与 ADR-0010 仍缺。 | 第七轮续：W2 交付 SYSTEM-API.md（解 W1 阻塞），登记 INT9。 | 第八轮：W3 落 ADR-0010 且 program-* 对齐（program-ota.yml / build-program-bundle.* / sign-program-manifest.js）；W1 范围收窄；新开 W5 专攻 D2 与 DO 清除。 | INT8 done（program-* 全链统一）。 | 第九轮：W5 前台服务已收敛为唯一 OsHostService（startForeground 1 处）；W1 落 lobos/os 骨架并完成 Registry liblobos 改名；已解锁 W3 重生成原生件清单。 | 第十轮：gate 998/150；lobos/os 扩到 7 文件 435 行；对 W5（两轮无落地）与 W3（清单未重生成/ADR 未改）各发催办+可执行微任务。 | 第十一轮：W5 滞速被停，MAIN 接手完成 A1–A6/A8/A13/A15（Manifest 与服务类名对齐、单进程单 FGS、watchdog/DO 清除）；gate 560→341。 | 第十二轮：W2 交付（A10/A11/A12/A16/B2/B3/B7/D9 done）；MAIN 完成 A7 并补 AccessibilityAnchor 缺失实现、修 Manifest（OsAccessibilityService/Theme.LobOs/WRITE_SECURE_SETTINGS）、修 KillAudit import。 | 第十二轮：W2/W4 交付并收工；MAIN 补缺（AccessibilityAnchor/PostPairingAutoFlow/未解析 import=0）、修 Manifest/WRITE_SECURE_SETTINGS/KillAudit import、对齐 lobos_hostbridge 与 panel-update 契约；新开 W6 清扫 OS 侧旧名与 engine DO 方法组。gate 337→190。 | 第十三轮：W2 收尾确认（UI 目录/router 死类型）；W3 完成 README 并入 docs → layout 契约全绿；MAIN 把 Kotlin 未解析 import 检查固化进 gate-scan。 | 第十四轮：发现接口契约被收敛到 docs/components/console-system-api.md 并修齐全仓引用；抽样确认 os.* 接线=0/36，新开 W7 专攻接线（含诚实降级与 gap 清单）。 | 第十五轮：MAIN 交付 D8 验收 runner（work/lobos-verify.sh）并首跑 PASS=11 FAIL=0（os.* 接线 0/6 抽样为信息项）。 | 第十五轮续：确认 W3 的 ADR 修订已落地（0004/0005 改名、0006 重写、0010 新增）→ INT10 done。 | 第十六轮：runner 升级为\"全量契约接线检查\"（2/49，缺失清单落 work/contract-missing.txt）；W6 已删 engine 的 DO 方法组（device_owner 14→0），gate 166→156。 | 第十七轮：W3 收工（A-pkg/A-pkg2=0，scripts/.github/README 0 命中）；MAIN 修掉 layout 交付维 4 条违规（D2/E 归原生 + 测试规则 4/5 改判）→ layout 违规 0；裁定设备协议名 program-*（INT16/17 派给 W6/W3）。 | 第十九轮：W7 停摆被停，MAIN 接手 os.* 接线（36 方法入 CapabilityBroker.OS_METHODS；真实读数/诚实降级二分）→ 接线 2/49→39/49，缺口清单落 lobos/os/METHOD-GAPS.md。 | runner 抽取修正：接线 33/34（唯一 missing 是文档简写伪影）。 | 第二十轮：全部子代理收工；发现 capability-single-source-gate-test.js 已失效（旧架构断言）；新开 W8（门禁测试重写）与 W9（D8 前缀重命名）。 | 第二十一轮：MAIN 清理 CapabilityBroker 的 A-dsh/C-do2 文案（gate 82→79）；落 enforcePrerequisites（P1–P9），其中 P2–P6 已 pass，P1/P7/P8 待 W8/W9，P9 待真机。 | 第二十三轮（里程碑）：MAIN 接手 W8/W9 —— D8 前缀重命名完成、失效门禁重写（5/0）并修 dead-path 生成物误判；gate 77→**0 命中**；**enforce=true 已在 strict 模式通过（exit=0）**；债表批量销账。 | 第二十四轮：MAIN 完成 C1（通知与 console 状态同源）与 C5（退避去重确认）；新开 W10 做 A14 Tile + E8 拆分。 | 第二十六轮：MAIN 接手 W10 —— A14（QS Tile）与 E8（Setup/Console 拆分）完成；gate strict 仍 0/0；债表 71/71（除 P9 外部依赖）。 | 复检轮（新目标）：拆 A1–A5 五个只读审计子代理；MAIN 做 A6（§5 判据逐条）。已发现 AUD-G1..G4 并纠正 INT16 误判。 | 复检第2轮：A1 分区审计回报（§5.8 重灾、§3.2 子包偏差、DO 文档残留、用例表断链等）；MAIN 实跑 engine 全量 26 测试，发现并修好 3 处真断（crosslang/ota-engine/boot-env），另有 5 处环境依赖必红；新增 AUD-G5..G15。 | 复检第3轮：修 G4/G12/G13/G14（活引用/债表 note/ROM 命名/version 注释）与 G3（engine 5 个 kernel-* 文件重命名，链完整性 26/26）。 | 复检第3轮：A2/A4 回报；MAIN 修复 P0（OTA 安装 stageRoot）+ 三处 Manifest 死声明 + BootReceiver 兜底边 + ACTION_RESTART 断路 + console 测试路径，共 5 处；新增 AUD-G16..G26，重开 A5/C5/D6/E5。 | 复检第4轮：A3/A4/A5 全部回报（五分区审计完成）；MAIN 修 P0 CapStatus.TODO（编译断）、悬空 import、Journal.seq 连续性、OsHostService 状态机接线、capability.invoke 登记、F13/F3 残留、CI PR paths；新增 AUD-G27..G46。 | 修复轮1：①OTA 链统一 program-*（INT16/G32 done）；②kernel 去词（G7/G11 代码侧完成，门禁新增裸词 kernel 且绿）；③修复 capability.invoke 引入的跨语言门回归（10/0）。 | 修复轮2：③ 完成 —— os.* 17 个已实现方法全部按契约 §2 形状重写 + 新增形状门禁 R6（6 passed/0 failed）；programs.json 写路径接通（AUD-G37）。 | 修复轮3：④ 起步 —— 新增文档门与债表门（均接线 CI 报告模式），修 3 处死链（doc-gate 0）、批量清 docs 旧名、ADR-0007 改写 + 0003/0009 errata（AUD-G41 done）。 | 修复轮4：④ 收尾 —— 文档门转强制(0 死链)、债表门上线、计划 §6 对齐现实；docs 15 项收口 + AUD-G44/G46 完成；artifact 名去品牌化。 | 目标收口：四项（OTA 链统一 / kernel 去词+词表 / os.* 形状+programs.json / docs 收口+债表门+文档门）全部完成，证据为 gate-scan strict 0、doc-gate 0 死链、debt-gate 88/115、10 项引擎门禁测试 PASS、lobos-verify PASS=12 FAIL=0。 | 清债轮A：C5/G25/G29/G30/G31/G36/G38 done（退避单源、R7 生命周期门、两套 manifest schema+校验、WebView 桥裁定+N-7、UI 命名清零、os.* 跨语言镜像、三向接线门）；顺带把 lodestar 修正：运行时交接文件目录 supervisor/ 与文档对齐。",

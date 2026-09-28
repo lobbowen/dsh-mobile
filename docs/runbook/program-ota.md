@@ -64,7 +64,7 @@
   同前缀的 `program-<version>.zip` 逐字节正常，且 CI 日志实证上传了 531 字节
   → **源对象没坏、发布也没坏**，坏的只是那一路的边缘缓存。
 - 设备侧因此把 cache-buster 写死在 `manifestUrl`（见 `ProgramOtaUpdater.kt` 的同名注释），
-  `KernelSelfCheck` 也复用同一 URL，取证路径与生产路径一致。
+  `ProgramOtaSelfCheck` 也复用同一 URL，取证路径与生产路径一致。
 - 结论：**任何人手工核验发布结果，必须带查询串**；看到 `{"probe":true}` 不代表发布失败。
   内核 zip 相反——文件名带版本、内容不可变，可以长缓存、可以断点续传。
 - **未结案**：CI 上传 manifest 时带了 `--cache-control=60`（见 `program-ota.yml` 的 Publish to Qiniu），

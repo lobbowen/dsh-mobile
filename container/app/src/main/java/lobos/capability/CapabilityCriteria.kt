@@ -31,7 +31,6 @@ object CapabilityCriteria {
 
     fun names(ctx: Context): DeviceNames = DeviceNames(
         packageName = ctx.packageName,
-        dpcComponent = "",
         accessibilityComponent = "${ctx.packageName}/${OsAccessibilityService::class.java.name}",
         notificationListenerComponent = "${ctx.packageName}/" +
             OsNotificationListenerService::class.java.name,

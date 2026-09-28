@@ -77,7 +77,7 @@
 >
 > **pair/status/forget 只要求 `base`**：否则未配对设备永远无法发起配对（能力先于配对
 > 会形成死锁）；`exec` 要求 `adb_shell`（= 已配对，判据 `files/adb/state.json` 存在，
-> 与 ProvisioningProbe / KernelSelfCheck 同一把尺子）。连接失败属运行时错误按
+> 与 ProvisioningProbe / ProgramOtaSelfCheck 同一把尺子）。连接失败属运行时错误按
 > `-32603` 原样带回，不冒充 `-32001`。
 
 ### 3.4 device_policy —— **已整体删除**

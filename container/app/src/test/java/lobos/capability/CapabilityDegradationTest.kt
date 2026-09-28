@@ -30,7 +30,6 @@ class CapabilityDegradationTest {
     private fun fresh(
         nowMs: Long = 1_000_000L,
         grants: Set<String> = ALL_GRANTS,
-        ownerAttempt: OwnerAttempt? = null,
         channel: ChannelProbe = ChannelProbe(ProbeOutcome.LIVE, 1_000_000L, "uid=2000"),
         programChecks: List<CheckItem> = listOf(CheckItem("bundle", true)),
     ): Evidence = Evidence(
@@ -39,7 +38,6 @@ class CapabilityDegradationTest {
         wirelessDebugOn = true,
         credentials = CredentialsState.PAIRED,
         channel = channel,
-        ownerAttempt = ownerAttempt,
         grants = grants,
         controlPlaneUp = true,
         programChecks = programChecks,
@@ -138,5 +136,36 @@ class CapabilityDegradationTest {
         val rows = steps(fresh(grants = noOverlay))
         assertEquals(StepStatus.DONE, rows.getValue("S4").status)
         assertEquals(StepStatus.ACTION, rows.getValue("S2").status)
+    }
+
+    @Test fun 未授权的判据必须说清adb试过没有() {
+        // 「未试先判」的文案侧案底：绿灯之外必须能分辨「还没试」与「试过但办不成」，
+        // 否则人看不出这项该由谁去办，诊断脚本也读不出归因。
+        val id = PermissionCatalog.SYSTEM_ALERT_WINDOW
+        val untried = CapabilityCatalog.rawJudge(id, Evidence(nowMs = 1_000_000L))
+        assertEquals(CapStatus.ACTION, untried?.status)
+        assertTrue("没实测过就写明 adb 未试：" + untried?.detail, untried?.detail?.contains("adb 未试") == true)
+        val tried = CapabilityCatalog.rawJudge(
+            id,
+            Evidence(
+                nowMs = 1_000_000L,
+                permissionAttempts = mapOf(
+                    id to SilentAttempt(AttemptOutcome.UNSUPPORTED, 999_000L, "appops not allowed"),
+                ),
+            ),
+        )
+        assertEquals(CapStatus.ACTION, tried?.status)
+        assertTrue("实测过就把账上的结局说在前面：" + tried?.detail,
+            tried?.detail?.contains(AttemptOutcome.UNSUPPORTED.human) == true)
+        // 实测成功但系统侧回读没授权 = ROM 回收：文案说「adb 已开」，绿灯仍然不给（读数即真）。
+        val revoked = CapabilityCatalog.rawJudge(
+            id,
+            Evidence(
+                nowMs = 1_000_000L,
+                permissionAttempts = mapOf(id to SilentAttempt(AttemptOutcome.SILENT_OK, 999_000L, "")),
+            ),
+        )
+        assertEquals(CapStatus.ACTION, revoked?.status)
+        assertTrue(revoked?.detail?.contains(AttemptOutcome.SILENT_OK.human) == true)
     }
 }
