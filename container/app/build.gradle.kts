@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "io.github.lobbowen.dshmobile"
+    namespace = "lobos"
     // compileSdk 必须 >= 35：依赖里的 androidx.core 1.15.0 / core-ktx 1.15.0 带有
     // AAR metadata 声明，要求使用方 compileSdk >= 35。原先是 34，导致 gradle 在
     // :app:checkDebugAarMetadata 阶段失败：
@@ -34,7 +34,7 @@ android {
     val appBridgeProtocol = (shellVer["bridgeProtocol"] as Number).toInt()
 
     defaultConfig {
-        applicationId = "io.github.lobbowen.dshmobile"
+        applicationId = "lobos.app"
         minSdk = 24
         // targetSdk 决定 SELinux 域：28 落在 untrusted_app_27，允许 exec app home。
         // 取舍与依据见 docs/adr/0001-android-execution-domain.md；link(2) 不在此豁免内，走自有原语。
@@ -90,9 +90,9 @@ android {
     // is a mutable property that could have been changed by this time
     // ApkSigningConfig 的这两个属性是 `var`，Kotlin 拒绝对可变属性做
     // 智能转换。用局部 val 绕开，同时也让"读环境变量"只发生一次。
-    val keystorePw = System.getenv("DSH_KEYSTORE_PASSWORD") ?: ""
-    val keyPw = System.getenv("DSH_KEY_PASSWORD") ?: keystorePw
-    val keyAliasName = System.getenv("DSH_KEY_ALIAS") ?: "dsh"
+    val keystorePw = System.getenv("LOBOS_KEYSTORE_PASSWORD") ?: ""
+    val keyPw = System.getenv("LOBOS_KEY_PASSWORD") ?: keystorePw
+    val keyAliasName = System.getenv("LOBOS_KEY_ALIAS") ?: "lobos"
 
     signingConfigs {
         if (hasReleaseKeystore) {
@@ -105,7 +105,7 @@ android {
                 // 那时整个构建已经等了很久（release 构建含 native 交叉编译）。
                 // 这里前置报错，失败得越早越好。
                 require(keystorePw.isNotEmpty()) {
-                    "检测到 keys/release.keystore，但 DSH_KEYSTORE_PASSWORD 为空。" +
+                    "检测到 keys/release.keystore，但 LOBOS_KEYSTORE_PASSWORD 为空。" +
                         "请设置该环境变量（CI: 由 secret 注入）。"
                 }
                 // V1/V2 都开：minSdk=24 的设备对 V2 支持良好，但 V1 保留可兼容
@@ -136,13 +136,13 @@ android {
     // 第一眼就要看到"这个包到底是用什么签的"。
     if (!hasReleaseKeystore) {
         logger.warn(
-            "[dsh-signing] ⚠ 未找到 ${releaseKeystore.path} —— 本次产物将使用 AGP 自动生成的 " +
+            "[lobos-signing] ⚠ 未找到 ${releaseKeystore.path} —— 本次产物将使用 AGP 自动生成的 " +
                 "debug 签名。后果：签名指纹每次都不同，新包无法覆盖安装到旧包上" +
                 "（INSTALL_FAILED_UPDATE_INCOMPATIBLE）。若这是发布构建，请配置密钥。" +
                 "本地可用 ./scripts/keygen-android-keystore.sh 生成。"
         )
     } else {
-        logger.lifecycle("[dsh-signing] 使用稳定签名: ${releaseKeystore.path}")
+        logger.lifecycle("[lobos-signing] 使用稳定签名: ${releaseKeystore.path}")
     }
 
     compileOptions {
@@ -204,7 +204,7 @@ android {
             // ↓ 直接读清单，不再硬编码文件名。
             //
             // 清单来源：.github/native-assets.txt —— 它是
-            // app/src/main/java/io/github/lobbowen/dshmobile/native/NativeAssetRegistry.kt
+            // app/src/main/java/lobos/native/NativeAssetRegistry.kt
             // 的**投影**（注册表是唯一事实来源）。
             //
             // 这样做的意义：加一个新的可执行资产时，只要改注册表 + 这份清单，

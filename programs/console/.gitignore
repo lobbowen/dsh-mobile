@@ -1,0 +1,7 @@
+# Lob OS 控制面板 Program
+node_modules/
+ui/dist/
+*.log
+*.tmp
+.cache/
+

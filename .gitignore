@@ -11,7 +11,7 @@ container/app/src/main/assets/node-bin/
 
 # 内核**不再随 APK 分发**（ADR-0005）：APK 内不允许出现内核资产。
 #
-# 所以这里**不再忽略任何内核包** —— 目的是让"有人把内核塞回 assets/kernel/"
+# 所以这里**不再忽略任何Program 包** —— 目的是让"有人把内核塞回 assets/program/"
 # 这件事**可见**：CI 的 APK 审计会因为"发现内核资产"直接报错，而不是被 ignore 静默吞掉。
 # （历史上这个文件曾让一个 1.2MB 的 baseline.zip 签进过仓库，正是 ignore 掩盖的结果。）
 
@@ -22,7 +22,7 @@ container/app/src/main/assets/npm/
 # OTA 发布包
 release/
 
-# 内核 feed 目录（由 scripts/build-kernel-feed.sh 产出，是**投递产物**而非源码）
+# Program feed 目录（投递产物而非源码；ADR-0005 后不再有本地 feed 脚本）
 #
 # 与服务端 feed 同理：它内容是「内核仓某 commit + 某个私钥」的函数，
 # 入库会立刻脱节，且每次构建字节都不同 → 无意义的 diff。
@@ -62,3 +62,6 @@ keys/*
 keystore.properties
 .env
 .env.*
+brand-scan-report.txt
+doc-gate-report.txt
+debt-gate-report.txt

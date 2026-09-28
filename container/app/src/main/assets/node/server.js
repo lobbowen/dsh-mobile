@@ -1,10 +1,10 @@
 'use strict';
 
 // ============================================================================
-//  安卓原生 Node 容器 —— 最小探针服务
+//  Lob OS 内置 Node 探针服务
 //  作用：证明 Node.js 已在安卓 bionic 环境原生跑通，并暴露运行时元信息
 //        （Node 版本 / LTS 栈 / OpenSSL-TLS 版本 / 架构）。
-//  后续塞 DSH 等负载时，把这份 server.js 换成你的入口即可；
+//  后续接入 Program 时，把这份 server.js 换成你的入口即可；
 //        端口、监听地址(127.0.0.1)、进程模型都保持不变。
 // ============================================================================
 
@@ -18,7 +18,7 @@ const url = require('url');
 // 最初的写法是一行：
 //     const PORT = parseInt(process.argv[2] || '3080', 10);
 //
-// 而 Android 侧（NodeRuntimeService.kt）是这么拉起来的：
+// 而 Android 侧（InstanceHost.kt）是这么拉起来的：
 //     ProcessBuilder(nodeBin, script, "--port", "3080")
 // 于是进程里实际的 argv 是：
 //     [0]=libnode.so  [1]=server.js  [2]="--port"  [3]="3080"
@@ -79,7 +79,7 @@ const server = http.createServer((req, res) => {
   if (parsed.pathname === '/api/version') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({
-      container: 'android-node-container',
+      container: 'lobos',
       node: process.version,                 // 例如 v24.21.0
       lts: process.release.lts || null,       // LTS 代号或 null
       platform: process.platform,             // android

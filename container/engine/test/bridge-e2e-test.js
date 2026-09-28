@@ -24,10 +24,13 @@ function call(cli, id, method, params) {
 (async () => {
   const srv = new BridgeServer({
     socketPath: sock,
-    // 设备已预置：base / device_owner / accessibility / adb_shell / kernel_update
+    // 设备已预置：base / accessibility / adb_shell / program_update
     // 未预置：manage_external_storage（故 storage 组不可用）、mediaprojection、notification_access
-    // build 组代表能力是 kernel_update；build_chain 已证伪、永不置位（methods.js:23），不得出现在预置里
-    deviceCapabilities: ['base', 'device_owner', 'accessibility', 'adb_shell', 'kernel_update'],
+    // build 组代表能力是 program_update；build_chain 已证伪、永不置位（methods.js），不得出现在预置里
+    deviceCapabilities: ['base', 'accessibility', 'adb_shell', 'program_update'],
+    // 本测试自声明一个「全组」测试载荷：授权表按 Program 判（复检 AUD-G35），
+    // 与被测的真实 console Program 权限无关，避免测试耦合它的最小权限集。
+    programRequires: { test: ['app_control', 'ui_automation', 'shell', 'storage', 'build', 'notification', 'system'] },
     auditLogPath: audit,
   });
   await srv.start();
@@ -37,18 +40,18 @@ function call(cli, id, method, params) {
 
   const hs = await new Promise((resolve) => {
     cli.onMessage((m) => { if (m.id === 1) resolve(m); });
-    cli.send(proto.handshakeRequest(1, ['bridge:app_control', 'bridge:notification', 'bridge:device_policy', 'bridge:storage', 'bridge:build']));
+    cli.send(proto.handshakeRequest(1, ['bridge:app_control', 'bridge:notification', 'bridge:storage', 'bridge:build'], 'test'));
   });
-  check('握手返回 capabilities 含 device_owner', Array.isArray(hs.result.capabilities) && hs.result.capabilities.includes('device_owner'));
+  check('握手返回 capabilities 含 accessibility', Array.isArray(hs.result.capabilities) && hs.result.capabilities.includes('accessibility'));
   check('握手 groups 含 bridge:app_control', hs.result.groups.includes('bridge:app_control'));
   check('握手 groups 不含缺能力的 storage', !hs.result.groups.includes('bridge:storage'));
-  check('握手 groups 含 kernel_update 解锁的 build', hs.result.groups.includes('bridge:build'));
+  check('握手 groups 含 program_update 解锁的 build', hs.result.groups.includes('bridge:build'));
 
   const np = await call(cli, 2, 'notif.post', { title: 'hi', text: 'there' });
   check('notif.post（base）成功', np.result && np.result.posted === true);
 
-  const ln = await call(cli, 3, 'policy.lockNow', {});
-  check('policy.lockNow（device_owner）成功', ln.result && ln.result.locked === true);
+  const inst = await call(cli, 3, 'app.install', { apkPath: '/tmp/x.apk' });
+  check('app.install（base，特权审计）成功', inst.result && inst.result.installing === '/tmp/x.apk');
 
   const fw = await call(cli, 4, 'fs.write', { path: '/x', content: 'y' });
   check('fs.write 缺 manage_external_storage 被拒(-32001)', fw.error && fw.error.code === -32001);
@@ -71,17 +74,17 @@ function call(cli, id, method, params) {
   const ss = await call(cli, 9, 'ui.screenshot', {});
   check('ui.screenshot 缺 mediaprojection 被拒(-32001)', ss.error && ss.error.code === -32001);
 
-  // sys.setTimeZone 与 sys.setTime 同属 system 组、同需 device_owner
-  const tz = await call(cli, 10, 'sys.setTimeZone', { timeZone: 'Asia/Shanghai' });
-  check('sys.setTimeZone（device_owner）成功', tz.result && tz.result.ok === true);
+  // system 组（代表能力 base）：sys.info 是设备事实读数，组级与方法级门禁都走 base
+  const si = await call(cli, 10, 'sys.info', {});
+  check('sys.info（system 组，base）成功', si.result && si.result.model === 'mock-android');
 
-  // build 组由 kernel_update 解锁（曾错绑已证伪的 build_chain）——实调一次坐实这条绑定
-  const ks = await call(cli, 11, 'build.kernelStatus', {});
-  check('build.kernelStatus（kernel_update）返回 mock 版本契约',
+  // build 组由 program_update 解锁（曾错绑已证伪的 build_chain）——实调一次坐实这条绑定
+  const ks = await call(cli, 11, 'build.programStatus', {});
+  check('build.programStatus（program_update）返回 mock 版本契约',
     ks.result && ks.result.current === '0.1.0-android.1' && Array.isArray(ks.result.installed));
 
   const log = fs.existsSync(audit) ? fs.readFileSync(audit, 'utf8') : '';
-  check('审计日志含 policy.lockNow（特权）', log.includes('policy.lockNow'));
+  check('审计日志含 app.install（特权）', log.includes('"method":"app.install"'));
   check('审计日志含握手记录', log.includes('handshake'));
 
   cli.close();

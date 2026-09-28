@@ -34,7 +34,7 @@ function uploadToken(ak, sk, bucket, key, ttlSec) {
 }
 
 function multipart(fields, fileField, fileName, fileBuf, mime) {
-  const B = '----dsh' + crypto.randomBytes(8).toString('hex');
+  const B = '----lobos' + crypto.randomBytes(8).toString('hex');
   const parts = [];
   for (const [k, v] of Object.entries(fields)) {
     parts.push(Buffer.from('--' + B + '\r\nContent-Disposition: form-data; name="' + k + '"\r\n\r\n' + v + '\r\n'));

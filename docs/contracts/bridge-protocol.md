@@ -7,7 +7,7 @@
 
 ## 1. 传输
 
-- **Unix 域套接字（UDS）**：**Linux 抽象命名空间**，名为 `dsh_hostbridge`（无文件系统路径，故无 `chmod` 可言）。内核侧 `net.connect('\0dsh_hostbridge')`（前导 NUL）。
+- **Unix 域套接字（UDS）**：**Linux 抽象命名空间**，名为 `lobos_hostbridge`（无文件系统路径，故无 `chmod` 可言）。内核侧 `net.connect('\0lobos_hostbridge')`（前导 NUL）。
   > ⚠ 抽象命名空间 socket 不做 UID 鉴权：当前实现**没有对端认证**，隔离完全依赖 SELinux 域。这是已知缺口，见 README §4。
 - 协议：**JSON-RPC 2.0**（请求/响应/通知）。
 - 连接由 `:node` 进程（内核）主动发起；HostBridge（Kotlin Service）监听。
@@ -16,7 +16,7 @@
 ## 2. 版本协商
 
 - 连接建立后，内核发送 `handshake`，携 `protocol` 版本与 `requires` 能力清单。
-- HostBridge 回 `capabilities`：设备实际已预置的能力集合（取决于 Device Owner / 无障碍 / ADB 配对 / 特殊权限的开启状态）。
+- HostBridge 回 `capabilities`：设备当前**已开启**的能力集合（取决于无障碍 / 电池白名单 / 通知使用权 / ADB 配对 / 特殊权限状态）。
 - 内核 `requires` 超出 `capabilities` → 桥拒绝对应方法调用，其余正常。
 
 ## 3. 能力分组与方法表（第一版）
@@ -31,13 +31,13 @@
 | `app.stop` | `pkg` | 基础 | ✅（`audit=false`，按 §5） |
 | `app.listInstalled` | — | 基础 | ✅ |
 | `app.openUrl` | `url` | 基础 | ✅ |
-| `app.install` | `apkPath`（包内/下载） | **Device Owner**（静默安装） | ✅ `PackageInstaller` |
-| `app.uninstall` | `pkg` | **Device Owner**（静默卸载） | ✅ `PackageInstaller.uninstall` |
-| `app.grantPermission` | `pkg`, `perm` | **Device Owner** | ✅ |
+| `app.install` | `apkPath`（包内/下载） | 基础（**用户点确认**） | ✅ `PackageInstaller` + 系统确认弹窗 |
+| `app.uninstall` | `pkg` | 基础（**用户点确认**） | ✅ `PackageInstaller.uninstall` |
+| ~~`app.grantPermission`~~ | — | — | **已删除**（Device Owner 能力面随台账 §J 整体退出） |
 
-> ⚠ 装箱注意：`DevicePolicyManager` **没有** `installPackage` / `uninstallPackage` 方法 ——
-> 静默装卸只能走 `PackageInstaller`（`createSession` → `openWrite` → `commit`），
-> 异步结果经 `PendingIntent` 回 `PackageInstallReceiver`。
+> ⚠ 装箱注意：安装走 `PackageInstaller`（`createSession` → `openWrite` → `commit`），
+> 结果经 `PendingIntent` 回 `PackageInstallReceiver`；**每一步都由用户在系统弹窗确认**，
+> 不提供任何静默/免确认路径。
 
 ### 3.2 ui_automation（UI 自动化 / 无人值守操作）
 | 方法 | 参数 | 依赖 | 落地 |
@@ -49,7 +49,7 @@
 | `ui.screenshot` | `width?`, `height?`, `inline?` | **MediaProjection** | ✅ 默认落盘 PNG；`inline=true` 内联 base64 |
 | `ui.waitFor` | `selector`, `timeoutMs?`, `intervalMs?` | Accessibility | ✅ 条件轮询 |
 
-> **`ui.screenshot` 的授权语义与 Device Owner 本质不同**：MediaProjection 授权是**每次会话**的，
+> **`ui.screenshot` 的授权语义是"每次会话"的**：MediaProjection 授权必须由用户在系统弹窗点一次，
 > 必须由用户在系统弹窗点一次「开始录制」，**无法预置**。授权结果缓存于
 > `files/screen-capture-grant.json`（Intent 的 Parcel 字节流 + base64），进程重启后自动复用。
 > 未授权时返回 `-32001` 并附「需先在 App 内授权」的指引。
@@ -80,20 +80,13 @@
 > 与 ProvisioningProbe / KernelSelfCheck 同一把尺子）。连接失败属运行时错误按
 > `-32603` 原样带回，不冒充 `-32001`。
 
-### 3.4 device_policy（系统策略，Device Owner）
-| 方法 | 参数 | 依赖 | 落地 |
-|---|---|---|---|
-| `policy.setPassword` | `pwd`, `type` | **Device Owner** | ⚠️ API 30 起废弃，多数设备不生效 |
-| `policy.lockNow` | — | **Device Owner** | ✅ |
-| `policy.wipe` | `flags?`, `reason?` | **Device Owner** | ✅ API 29+ 走 `wipeData(flags, reason)` |
-| `policy.setKiosk` | `pkg` / `packages[]`, `enable` | **Device Owner** | ✅ API 34+ 补 `setLockTaskFeatures` |
-| `policy.addUserRestriction` | `key` | **Device Owner** | ✅ |
-| `sys.setTime` | `epochMs` | **Device Owner** | ✅ 需 `AUTO_TIME=0`（API 28+） |
-| `sys.setTimeZone` | `timeZone`（Olson ID） | **Device Owner** | ✅ 需 `AUTO_TIME_ZONE=0`（API 28+） |
-| `sys.reboot` | — | **Device Owner** | ✅ 单参 `reboot(ComponentName)` |
+### 3.4 device_policy —— **已整体删除**
 
-> ⚠ 装箱注意：`dpm.reboot` 在 android.jar 里**只有单参版本**（两参版是桌面 Java 的）。
-> `setTime` / `setTimeZone` 是 **API 28+**，且必须先关自动时间/时区，否则静默无效。
+> 本组（`policy.setPassword/lockNow/wipe/setKiosk/addUserRestriction`）与 `sys.setTime/setTimeZone/sys.reboot`
+> 全部以 **Device Owner** 为前提。按 `docs/plans/os-v4-execution-plan.md` 台账 §J，Device Owner **能力与路径都不保留**，
+> 因此这些方法已从桥删除；调用它们会得到 `ERR_METHOD_NOT_FOUND`。
+>
+> 替代路径：时间/时区由用户或系统自行管理；reboot/擦除/密码/kiosk 属受管设备能力，本产品不提供。
 
 ### 3.5 storage（存储）
 | 方法 | 参数 | 依赖 | 落地 |
@@ -114,10 +107,10 @@
 ### 3.6 build（内核安装 —— **不是**编译）
 | 方法 | 参数 | 依赖 | 落地 |
 |---|---|---|---|
-| `build.kernelInstall` | `checkOnly?` | `kernel_update` | ✅ **唯一入口**：从 OTA 源安装/升级 |
-| `build.kernelStatus` | — | `kernel_update` | ✅ |
+| `build.programInstall` | `checkOnly?` | `program_update` | ✅ **唯一入口**：从 OTA 源安装/升级 |
+| `build.programStatus` | — | `program_update` | ✅ |
 | `build.apk` | — | — | ⚠️ 废弃，返回带迁移指引的 `-32602` |
-| `build.status` | — | `kernel_update` | ✅（旧名，保留兼容） |
+| `build.status` | — | `program_update` | ✅（旧名，保留兼容） |
 
 > **语义已修正**：本组不再是「内置编译工具链」。那个方案**已实测证伪**——
 > Google Maven 上没有 aarch64 版 aapt2（`linux-aarch64`/`linux-arm64` 均 404），
@@ -129,14 +122,14 @@
 > 来源一多就会出现多份"安装语义"，且其中任何一条都能**绕过版本下限**。
 > 验签由 Node 侧完成（Android 要 API 33+ 才有 Ed25519，而 minSdk=24）。
 
-**`build.kernelInstall` 请求 / 响应：**
+**`build.programInstall` 请求 / 响应：**
 
 ```jsonc
 // 只检查（不下载、不安装）—— "检查更新"用
-{ "method": "build.kernelInstall", "params": { "checkOnly": true } }
+{ "method": "build.programInstall", "params": { "checkOnly": true } }
 
 // 安装或升级到 feed 上的最新版
-{ "method": "build.kernelInstall", "params": {} }
+{ "method": "build.programInstall", "params": {} }
 ```
 
 ```jsonc
@@ -165,11 +158,11 @@
 > **`restartRequired` 刻意由调用方处理**：本方法**不**自己重启进程 ——
 > 重启会让调用方（内核自己）在半途消失，无法收到回执。
 
-**channel（通道）约定**：设备读 `<baseUrl>/<rolling>/kernel-manifest.json`，
-其中 `rolling = kernel-<channel>`，通道由 `container/app/src/main/assets/kernel-feed.json` 的
-`channel` 决定（`canary` 灰度 / `stable` 生产）。完整链路见 [kernel-ota.md](../runbook/kernel-ota.md)。
+**channel（通道）约定**：设备读 `<baseUrl>/<rolling>/program-manifest.json`，
+其中 `rolling = program-<channel>`，通道由 `container/app/src/main/assets/program-feed.json` 的
+`channel` 决定（`canary` 灰度 / `stable` 生产）。完整链路见 [program-ota.md](../runbook/program-ota.md)。
 
-本地 feed 与 APK 内置基线已于 **ADR-0005** 收敛删除；`build.kernelInstall` 是唯一安装入口。
+本地 feed 与 APK 内置基线已于 **ADR-0005** 收敛删除；`build.programInstall` 是唯一安装入口。
 
 ### 3.7 notification（通知）
 | 方法 | 参数 | 依赖 | 落地 |
@@ -182,7 +175,6 @@
 |---|---|---|---|
 | `sys.info` | — | 基础（设备/API level） | ✅ |
 | `sys.nativeAssets` | `walkProbes?`（默认 `true`） | 基础（只读探测） | ✅ |
-| `sys.setTime` / `sys.setTimeZone` / `sys.reboot` | 见 §3.4 | **Device Owner** | ✅ |
 
 #### `sys.nativeAssets` —— 原生资产自检
 
@@ -248,6 +240,6 @@ W^X/exec 这条链的失败几乎全部发生在真机，而容器侧的诊断�
   清单以 `container/engine/src/bridge/methods.js` 的 `audit: true` 为准（由
   `bridge-methods-crosslang-test.js` 与 Kotlin `MethodDef` 双向钉住）：
   `app.install/uninstall/grantPermission`、`ui.tap/swipe/inputText/screenshot`、
-  `shell.pair/exec/forget`、`policy.*`（setPassword/lockNow/wipe/setKiosk/addUserRestriction）、
-  `fs.write/mkdir`、`build.kernelInstall/apk`、`notif.read`、**`notif.post`**（外发内容可被用作伪装通道，故留痕）。
-- 审计日志对内核包更新保持持久（不随内核包切换而丢）。
+  `shell.pair/exec/forget`、
+  `fs.write/mkdir`、`build.programInstall/apk`、`notif.read`、**`notif.post`**（外发内容可被用作伪装通道，故留痕）。
+- 审计日志对Program 包更新保持持久（不随Program 包切换而丢）。

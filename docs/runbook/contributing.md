@@ -13,7 +13,7 @@
 | `container/app/**`（Kotlin / assets / res / gradle） | `fast-apk.yml` | 分钟级 | 推 `main` 或 `fast-*` tag 触发 |
 | `container/native/**` | `fast-apk.yml` | 分钟级 | 原生桥源码 |
 | `container/engine/**` | `ci.yml` 的 container job | 分钟级 | **不触发** fast-apk（不出 APK） |
-| `kernel/**`（内核 + 面板） | `ci.yml` 的 kernel job | 分钟级 | **不重编 APK**；内核经 OTA 分发 |
+| `programs/**`（console Program + 面板 UI） | `ci.yml` 的 console job | 分钟级 | **不重编 APK**；Program 经 OTA 分发 |
 | `scripts/build-node-android.sh` | `build-apk.yml`（**手动**，push 不触发） | **2~3 小时** | 只有真要重编 Node 才走 |
 | 升级 Node 版本 | `build-apk.yml`（手动）+ release-admin 的 pin job | **2~3 小时** | 编完必须固化，见 §3 |
 | `docs/**`、`*.md` | 不触发构建 | — | 纯文档 |
@@ -31,7 +31,7 @@ W^X 下 `filesDir` 里的一切**不可 execve**：`npm`/`dsh` 的 bin shim 是�
 - dsh 子命令：`NativeManager.dshCliInvocation()`（插件域经 `resolveDshCli` 注入）。
 - 装机成功后 `config.command` 会被写回并落盘 —— 新增消费方读它，不要再猜路径。
 
-行为门禁：`kernel/test/npm-contract-chain-test.js`。
+行为门禁：`container/engine/test/test-chain-completeness-test.js`。
 
 ---
 
@@ -179,5 +179,5 @@ put("LD_LIBRARY_PATH", libSearchPath)
 
 ## 9. 一句话总结
 
-> **改 App 代码走 fast-apk（分钟级）；改内核走 ci.yml 的 kernel job；只有动 Node 编译脚本才走 build-apk（小时级）。
+> **改 App 代码走 fast-apk（分钟级）；改 console Program 走 ci.yml 的 console job；只有动 Node 编译脚本才走 build-apk（小时级）。
 > 拿不准就问自己：这会改变 libnode.so 吗？**

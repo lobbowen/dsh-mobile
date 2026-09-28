@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
-const REGISTRY = path.join(ROOT, 'container/app/src/main/java/io/github/lobbowen/dshmobile/native/NativeAssetRegistry.kt');
+const REGISTRY = path.join(ROOT, 'container/app/src/main/java/lobos/native/NativeAssetRegistry.kt');
 const OUT = path.join(ROOT, '.github/native-assets.txt');
 const OUT_CAPS = path.join(ROOT, '.github/native-capabilities.txt');
 
@@ -81,7 +81,7 @@ const lines = [
   '# 随包原生资产清单 —— 由 CI 与构建脚本共同读取',
   '#',
   '# ⚠ 本文件由 scripts/gen-native-assets.js 生成，**请勿手改**。',
-  '#   来源：container/app/src/main/java/io/github/lobbowen/dshmobile/native/NativeAssetRegistry.kt',
+  '#   来源：container/app/src/main/java/lobos/native/NativeAssetRegistry.kt',
   '#   CI 会运行生成器并 `git diff --exit-code` 校验。',
   '#',
   '# 格式：每行一个文件名（不含 lib/<abi>/ 前缀），空行与 # 开头的行忽略。',
@@ -96,7 +96,7 @@ fs.writeFileSync(OUT, lines.join('\n'));
 // ── 小件能力件清单（CAPABILITY + 注册表外的 node-pty）──
 // node-pty 刻意**不**进注册表：它不是 NativeExecutable（由 node-gyp 编成 .node 再改名投
 // jniLibs），进注册表会把它纳入 NativePreparer 探针与 native-assets 投影。故在此单点声明。
-const EXTRA_CAPS = [{ id: 'node-pty', libName: 'libdshpty.so', tier: 'soft' }];
+const EXTRA_CAPS = [{ id: 'node-pty', libName: 'liblobospty.so', tier: 'soft' }];
 const caps = [...parseCapability(src), ...EXTRA_CAPS];
 const TIER_ORDER = ['self-c', 'upstream', 'soft'];
 const TIER_DESC = {
@@ -108,7 +108,7 @@ const capLines = [
   '# 小体积原生能力件清单 —— 由构建 / 打包审计脚本与测试共同读取',
   '#',
   '# ⚠ 本文件由 scripts/gen-native-assets.js 生成，**请勿手改**。',
-  '#   来源：container/app/src/main/java/io/github/lobbowen/dshmobile/native/NativeAssetRegistry.kt',
+  '#   来源：container/app/src/main/java/lobos/native/NativeAssetRegistry.kt',
   '#        的 CAPABILITY（外加注册表外的 node-pty，见生成器内的说明）。',
   '#   CI 会运行生成器并 `git diff --exit-code` 校验。',
   '#',

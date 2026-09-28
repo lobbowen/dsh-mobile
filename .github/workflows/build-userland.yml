@@ -7,7 +7,7 @@ name: Build Userland (C 层工具供给)
 # 内核只持有 **通道锚 + 信任根**，按清单取件并核验 —— 因此**加件/升级只发清单，内核不动**；
 # 工具随内核启动投放上机，**不需要重装 APK**。
 #
-# 为什么必须动态：容器全部 Linux 语义（link(2)/tmp/祖先目录）靠 libdshposix 经 LD_PRELOAD 落地，
+# 为什么必须动态：容器全部 Linux 语义（link(2)/tmp/祖先目录）靠 liblobosposix 经 LD_PRELOAD 落地，
 # 静态件会绕过整层（2026-09-27 对 bash/rg 的真机定罪）。verify-artifact 把这条钉住。
 
 on:

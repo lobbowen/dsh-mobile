@@ -43,7 +43,7 @@ function generate(name) {
   return {
     privatePem: privateKey.export({ type: 'pkcs8', format: 'pem' }),
     jwk: publicKey.export({ format: 'jwk' }),
-    name: name || 'dsh@device',
+    name: name || 'lobos@device',
   };
 }
 
@@ -52,7 +52,7 @@ function loadOrCreate(file, name) {
   if (fs.existsSync(file)) {
     const privatePem = fs.readFileSync(file, 'utf8');
     const jwk = crypto.createPublicKey(privatePem).export({ format: 'jwk' });
-    return { privatePem, jwk, name: name || 'dsh@device' };
+    return { privatePem, jwk, name: name || 'lobos@device' };
   }
   const k = generate(name);
   fs.writeFileSync(file, k.privatePem, { mode: 0o600 });
@@ -61,7 +61,7 @@ function loadOrCreate(file, name) {
 
 /** adb 公钥串：`<base64 524B blob> <name>`。 */
 function pubkeyString(key, name) {
-  return publicKeyBlob(key.jwk).toString('base64') + ' ' + (name || key.name || 'dsh@device');
+  return publicKeyBlob(key.jwk).toString('base64') + ' ' + (name || key.name || 'lobos@device');
 }
 
 /** ADB token 签名（token 即 SHA-1 摘要；原始 PKCS#1 私钥运算）。返回 256B。 */

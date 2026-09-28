@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "default": "24.21.0",
+  "npm": "11.19.0",
   "abi": "arm64-v8a",
   "ota": {
     "baseUrl": "https://REPLACE_WITH_YOUR_OTA_HOST/node-container/releases",

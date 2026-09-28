@@ -7,13 +7,13 @@ const crypto = require('crypto');
 const { canonical } = require('./sign');
 
 /**
- * 验签单个 kernel.json。
+ * 验签单个 program-manifest.json。
  * @returns {boolean}
  */
-function verifyManifest(publicKeyPem, kernelJson, signatureB64) {
+function verifyManifest(publicKeyPem, manifestJson, signatureB64) {
   if (!signatureB64) return false;
   try {
-    const data = Buffer.from(canonical(kernelJson), 'utf8');
+    const data = Buffer.from(canonical(manifestJson), 'utf8');
     const sig = Buffer.from(signatureB64, 'base64');
     return crypto.verify(null, data, publicKeyPem, sig);
   } catch (_e) {

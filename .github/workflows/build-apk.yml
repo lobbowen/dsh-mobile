@@ -1,4 +1,4 @@
-name: Build Android Node Container APK
+name: Build Lob OS APK
 
 # 这个工作流存在的意义：CI 运行器有完整的公网（能访问 dl.google.com），
 # 而本仓库作者所在的沙箱环境外网被白名单限制、无法下载 Android SDK/NDK。
@@ -185,7 +185,7 @@ jobs:
       # 这里原先的写法是「openssl 退码 0 就算有效，否则打一条 ::warning:: 继续出包」——
       # 坏锚点被焊进 APK 后，所有设备对每个内核包都判 signature-invalid，而这条链是绿的。
       # 且「退码 0」并不回答算法问题：RSA 公钥一样能被 openssl pkey -pubin 读成功。
-      # （与签名私钥的**配对**校验在 kernel-ota 那条链，只有它拿得到私钥。）
+      # （与签名私钥的**配对**校验在 program-ota 那条链，只有它拿得到私钥。）
       # ---------------------------------------------------------------------------
       - name: Ensure welded OTA public key anchor
         id: anchor
@@ -390,7 +390,7 @@ jobs:
         id: nodecache
         uses: actions/cache@v4
         with:
-          path: /tmp/dsh-node-cache
+          path: /tmp/lobos-node-cache
           key: node-android-${{ steps.nodever.outputs.tag }}-${{ hashFiles('scripts/build-node-android.sh') }}
 
       - name: Restore cached Node binary if present
@@ -401,8 +401,8 @@ jobs:
           # （不是 assets！原因见 build-node-android.sh 里的 W^X 说明）
           mkdir -p container/app/src/main/jniLibs/arm64-v8a
           DEST="container/app/src/main/jniLibs/arm64-v8a/libnode.so"
-          if [ -f /tmp/dsh-node-cache/node ]; then
-            cp -f /tmp/dsh-node-cache/node "$DEST"
+          if [ -f /tmp/lobos-node-cache/node ]; then
+            cp -f /tmp/lobos-node-cache/node "$DEST"
             chmod +x "$DEST"
             echo "cache-hit=yes" >> "$GITHUB_OUTPUT"
             echo "[ok] 复用已编译的 node 二进制，跳过 3~4 小时交叉编译："
@@ -428,8 +428,8 @@ jobs:
             for a in $ASSETS; do
               [ "$a" = "libnode.so" ] && continue   # 本体已在上方恢复
               D="container/app/src/main/jniLibs/arm64-v8a/$a"
-              if [ -f "/tmp/dsh-node-cache/$a" ]; then
-                cp -f "/tmp/dsh-node-cache/$a" "$D"
+              if [ -f "/tmp/lobos-node-cache/$a" ]; then
+                cp -f "/tmp/lobos-node-cache/$a" "$D"
                 chmod +x "$D"
                 echo "[ok] 连带恢复 $a:"
                 ls -la "$D"
@@ -471,7 +471,7 @@ jobs:
             # 无 restore-keys ⇒ 能走到这里只可能是精确命中，即当前编译脚本的产物。
             # （此前这里是"回退命中打一条 warn 继续用"，见上方 Cache 步骤的说明。）
             echo "[ok] 精确命中：复用的二进制由当前 build-node-android.sh 产出（形态由下游 Gate 判）。"
-            SAVED_KEY="$(cat /tmp/dsh-node-cache/.cache-key 2>/dev/null || echo '<unknown>')"
+            SAVED_KEY="$(cat /tmp/lobos-node-cache/.cache-key 2>/dev/null || echo '<unknown>')"
             echo "       缓存条目 key: $SAVED_KEY"
           else
             echo "cache-hit=no" >> "$GITHUB_OUTPUT"
@@ -515,13 +515,13 @@ jobs:
         if: steps.restorenode.outputs.cache-hit != 'yes' && steps.nodebuild.outcome == 'success'
         run: |
           echo "=== 保存 Node 产物到缓存目录 ==="
-          mkdir -p /tmp/dsh-node-cache
+          mkdir -p /tmp/lobos-node-cache
           if [ ! -f out/Release/node ]; then
             echo "[warn] out/Release/node 不存在，跳过缓存保存。"
             exit 0
           fi
-          cp -f out/Release/node /tmp/dsh-node-cache/node
-          chmod +x /tmp/dsh-node-cache/node
+          cp -f out/Release/node /tmp/lobos-node-cache/node
+          chmod +x /tmp/lobos-node-cache/node
 
           # 连带保存全部随包依赖（清单驱动）。
           # 它们是 node 的运行期动态依赖、且不在 Android 系统里，必须随包提供。
@@ -533,11 +533,11 @@ jobs:
           for a in $ASSETS; do
             SRC="container/app/src/main/jniLibs/arm64-v8a/$a"
             if [ "$a" = "libnode.so" ]; then
-              # 本体已在上面以 /tmp/dsh-node-cache/node 的形式存过（保持既有缓存键不变，
+              # 本体已在上面以 /tmp/lobos-node-cache/node 的形式存过（保持既有缓存键不变，
               # 避免所有历史缓存失效）
               echo "[ok] $a 已作为 node 缓存项保存"
             elif [ -f "$SRC" ]; then
-              cp -f "$SRC" "/tmp/dsh-node-cache/$a"
+              cp -f "$SRC" "/tmp/lobos-node-cache/$a"
               echo "[ok] 连带保存 $a ($(stat -c%s "$SRC") 字节)"
             else
               echo "[warn] $SRC 不存在，缓存里将没有 $a。"
@@ -546,9 +546,9 @@ jobs:
           done
           # 记下产出这份缓存时的 key + run id，供下次区分"精确命中/回退命中"。
           echo "node-android-${{ steps.nodever.outputs.tag }}-${{ hashFiles('scripts/build-node-android.sh') }}:${GITHUB_RUN_ID}" \
-            > /tmp/dsh-node-cache/.cache-key
-          ls -la /tmp/dsh-node-cache/
-          du -sh /tmp/dsh-node-cache/ 2>/dev/null || true
+            > /tmp/lobos-node-cache/.cache-key
+          ls -la /tmp/lobos-node-cache/
+          du -sh /tmp/lobos-node-cache/ 2>/dev/null || true
           echo "[ok] 已写入缓存。即使后续 gradle 步骤失败，这份 Node 二进制也能被下次运行复用。"
 
       - name: Verify node binary is in place (pre-gradle gate)
@@ -666,7 +666,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: android-node-container-apk
+          name: lobos-apk
           path: container/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
@@ -684,7 +684,7 @@ jobs:
           APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)" \
             || { echo "[error] 没有可核验的 APK —— 门禁不许空跑"; exit 1; }
           ARGS=(--require-stable)
-          [ -z "${DSH_APK_CERT_FILE:-}" ] || ARGS+=(--cert "$DSH_APK_CERT_FILE")
+          [ -z "${LOBOS_APK_CERT_FILE:-}" ] || ARGS+=(--cert "$LOBOS_APK_CERT_FILE")
           bash scripts/verify-apk-signing.sh "$APK" "${ARGS[@]}"
 
       # ---------------------------------------------------------------------------
@@ -737,7 +737,7 @@ jobs:
           # 这条链路的产物由 Actions artifact 保留）。
           # 本步没有 set -e（见上方版本门禁那条注释），所以显式判宿主退出码。
           bash scripts/gh-release-upload.sh "$TAG" \
-            --title "DSH Mobile APK (latest)" --notes "自动构建产物，持续覆盖更新。" \
+            --title "Lob OS APK (latest)" --notes "自动构建产物，持续覆盖更新。" \
             "$APK" version.json \
             || { echo "::error title=发布失败::上方宿主已说明哪一步没成 —— 不许把这一步当发布成功。"; exit 1; }
           echo "=== 发布完成 ==="
@@ -884,7 +884,7 @@ jobs:
             echo "wfvalidate  : ${{ steps.wfvalidate.outcome }}"
             # enginetests 紧跟在 validate 之后，是"秒级快速失败"的关键一环，必须登记 ——
             # 漏了它就会把"容器引擎测试失败"误报成"validate-workflow 失败"（真实踩过）。
-            # W6 门禁（kernel/test/workflow-parse-test.js）检查本清单与正常路径那份逐项一致。
+            # W6 门禁（programs/console/test/workflow-parse-test.js）检查本清单与正常路径那份逐项一致。
             echo "enginetests : ${{ steps.enginetests.outcome }}"
             echo "hbstart     : ${{ steps.hbstart.outcome }}"
             echo "ping        : ${{ steps.ping.outcome }}"

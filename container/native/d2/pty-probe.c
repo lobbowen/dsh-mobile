@@ -1,4 +1,4 @@
-/* libdshptyprobe —— 安卓真机 PTY 能力探针（纯 C，静态，无 NAPI）。
+/* liblobosptyprobe —— 安卓真机 PTY 能力探针（纯 C，静态，无 NAPI）。
  *
  * 目的（一次 exec 回答 node-pty 移植的路线问题）：
  * untrusted_app 域能否走通 openpt 链 —— open("/dev/ptmx") → grantpt →

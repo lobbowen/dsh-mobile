@@ -1,0 +1,7 @@
+{
+  "name": "lobos-program-pi",
+  "version": "0.1.0",
+  "private": true,
+  "main": "bin/pi.js",
+  "description": "第二个载荷：验证多 Program 不改变 Android 观察面"
+}

@@ -8,7 +8,7 @@ const os = require('os');
 const path = require('path');
 const http = require('http');
 const { OtaEngine } = require('../src/ota-engine');
-const { packBundle } = require('../src/kernel-bundle');
+const { packBundle } = require('../src/program-bundle');
 const makeRunner = require('./harness');
 
 const { check, finish } = makeRunner('ota-engine');
@@ -18,9 +18,9 @@ const kpGood = crypto.generateKeyPairSync('ed25519', { privateKeyEncoding: { typ
 function makeSrc(tag) {
   const src = fs.mkdtempSync(path.join(os.tmpdir(), 'osrc-' + tag + '-'));
   fs.mkdirSync(path.join(src, 'bin'), { recursive: true });
-  fs.writeFileSync(path.join(src, 'bin', 'dsh-supervisor'), '#!/usr/bin/env node\n');
+  fs.writeFileSync(path.join(src, 'bin', 'panel'), '#!/usr/bin/env node\n');
   fs.mkdirSync(path.join(src, 'ui', 'dist'), { recursive: true });
-  fs.writeFileSync(path.join(src, 'ui', 'dist', 'supervisor.html'), '<html></html>');
+  fs.writeFileSync(path.join(src, 'ui', 'dist', 'console.html'), '<html></html>');
   return src;
 }
 
@@ -100,7 +100,7 @@ function httpGetFor(srv) {
   eng.apply(goodManifest.version, goodZip);
   check('应用后 currentVersion = 2.0.0', eng.currentVersion() === '2.0.0');
   check('应用后 installedVersions 含 2.0.0', eng.installedVersions().includes('2.0.0'));
-  check('应用后 kernel.json 落盘', fs.existsSync(path.join(base, 'kernel', '2.0.0', 'kernel.json')));
+  check('应用后 program-manifest.json 落盘', fs.existsSync(path.join(base, 'programs', 'console', '2.0.0', 'program-manifest.json')));
   // 结构性：apply 仅对已验证包调用 —— 用「未验签的坏包」证伪这条通路。
   let badApplyThrew = false;
   try { eng.apply('9.9.9', Buffer.from('not-a-zip')); } catch { badApplyThrew = true; }

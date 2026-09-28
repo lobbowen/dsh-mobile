@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "runtime.json（容器写、内核读，schema 2）",
+  "title": "runtime.json（OS 原生写、Program 只读，schema 2）",
   "type": "object",
   "required": [
     "schema",

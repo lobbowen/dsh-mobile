@@ -26,18 +26,18 @@ const kt = collect(path.join(ROOT, 'container', 'app'), (p) => p.endsWith('.kt')
 for (const f of kt) if (AGENT.test(fs.readFileSync(f, 'utf8'))) problems.push('R1 容器 Kotlin 含 Agent 产品名: ' + rel(f));
 
 // R2：内核非测试代码不得 require 到 container/
-const kj = collect(path.join(ROOT, 'kernel'), (p) => p.endsWith('.js') && !rel(p).startsWith('kernel/test/'));
+const kj = collect(path.join(ROOT, 'programs/console'), (p) => p.endsWith('.js') && !rel(p).startsWith('programs/console/test/'));
 for (const f of kj) for (const s of reqs(fs.readFileSync(f, 'utf8'))) if (s.includes('container/')) problems.push('R2 内核引用容器源码: ' + rel(f) + ' -> ' + s);
 
 // R3：容器引擎非测试代码不得 require 到内核源码（tests 允许，见 bridge-interop）
 const ej = collect(path.join(ROOT, 'container', 'engine'), (p) => p.endsWith('.js') && !rel(p).startsWith('container/engine/test/'));
-for (const f of ej) for (const s of reqs(fs.readFileSync(f, 'utf8'))) if (s.includes('kernel/') && s.includes('..')) problems.push('R3 容器引擎引用内核源码: ' + rel(f) + ' -> ' + s);
+for (const f of ej) for (const s of reqs(fs.readFileSync(f, 'utf8'))) if (s.includes('programs/console/') && s.includes('..')) problems.push('R3 容器引擎引用内核源码: ' + rel(f) + ' -> ' + s);
 
 // 自证：判据要能抓样本、目录要真扫到文件 —— 否则「零命中」是空转。
 const proofs = [
   ['R1', AGENT.test('com.deepseek.X') && !AGENT.test('class A')],
   ['R2', reqs("require('../../container/engine/x')").some((s) => s.includes('container/'))],
-  ['R3', reqs("require('../kernel/src/x')").some((s) => s.includes('kernel/') && s.includes('..'))],
+  ['R3', reqs("require('../programs/console/src/x')").some((s) => s.includes('programs/console/') && s.includes('..'))],
   ['覆盖', kt.length > 0 && kj.length > 0 && ej.length > 0],
 ];
 const blind = proofs.filter(([, ok]) => !ok).map(([n]) => n);

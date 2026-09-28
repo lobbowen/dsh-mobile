@@ -48,7 +48,7 @@ function pair(o) {
   const code = String(o.code);
   const timeoutMs = o.timeoutMs || 15000;
   return new Promise((resolve, reject) => {
-    const cred = x509.generateSelfSigned('dsh-pairing');
+    const cred = x509.generateSelfSigned('lobos-pairing');
     const sock = tls.connect({
       host: o.host, port: o.port, key: cred.keyPem, cert: cred.certPem,
       rejectUnauthorized: false, minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3',

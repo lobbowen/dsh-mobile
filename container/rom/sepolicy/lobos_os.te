@@ -1,0 +1,26 @@
+# 容器自有 SELinux 域：最小权限，只解掉 untrusted_app 强加的四条封死。
+# 本文件是集成模板，必须过 AOSP 整编的 neverallow 校验。
+
+type lobos_os, domain;
+type lobos_os_exec, exec_type, file_type, vendor_file_type;
+init_daemon_domain(lobos_os)
+
+# 1) 自家目录可执行与可链接：替代 targetSdk=28 与 liblobosposix 的 link 替代。
+allow lobos_os lobos_os_data_file:dir { create_dir_perms relabelfrom };
+allow lobos_os lobos_os_data_file:file { create_file_perms execute execute_no_trans };
+allow lobos_os lobos_os_data_file:file link;
+
+# 2) 数据分区祖先可读：让 durable 目录 fsync 能走完到 /（替代 open 回退）。
+allow lobos_os system_data_file:dir r_dir_perms;
+allow lobos_os system_data_file:file r_file_perms;
+
+# 3) 命名空间与挂载：真容器根（路线 A），需内核 CONFIG_USER_NS。
+allow lobos_os self:capability sys_admin;
+allow lobos_os self:userns { create };
+allow lobos_os self:mounton mounton;
+
+# 4) 网络与本地端口：面板与外部访问。
+allow lobos_os self:tcp_socket { create_socket_perms };
+allow lobos_os self:udp_socket { create_socket_perms };
+allow lobos_os self:unix_stream_socket { create_stream_socket_perms };
+allow lobos_os port_type:tcp_socket name_bind;

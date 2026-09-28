@@ -11,7 +11,13 @@ const FORBIDDEN = ['libdshrootns', 'libdshrootprobe', 'libdshptraceprobe', 'Cont
 const EXT = new Set(['.kt', '.kts', '.c', '.h', '.js', '.mjs', '.cjs', '.yml', '.yaml', '.json',
   '.sh', '.gradle', '.te', '.xml', '.bp', '.rc', '.txt', '.py']);
 const SKIP_DIRS = new Set(['.git', 'node_modules', '_backup', '_tools', 'build', '.gradle', 'dist']);
-const SKIP_FILES = new Set([path.resolve(__dirname, 'dead-path-gate-test.js')]);
+// 生成物/判据数据也要跳过：它们**按设计**引用违禁词（报告是命中清单、policy 是词表），
+// 扫进来等于门禁判自己。
+const SKIP_FILES = new Set([
+  path.resolve(__dirname, 'dead-path-gate-test.js'),
+  path.resolve(ROOT, 'brand-scan-report.txt'),
+  path.resolve(ROOT, '.github', 'gate-policy.json'),
+]);
 
 const matchTokens = (t) => FORBIDDEN.filter((f) => t.includes(f));
 

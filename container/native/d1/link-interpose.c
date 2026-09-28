@@ -1,5 +1,5 @@
 // link/linkat 用户态替代：Android 对所有 app 域 neverallow link(2)，
-// 本库以「独占拷贝」实现等价语义，经 LD_PRELOAD 注入，替代对 DSH 安装树的字节补丁。
+// 本库以「独占拷贝」实现等价语义，经 LD_PRELOAD 注入，替代对载荷安装树的字节补丁。
 // 语义：目标已存在 -> EEXIST；源保持不变（move 型调用后续自行 unlink，net 效果相同）。
 // 详见 docs/ADR-001。
 #define _GNU_SOURCE

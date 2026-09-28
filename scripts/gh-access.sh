@@ -60,7 +60,7 @@ gh_access_init() {
   _fix_hosts || true
   local t; t="$(_gh_token)"
   if [ -n "$t" ]; then export GH_TOKEN="$t"; fi
-  export GITHUB_REPO="${GITHUB_REPO:-advgyxqamf/DSH-Mobile}"
+  export GITHUB_REPO="${GITHUB_REPO:-lobbowen/lobos}"
   export GH_PAGER=cat
 }
 

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# ============================================================================
+#  构建并签名内核 OTA 包（对齐 docs/contracts/base-spec.md §5 通道一）。
+#
+#  用法：
+#    ./scripts/build-program-bundle.sh <program-src-dir> <version> [abi] [url-base]
+#
+#  例：
+#    ./scripts/build-program-bundle.sh <内核源码目录> 1.4.0 \
+#        node24-arm64-android35 https://cdn.example.com/ota
+#
+#  前置：
+#    - 私钥 keys/ota-private.pem 已就位（scripts/keygen.sh 生成；CI 由 secret 注入）。
+#    - 公钥锚点 container/app/src/main/assets/ota-public.pem 已焊接（设备端验签用）。
+#
+#  产物（release/）：
+#    program-<version>.zip        OTA 下发的内核包
+#    program-manifest.json        版本/url/sha256/签名，供 OTA 引擎 fetchManifest
+# ============================================================================
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SRC="${1:?用法: build-program-bundle.sh <program-src-dir> <version> [abi] [url-base]}"
+VER="${2:?缺少 version 参数}"
+ABI="${3:-node24-arm64-android35}"
+URL_BASE="${4:-}"
+
+if [ ! -f "$ROOT/keys/ota-private.pem" ]; then
+  echo "[build-program-bundle] 私钥缺失: $ROOT/keys/ota-private.pem（先跑 ./scripts/keygen.sh 或注入 CI secret）" >&2
+  exit 1
+fi
+
+# 签名之前先确认这把私钥导出的公钥就是 APK 焊着的那一份：不配对的签名照样能生成，
+# 但设备端只会把包判成 signature-invalid —— 判据只住 verify-ota-anchor.sh。
+bash "$ROOT/scripts/verify-ota-anchor.sh" --private "$ROOT/keys/ota-private.pem"
+
+exec node "$ROOT/scripts/build-program-bundle.js" "$SRC" "$VER" "$ABI" "$URL_BASE"

@@ -1,7 +1,8 @@
 # ADR-0007：L0 GUI 开场管线（S0–S4）与 S0 无线 ADB 配对交互 —— 通知栏 RemoteInput + mDNS 自动发现，禁 Activity 抢焦点
 
 - 状态：**已决定**（2026-09-25；主路径细节待 §5 真机验证清单定罪，未定罪前不得写死）
-- 关联：[ADR-0001 执行域](0001-android-execution-domain.md) · [ADR-0005 内核只走 OTA](0005-kernel-via-ota-only.md) · [ADR-0006 后台生命周期](0006-background-lifecycle-keepalive.md) · 完整设计见 [ui-onboarding-spec.md](../contracts/ui-onboarding-spec.md)
+- **2026-09-28 errata**：Device Owner 已全面退出（台账 §J，见 [ADR-0010](0010-lob-os-container-form.md)）；本 ADR 中 S1=Device Owner、`dpm set-device-owner`、`DeviceAdminReceiver` 等叙述**一并作废**，开场管线收敛为 **S0 ADB 配对 → S1 权限集 → S2 运行时 + Program 就绪 → S3 工作台**（少一段）。
+- 关联：[ADR-0001 执行域](0001-android-execution-domain.md) · [ADR-0005 内核只走 OTA](0005-program-via-ota-only.md) · [ADR-0006 后台生命周期](0006-background-lifecycle-keepalive.md) · 完整设计见 [ui-onboarding-spec.md](../contracts/ui-onboarding-spec.md)
 
 ---
 
@@ -22,12 +23,10 @@
 ### 2.1 开场管线 = S0→S4 五段状态机（L0 原生 GUI）
 
 ```
-S0 ADB 通道 → S1 Device Owner → S2 权限集 → S3 运行时+内核就绪 → S4 工作台（进控制面板）
+S0 ADB 配对 → S1 权限集 → S2 运行时 + Program 就绪 → S3 工作台（进控制面板）
 ```
 
-- 五段顺序即依赖顺序：ADB 是杠杆（未配 DO 前 shell 可 `dpm set-device-owner`），DO 是
-  权限主路径（Android 17 实测 shell 已不能 `pm grant`/`appops set`，DO 经
-  `setPermissionGrantState` 静默授予），权限齐了才有高质量的 S3，S3 绿了才谈 S4。
+- 四段顺序即依赖顺序：ADB 是杠杆（有 shell 通道才能做静默补授），权限齐了才有高质量的 S2，S2 绿了才谈 S3。**不做 Device Owner**：Android 17 实测 shell 已不能 `pm grant`/`appops set`，这类能力改由「用户在系统页手动开启」承担 —— 权限面变小，但不引入受管设备前提。
 - 首页只渲染这五段的状态摘要 + 一个大入口；每段的引导细节在各自的次级页。
 - 技术选型：**原生 View + Material**（不上 Compose；minSdk24/targetSdk28 下 Compose 收益为
   负、包体与坑都不划算）。检测逻辑全部放 `permissions/`、`lifecycle/` 的**纯函数**（JVM
@@ -69,9 +68,7 @@ S0 ADB 通道 → S1 Device Owner → S2 权限集 → S3 运行时+内核就绪
 
 - S0 是全链路里唯一无法 100% 自动化的环节（系统对话框不可代点）；交互设计的全部目标
   是让用户「盯着码 → 在通知里输码 → 等自动完成」三步内结束。
-- 新 APK 装上后 **Device Owner 与无障碍授权失效**（ComponentName 键控），需一次性重新
-  `adb shell dpm set-device-owner io.github.lobbowen.dshmobile/.lifecycle.DeviceAdminReceiver`
-  + 重开无障碍——写入发布说明。
+- 新 APK 装上后**无障碍/通知使用权会失效**（ComponentName 键控）；且 `applicationId` 已改为 `lobos.app` ⇒ **不能原地覆盖升级**：需并存安装 → 重新开启无障碍/通知使用权/电池白名单 → 卸载旧包。
 - ColorOS「应用启动管理」三开关的自动化**明确排除在本期外**，列为下一阶段议题。
 
 ## 4. 影响面
@@ -79,7 +76,7 @@ S0 ADB 通道 → S1 Device Owner → S2 权限集 → S3 运行时+内核就绪
 - 新增：`ui/` 开场管线页集合（原生 View）、配对通知 Service、mDNS 发现器。
 - 删除：内核 `src/adb/` 全套 + `/adb/pair|shell|forget` 路由 + 内核 UI 配对页及其客户端
   （见 spec §6 文件清单）——需一次内核 OTA 发布。
-- 不动：桥协议（`shell.*` 方法组 already 在 L0，见 `container/engine/src/bridge/methods.js:67-70`）。
+- 不动：桥协议（`shell.*` 方法组已在 OS 原生侧，见 `container/engine/src/bridge/methods.js`）。
 
 ## 5. 真机验证清单（定罪前主路径不得写死）
 

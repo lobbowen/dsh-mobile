@@ -1,0 +1,297 @@
+{
+  "version": 1,
+  "enforce": true,
+  "reportFile": "brand-scan-report.txt",
+  "ignoreSegments": [
+    "node_modules",
+    "dist",
+    "build",
+    ".git",
+    ".gradle",
+    "release",
+    "feed",
+    ".pnpm-android-test"
+  ],
+  "ignoreExt": [
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".ico",
+    ".so",
+    ".jar",
+    ".a",
+    ".tgz",
+    ".gz",
+    ".zip",
+    ".bin",
+    ".ttf",
+    ".woff",
+    ".woff2",
+    ".pem",
+    ".keystore",
+    ".frk2",
+    ".bin"
+  ],
+  "terms": [
+    {
+      "id": "A-pkg",
+      "term": "dshmobile",
+      "word": true,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "A-pkg2",
+      "term": "io.github.lobbowen.dshmobile",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "A-env",
+      "term": "DSH_",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "A-dsh",
+      "term": "dsh",
+      "word": true,
+      "caseInsensitive": true,
+      "allow": [
+        "docs/",
+        "programs/dsh/",
+        "THIRD-PARTY.md"
+      ]
+    },
+    {
+      "id": "A-deep",
+      "term": "deepseek",
+      "word": true,
+      "caseInsensitive": true,
+      "allow": [
+        "docs/",
+        "programs/dsh/",
+        "THIRD-PARTY.md"
+      ]
+    },
+    {
+      "id": "A-deep2",
+      "term": "@deepseek-ai",
+      "word": false,
+      "allow": [
+        "docs/",
+        "programs/dsh/",
+        "THIRD-PARTY.md"
+      ]
+    },
+    {
+      "id": "A-label",
+      "term": "Android Node Container",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "A-k1",
+      "term": "dsh-android-kernel",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "A-k2",
+      "term": "dsh-supervisor",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "A-k3",
+      "term": "dsh-kernel",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "A-k4",
+      "term": "dsh-logo",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "B-node",
+      "term": ":node",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "B-nrs",
+      "term": "NodeRuntimeService",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "B-nwp",
+      "term": "NodeWatchdogPolicy",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "B-pid",
+      "term": "node.pid",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "B-birth",
+      "term": "node.birth",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "B-ma",
+      "term": "managedAgents",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "B-km",
+      "term": "KernelManager",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "B-ko",
+      "term": "KernelOtaUpdater",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "B-path",
+      "term": "kernel/",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "B-kj",
+      "term": "kernel.json",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "C-do1",
+      "term": "DeviceOwner",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "C-do2",
+      "term": "Device Owner",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "C-do3",
+      "term": "set-device-owner",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "C-do4",
+      "term": "LockTask",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "C-do5",
+      "term": "setKiosk",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "C-do6",
+      "term": "device_policy",
+      "word": false,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "B-kernel",
+      "term": "kernel",
+      "word": true,
+      "allow": [
+        "docs/"
+      ]
+    },
+    {
+      "id": "A-lnc",
+      "term": "android-node-container",
+      "word": false,
+      "allow": [
+        "docs/",
+        "programs/dsh/",
+        "THIRD-PARTY.md"
+      ]
+    }
+  ],
+  "ignoreFiles": [
+    "brand-scan-report.txt",
+    ".github/gate-policy.json",
+    "docs/plans/os-v4-debt-registry.json",
+    "doc-gate-report.txt",
+    "debt-gate-report.txt"
+  ],
+  "allowFiles": [
+    "container/engine/test/capability-single-source-gate-test.js",
+    "container/engine/test/dead-path-gate-test.js",
+    "container/engine/test/dependency-rule-test.js",
+    "scripts/verify-apk-native.sh",
+    ".github/workflows/fast-apk.yml",
+    "container/native/d1/exec-path.c",
+    "scripts/build-userland-git.sh"
+  ]
+}

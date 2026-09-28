@@ -1,0 +1,232 @@
+package lobos.ota
+
+import android.content.Context
+import lobos.native.NativeAssetRegistry
+import java.io.File
+import org.json.JSONObject
+
+/**
+ * 内核安装器（Kotlin 侧编排层）。
+ *
+ * 为什么 Kotlin 侧**不能**自己验签 —— 这是 minSdk 的硬约束，不是取舍：
+ * 内核的信任根是 **ed25519**（`container/engine/src/sign.js`，公钥焊死在
+ * `assets/ota-public.pem`）。而 Android 官方文档明确列出：
+ *
+ * ```
+ * Android Signature 算法支持表：
+ * ECDSA 11+
+ * Ed25519 33+ ← 注意这一行
+ * ```
+ *
+ * 本项目 `minSdk = 24`（Android 7.0），`targetSdk = 28`（刻意压低以留在可 exec 的
+ * SELinux 域，见 build.gradle.kts 注释）。也就是说：
+ * **在 API 24–32 的设备上，`Signature.getInstance("Ed25519")` 抛
+ * NoSuchAlgorithmException —— Kotlin 侧根本无法验签。**
+ *
+ * 旁证（真实工程教训）：Conscrypt 官方支持 Ed25519；但 API 31–32 的平台
+ * BouncyCastle 被裁剪、不含 Ed25519；API 33+ 上 `KeyFactory.getInstance("Ed25519")`
+ * 还会**静默**解析到 AndroidKeyStore provider（只认硬件密钥，导入软件 PKCS8
+ * 会 InvalidKeySpecException）。即"能拿到 Signature 实例"与"能用"是两件事。
+ *
+ * 结论：**验签必须由 Node 做**（`crypto.verify(null, data, pem, sig)` 走自带
+ * OpenSSL，与 API level 完全无关，已在 Node 22/24 实测通过 —— 见
+ * `container/engine/test/ota-engine-test.js`）。
+ *
+ * 于是本类的职责被严格限定为「编排」，不含任何密码学：
+ * 它做四件事，全部是可独立验证的机械操作：
+ * 1. 把候选包（来自 APK assets / 本地文件 / 下载落盘）交给 Node 校验；
+ * 2. 校验**通过**才解包到 `files/programs/console/<version>.tmp-*`；
+ * 3. 原子 rename 到 `files/programs/console/<version>`；
+ * 4. 原子写 `CURRENT` 指针。
+ *
+ * 「坏包永不生效」由第 2 步的前置校验保证：校验失败直接返回，**不碰任何已有
+ * 文件**。这条不变式比"校验得多严"更重要 —— 它保证最坏情况是"没升级成功"，
+ * 而不是"把能跑的版本弄坏了"。
+ *
+ * 为什么不直接复用 container/engine/src/ota-engine.js：
+ * 那个引擎是**完整**的（下载 + 验签 + 解包 + 切指针 + 回滚），但它是为
+ * 「容器自己就是 Node 进程」的假设写的（原 `src/boot.js`，现 `engine/test/boot-fixture.js`）。而安卓上编译出的
+ * 事实是：**Kotlin 宿主进程（:main）拥有 filesDir 的写权与生命周期控制**，
+ * Node（`runtime` 进程）是被它 spawn 的、随时可能被杀。
+ *
+ * 让"随时可能被杀的进程"去管理"自己下个版本"的落盘，是竞态的来源
+ * （写到一半被杀 → 半包残留 → 下次启动读到损坏目录）。所以：
+ * · **落盘/切指针**（有状态、需原子性）→ 留在 Kotlin 侧，它不会中途消失；
+ * · **验签**（无状态、纯函数）→ 交给一次性 Node 进程，用后即弃。
+ *
+ * 这样两边各做自己可靠的事，而不是把两件事塞进同一个易变进程。
+ */
+object ProgramInstaller {
+
+    /**
+     * 候选包来源。**只剩 OTA 一种真实来源**（ADR-0005：本地 feed 与 APK 内置基线已收敛删除）。
+     * 保留枚举是为了归因可扩展，而不是留后门 —— 新增来源必须同时回答"它能否绕过版本下限"。
+     */
+    enum class Source(val label: String) {
+        OTA("远端 OTA"),
+        NONE("无"),
+    }
+
+    /**
+     * 一次安装尝试的结果。
+     *
+     * 刻意不抛异常：调用方（启动链）需要**总是**能继续往下走，
+     * 且失败必须能落进诊断。异常会诱导"catch 住就完了"的写法，掩盖归因。
+     */
+    data class InstallResult(
+        val ok: Boolean,
+        val version: String?,
+        val source: Source,
+        /** 机械失败或验证失败的短码，如 "signature-invalid" / "sha256-mismatch"。 */
+        val reason: String?,
+        /** 人类可读的细节，直接进诊断行。 */
+        val detail: String,
+        val nodeVerifyOutput: String = "",
+    ) {
+        fun toDiagnosticLine(): String = when {
+            ok -> "内核安装成功 v=$version（来源=${source.label}）"
+            else -> "内核安装未生效（来源=${source.label}）原因=$reason；$detail"
+        }
+    }
+
+    /**
+     * 校验并安装一个候选内核包。
+     *
+     * @param zip 候选包（必须已落成**文件** —— Node 校验器要读它，走文件比走
+     * stdin 更利于把失败原因看全）
+     * @param manifest 期望的 sha256/version。null 表示"只做包内自校验"
+     * （此时 sha256 从包本身算，防不住替换，但能挡住结构损坏）
+     * @param source 来源标签（仅用于归因）
+     * @return 安装结果。**失败时保证 files/programs/console 下不留任何新东西。**
+     */
+    fun install(
+        context: Context,
+        zip: File,
+        manifest: JSONObject?,
+        source: Source,
+        nodeBin: File = NativeAssetRegistry.resolve(context, NativeAssetRegistry.NODE),
+        /** 原始 manifest 文件（ADR-0005 C3）：随包一起验 manifest 签名。 */
+        manifestFile: File? = null,
+        /** 目标 Program id（复检 AUD-G28：多 Program 各有落位根）。 */
+        programId: String = ProgramManager.CONSOLE_ID,
+    ): InstallResult {
+        if (!zip.isFile) {
+            return InstallResult(false, null, source, "zip-missing", "候选包不存在: ${zip.absolutePath}")
+        }
+        if (zip.length() <= 0) {
+            return InstallResult(false, null, source, "zip-empty", "候选包是空文件: ${zip.absolutePath}")
+        }
+
+        // ---- 1) 交给 Node 做密码学校验（Kotlin 侧做不到，见类注释）----
+        val verify = ProgramVerifier.verify(context, zip, manifest, nodeBin, manifestFile)
+        if (!verify.ok) {
+            return InstallResult(
+                ok = false, version = verify.version, source = source,
+                reason = verify.reason, detail = verify.detail, nodeVerifyOutput = verify.raw,
+            )
+        }
+        val version = verify.version
+            ?: return InstallResult(false, null, source, "no-version", "校验通过但包内无 version", verify.raw)
+
+        // ---- 1.5) 版本下限（anti-rollback floor，ADR-0005 C1）----
+        //
+        // 只与 CURRENT 比较是不够的：一次健康失败回退后 CURRENT 会降回来，
+        // "比 CURRENT 新"的判据也跟着被拉低 —— 更旧的包于是又能装上。
+        // 下限记录的是**曾成功提交过的最高版本**，只增不减；低于它一律拒绝，
+        // **即使签名合法**：签名只证明"这包是我们发的"，不证明"它不该被回退"。
+        val km = ProgramManager(context, programId)
+        if (km.isBelowFloor(version)) {
+            return InstallResult(
+                ok = false, version = version, source = source, reason = "version-below-floor",
+                detail = "候选 " + version + " 低于版本下限 " + km.floorVersion() + " —— 拒绝安装（防回退）。",
+                nodeVerifyOutput = verify.raw,
+            )
+        }
+        val previousVersion = km.currentVersion()
+
+        // ---- 2) 目标已存在则直接复用（幂等：重复安装同一版本不重写）----
+        val dest = km.programDir(version)
+        if (dest.isDirectory && km.entryPath(version).exists()) {
+            km.setCurrentVersion(version)
+            // 已落盘也要重新标记"待命"：只有健康检查通过才算提交（C2）。
+            km.markPending(version, previousVersion)
+            return InstallResult(
+                ok = true, version = version, source = source, reason = "already-installed",
+                detail = "该版本已落盘，直接切指针（待健康检查通过后提交）", nodeVerifyOutput = verify.raw,
+            )
+        }
+
+        // ---- 3) 解包到临时目录（暂存命名唯一出处 = ProgramManager.stagingDirName；
+        //      开机清扫器按同一判据认它，安装被杀也不会留下无人认领的尸体）----
+        val tmp = File(km.programDir(version).parentFile, ProgramManager.stagingDirName(version))
+        tmp.deleteRecursively()
+        tmp.mkdirs()
+        try {
+            km.unzipInto(zip, tmp)     // 内含目录穿越防护 + 空包检查
+        } catch (e: Throwable) {
+            tmp.deleteRecursively()    // ★ 失败清理，绝不留半包
+            val reason = if (e is IllegalStateException) "unsafe-or-empty-zip" else "unzip-failed"
+            return InstallResult(
+                false, version, source, reason,
+                "${e::class.java.simpleName}: ${e.message ?: ""}", verify.raw
+            )
+        }
+
+        // 包结构契约（program-bundle.js:packBundle）：zip 条目恒为 program/<version>/...，
+        // 所以解出来的 manifest 根在 tmp/program/ 这一层。曾直接拿 tmp 找 <version>/，
+        // postcheck 永远失败（真机首装实测：postcheck-manifest-unreadable 无限回退探针）。
+        val stageRoot = File(tmp, "program").let { if (it.isDirectory) it else tmp }
+
+        // 解包后**再核一次**包内 program-manifest.json 与校验阶段读到的一致。
+        // 为什么：Node 校验是读原 zip，而落盘走的是 Java 解压 —— 两者若对
+        // 同一 zip 的解读不同（历史上 zip.js 就只在 Stored 下正确），会出现
+        // "验的是 A、装的是 B"。这一步把这种不一致变成硬失败。
+        val installedManifest = km.readProgramManifest(version, stageRoot)
+        if (installedManifest == null) {
+            tmp.deleteRecursively()
+            return InstallResult(false, version, source, "postcheck-manifest-unreadable",
+                "解包后读不到 program-manifest.json —— ZipInputStream 与校验器对包结构理解不一致", verify.raw)
+        }
+        if (installedManifest.version != version) {
+            tmp.deleteRecursively()
+            return InstallResult(false, version, source, "postcheck-version-mismatch",
+                "校验阶段 version=$version，解包后读到 ${installedManifest.version}", verify.raw)
+        }
+        if (verify.entryOk == false) {
+            tmp.deleteRecursively()
+            return InstallResult(false, version, source, "postcheck-entry-missing",
+                "包内缺少入口 ${installedManifest.entry}", verify.raw)
+        }
+
+        // ---- 4) 原子就位 ----
+        //
+        // 顺序是刻意的：先删旧的同名正式目录（若有半包残留），再 rename。
+        // rename 在同一文件系统内是原子的，所以设备断电只会得到
+        // "改名成功" 或 "没改名"，不会得到半成品 —— 这正是不能用 copyTo 的原因。
+        dest.deleteRecursively()
+        val staged = File(stageRoot, version)
+        if (!staged.renameTo(dest)) {
+            // rename 失败（跨设备/权限）时退化为拷贝，但**先拷到 .tmp 再 rename**，
+            // 保住原子性。直接拷到 dest 会让窗口期内 dest 是不完整的。
+            tmp.deleteRecursively()
+            return InstallResult(false, version, source, "rename-failed",
+                "无法把 ${staged.absolutePath} 重命名为 ${dest.absolutePath}", verify.raw)
+        }
+
+        km.setCurrentVersion(version)
+        // 安装 ≠ 提交：先标"待命"，由启动链在**健康检查通过**后提交（提升下限），
+        // 起不来则回滚到 previousVersion 且下限不降（ADR-0005 C2）。
+        km.markPending(version, previousVersion)
+        // 本次安装留下的暂存目录要**自己收**：rename 只搬走了 tmp/program/<version>，外壳 tmp 还留着。
+        // 失败路径全都 deleteRecursively，只有成功路径忘了收 —— 真机实证 2026-09-28：
+        // `0.1.0-android.43.tmp-31506-…` 长期驻留（启动清扫只收上一次的，收不到本次的）。
+        tmp.deleteRecursively()
+        // 两条版本流变了 ⇒ provisioning.json 必须跟着新（否则面板一直显示上一版内核）。
+        lobos.ProvisioningProbe.refreshProgramOtaVersions(context)
+        return InstallResult(
+            ok = true, version = version, source = source, reason = null,
+            detail = "已落盘并切换指针（待健康检查通过后提交）: ${dest.absolutePath}", nodeVerifyOutput = verify.raw,
+        )
+    }
+
+}

@@ -1,5 +1,10 @@
 # 容器底座规范（BASE_SPEC）
 
+> ⚠ **v4 收敛提示（2026-09-28）**：本文件的 §2/§4 仍描述 v4 之前的三层（容器/内核/Agent）与 `program-manifest.json` 包契约。
+> v4 实体为 **OS / Runtime / Program**，Program 契约见 [program-manifest.schema.json](program-manifest.schema.json)，
+> 形态主轴见 [ADR-0010](../adr/0010-lob-os-container-form.md)、OTA 见 [ADR-0005](../adr/0005-program-via-ota-only.md)；
+> 单一生命周期（无 `:node`/无 binder 监督）见 [ADR-0006](../adr/0006-background-lifecycle-keepalive.md)。§3/§8 的运行时与桥契约继续有效。
+
 > 架构与硬约束的**唯一事实来源**是仓根 [`architecture.md`](../architecture.md)；
 > 本文件只定义「冻结容器 ↔ 可热更新内核」之间的**契约**。
 >
@@ -25,7 +30,7 @@
 | 层 | 名称 | 更新方式 | 冻结？ | 职责 |
 |---|---|---|---|---|
 | **L0** | 容器（APK） | 仅 Node/桥能力变更才重编 | ✅ | Node 运行时 + **npm 客户端** + libc++_shared.so + HostBridge + OTA 引擎 + 生命周期 + 诊断 |
-| **L1** | 内核 = 控制面板 / Manager | 容器签名 OTA 热更新 | ❌ | 控制面板代码 + `kernel.json`；运行在 Node 运行时内；**运行时经 npm 安装/升级/启停 Agent** |
+| **L1** | 内核 = 控制面板 / Manager | 容器签名 OTA 热更新 | ❌ | 控制面板代码 + `program-manifest.json`；运行在 Node 运行时内；**运行时经 npm 安装/升级/启停 Agent** |
 | **L2** | Agent 产品 | 内核运行时 npm（公共源） | ❌ | Codex / Claude Code / DeepSeek Harness 等标准公共产品，由内核拉取管理 |
 
 > **发布维只有 L0/L1/L2 三档，不存在 L3。** HostBridge 随 APK 冻结，属 L0；
@@ -42,13 +47,13 @@
 | Node 版本 | `24.21.0`（arm64-v8a） |
 | 平台 | android-35 |
 | C++ 运行时 | 容器内 `libc++_shared.so`（native 模块必须链接它） |
-| **npm 客户端** | **运行时可用**（npm 11.19.0 纯 JS，随 APK `assets/npm/` 投放；由 node 代跑 `npm-cli.js` —— npm 是纯 JS，调用通路只有这一条，形态见 `runtime.json` 的 `npmEntry`）。边界：安装一律 `--ignore-scripts`（容器无 sh 可 spawn）；`git:`/需编译的 native 依赖不支持；全局前缀固定 `$HOME/.npm-global`（内核侧 `npm_config_prefix` 显式注入，容器侧启动时写 `$HOME/.npmrc`，两处目录名由 `kernel/test/npm-contract-chain-test.js` 逐字对账） |
-| **共享开发环境（C 层）** | 与产品无关的运行时/工具出一处、共享（分层见 [ADR-0009](../adr/0009-delivery-layers.md)）。npm 随 APK `assets/npm/` 投放（底座种子，B）；**C 的其余内容由 C 自己的签名清单投放**：内核 `kernel/src/supply/`（机制）在启动时取回清单、对原始字节验签、按件取回并验哈希、原子落位到共享 `$PREFIX/lib/toolchain`，并自写 `#!/system/bin/sh` 可执行入口（安卓无 `/usr/bin/env`，npm 生成的 bin shim 不可 execve）。**加件/升级只发清单，内核不动**；件命名**内容寻址**（文件名带 sha12），对象存储长缓存才安全。C 的内容分两类：**运行时**（node·python，带版本地板 —— 缺 = 一整类负载跑不起来）与**工具**（npm·pnpm·git·jq·sqlite3·rg·curl·coreutils，只判在不在）。 |
-| 运行时交接文件 | `<DSH_SUPERVISOR_HOME>/supervisor/runtime.json`（**容器写、内核读**，schema 2）：`nodePath`（libnode.so 绝对路径）、`nodeBinDir`、`npmPath`、`npmEntry`（npm-cli.js 绝对路径，**可选键**：缺失时内核退回 ambient npm）、`prefix`（`$PREFIX` 根 = `files/usr`，**可选键**：能力件真名的家，`bin/{bash,rg}` 与 `bin/node`（→ libnode.so 的符号链接）、`lib/pty.node`；内核原生件投放单元的唯一取件路径，缺失即判 `blocked` 并上屏，不再静默跳过）、`minNode`。内核侧解析入口唯一：`src/platform/runtime-contract.js`（`npmInvocation()`/`nodeBin()`/`npmEnv()`/`prefixRoot()`） |
+| **npm 客户端** | **运行时可用**（npm 11.19.0 纯 JS，随 APK `assets/npm/` 投放；由 node 代跑 `npm-cli.js` —— npm 是纯 JS，调用通路只有这一条，形态见 `runtime.json` 的 `npmEntry`）。边界：安装一律 `--ignore-scripts`（容器无 sh 可 spawn）；`git:`/需编译的 native 依赖不支持；全局前缀固定 `$HOME/.npm-global`（内核侧 `npm_config_prefix` 显式注入，容器侧启动时写 `$HOME/.npmrc`，两处目录名由 `container/engine/test/test-chain-completeness-test.js` 逐字对账） |
+| **共享开发环境（C 层）** | 与产品无关的运行时/工具出一处、共享（分层见 [ADR-0009](../adr/0009-delivery-layers.md)）。npm 随 APK `assets/npm/` 投放（底座种子，B）；**C 的其余内容由 C 自己的签名清单投放**：OS 原生 `lobos/runtime/SupplyProvisioner`（机制）在启动时取回清单、对原始字节验签、按件取回并验哈希、原子落位到共享 `$PREFIX/lib/toolchain`，并自写 `#!/system/bin/sh` 可执行入口（安卓无 `/usr/bin/env`，npm 生成的 bin shim 不可 execve）。**加件/升级只发清单，内核不动**；件命名**内容寻址**（文件名带 sha12），对象存储长缓存才安全。C 的内容分两类：**运行时**（node·python，带版本地板 —— 缺 = 一整类负载跑不起来）与**工具**（npm·pnpm·git·jq·sqlite3·rg·curl·coreutils，只判在不在）。 |
+| 运行时交接文件 | `<LOBOS_SUPERVISOR_HOME>/supervisor/runtime.json`（**容器写、内核读**，schema 2）：`nodePath`（libnode.so 绝对路径）、`nodeBinDir`、`npmPath`、`npmEntry`（npm-cli.js 绝对路径，**可选键**：缺失时内核退回 ambient npm）、`prefix`（`$PREFIX` 根 = `files/usr`，**可选键**：能力件真名的家，`bin/{bash,rg}` 与 `bin/node`（→ libnode.so 的符号链接）、`lib/pty.node`；内核原生件投放单元的唯一取件路径，缺失即判 `blocked` 并上屏，不再静默跳过）、`minNode`。OS 原生侧写方唯一：`lobos/runtime/InstanceHost.writeRuntimeJson()`；引擎侧读方唯一：`container/engine/src/runtime-json.js` |
 | 内置构建链 | **无**（已实测证伪：Google Maven 无 aarch64 版 aapt2，见 architecture.md §2.3）。`build` 组语义为「经 OTA 安装已签名内核」（A''，见本契约 §3.6） |
-| 进程模型 | `NodeRuntimeService`（前台 `START_STICKY`）spawn 独立 `:node` 进程加载内核入口 |
+| 进程模型 | `InstanceHost`（前台 `START_STICKY`）spawn 独立 `:node` 进程加载内核入口 |
 
-容器在 `kernel.json` 中声明上述契约，内核可据此声明兼容性。
+容器在 `program-manifest.json` 中声明上述契约，内核可据此声明兼容性。
 
 ---
 
@@ -57,23 +62,23 @@
 整个内核是一个目录，**只含控制面板（Manager）+ 清单**：
 
 ```
-kernel/<version>/
-  kernel.json          # 内核包清单（见下）
-  bin/dsh-supervisor   # 内核入口（被 node 解释的脚本）
+program/<version>/
+  program-manifest.json          # 内核包清单（见下）
+  bin/panel   # 内核入口（被 node 解释的脚本）
   ui/dist/             # 控制面板静态资源（运行期必需）
 ```
 
 > **不含 `agents/`**：Agent 产品由内核运行时从公共 npm 拉取，不打包进内核。
 
-`kernel.json` schema：
+`program-manifest.json` schema：
 
 ```json
 {
-  "name": "dsh-kernel",
+  "name": "lobos-console-panel",
   "version": "1.4.0",
   "abi": "node24-arm64-android35",
   "engines": { "node": ">=24 <25" },
-  "entry": "bin/dsh-supervisor",
+  "entry": "bin/panel",
   "requires": [
     "bridge:app_control",
     "bridge:ui_automation",
@@ -103,13 +108,13 @@ kernel/<version>/
 **构建期（CI）**：
 1. `npm ci` 解析 Manager 依赖；
 2. 对含原生模块者，按固定 ABI（Node 24 / N-API / libc++_shared.so / 16KB 对齐）交叉预编译 `.node`；
-3. 打包 `kernel/<version>/` 目录 → 用私钥签名 → 产出 `kernel-manifest.json`（版本/URL/sha256/签名）；
+3. 打包 `program/<version>/` 目录 → 用私钥签名 → 产出 `program-manifest.json`（版本/URL/sha256/签名）；
 4. 发布到 CDN / Release。**npm 在此仅作构建期工具，用于产出内核包。**
 
 **设备端 OTA 流程**：
 ```
-轮询 kernel-manifest → 下载内核包 → 验签 + sha256
-  → 原子解包到 files/kernel/<new-version>/ → 切换 CURRENT 指针（临时文件 rename）
+轮询 program-manifest → 下载内核包 → 验签 + sha256
+  → 原子解包到 files/programs/console/<new-version>/ → 切换 CURRENT 指针（临时文件 rename）
   → 杀旧 :node 进程、spawn 新进程（Manager 引导）
 ```
 - 原子性：先写新目录再切指针，失败不影响旧版本。
@@ -153,7 +158,7 @@ Manager 在运行时按 `managedAgents` 的 `pkg` + `version`，从**公共 npm 
 ## 8. 安全模型
 
 - **双信任根**：容器公钥签内核；npm 标准完整性验 Agent。
-- **传输私有**：Agent↔HostBridge 走 **Unix 域套接字（UDS）** 的**抽象命名空间**（名 `dsh_hostbridge`，无文件系统路径、无文件权限保障），**不走 TCP**。控制面是 `127.0.0.1:36360`；3080 只是无内核时的探针端口。
+- **传输私有**：Agent↔HostBridge 走 **Unix 域套接字（UDS）** 的**抽象命名空间**（名 `lobos_hostbridge`，无文件系统路径、无文件权限保障），**不走 TCP**。控制面是 `127.0.0.1:36360`；3080 只是无内核时的探针端口。
 - **能力作用域**：Agent 仅能使用其 `requires` 声明且在设备已预置的能力；缺失能力 → 桥拒绝/降级。
 - **审计**：所有经桥执行的特权操作（装卸应用、锁屏、shell、读屏）须落审计日志。
 
@@ -162,9 +167,9 @@ Manager 在运行时按 `managedAgents` 的 `pkg` + `version`，从**公共 npm 
 ## 9. 生命周期（运行时）
 
 ```
-App 启动 → NodeRuntimeService(START_STICKY) → 读 CURRENT 指针
-  → 加载 kernel/<version>/bin/dsh-supervisor（由 node 解释）
-  → Manager 读 kernel.json → 按 requires 连接 HostBridge(UDS)
+App 启动 → InstanceHost(START_STICKY) → 读 CURRENT 指针
+  → 加载 program/<version>/bin/panel（由 node 解释）
+  → Manager 读 program-manifest.json → 按 requires 连接 HostBridge(UDS)
   → Manager 按 managedAgents 在运行时经 npm 安装/拉起各 Agent
   → 健康检查（端口/探针/桥握手）
   → 进程退出或健康检查失败 → 退避重启（沿用 watchExit/pollPort）

@@ -17,7 +17,7 @@
 // 8 = Deflate → zlib.inflateRawSync（**raw**，不是 zlib 头格式）
 // 其余 method → 显式抛错（不静默降级，否则又是同一个坑的变体）。
 //
-// 为什么保留 createZip 默认 Stored：安卓侧 KernelManager 用 java.util.zip 解基线包，
+// 为什么保留 createZip 默认 Stored：安卓侧 ProgramManager 用 java.util.zip 解基线包，
 // Stored 保证 100% 兼容且无需 zlib；而 OTA 包体积小（内核源码），压缩收益有限。
 
 const fs = require('fs');

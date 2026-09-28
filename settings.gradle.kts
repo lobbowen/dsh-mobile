@@ -18,6 +18,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AndroidNodeContainer"
+rootProject.name = "LobOS"
 include(":app")
 project(":app").projectDir = file("container/app")

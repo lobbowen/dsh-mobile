@@ -14,15 +14,14 @@ const makeRunner = require('./harness');
 const { check, finish } = makeRunner('bridge-methods-crosslang');
 
 const ROOT = path.resolve(__dirname, '..', '..', '..');
-const KOTLIN = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'io', 'github',
-  'lobbowen', 'dshmobile', 'bridge', 'HostBridgeService.kt');
+const KOTLIN = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'lobos', 'bridge', 'CapabilityBroker.kt');
 const methods = require('../src/bridge/methods');
 
 const ksrc = fs.readFileSync(KOTLIN, 'utf8');
 
 // ── 解析 Kotlin 方法表：`"a.b" to MethodDef(listOf("cap1", "cap2"), audit) {` ──
 const kotlin = new Map();
-const re = /"([a-z][\w]*\.[\w]+)"\s+to\s+MethodDef\(\s*listOf\(([^)]*)\)\s*,\s*(true|false)\s*\)/g;
+const re = /"((?:[a-z][\w]*\.)+[a-z][\w]*)"\s+to\s+MethodDef\(\s*listOf\(([^)]*)\)\s*,\s*(true|false)\s*\)/g;
 let m;
 while ((m = re.exec(ksrc)) !== null) {
   const caps = [...m[2].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
@@ -58,7 +57,7 @@ check('每方法 audit 两表一致', auditDiff.length === 0, auditDiff.join('; 
 const kGroups = new Map();
 const gre = /"(bridge:[a-z_]+)"\s+to\s+"([a-z_]+)"/g;
 while ((m = gre.exec(ksrc)) !== null) kGroups.set(m[1].slice('bridge:'.length), m[2]);
-check('Kotlin 组表解析出 8 组（防正则空转）', kGroups.size === 8, 'size=' + kGroups.size);
+check('Kotlin 组表解析出 7 组（防正则空转）', kGroups.size === 7, 'size=' + kGroups.size);
 const grpDiff = [];
 for (const [g, cap] of kGroups) {
   if (methods.GROUP_REQUIRED[g] !== cap) grpDiff.push(`${g}: kotlin=${cap} js=${methods.GROUP_REQUIRED[g]}`);

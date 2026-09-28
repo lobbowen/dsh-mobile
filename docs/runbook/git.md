@@ -9,12 +9,12 @@
 
 | 仓 | 角色 | 默认分支 | 冻结性 |
 |---|---|---|---|
-| `lobbowen/dsh-mobile` | **主仓**。`container/{app,engine,native} + scripts/` = **L0 容器**；`kernel/` = **L1 内核** | `main` | 容器冻结；内核热更 |
-| `dsh-supervisor-core` | 内核的 PC 起源仓（历史），**不再承载 Android 内核** | `master` | 只读 / 归档 |
-| `dsh-supervisor-launcher` | 桌面 Tauri 壳（PC） | `main` | 独立演进 |
+| `lobbowen/lobos` | **主仓**。`container/{app,engine,native,rom} + scripts/` = **OS（冻结 APK）**；`programs/console/` = **默认控制面板 Program** | `main` | OS 冻结；Program 热更 |
+| `dsh-console-core` | 内核的 PC 起源仓（历史），**不再承载 Android 内核** | `master` | 只读 / 归档 |
+| `dsh-console-launcher` | 桌面 Tauri 壳（PC） | `main` | 独立演进 |
 
-> **内核只有一个正统家**：当前 = `dsh-mobile/kernel/`。不允许两处同时可写。
-> 旧名 `app/`、`container-engine/`、`native/`、`dsh-android-kernel/` 均已不存在，
+> **Program 只有一个正统家**：当前 = `programs/console/`。不允许两处同时可写。
+> 旧名 `app/`、`container-engine/`、`native/`、`kernel/` 均已不存在，
 > 映射见 [../contracts/layout.json](../contracts/layout.json) 的 `moves`。
 
 ## 2. 分支模型
@@ -27,7 +27,7 @@
 
 - 格式：`<type>(<scope>): <subject>`
 - `type`：feat / fix / docs / ci / refactor / test / chore
-- `scope`：`app` · `engine` · `kernel` · `native` · `ci` · `docs`
+- `scope`：`app` · `engine` · `native` · `console` · `ci` · `docs`
 - **一次提交只做一件事**；"目录搬迁"与"逻辑修改"必须分开提交。
 
 ## 4. Tag 规范（按实际 workflow 校正）
@@ -37,9 +37,9 @@
 | `v<versionName>` | fast-apk / ci | 壳的**版本化归档**（`app-debug-<VN>+<VC>.apk`）；`v*` 也触发 ci.yml |
 | `apk-latest` | fast-apk / build-apk / release-admin | 滚动通道（`app-debug.apk` + `version.json`） |
 | `node-runtime-<version>-<abi>` | build-apk 的 pin job | 预编译 Node 运行时（如 `node-runtime-24.21.0-arm64-v8a`） |
-| `kernel-<version>` | kernel-ota | 内核版本化归档（`kernel-<v>.zip` + manifest） |
-| `kernel-<channel>` | kernel-ota | 内核通道滚动归档（canary / stable） |
-| `kernel-ota-*` | 人 | **触发** kernel-ota 构建 |
+| `program-<version>` | program-ota | Program 版本化归档（`program-<v>.zip` + manifest） |
+| `program-<channel>` | program-ota | 内核通道滚动归档（canary / stable） |
+| `program-ota-*` | 人 | **触发** program-ota 构建 |
 | `fast-*` | 人 | **触发** fast-apk 构建 |
 | `pin-node-*` | 人 | 触发固化最近一次成功的 Node 构建产物 |
 | `admin-*` | 人 | 管理命令（status / logs / release / cancel / cancelall） |
@@ -53,7 +53,7 @@
 # ci.yml —— 统一门禁（骨干）
 on:
   push:  { branches: [main, master], tags: ['v*'],
-           paths: ['container/**','kernel/**','docs/contracts/**','scripts/**',
+           paths: ['container/**','programs/console/**','docs/contracts/**','scripts/**',
                    '.github/native-assets.txt','.github/workflows/**'] }
   pull_request: { paths: [同上] }
 
@@ -65,17 +65,17 @@ on:
                   '.github/native-assets.txt'],
           tags: ['fast-*'] }
 
-# kernel-ota.yml —— 内核 OTA
+# program-ota.yml —— Program OTA
 on:
   workflow_dispatch: { ... }
-  push: { tags: ['kernel-ota-*'] }     # 确实有 push 触发，勿删
+  push: { tags: ['program-ota-*'] }     # 确实有 push 触发，勿删
 
 # build-apk.yml —— 全量 Node 交叉编译，仅手动
 on: { workflow_dispatch: {} }          # push 触发已移除
 ```
 
-目的：**内核改动不触发 APK 重编；容器改动不自动发内核包。**
-注意 fast-apk **不**监听 `container/engine/**` 与 `kernel/**`。
+目的：**内核改动不触发 APK 重编；容器改动不自动发Program 包。**
+注意 fast-apk **不**监听 `container/engine/**` 与 `programs/console/**`。
 
 ## 6. 凭据规范
 
@@ -111,10 +111,10 @@ on: { workflow_dispatch: {} }          # push 触发已移除
 
 | 类别 | 路径 |
 |---|---|
-| 构建产物 | `container/app/build/`、`.gradle/`、`container/engine/node_modules/`、`kernel/ui/dist/`、`kernel/ui/node_modules/` |
+| 构建产物 | `container/app/build/`、`.gradle/`、`container/engine/node_modules/`、`programs/console/ui/dist/`、`programs/console/ui/node_modules/` |
 | 运行时资产 | `container/app/src/main/assets/node-bin/`、`container/app/src/main/assets/npm/` |
-| 内核投递产物 | `release/`、`feed/` |
+| Program 投递产物 | `release/`、`feed/` |
 | 秘密 | `keys/`（白名单保留 README）、`*.keystore`、`keystore.properties`、`.secrets/` |
 | 日志 | `*.log` |
 
-> `_artifacts/baseline/baseline.zip` 已随 ADR-0005 删除（见 [../adr/0005-kernel-via-ota-only.md](../adr/0005-kernel-via-ota-only.md)）。
+> `_artifacts/baseline/baseline.zip` 已随 ADR-0005 删除（见 [../adr/0005-program-via-ota-only.md](../adr/0005-program-via-ota-only.md)）。

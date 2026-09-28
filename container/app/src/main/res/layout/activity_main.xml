@@ -20,7 +20,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="8dp"
-                android:text="Android Node 容器 · 启动诊断"
+                android:text="Lob OS · 控制台"
                 android:textColor="#58a6ff"
                 android:textSize="15sp"
                 android:textStyle="bold" />

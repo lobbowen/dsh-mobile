@@ -96,44 +96,37 @@ try {
     for (const p of (DL[k].paths || [])) if (!ex(p)) add('LAYER-PATH-MISSING', k + ':' + p);
   }
   // 规则 2：C 的内容不得住内核（内容清单只在 C 通道；内核只留通道锚 + 装配动作）
-  for (const abs of walkFiles(path.join(ROOT, 'kernel', 'src'), [])) {
+  for (const abs of walkFiles(path.join(ROOT, 'programs/console', 'src'), [])) {
     const t = readSafe(abs);
     if (t.indexOf('hubcdn.zll.ink/userland/') >= 0) add('C-IN-KERNEL', rel(abs));
     else if (/https:\/\/[^'"\s]+\.tar\.gz/.test(t)) add('C-IN-KERNEL', rel(abs) + '（内核里出现制品 URL）');
   }
   // 规则 3：F 的产品声明不得住内核
-  if (ex('kernel/adapters')) add('F-IN-KERNEL', 'kernel/adapters');
-  // 规则 4：D2 件清单唯一处 —— 目录必须在，且**与随包投递清单对账**（带 libName 的件必须出现）。
-  // 知识一处（D2 件清单）、投递一处（随包能力件清单）；两边漂移即红。
-  const d2Pieces = path.join(ROOT, 'kernel', 'src', 'd2', 'pieces.json');
+  if (ex('programs/console/adapters')) add('F-IN-KERNEL', 'programs/console/adapters');
+  // 规则 4：D2 件清单唯一处在**原生侧**（lobos/native/NativeAssetRegistry.kt），与随包投递清单对账。
+  const d2Reg = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'lobos', 'native', 'NativeAssetRegistry.kt');
   const capsTxt = path.join(ROOT, '.github', 'native-capabilities.txt');
-  if (!fs.existsSync(d2Pieces)) add('D2-INVENTORY', 'kernel/src/d2/pieces.json 缺失（D2 无唯一件清单）');
+  if (!fs.existsSync(d2Reg)) add('D2-INVENTORY', '原生件注册表缺失（D2 无唯一件清单）');
   else if (fs.existsSync(capsTxt)) {
     const caps = fs.readFileSync(capsTxt, 'utf8');
-    let cat = null; try { cat = JSON.parse(fs.readFileSync(d2Pieces, 'utf8')); } catch { cat = null; }
-    for (const p of (cat && cat.pieces) || []) {
-      if (p.libName && caps.indexOf(' ' + p.libName + ' ') < 0) add('D2-INVENTORY', 'D2 件 ' + p.id + ' 的 ' + p.libName + ' 不在随包清单里');
+    const reg = readSafe(d2Reg);
+    const libs = [...reg.matchAll(/libName\s*=\s*"([^"]+)"/g)].map((m) => m[1]);
+    for (const lib of libs) {
+      if (!/^liblobos/.test(lib)) continue; // 只对账自建件；上游/运行时件不在能力件清单
+      if (caps.indexOf(' ' + lib + ' ') < 0) add('D2-INVENTORY', '原生件 ' + lib + ' 不在随包清单里');
     }
   }
-  // 规则 5：环境目录**只有一份**（E 的登记表 #envUnits），状态视图必须是它的**投影**。
-  // 判据为什么长这样：债的形态不是「某文件存在」，而是「同一件事在两处各说一遍」——
-  // 所以既要查第二份目录不在，也要查投影**确实从登记表取目录**且不自持条目表。
-  // 判据不点名那个已被取代的文件名 —— 否则门禁自己写出了旧路径，规则 8 会判它残留（判据自伤）。
-  // 改为按**形态**识别：platform/ 下不该再有 catalog 类文件（文件名运行时取，源码里无旧路径字面量）。
-  const platDir = path.join(ROOT, 'kernel', 'src', 'platform');
+  // 规则 5：环境目录只有一份，且**投影在原生侧**：console 不得自持 catalog 类文件；
+  // 原生侧必须有程序登记（lobos/os/AppRegistry.kt）—— 判据不点名已被删除的旧文件名（避免判据自伤）。
+  const platDir = path.join(ROOT, 'programs/console', 'src', 'platform');
   const leftoverCats = fs.existsSync(platDir) ? fs.readdirSync(platDir).filter((f) => /catalog/i.test(f)) : [];
-  const envStatus = path.join(ROOT, 'kernel', 'src', 'platform', 'env-status.js');
   if (leftoverCats.length) add('ENV-CATALOG', 'platform/ 下还有 catalog 类文件：' + leftoverCats.join(', '));
-  else if (!fs.existsSync(envStatus)) add('ENV-CATALOG', 'kernel/src/platform/env-status.js 缺失（环境状态视图没了）');
-  else {
-    const st = readSafe(envStatus);
-    if (st.indexOf('supply-table.json') < 0) add('ENV-CATALOG', 'env-status.js 未从 E 的登记表取目录（又自持了一份？）');
-    if (/const\s+\w*ENTRIES\s*=\s*\{/.test(st)) add('ENV-CATALOG', 'env-status.js 里有硬编码条目表');
-  }
+  const nativeEnv = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'lobos', 'os', 'AppRegistry.kt');
+  if (!fs.existsSync(nativeEnv)) add('ENV-CATALOG', '原生侧程序登记 os/AppRegistry.kt 缺失（环境状态视图没了）');
   // 规则 6：CI 工具不得住在 L0 车辆里（L0 目录里不该有构建 CLI）
   if (ex('container/engine/bin')) add('CI-TOOL-IN-L0', 'container/engine/bin');
   // 规则 7（原「D2 的件解析不得住 E 的目录」）已退役：该不变量现由内核门禁把守
-  // （kernel/test/native-supply-gate-test.js 的「D2 不再住 E 的目录」），此处若再写一遍旧路径，
+  // （programs/console/test/native-supply-gate-test.js 的「D2 不再住 E 的目录」），此处若再写一遍旧路径，
   // 反而会被规则 8 判成本身就是残留 —— 判据不该有两把尺子。
 
   // 规则 8：**已迁移的旧路径不得再被引用** —— 连续写法与**分段写法**都要查。
@@ -162,14 +155,14 @@ try {
   // 背景：安卓没有 /usr/bin/env，我们曾给每件手写 `#!/system/bin/sh` 包装（补偿层）；
   // 根因已由 D1 的 exec-path.c 补回（execve 前按调用方 PATH 解析 shebang），包装已删除。
   // 这条护栏留着：谁再把「给每件手写包装」当解法加回来，CI 立刻红 —— 要修的是约定，不是加壳。
-  const matPath = path.join(ROOT, 'kernel', 'src', 'supply', 'materialize.js');
-  if (fs.existsSync(matPath) && readSafe(matPath).indexOf('#!/system/bin/sh') >= 0) add('SHEBANG-COMPENSATION', 'kernel/src/supply/materialize.js 仍在手写 sh 包装');
+  const matPath = path.join(ROOT, 'programs/console', 'src', 'supply', 'materialize.js');
+  if (fs.existsSync(matPath) && readSafe(matPath).indexOf('#!/system/bin/sh') >= 0) add('SHEBANG-COMPENSATION', 'programs/console/src/supply/materialize.js 仍在手写 sh 包装');
 
   // 规则 10：C 的**共享供给机制**（物化器）必须住在 APK 侧共享层 —— 它服务所有产品、不属于任何一个，
   //   更不该住内核（内核只做检测 + 触发）。由来：用户 2026-09-29 复核「加到内核里就只有内核能适配，
-  //   我再装一个 DSH/Codex，这些还要再加一遍 —— 它们是共用的」。未搬完以前，用带到期日的 deliveryDebt 挂账。
-  const matMechPath = path.join(ROOT, 'kernel', 'src', 'supply', 'materialize.js');
-  if (fs.existsSync(matMechPath)) add('SUPPLY-MECH-IN-KERNEL', 'kernel/src/supply/materialize.js');
+  //   我再装一个其它 Program，这些还要再加一遍 —— 它们是共用的」。未搬完以前，用带到期日的 deliveryDebt 挂账。
+  const matMechPath = path.join(ROOT, 'programs/console', 'src', 'supply', 'materialize.js');
+  if (fs.existsSync(matMechPath)) add('SUPPLY-MECH-IN-KERNEL', 'programs/console/src/supply/materialize.js');
 
   // 规则 11：C 的供给层**必须是 Android 原生实现** —— 它已属 APK 层，职责是向下供给；
   //   再借 node/运行时等于又多欠一层依赖（用户 2026-09-29 复核：「不应该用 node，而是用安卓原生的逻辑」）。

@@ -36,8 +36,12 @@ function parse(str) {
 }
 
 // 握手：内核连接后主动发 bridge.handshake{ protocol, requires }
-function handshakeRequest(id, requires) {
-  return request(id, 'bridge.handshake', { protocol: PROTOCOL_VERSION, requires: requires || [] });
+function handshakeRequest(id, requires, program) {
+  return request(id, 'bridge.handshake', {
+    protocol: PROTOCOL_VERSION,
+    program: program || null,
+    requires: requires || [],
+  });
 }
 
 /**

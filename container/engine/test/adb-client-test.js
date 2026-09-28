@@ -1,5 +1,5 @@
 'use strict';
-// L0 adb-client 向量测试（原 Kotlin kernel/adb 测试套的 AOSP 向量迁移，D4）
+// L0 adb-client 向量测试（原 Kotlin adb 测试套的 AOSP 向量迁移，D4）
 //
 // 被测对象是**壳自带的** assets/node/adb-client/（ADR-0003 勘误 2026-09-24：
 // ADB 客户端唯一归属是 L0；Kotlin 副本与内核侧实现都会在收敛后消失，这里
@@ -59,10 +59,10 @@ function modPow(b, e, m) { let r = 1n; b %= m; while (e > 0n) { if (e & 1n) r = 
 
 // ── 2. adb 公钥串：base64(524B) + 空格 + name，padding 恰好一个 '=' ──
 {
-  const key = adbkey.generate('dsh@test');
+  const key = adbkey.generate('lobos@test');
   const s = adbkey.pubkeyString(key);
   const [b64, name] = s.split(' ');
-  check('公钥串两段（base64 + 名字）', b64 && name === 'dsh@test');
+  check('公钥串两段（base64 + 名字）', b64 && name === 'lobos@test');
   check('524 字节 → 700 字符、1 个 padding', b64.length === 700 && b64.endsWith('=') && !b64.endsWith('=='));
   check('base64 解回 524 字节', Buffer.from(b64, 'base64').length === 524);
 }
@@ -70,7 +70,7 @@ function modPow(b, e, m) { let r = 1n; b %= m; while (e > 0n) { if (e & 1n) r = 
 // ── 3. ADB token 签名语义：token 本身当 SHA-1 摘要（历史踩坑点） ──
 {
   const SHA1_DIGEST_INFO = Buffer.from('3021300906052b0e03021a05000414', 'hex');
-  const key = adbkey.generate('dsh@test');
+  const key = adbkey.generate('lobos@test');
   const pub = crypto.createPublicKey(key.privatePem);
   const { n, e } = pub.export({ format: 'jwk' });
   const modulus = BigInt('0x' + (Buffer.from(n, 'base64url').toString('hex') || '0'));

@@ -1,0 +1,85 @@
+#!/usr/bin/env node
+'use strict';
+
+// Lob OS 控制面板 Program 入口（唯一入口；没有 os-init）。
+// 面板不是 init：它启动的只是自己的 HTTP 服务，不拉起/监督 OS 或任何被管对象。
+// OS 的启动/保活由 OS 原生（Kotlin OsHost/OsInit）负责；停掉本进程不影响 OS。
+
+const { Panel } = require('../src/panel');
+const { panelVersion } = require('../src/platform/version');
+
+function usage() {
+  console.log('用法: panel <command> [options]');
+  console.log('');
+  console.log('命令:');
+  console.log('  serve [-c <config>]   启动控制面板 HTTP 服务（由 OS 拉起）');
+  console.log('  status [-c <config>]  打印面板自身状态（读面板 API，不触碰 OS）');
+  console.log('  self-check            纯逻辑自检（不依赖资产/网络/OS）');
+  console.log('  version               打印面板版本');
+  console.log('');
+  console.log('环境变量 LOBOS_PANEL_HOME 覆盖面板状态根；LOBOS_BRIDGE_SOCKET 覆盖 OS 能力桥。');
+  process.exit(1);
+}
+
+async function cmdServe() {
+  const panel = new Panel();
+  await panel.start();
+  process.on('SIGTERM', () => { panel.stop().then(() => process.exit(0)); });
+  process.on('SIGINT', () => { panel.stop().then(() => process.exit(0)); });
+  console.log('[panel] serving, pid=' + process.pid);
+}
+
+async function cmdStatus() {
+  const panel = new Panel();
+  const summary = await panel.statusSummary();
+  console.log('panel:      v' + summary.panel.version + '  pid=' + summary.panel.pid);
+  console.log('apiPort:    ' + summary.panel.apiPort);
+  console.log('osOnline:   ' + summary.osOnline);
+  if (summary.os) console.log('osState:    ' + JSON.stringify(summary.os));
+  else console.log('osState:    —（' + (summary.note || 'OS 未接线') + '）');
+}
+
+function cmdSelfCheck() {
+  // 发布物冒烟：纯逻辑自检，验证入口/清单契约与「不是 init」的不变量。
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const root = path.join(__dirname, '..');
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  const checks = [
+    ['manifest.role=system', manifest.role === 'system'],
+    ['manifest.entry=bin/panel', manifest.entry === 'bin/panel'],
+    ['package.name=lobos-console-panel', pkg.name === 'lobos-console-panel'],
+    ['package.bin.panel', !!(pkg.bin && pkg.bin.panel)],
+    ['无 supervisor.js（系统职责已下沉）', !fs.existsSync(path.join(root, 'src', 'supervisor.js'))],
+  ];
+  let ok = true;
+  for (const [name, pass] of checks) { console.log((pass ? 'PASS ' : 'FAIL ') + name); if (!pass) ok = false; }
+  console.log('panelVersion=' + panelVersion());
+  console.log('node=' + process.version);
+  console.log('self-check: ' + (ok ? 'OK' : 'FAILED'));
+  process.exit(ok ? 0 : 1);
+}
+
+const cmd = process.argv[2];
+switch (cmd) {
+  case undefined:
+  case 'serve':
+  case 'daemon':
+    cmdServe().catch((e) => { console.error('[panel] 启动失败:', (e && e.stack) || e); process.exit(1); });
+    break;
+  case 'status':
+    cmdStatus().catch((e) => { console.error('[panel] status 失败:', (e && e.message) || e); process.exit(1); });
+    break;
+  case 'self-check':
+    cmdSelfCheck();
+    break;
+  case 'version':
+  case '--version':
+  case '-v':
+    console.log('panel v' + panelVersion());
+    break;
+  default:
+    usage();
+}
+

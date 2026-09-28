@@ -103,10 +103,10 @@ if [ -z "$DN" ]; then
   exit 1
 fi
 
-echo "[dsh-signing] apksigner: $APKSIGNER"
-echo "[dsh-signing] APK: $APK"
-echo "[dsh-signing] $DN"
-echo "[dsh-signing] SHA-256 指纹: ${FP:-（apksigner 输出里没解析到 sha-256 摘要行）}"
+echo "[lobos-signing] apksigner: $APKSIGNER"
+echo "[lobos-signing] APK: $APK"
+echo "[lobos-signing] $DN"
+echo "[lobos-signing] SHA-256 指纹: ${FP:-（apksigner 输出里没解析到 sha-256 摘要行）}"
 
 IS_DEBUG=0
 case "${DN,,}" in (*"android debug"*) IS_DEBUG=1 ;; esac
@@ -128,7 +128,7 @@ if [ -n "$EXPECT_CERT" ]; then
     echo "::error title=签名身份不符::APK 内证书指纹 $FP ≠ 本次注入 keystore 的指纹 $CERT_FP —— 签名配置指错了 key（换过 keystore / 别名取错），装到既有设备上必失败。"
     exit 1
   fi
-  echo "[dsh-signing] [ok] APK 证书指纹与注入锚点一致（${EXPECT_CERT##*/} = $FP）"
+  echo "[lobos-signing] [ok] APK 证书指纹与注入锚点一致（${EXPECT_CERT##*/} = $FP）"
   if [ "$REQUIRE_STABLE" = "1" ] && [ "$IS_DEBUG" = "1" ]; then
     # 一致只证明「签名配置生效」，不证明「这把 key 是稳定的」。发布链路两个都要：
     # 有人会把本地 debug keystore 灌进 ANDROID_KEYSTORE_BASE64，那等于没配。
@@ -148,7 +148,7 @@ if [ "$IS_DEBUG" = "1" ]; then
 fi
 
 if [ "$REQUIRE_STABLE" = "1" ]; then
-  echo "[dsh-signing] [ok] 非 debug 签名（发布链路放行）。⚠ 本次【没有】可比对的锚点指纹 —— 只证明了「不是 debug」，没证明「是哪把 key」。"
+  echo "[lobos-signing] [ok] 非 debug 签名（发布链路放行）。⚠ 本次【没有】可比对的锚点指纹 —— 只证明了「不是 debug」，没证明「是哪把 key」。"
   exit 0
 fi
 echo "::warning title=签名身份无从核验::未配 keystore 却拿到非 debug 签名 —— 没有锚点能证明它是【哪一把】key。发布请走配了 ANDROID_KEYSTORE_BASE64 的链路。"

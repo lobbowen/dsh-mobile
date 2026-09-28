@@ -3,7 +3,7 @@
 # 读「某个 Release 上已有的某个资产」——三种结局必须分得开，且都由这一处判。
 #
 # 为什么单独成宿主：发布前都要拿"线上现在是什么"跟自己比（APK 侧比 version.json，
-# 内核侧比 kernel-manifest.json）。旧写法是各 workflow 自己 `gh release download`，
+# 内核侧比 program-manifest.json）。旧写法是各 workflow 自己 `gh release download`，
 # 失败就 `::warning` 一句然后**照发** —— 那是把「看不清线上是什么」当成了
 # 「线上什么都没有」，恰好是最危险的那一侧被放行（2026-09-26 定罪，见
 # docs/runbook/release.md §3）。所以「不存在」与「取不到」必须由同一段代码分开判。

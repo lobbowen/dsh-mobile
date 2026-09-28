@@ -1,7 +1,7 @@
 'use strict';
 
-// 运行时契约 runtime.json（容器写、内核读）。对齐内核 src/platform/runtime-contract.js。
-// 内核启动前由容器写入 <DSH_SUPERVISOR_HOME>/supervisor/runtime.json。
+// 运行时契约 runtime.json（原生写、Program 读）。写读两侧都归原生（债 C3）。
+// 运行时启动前由原生写入 <LOBOS_SUPERVISOR_HOME>/supervisor/runtime.json。
 
 const fs = require('fs');
 const path = require('path');
@@ -36,7 +36,7 @@ function writeRuntimeJson({ home, nodePath, nodeBinDir, npmPath, npmEntry, prefi
     ...(npmEntry ? { npmEntry } : {}),
     ...(prefix ? { prefix } : {}),
     minNode: minNode || 'v24.12.0',
-    writtenBy: writtenBy || 'android-node-container',
+    writtenBy: writtenBy || 'lobos-os',
   };
   fs.writeFileSync(runtimeJsonPath(home), JSON.stringify(obj, null, 2), { mode: 0o600 });
   return obj;

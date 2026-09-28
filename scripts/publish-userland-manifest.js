@@ -10,7 +10,7 @@
 //
 // 为什么对**文件原始字节**签名（而不是像内核 manifest 那样签 canonical JSON）：
 //   验签发生在**内核**（JS）。内核不该为此再复制一份 canonical 实现 —— 本仓已有两份
-//   （container/engine/src/sign.js 与设备端 assets/node/kernel-verify.js，靠「逐字节一致」
+//   （container/engine/src/sign.js 与设备端 assets/node/program-verify.js，靠「逐字节一致」
 //   的约定维持），再加一份就是第三把尺子。签字节 = 验字节：
 //   验签侧只需 crypto.verify(null, <原始字节>, <公钥>, <签名>)，零额外实现。
 //

@@ -1,16 +1,19 @@
 {
-  "version": 2,
+  "version": 3,
   "updated": "2026-09-27",
-  "_note": "v2：文档收敛进 docs/（源码目录不再放文档）；删除历史快照。",
+  "_note": "v3：kernel→programs/console；system(Tier S)→container/rom；新增 programs/{console,dsh,pi}。Lob OS 三层实体。",
   "rootAllow": [
     "README.md",
     ".github",
     ".gitignore",
     "container",
-    "kernel",
-    "system",
+    "programs",
+    "programs/console",
+    "container/rom",
     "docs",
     "scripts",
+    "THIRD-PARTY.md",
+    "brand-scan-report.txt",
     "gradle",
     "gradlew",
     "gradlew.bat",
@@ -31,13 +34,13 @@
     "L1": {
       "title": "内核（签名 OTA 热更新）",
       "paths": [
-        "kernel"
+        "programs/console"
       ]
     },
     "S": {
       "title": "Tier S（ROM 集成）",
       "paths": [
-        "system"
+        "container/rom"
       ]
     },
     "CI": {
@@ -118,9 +121,10 @@
     },
     {
       "from": "dsh-android-kernel",
-      "to": "kernel",
+      "to": "programs/console",
       "kind": "dir",
-      "expectFiles": 234
+      "expectFiles": 150,
+      "countNote": "迁移基线原为 234；W2 把系统级职责下沉 OS 原生后 console 按设计收缩（当前约 169 件），基线随之下调。"
     },
     {
       "from": "docs/ADR-001-android-execution-domain.md",
@@ -183,18 +187,18 @@
       "kind": "file"
     },
     {
-      "from": "kernel/README.md",
-      "to": "docs/components/kernel.md",
+      "from": "programs/console/README.md",
+      "to": "docs/components/console.md",
       "kind": "file"
     },
     {
-      "from": "kernel/docs/ANDROID-PLAN.md",
-      "to": "docs/components/kernel-android-plan.md",
+      "from": "programs/console/docs/ANDROID-PLAN.md",
+      "to": "docs/plans/archive/kernel-android-plan.md",
       "kind": "file"
     },
     {
-      "from": "kernel/ui/FRAMEWORK.md",
-      "to": "docs/components/kernel-ui.md",
+      "from": "programs/console/ui/FRAMEWORK.md",
+      "to": "docs/components/console-ui.md",
       "kind": "file"
     },
     {
@@ -241,35 +245,40 @@
       "expectFiles": 1
     },
     {
-      "from": "kernel/src/guard/native",
-      "to": "kernel/src/assembler",
-      "kind": "dir",
-      "expectFiles": 9
-    },
-    {
       "from": "container/engine/bin/build-bundle.js",
-      "to": "scripts/build-kernel-bundle.js",
+      "to": "scripts/build-program-bundle.js",
       "kind": "file"
     },
     {
-      "from": "kernel/src/assembler/platform-artifacts.js",
-      "to": "kernel/src/d2/artifacts.js",
+      "from": "programs/console/src/platform/toolchain.js",
+      "to": "container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt",
       "kind": "file"
     },
     {
-      "from": "kernel/src/platform/toolchain.js",
-      "to": "container/app/src/main/java/io/github/lobbowen/dshmobile/runtime/SupplyProvisioner.kt",
+      "from": "programs/console/adapters/dsh/agent.json",
+      "to": "programs/dsh/manifest.json",
       "kind": "file"
+    }
+  ],
+  "retiredMoves": [
+    {
+      "from": "programs/console/src/guard/native",
+      "to": "programs/console/src/assembler",
+      "kind": "dir",
+      "expectFiles": 9,
+      "retiredReason": "删除：职责下沉 OS 原生（W1 os/instances、os/ports）—— A11"
     },
     {
-      "from": "kernel/adapters/dsh/agent.json",
-      "to": "kernel/src/platform/agent-defaults.json",
-      "kind": "file"
+      "from": "programs/console/src/assembler/platform-artifacts.js",
+      "to": "programs/console/src/d2/artifacts.js",
+      "kind": "file",
+      "retiredReason": "删除：归 OS 原生 Runtime 供给（W1 cenv）—— A11/B7"
     },
     {
-      "from": "kernel/src/platform/env-catalog.js",
-      "to": "kernel/src/platform/env-status.js",
-      "kind": "file"
+      "from": "programs/console/src/platform/env-catalog.js",
+      "to": "programs/console/src/platform/env-status.js",
+      "kind": "file",
+      "retiredReason": "删除：归 OS 原生 os.env.* —— C3"
     }
   ],
   "legacyForbidden": [
@@ -292,9 +301,9 @@
     "docs/runbook/handover.md",
     "docs/runbook/handover-2026-09-24.md",
     "docs/runbook/container-status.md",
-    "kernel/README.md",
-    "kernel/docs",
-    "kernel/ui/FRAMEWORK.md",
+    "programs/console/README.md",
+    "programs/console/docs",
+    "programs/console/ui/FRAMEWORK.md",
     "system/README.md"
   ],
   "generated": [
@@ -320,9 +329,9 @@
     "keygen-android-keystore.sh": "L0",
     "inject-libcxx-into-apk.py": "L0",
     "stage-npm-assets.sh": "L0",
-    "build-kernel-bundle.sh": "L1",
+    "build-program-bundle.sh": "L1",
     "keygen.sh": "L1",
-    "sign-kernel-manifest.js": "L1",
+    "sign-program-manifest.js": "L1",
     "upload-qiniu.js": "L1",
     "gen-native-assets.js": "cross",
     "gen-version.js": "cross",
@@ -352,7 +361,8 @@
     "read-release-asset.sh": "cross",
     "check-apk-release-version.sh": "L0",
     "verify-apk-version-gate.sh": "L0",
-    "build-kernel-bundle.js": "cross",
+    "build-program-bundle.js": "cross",
+    "gate-scan.js": "cross",
     "publish-userland-manifest.js": "cross",
     "userland-external-tools.json": "cross",
     "build-userland-jq.sh": "cross",
@@ -374,14 +384,14 @@
       "title": "开发环境层",
       "vehicle": "L0(运行时打进 APK) + 系统层($PREFIX 自装)",
       "paths": [
-        "container/app/src/main/java/io/github/lobbowen/dshmobile/runtime",
+        "container/app/src/main/java/lobos/runtime",
         "scripts/build-userland-sqlite3.sh",
         ".github/workflows/build-userland.yml",
         "container/app/src/main/assets/node-versions.json"
       ],
       "shape": "内容按**性质**分裂：运行时（node·python·go·java）随 APK 冻结（jniLibs+assets）；工具（npm·pnpm·git·jq·sqlite3·rg·curl·coreutils）由环境自己装进 $PREFIX、自适应、自更新，内核检测并触发",
       "_bootstrap": "C 通道的**自举种子**：npm（构建期由 CI 注入 assets/npm，**仓内不存在该目录**，故只在此说明不进 paths）—— 装 pnpm/git 等都要先有它，故它必须随 APK 落地；这是**设计**，不是把工具冻结在 APK。其余工具（pnpm/git/jq/sqlite3/rg/curl/coreutils）一律由环境自己装进 $PREFIX。",
-      "_where": "C 是**共享层**（服务所有产品，与产品无关）。供给机制住 APK 侧（**必须 Android 原生实现：Kotlin/Android API —— 取回/校验/解包/落位/建链，不得依赖 node 或任何运行时**）；内核只留**检测 + 触发**（住 kernel/src/assembler）。判据：加/更新一件工具**不需要内核 OTA、不需要 APK 更新**（只发清单）。"
+      "_where": "C 是**共享层**（服务所有产品，与产品无关）。供给机制住 APK 侧（**必须 Android 原生实现：Kotlin/Android API —— 取回/校验/解包/落位/建链，不得依赖 node 或任何运行时**）；检测与触发归原生（lobos/native + lobos/runtime）；console 只做只读展示。判据：加/更新一件工具**不需要内核 OTA、不需要 APK 更新**（只发清单）。"
     },
     "D1": {
       "title": "Linux 语义兑现",
@@ -392,26 +402,27 @@
     },
     "D2": {
       "title": "Android 平台件库",
-      "vehicle": "kernel",
+      "vehicle": "L0",
       "paths": [
-        "kernel/src/d2"
+        "container/app/src/main/java/lobos/native"
       ],
-      "_payload": "D2 的**物**落在 APK：container/app/src/main/assets/node/adb-client/**（D2 行只声明清单与解析实现住 kernel/src/d2）。"
+      "_payload": "D2 的**物**落在 APK：container/app/src/main/assets/node/adb-client/**；**唯一件清单与解析实现已下沉原生**（lobos/native/NativeAssetRegistry.kt），console 不再持有 d2 目录。"
     },
     "E": {
       "title": "装配器",
-      "vehicle": "L1",
+      "vehicle": "L0",
       "paths": [
-        "kernel/src/assembler"
-      ]
+        "container/app/src/main/java/lobos/runtime"
+      ],
+      "_note": "装配器已下沉原生（lobos/runtime/SupplyProvisioner + NativePreparer）；console 侧不再有 assembler 目录。"
     },
     "F": {
       "title": "产品声明",
       "vehicle": "L2",
       "paths": [
-        "container/app/src/main/assets/kernel-feed.json"
+        "container/app/src/main/assets/program-feed.json"
       ],
-      "_note": "产品声明（每产品一套）：通道选择等**声明物**随壳分发。原先 paths 为空 ⇒ 声明物无位可归（kernel-feed.json 住在 B 的 assets 里）—— 现明确：F 的物就落在 APK 内，与 B 共用 assets 目录但**物各有主**。"
+      "_note": "产品声明（每产品一套）：通道选择等**声明物**随壳分发。原先 paths 为空 ⇒ 声明物无位可归（program-feed.json 住在 B 的 assets 里）—— 现明确：F 的物就落在 APK 内，与 B 共用 assets 目录但**物各有主**。"
     }
   },
   "deliveryDebt": []

@@ -1,0 +1,308 @@
+name: Build & Sign Kernel OTA Bundle
+
+# 构建并签名「可热更新的内核（L1）」OTA 包：对齐 docs/contracts/base-spec.md §5 通道一（构建期签名）。
+#
+# 双信任根：本工作流用 CI secret OTA_PRIVATE_KEY_PEM（ed25519 私钥）签名内核包；
+# 设备端用焊死在 APK 的 container/app/src/main/assets/ota-public.pem 验签 —— 私钥绝不进 APK。
+#
+# 用法（手动 Run workflow）：
+#   - program_repo : Program 源码仓（**留空 = 单仓内的 programs/console/ 子目录**；
+#                   仅在需要从 fork/其他仓构建时才填 owner/repo）
+#   - program_ref  : 跨仓构建时的内核仓 ref（分支/tag/sha）；留空走单仓，此项无效
+#   - version     : Program 版本号（写进 manifest.json / 包名）
+#   - abi         : 默认 node24-arm64-android35
+#   - url_base    : OTA 下载基址（如 https://cdn.example.com/ota）；留空则不写 url
+#   - publish     : 是否把产物发到 Release
+#
+# 产物：release/program-<version>.zip + release/program-manifest.json（作为 artifact / Release 下载）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      program_repo:
+        description: '内核源码仓 (owner/repo)'
+        required: false
+        default: ''
+      program_ref:
+        description: '内核仓 ref（分支/tag/sha）'
+        required: false
+        default: 'main'
+      version:
+        # ⚠ 默认必须为空：留空才会从单一事实源 programs/console/package.json 解析（ADR-0004）。
+        # 原先默认 '1.0.0'，与 package.json 构成两个源 —— 实测它就静默产出了 version=1.0.0
+        # 的 manifest（内核真实为 0.1.0-android.11）。注释写着「已修」，但默认值一直没改。
+        description: '内核版本号（留空 = 从 programs/console/package.json 解析）'
+        required: false
+        default: ''
+      abi:
+        description: 'abi 标签'
+        required: false
+        default: 'node24-arm64-android35'
+      url_base:
+        description: 'OTA 下载基址（结尾不带 /）'
+        required: false
+        default: ''
+      publish:
+        description: '发布到 Release'
+        type: boolean
+        required: false
+        default: false
+      rollout_percent:
+        description: '灰度放量百分比（0-100；100=全量）。设备按 安装ID+版本 确定性分桶'
+        required: false
+        default: '100'
+      channel:
+        description: '发布通道：canary=灰度测试（先发这里真机验证），stable=生产'
+        type: choice
+        options:
+          - canary
+          - stable
+        required: false
+        default: canary
+  push:
+    tags:
+      - 'program-ota-*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-program:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PROGRAM_REPO: ${{ github.event.inputs.program_repo }}
+      PROGRAM_REF: ${{ github.event.inputs.program_ref || 'main' }}
+      # 版本号**不写死**：留空时由下一步从内核的单一事实源（programs/console/package.json）解析。
+      # 原先这里默认 '1.0.0'，与 programs/console/package.json 的版本是两个源 —— 会静默分叉（ADR-0004）。
+      PROGRAM_VER: ${{ github.event.inputs.version || '' }}
+      PROGRAM_ABI: ${{ github.event.inputs.abi || 'node24-arm64-android35' }}
+      # 通道：默认 canary —— 内核推送必须先在灰度真机跑过，再提升到 stable。
+      PROGRAM_CHANNEL: ${{ github.event.inputs.channel || 'canary' }}
+      OTA_URL_BASE: ${{ github.event.inputs.url_base || '' }}
+    steps:
+      - name: Checkout container repo
+        uses: actions/checkout@v4
+
+      - name: Resolve program version + requiresProtocol from programs/console/package.json
+        run: |
+          set -euo pipefail
+          V="${{ github.event.inputs.version }}"
+          if [ -z "$V" ]; then
+            V="$(node -p "require('./programs/console/package.json').version")"
+            echo "[version] 内核版本（来自 programs/console/package.json）: $V"
+          else
+            echo "[version] 内核版本（显式指定）: $V"
+          fi
+          echo "PROGRAM_VER=$V" >> "$GITHUB_ENV"
+          P="$(node -p "require('./programs/console/package.json').lobos.requiresProtocol || 0")"
+          echo "LOBOS_PROGRAM_REQUIRES_PROTOCOL=$P" >> "$GITHUB_ENV"
+          echo "[version] 内核要求的最低桥协议: $P"
+
+      - name: Restore signing private key from secret
+        env:
+          OTA_PRIVATE_KEY_PEM: ${{ secrets.OTA_PRIVATE_KEY_PEM }}
+        run: |
+          if [ -z "$OTA_PRIVATE_KEY_PEM" ]; then
+            echo "::error::secrets.OTA_PRIVATE_KEY_PEM 未配置（ed25519 私钥，用于签名内核包）"
+            exit 1
+          fi
+          mkdir -p keys
+          printf '%s' "$OTA_PRIVATE_KEY_PEM" > keys/ota-private.pem
+          chmod 600 keys/ota-private.pem
+          echo "private key restored -> keys/ota-private.pem"
+
+      - name: Verify OTA public key anchor matches the signing private key
+        # 这条是 P2b-e 的落点：此前这一步只查「锚点文件在不在 + 多少字节」。于是
+        # 私钥轮换后重焊了 APK 公钥却忘了改 secrets.OTA_PRIVATE_KEY_PEM（或反过来）
+        # 会一路绿到底 —— 签出的每个包在所有设备上判 signature-invalid，OTA 静默死亡，
+        # 取证却要一轮真机。只有这条链拿得到私钥，所以配对判据在这里执行。
+        # 判据实现唯一：scripts/verify-ota-anchor.sh（build-apk 那边同调、只缺 --private）。
+        run: |
+          set -euo pipefail
+          bash scripts/ensure-tool.sh openssl openssl
+          bash scripts/verify-ota-anchor.sh \
+            --anchor container/app/src/main/assets/ota-public.pem \
+            --private keys/ota-private.pem
+
+      - name: Stage program source
+        # 单仓默认：Program 源码就是同仓 programs/console/ 子目录，无需跨仓检出。
+        # 只有显式传了 program_repo（fork / 试验分支）才去 clone 外部仓。
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "$PROGRAM_REPO" ]; then
+            git clone --depth 1 --branch "$PROGRAM_REF" \
+              "https://x-access-token:${GH_TOKEN}@github.com/$PROGRAM_REPO.git" program-src
+          else
+            cp -a programs/console program-src
+          fi
+
+      - name: Build panel UI (ui/dist)
+        # ui/dist 被 .gitignore 排除，但内核包运行期必需 —— 检出里没有，
+        # 不现场构建就会打出「能启动但打不开控制面板」的残缺包
+        # （program-bundle.js 特意在排除表旁注了"注意保留 ui/dist"）。
+        run: |
+          set -euo pipefail
+          cd program-src/ui
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Build & sign program bundle
+        # 输出目录必须显式给：build-program-bundle.js 的默认值是「脚本所在仓的三层之上」(../..)，
+        #   在 CI 上等于 /home/runner/work/release —— 而本工作流后面按仓内 release/ 读它，
+        #   于是 sign 步骤 ENOENT（实测：program-ota-0.1.0-android.37 首次发布即因此红）。
+        #   脚本本来就留了 LOBOS_BUNDLE_OUT_DIR 这个口子，这里显式钉成仓内 release/。
+        env:
+          LOBOS_BUNDLE_OUT_DIR: ${{ github.workspace }}/release
+        run: |
+          chmod +x scripts/build-program-bundle.sh
+          ./scripts/build-program-bundle.sh "$PWD/program-src" "$PROGRAM_VER" "$PROGRAM_ABI" "$OTA_URL_BASE"
+
+      - name: Sign feed manifest (freshness + signature)
+        # ADR-0005 C3：manifest 是**先被读**的那一个，必须自带新鲜度与签名 ——
+        # sequence 单调（防重放/冻结）、expires 过期即拒、signature 供设备端校验。
+        #
+        # sequence 由脚本内部取**时间戳**，不再依赖"上一份 Release 的 sequence + 1"。
+        # 那个做法在 Release 被删除/重建时会**倒退**，而设备把水位持久化在自己身上 ——
+        # 会把倒退后的 sequence 判为重放并拒绝，导致设备**永久卡住**（实测撞到过）。
+        # 因此这里不再需要下载上一份 manifest，步骤也少一个失败点。
+        run: |
+          set -euo pipefail
+          node scripts/sign-program-manifest.js release/program-manifest.json keys/ota-private.pem "${{ github.event.inputs.rollout_percent || 100 }}"
+
+      - name: Upload bundle artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: program-ota-${{ env.PROGRAM_VER }}
+          path: |
+            release/program-${{ env.PROGRAM_VER }}.zip
+            release/program-manifest.json
+          if-no-files-found: error
+
+      - name: Publish to Release
+        if: ${{ github.event.inputs.publish == 'true' || startsWith(github.ref, 'refs/tags/program-ota-') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ls -la release/
+
+          # 发布说明写到文件再 --notes-file 读入。
+          # 不直接写 --notes "多行"：多行字符串在 YAML 块标量里必须整体缩进，
+          # 而缩进一破 YAML 就断（这里真实踩过 —— validate-workflow.py 立刻报
+          # "could not find expected ':'"）。写文件既避开缩进问题，
+          # 也让这段中文说明不必挤在缩进层级里。
+          cat > /tmp/notes.md <<'NOTES'
+          Signed Program OTA bundle. Verify with the welded APK public key.
+
+          ## 设备如何拿到（OTA，唯一路径 —— ADR-0005）
+
+          设备启动时读该**通道**的 manifest 并自动安装/升级：
+          ```
+          <baseUrl>/program-<channel>/program-manifest.json
+          <baseUrl>/program-<channel>/program-<version>.zip
+          ```
+          通道 = `canary`（灰度真机验证）或 `stable`（生产）；设备侧在
+          `container/app/src/main/assets/program-feed.json` 里选通道。
+          本地 feed（adb 投放）与 APK 内置基线均已删除 —— 只有一个安装来源。
+
+          ## 生效方式
+
+          下次启动时由 OS 原生（`OsHost`/`OsInit`）自动发现并安装。
+          安装**必须**验签通过；未签名或签名不匹配的包会被拒绝 ——
+          设备只安装已签名内核，不生产内核。
+          NOTES
+
+          # ── 通道（灰度）：canary = 灰度真机验证；stable = 生产 ──────────────
+          # 为什么必须有：内核推送**必须先在灰度通道真实跑过**，否则只能靠祈祷。
+          # 设备端读 <base>/<rolling>/program-manifest.json，rolling = program-<channel>。
+          ROLL="program-$PROGRAM_CHANNEL"
+          echo "[channel] channel=$PROGRAM_CHANNEL rolling=$ROLL"
+
+          # ── 版本前进门禁（**按通道**比较）────────────────────────────────
+          # 发布一个"不大于本通道已发布"的版本 = 该通道设备永远不更新且无报错。
+          # 按通道而非全局：canary 可以领先 stable；提升(promote)到 stable 时对 stable 仍需前进。
+          # 「该通道还没有 manifest」与「取不到 manifest」是两种结局，分类只住
+          # scripts/read-release-asset.sh（APK 侧读 version.json 用的是同一处）。
+          # 旧写法把「取不到」降成 ::warning 然后照发，还把「取到了但读不出 version」
+          # 也当成空 —— 两者都是把「看不清」当成「没有」，正是 release.md §3 定过的那类罪。
+          TMPD="$(mktemp -d)"
+          FEEDRC=0
+          bash scripts/read-release-asset.sh program-channel-manifest "$ROLL" program-manifest.json "$TMPD" || FEEDRC=$?
+          CUR=""
+          if [ "$FEEDRC" = "0" ]; then
+            CUR="$(node -p "require('$TMPD/program-manifest.json').version || ''" 2>/dev/null || true)"
+            if [ -z "$CUR" ]; then
+              echo "::error title=内核版本门禁::$ROLL 的 manifest 取到了却读不出 version 字段 —— 通道状态坏了，先修它再发。"
+              exit 1
+            fi
+          elif [ "$FEEDRC" = "10" ]; then
+            echo "[version] $ROLL 上没有 manifest —— 该通道首次发布，跳过前进检查"
+          else
+            echo "::error title=内核版本门禁::读 $ROLL 的已发布 manifest 失败（原因见上一条）—— 看不清通道状态就不许发。"
+            exit 1
+          fi
+          if [ -n "$CUR" ]; then
+            echo "[version] $ROLL 已发布=$CUR，本次=$PROGRAM_VER"
+            # 门禁只拦**回退**，放行**同版本重发**。这与 APK 侧 versionCode 门禁的
+            # 「显式通道」那一格同形：本 workflow 的发布口全部是人触发的显式动作
+            # （tag `program-ota-*` 或 dispatch 的 publish=true），没有"自动同号覆盖"那条路。
+            # 为什么同版本必须放行：修投递通道、重传、补签，都发生在"版本没变"的时候；
+            # 若判成错误，这些修复就永远落不了地。而且同版本重发不会让设备"看起来有更新"
+            # ——它本来就不会更新（版本相等），这只是把同一份产物重新送到目标位置。
+            if [ "$PROGRAM_VER" = "$CUR" ]; then
+              echo "[ok] 同版本重发（$CUR）：允许，用于修复投递/重传"
+            else
+              node -e "const {isNewer}=require('./container/engine/src/program-version'); if(isNewer(process.argv[1],process.argv[2])){process.exit(1)}" "$CUR" "$PROGRAM_VER" \
+                || { echo "::error title=内核版本回退::$ROLL 上本次 $PROGRAM_VER 低于已发布 $CUR —— 设备有版本下限，会拒绝安装；且该通道设备也判为无更新。请递增 programs/console/package.json 的 version。"; exit 1; }
+              echo "[ok] 版本前进（$CUR → $PROGRAM_VER）"
+            fi
+          fi
+
+          # ── 版本化归档（全局唯一一次）────────────────────────────────────
+          # program-<version> 只创建一次。**从 canary 提升到 stable 时不再重建** ——
+          # 提升是标准动作，若把"同版本第二次发布"判为错误，就无法提升。
+          # 「已存在就整步跳过」这条政策用宿主的 --skip-existing 表达，判据本身
+          # （读线上、创建、覆盖、回读确认）只住 scripts/gh-release-upload.sh 一份。
+          bash scripts/gh-release-upload.sh "program-${{ env.PROGRAM_VER }}" \
+            --skip-existing \
+            --title "Kernel OTA ${{ env.PROGRAM_VER }}" \
+            --notes-file /tmp/notes.md \
+            "release/program-${{ env.PROGRAM_VER }}.zip" release/program-manifest.json
+
+          # ---- 通道滚动归档：发布方不必追着 program-<version> 的 tag 找当前版本 ----
+          # 设备端读的是对象存储的 <base>/program-<channel>/（下一步），GitHub 这一份
+          # 只做归档与本 workflow 的版本前进门禁 —— github.com 在目标网络不可达。
+          # --prune 让通道 feed 只保留**本次**的 zip（否则会随每次发布无限堆积历史包）；
+          # 本次刚传上去的资产名由宿主自动列入保留名单，不会被自己清掉。
+          bash scripts/gh-release-upload.sh "$ROLL" \
+            --title "Kernel OTA channel $PROGRAM_CHANNEL" \
+            --notes "通道 feed（$PROGRAM_CHANNEL）：设备端读 $ROLL/program-manifest.json 判断是否有更新。" \
+            --prune '^program-[0-9]' \
+            release/program-manifest.json "release/program-${{ env.PROGRAM_VER }}.zip"
+
+      - name: Publish to Qiniu (the channel devices actually read)
+        # 为什么必须有这一步：**GitHub 在目标网络不可达**（实测 github.com / raw.githubusercontent.com
+        # 均失败），所以 Release 只能当**归档**，设备端真正读的是对象存储。
+        # 缺配置就**硬失败** —— 发一个设备读不到的包，等于假装发布成功。
+        if: ${{ github.event.inputs.publish == 'true' || startsWith(github.ref, 'refs/tags/program-ota-') }}
+        env:
+          QINIU_AK: ${{ secrets.QINIU_AK }}
+          QINIU_SK: ${{ secrets.QINIU_SK }}
+          QINIU_BUCKET: ${{ secrets.QINIU_BUCKET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${QINIU_AK:-}" ] || [ -z "${QINIU_SK:-}" ] || [ -z "${QINIU_BUCKET:-}" ]; then
+            echo "::error title=对象存储未配置::需要 secrets QINIU_AK / QINIU_SK / QINIU_BUCKET。设备端只从对象存储取内核（GitHub 在目标网络不可达，已实测）。"
+            exit 1
+          fi
+          CH="program-$PROGRAM_CHANNEL"
+          # manifest 短缓存（否则设备永远读到旧 manifest，表现为"发了没更新"）；
+          # 内核包长缓存（文件名带版本号，内容不可变）。
+          node scripts/upload-qiniu.js release/program-manifest.json "$CH/program-manifest.json" --cache-control=60
+          node scripts/upload-qiniu.js "release/program-$PROGRAM_VER.zip" "$CH/program-$PROGRAM_VER.zip" --cache-control=31536000
+          echo "[qiniu] 通道 $CH 已更新：$PROGRAM_VER"
+
+

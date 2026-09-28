@@ -5,7 +5,7 @@
 //   而生态里大量程序按这些**绝对路径**写 shebang —— npm 生成的 bin shim 是
 //   `#!/usr/bin/env node`，pip 的 console script 同理，我们自己的脚本也这么写。
 //   后果：execve 一个这样的脚本 → 内核 exec 解释器时 ENOENT → 调用方以为「脚本不存在」。
-//   我们此前的补法是**给每个工具手写一层 `#!/system/bin/sh` 包装**（kernel/src/supply/materialize.js）——
+//   我们此前的补法是**给每个工具手写一层 `#!/system/bin/sh` 包装**（programs/console 早期装配层的逐工具包装）——
 //   那才是「中间多了一层」；根因是**约定缺了**，不是需要适配层。
 //
 // 本件把缺的约定补回来：execve 家族在交给内核之前，先按**调用方的 PATH** 把
@@ -13,7 +13,7 @@
 //   补回之后：npm/pip 的原生 shim、`#!/usr/bin/env X`、`#!/bin/sh`、`#!/usr/bin/X` 全部按原样工作。
 //
 // 为什么用 PATH 而不是读 $PREFIX：
-//   · PREFIX 类环境变量会被 DSH 起子进程时剥掉（真机定罪），不能当判据；
+//   · PREFIX 类环境变量会被 Program 子进程清理机制剥掉（真机定罪），不能当判据；
 //   · 而「按 PATH 找命令」正是 Unix 的既有语义，容器已把 $PREFIX/bin 放在 PATH 首位。
 //   ⇒ 本件不持有任何路径常量，只兑现语义。
 //

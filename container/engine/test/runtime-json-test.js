@@ -29,7 +29,7 @@ check('含 npmEntry', obj.npmEntry === '/data/app/node/24.21.0/npm-cli.js');
 // prefix = $PREFIX 根（内核投放单元的唯一取件路径）。
 check('含 prefix', obj.prefix === '/data/user/0/x/files/usr');
 check('含 minNode', obj.minNode === 'v24.12.0');
-check('含 writtenBy', obj.writtenBy === 'android-node-container');
+check('含 writtenBy', obj.writtenBy === 'lobos-os');
 
 const read = readRuntimeJson(home);
 check('读回 object 与写入一致', read && read.schema === 2 && read.nodePath === obj.nodePath && read.npmEntry === obj.npmEntry);
@@ -46,14 +46,14 @@ let threw = false;
 try { readRuntimeJson(home); } catch (_e) { threw = true; }
 check('schema 不符时抛出', threw === true);
 
-// ── 跨语言对账：生产写方（Kotlin :node 服务）与测试夹具写方（本 JS 模块）必须写同一套键。
+// ── 跨语言对账：生产写方（Kotlin 原生宿主）与测试夹具写方（本 JS 模块）必须写同一套键。
 // 为什么需要：runtime.json 是**容器写、内核读**的唯一通道，两份写实现漂移的后果是
 // 「夹具测得过、真机上内核读不到 prefix ⇒ 投放单元全部判 blocked」—— 正是 2026-09-26
 // 那次 glob/grep 全灭的形状（那时连门控键都没写，谁都看不见）。
-// 取**区间切片**而非整文件计数：NodeRuntimeService 里还有别的 JSONObject.put，整文件计数
+// 取**区间切片**而非整文件计数：InstanceHost 里还有别的 JSONObject.put，整文件计数
 // 会把不相干的键算进契约里，那样"对上了"是假的。
 const ktSrc = path.join(__dirname, '..', '..', '..',
-  'container/app/src/main/java/io/github/lobbowen/dshmobile/runtime/NodeRuntimeService.kt');
+  'container/app/src/main/java/lobos/runtime/InstanceHost.kt');
 const kt = fs.readFileSync(ktSrc, 'utf8');
 const fnHead = kt.indexOf('private fun writeRuntimeJson');
 const fnTail = kt.indexOf('File(dir, "runtime.json")', fnHead);

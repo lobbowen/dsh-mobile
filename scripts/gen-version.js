@@ -16,8 +16,8 @@
 // 单一事实源分工（本脚本**只汇总，不产生新事实**）：
 //   version.json                              壳（APK）versionName/versionCode
 //   container/engine/package.json             引擎版本
-//   kernel/package.json                       内核版本（OTA 包名同源）
-//   kernel/ui/package.json                    面板版本
+//   programs/console/package.json                       控制面板 Program 版本（OTA 包名同源）
+//   programs/console/ui/package.json                    面板版本
 //   container/app/src/main/assets/node-versions.json  Node 运行时钉版（default/abi）
 // ============================================================================
 
@@ -28,12 +28,12 @@ const ROOT = path.resolve(__dirname, '..');
 const read = (p) => JSON.parse(fs.readFileSync(path.join(ROOT, p), 'utf8'));
 const errors = [];
 
-let version, engine, kernel, ui, nodeVersions;
+let version, engine, consolePkg, ui, nodeVersions;
 for (const [name, assign] of [
   ['version.json', (v) => (version = v)],
   ['container/engine/package.json', (v) => (engine = v)],
-  ['kernel/package.json', (v) => (kernel = v)],
-  ['kernel/ui/package.json', (v) => (ui = v)],
+  ['programs/console/package.json', (v) => (consolePkg = v)],
+  ['programs/console/ui/package.json', (v) => (ui = v)],
   ['container/app/src/main/assets/node-versions.json', (v) => (nodeVersions = v)],
 ]) {
   try {
@@ -50,18 +50,18 @@ if (errors.length === 0) {
   req(typeof shell.versionName === 'string' && shell.versionName.trim() !== '', 'version.json: shell.versionName 缺失');
   req(Number.isInteger(shell.versionCode) && shell.versionCode >= 1, 'version.json: shell.versionCode 必须是 >= 1 的整数');
   req(typeof engine.version === 'string' && engine.version !== '', 'container/engine/package.json: version 缺失');
-  req(typeof kernel.version === 'string' && kernel.version !== '', 'kernel/package.json: version 缺失');
-  req(typeof ui.version === 'string' && ui.version !== '', 'kernel/ui/package.json: version 缺失');
+  req(typeof consolePkg.version === 'string' && consolePkg.version !== '', 'programs/console/package.json: version 缺失');
+  req(typeof ui.version === 'string' && ui.version !== '', 'programs/console/ui/package.json: version 缺失');
   req(typeof nodeVersions.default === 'string' && nodeVersions.default !== '', 'assets/node-versions.json: default 缺失');
   req(typeof nodeVersions.abi === 'string' && nodeVersions.abi !== '', 'assets/node-versions.json: abi 缺失');
 
   // ---- 两条版本流的兼容契约（ADR-0004 §3）----
   const bridgeProtocol = Number(shell.bridgeProtocol);
-  const kernelRequires = Number((kernel.dsh || {}).requiresProtocol);
+  const consoleRequires = Number((consolePkg.lobos || {}).requiresProtocol);
   req(Number.isInteger(bridgeProtocol) && bridgeProtocol >= 1, 'version.json: shell.bridgeProtocol 必须是 >= 1 的整数');
-  req(Number.isInteger(kernelRequires) && kernelRequires >= 0, 'kernel/package.json: dsh.requiresProtocol 缺失/非法');
-  req(kernelRequires <= bridgeProtocol,
-    '兼容性不成立：内核要求桥协议 v' + kernelRequires + ' > 壳实现的 v' + bridgeProtocol);
+  req(Number.isInteger(consoleRequires) && consoleRequires >= 0, 'programs/console/package.json: lobos.requiresProtocol 缺失/非法');
+  req(consoleRequires <= bridgeProtocol,
+    '兼容性不成立：Program 要求桥协议 v' + consoleRequires + ' > OS 实现的 v' + bridgeProtocol);
 
   // "声明的协议"必须等于"实现的协议"，否则声明毫无意义。
   let protoSrc = '';
@@ -89,8 +89,8 @@ const line = (label, val) => console.log('  ' + String(label).padEnd(9) + val);
 console.log('[version] 跨层版本（各单一事实源校验通过）');
 line('shell', shell.versionName + '  (versionCode=' + shell.versionCode + ')');
 line('engine', engine.name + ' ' + engine.version);
-line('kernel', kernel.name + ' ' + kernel.version);
+line('console', consolePkg.name + ' ' + consolePkg.version);
 line('ui', ui.name + ' ' + ui.version);
 line('runtime', 'node-runtime-' + nodeVersions.default + '-' + nodeVersions.abi);
-line('protocol', 'shell v' + shell.bridgeProtocol + '  /  kernel requires v' + (kernel.dsh || {}).requiresProtocol);
+line('protocol', 'os v' + shell.bridgeProtocol + '  /  console requires v' + (consolePkg.lobos || {}).requiresProtocol);
 line('apk', 'app-debug-' + shell.versionName + '+' + shell.versionCode + '.apk  （发布资产名）');

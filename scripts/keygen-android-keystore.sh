@@ -33,7 +33,7 @@
 # 产物：keys/release.keystore（gitignored）+ keys/keystore.properties
 #
 # 之后构建：
-# DSH_KEYSTORE_PASSWORD=... DSH_KEY_ALIAS=dsh DSH_KEY_PASSWORD=... \
+# LOBOS_KEYSTORE_PASSWORD=... LOBOS_KEY_ALIAS=lobos LOBOS_KEY_PASSWORD=... \
 # ./gradlew assembleRelease
 # （或把 keys/keystore.properties 里的值导成环境变量）
 #
@@ -46,7 +46,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ALIAS="${1:-dsh}"
+ALIAS="${1:-lobos}"
 DAYS="${2:-10000}"
 KS="$ROOT/keys/release.keystore"
 PROPS="$ROOT/keys/keystore.properties"
@@ -80,17 +80,17 @@ if command -v keytool >/dev/null 2>&1; then
     -storetype PKCS12 \
     -storepass "$STOREPASS" \
     -keypass "$KEYPASS" \
-    -dname "CN=DSH Mobile, OU=Container, O=DSH, L=, ST=, C=CN" \
+    -dname "CN=Lob OS, OU=Container, O=LobOS, L=, ST=, C=CN" \
     >/dev/null 2>&1
 elif command -v openssl >/dev/null 2>&1; then
   # 无 keytool 的退路：本机按项目政策不装 JDK（构建一律 CI），而密钥必须能在
   # 开发机生成（私钥绝不应经 CI 生成）。openssl 产的是标准 PKCS12，
   # AGP/apksigner/CI 的 keytool 核验步骤都能直接读；-name 写入 friendlyName，
-  # 与 DSH_KEY_ALIAS 一致，别名查找不会落空。
+  # 与 LOBOS_KEY_ALIAS 一致，别名查找不会落空。
   TMPD="$(mktemp -d)"
   trap 'rm -rf "$TMPD"' EXIT
   openssl req -x509 -newkey rsa:4096 -keyout "$TMPD/key.pem" -out "$TMPD/cert.pem" \
-    -days "$DAYS" -nodes -subj "/CN=DSH Mobile/OU=Container/O=DSH/C=CN" >/dev/null 2>&1
+    -days "$DAYS" -nodes -subj "/CN=Lob OS/OU=Container/O=LobOS/C=CN" >/dev/null 2>&1
   openssl pkcs12 -export -in "$TMPD/cert.pem" -inkey "$TMPD/key.pem" \
     -name "$ALIAS" -out "$KS" -passout "pass:$STOREPASS" >/dev/null 2>&1
   echo "[keygen-apk] （openssl 退路生成 PKCS12；如需 keytool 版请装 JRE 后重跑——但一旦发布，keystore 不可更换）"
@@ -106,9 +106,9 @@ cat > "$PROPS" <<EOF
 # APK 签名密码（由 scripts/keygen-android-keystore.sh 生成）
 # 与 keys/ota-private.pem 一样属于机密，绝不入库（keys/ 整体 gitignored）。
 # CI 请用 secret，不要提交这个文件。
-DSH_KEYSTORE_PASSWORD=$STOREPASS
-DSH_KEY_ALIAS=$ALIAS
-DSH_KEY_PASSWORD=$KEYPASS
+LOBOS_KEYSTORE_PASSWORD=$STOREPASS
+LOBOS_KEY_ALIAS=$ALIAS
+LOBOS_KEY_PASSWORD=$KEYPASS
 EOF
 chmod 600 "$PROPS"
 

@@ -71,12 +71,12 @@ fs.writeFileSync(path.join(BIN_KT, 'keytool'), [
   '  list) [ "$pw" = rightpass ] || exit 1',
   '        grep -q KEystoreFake "$ks" 2>/dev/null || exit 1',
   `        echo "Certificate fingerprint (SHA-256): ${COLON}" ;;`,
-  '  exportcert) [ "$alias" = dsh ] || { echo "stub: 别名 $alias 不存在" >&2; exit 1; }',
+  '  exportcert) [ "$alias" = lobos ] || { echo "stub: 别名 $alias 不存在" >&2; exit 1; }',
   // 证书体以 '-' 开头，printf 会把它当选项解析（实测 printf: --: invalid option），
   // 故用 '%s\n' + 三个参数，而不是把 PEM 直接当格式串。
   "        printf '%s\\n' '-----BEGIN CERTIFICATE-----' 'MIIBFakeFakeFake' '-----END CERTIFICATE-----' > \"$outfile\" ;;",
   '  printcert) [ -s "$outfile" ] || exit 1',
-  '        echo "Owner: CN=dsh-test"',
+  '        echo "Owner: CN=lobos-test"',
   `        echo "Certificate fingerprint (SHA-256): ${COLON}" ;;`,
   'esac',
   'exit 0',
@@ -125,13 +125,13 @@ function setApksigner(body, ver) {
   return d;
 }
 const OUT = {
-  stable: dnLine('CN=dsh-test, O=dsh, C=US') + `Signer #1 certificate SHA-256 digest: ${FP}\\n`,
+  stable: dnLine('CN=lobos-test, O=lobos, C=US') + `Signer #1 certificate SHA-256 digest: ${FP}\\n`,
   debug: dnLine('CN=Android Debug, O=Android, C=US') + `Signer #1 certificate SHA-256 digest: ${FP}\\n`,
-  otherKey: dnLine('CN=dsh-test, O=dsh, C=US') + `Signer #1 certificate SHA-256 digest: ${FP_OTHER}\\n`,
+  otherKey: dnLine('CN=lobos-test, O=lobos, C=US') + `Signer #1 certificate SHA-256 digest: ${FP_OTHER}\\n`,
   noDN: 'Signer #1 certificate SHA-256 digest: deadbeef\\n',
-  sha1Only: dnLine('CN=dsh-test') + `Signer #1 certificate SHA-1 digest: ${COLON}\\n`,
-  jdkStyle: dnLine('CN=dsh-test') + `\\t SHA256: ${COLON}\\n`,
-  eqStyle: dnLine('CN=dsh-test') + `sha256 Fingerprint=${COLON}\\n`,
+  sha1Only: dnLine('CN=lobos-test') + `Signer #1 certificate SHA-1 digest: ${COLON}\\n`,
+  jdkStyle: dnLine('CN=lobos-test') + `\\t SHA256: ${COLON}\\n`,
+  eqStyle: dnLine('CN=lobos-test') + `sha256 Fingerprint=${COLON}\\n`,
 };
 const CERT = path.join(tmp, 'keys/release.cert');
 // 锚点由 inject 的全绿用例产出，但 ② 的比对用例不该依赖它 —— 先直接放一份，
@@ -206,7 +206,7 @@ const ver = (extra, o = {}) => run(VERIFY, [APK, ...(extra || [])], o);
     !r.out.includes('明文传上命令行'), r.out.slice(0, 160));
   const envTxt = fs.existsSync(path.join(tmp, 'gh_env.txt')) ? fs.readFileSync(path.join(tmp, 'gh_env.txt'), 'utf8') : '';
   check('inject：GITHUB_ENV 导出 gradle 那三个变量 + 锚点路径（名字与 build.gradle.kts 逐字对齐）',
-    ['DSH_KEYSTORE_PASSWORD=rightpass', 'DSH_KEY_ALIAS=dsh', 'DSH_KEY_PASSWORD=rightpass', 'DSH_APK_CERT_FILE=' + CERT]
+    ['LOBOS_KEYSTORE_PASSWORD=rightpass', 'LOBOS_KEY_ALIAS=lobos', 'LOBOS_KEY_PASSWORD=rightpass', 'LOBOS_APK_CERT_FILE=' + CERT]
       .every((k) => envTxt.includes(k)), envTxt.slice(0, 200));
   check('inject：keystore 落盘不带同组/其他人可读位',
     (() => { const p = path.join(tmp, 'keys/release.keystore'); return fs.existsSync(p) && (fs.statSync(p).mode & 0o077) === 0; })());
@@ -369,8 +369,8 @@ for (const [label, body, wantRc] of [
       && /verify-apk-signing\.sh[\s\S]{0,400}?--require-stable/.test(byName['release-admin.yml'])
       && !/verify-apk-signing\.sh[^\n]*--require-stable/.test(byName['fast-apk.yml']),
     '发布档与日常档的区分丢了');
-  check('发布门禁调用点里锚点走 shell 变量（写成 ${{ DSH_APK_CERT_FILE }} 会被展开成空串）',
-    !/\$\{\{\s*DSH_APK_CERT_FILE\s*\}\}/.test(wfs.map(([, t]) => t).join('\n')),
+  check('发布门禁调用点里锚点走 shell 变量（写成 ${{ LOBOS_APK_CERT_FILE }} 会被展开成空串）',
+    !/\$\{\{\s*LOBOS_APK_CERT_FILE\s*\}\}/.test(wfs.map(([, t]) => t).join('\n')),
     '出现会被 Actions 吃掉的写法');
 }
 

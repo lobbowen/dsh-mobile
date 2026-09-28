@@ -171,7 +171,7 @@ def check(path: Path):
         # 事件名白名单：on: 下写了非事件 key（最常见的是把 push 的子键
         # tags/branches/paths 误提到顶层）时，YAML 解析完全合法，但 GitHub
         # 会以【workflow 级失败、0 个 job、无步骤日志】的形式拒绝 ——
-        # 发现成本极高，必须在这里拦下（kernel-ci.yml 迁移时真实踩过）。
+        # 发现成本极高，必须在这里拦下（program-ci.yml 迁移时真实踩过）。
         KNOWN_EVENTS = {
             "push", "pull_request", "pull_request_target", "workflow_dispatch",
             "workflow_call", "schedule", "release", "issues", "issue_comment",

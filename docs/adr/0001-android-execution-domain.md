@@ -209,7 +209,7 @@ DSH（`dsh-attachment-local.ensureDurableHome`）把边界写成 `parse(home).ro
 
 > **2026-09-23 更新**：路线 A 实测不可得（应用 seccomp 把 `unshare(CLONE_NEWUSER)` 挡成 EINVAL）；
 > 路线 B（`libdshrootns`）经真机实测**已否决并删除**（libc 符号覆盖不全 + 祖先 realpath 导致 node 静默 exit 1），
-> 详见 [adr/0002-container-root-rejected.md](adr/0002-container-root-rejected.md)。
+> 详见 [adr/0002-container-root-rejected.md](../adr/0002-container-root-rejected.md)。
 > 当前采用「长 `$PREFIX`、不伪造 `/`」；真根留待 Tier S（`system/`）。
 
 ## 追加决策：底座是系统服务（Tier S），不是普通应用（2026-09-23）

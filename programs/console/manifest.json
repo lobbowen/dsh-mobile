@@ -1,0 +1,44 @@
+{
+  "id": "console",
+  "name": "Lob OS 控制面板",
+  "role": "system",
+  "version": "0.1.0",
+  "runtime": {
+    "name": "node",
+    "range": ">=24 <25"
+  },
+  "entry": "bin/panel",
+  "args": [
+    "serve"
+  ],
+  "ports": {
+    "http": {
+      "env": "PANEL_PORT",
+      "health": "/"
+    }
+  },
+  "requires": [
+    "bridge:storage",
+    "bridge:shell"
+  ],
+  "capabilities": [
+    "state.read",
+    "program.manage",
+    "net.lan?",
+    "ui.automation?",
+    "notify.post?"
+  ],
+  "storage": {
+    "workspace": true,
+    "quotaMB": 256
+  },
+  "resource": {
+    "class": "resident",
+    "maxRssMB": 512
+  },
+  "ui": {
+    "kind": "http",
+    "path": "/__panel"
+  },
+  "_note": "控制面板 Program（临时过渡）：状态监控 / 安装管理编排 / 小组件。不是系统层，可停可换。"
+}

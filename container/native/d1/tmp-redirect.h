@@ -1,5 +1,5 @@
-#ifndef DSH_TMP_REDIRECT_H
-#define DSH_TMP_REDIRECT_H
+#ifndef LOBOS_TMP_REDIRECT_H
+#define LOBOS_TMP_REDIRECT_H
 
 // D1：/tmp 语义兑现的**唯一实现** —— open-fallback.c（open/openat）与
 // tmp-paths.c（mkdir/stat/unlink/rename/… 整张路径 syscall 面）共用这一份。
@@ -8,8 +8,8 @@
 // 必然失败。这里把 /tmp 前缀重写到 $TMPDIR —— 只改前缀、只动 /tmp（/tmpfoo 不动），
 // 其余路径与语义一律不变。
 //
-// 生效条件：TMPDIR 为**绝对路径**即生效（默认开）。曾用 DSH_TMP_REDIRECT 开关，
-// 但 DSH 起子进程会剥掉 DSH_*（真机定罪），开关到不了干活进程，故去掉。
+// 生效条件：TMPDIR 为**绝对路径**即生效（默认开）。曾用一个临时开关，
+// 但 Program 子进程清理会剥掉临时环境键（真机定罪），开关到不了干活进程，故去掉。
 //
 // 判据（设备端探针 tmp-redirect）：/tmp 下的 open + mkdir + stat + unlink
 // 全部落到 $TMPDIR，缺一片即红。

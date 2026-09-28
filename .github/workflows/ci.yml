@@ -2,7 +2,7 @@ name: CI (gates)
 
 # 统一门禁：容器引擎（契约/对账/原生资产/桥）+ 内核回归 + 面板前端。
 # 单一事实源与红线见 docs/standards/storage.md、docs/standards/testing.md。
-# 出包（APK/内核 OTA）不在这里，见 apk-fast / apk-full / kernel-ota。
+# 出包（APK/内核 OTA）不在这里，见 fast-apk / build-apk / program-ota。
 
 on:
   push:
@@ -10,7 +10,10 @@ on:
     tags: ['v*']
     paths:
       - 'container/**'
-      - 'kernel/**'
+      - 'programs/**'
+      - '.github/gate-policy.json'
+      - 'THIRD-PARTY.md'
+      - 'scripts/gate-scan.js'
       - 'docs/contracts/**'
       - 'scripts/**'
       - '.github/native-assets.txt'
@@ -22,7 +25,7 @@ on:
   pull_request:
     paths:
       - 'container/**'
-      - 'kernel/**'
+      - 'programs/**'
       - 'docs/contracts/**'
       - 'scripts/**'
       # 与上面 push 的清单**必须对称**：.github/native-assets.txt 是 NativeAssetRegistry 的投影，
@@ -35,6 +38,35 @@ on:
   workflow_dispatch: {}
 
 jobs:
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # gate：命名/品牌/结构门禁（Lob OS）
+  #   gate-scan 已是强制模式（.github/gate-policy.json enforce=true）；doc-gate / debt-gate 目前为**报告模式**，
+  #   收口后可用 --strict 转强制。三份报告随 artifact 上传。
+  # ══════════════════════════════════════════════════════════════════════════
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Gate — naming/brand/structure scan
+        run: node scripts/gate-scan.js
+      - name: Gate — docs relative links (strict)
+        run: node scripts/doc-gate.js --strict
+      - name: Gate — debt registry (report mode)
+        run: node scripts/debt-gate.js
+      - name: Upload gate reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-reports
+          path: |
+            brand-scan-report.txt
+            doc-gate-report.txt
+            debt-gate-report.txt
+          if-no-files-found: ignore
   # ══════════════════════════════════════════════════════════════════════════
   # container：L0 引擎全量逻辑门禁（含契约对账 / 目录对账 / 分层依赖 / 原生资产单一事实源）
   # ══════════════════════════════════════════════════════════════════════════
@@ -87,13 +119,13 @@ jobs:
           bash ../../scripts/run-engine-tests.sh
 
   # ══════════════════════════════════════════════════════════════════════════
-  # kernel：L1 内核回归（安卓路径）+ 面板前端门禁
+  # console：console Program 回归（安卓路径）+ 面板前端门禁
   # ══════════════════════════════════════════════════════════════════════════
-  kernel:
+  console:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: kernel
+        working-directory: programs/console
     steps:
       - uses: actions/checkout@v4
 
@@ -117,21 +149,22 @@ jobs:
       - name: 把 npm 钉到设备上那份
         # 设备上跑的 npm 是 APK 投放的那一份（scripts/stage-npm-assets.sh 钉版本+sha512）。
         # runner 自带的 npm 10 会**静默忽略** --os/--cpu，实测两份计划各 575 项、两侧差集皆空；
-        # 版本取自供给表的 probe.npm.version，门禁两头核对：现场 npm = 表锚，表锚 = 投放脚本。
+        # 设备侧 npm 版本的唯一锚点 = container/app/src/main/assets/node-versions.json 的 npm 字段
+        # （复检 AUD-G27：原锚点随 assembler 删除，现已重建）。
         run: |
           set -euo pipefail
           echo "runner 自带 npm: $(npm --version)"
-          NPMV="$(node -p "require('./src/assembler/supply-table.json').probe.npm.version")"
+          NPMV="$(node -p "require('./container/app/src/main/assets/node-versions.json').npm")"
           npm install -g "npm@$NPMV"
           echo "探针用 npm: $(npm --version)"
 
-      - name: 内核回归测试（安卓路径 · DSH_ANDROID=1）
+      - name: 内核回归测试（安卓路径 · LOBOS_ANDROID=1）
         env:
-          DSH_ANDROID: '1'
+          LOBOS_ANDROID: '1'
         run: npm test
 
       - name: 前端门禁（typecheck + lint + test + build）
-        working-directory: kernel/ui
+        working-directory: programs/console/ui
         run: |
           npm ci --no-audit --no-fund
           npm run verify
@@ -141,14 +174,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ui-dist
-          path: kernel/ui/dist
+          path: programs/console/ui/dist
           if-no-files-found: error
 
   # ══════════════════════════════════════════════════════════════════════════
-  # kernel-release：tag 触发，把面板产物作为 OTA 资源挂到 Release（不发布 npm）
+  # console-release：tag 触发，把面板产物作为 OTA 资源挂到 Release（不发布 npm）
   # ══════════════════════════════════════════════════════════════════════════
-  kernel-release:
-    needs: kernel
+  console-release:
+    needs: console
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -163,17 +196,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VER="$(node -p "require('./kernel/package.json').version")"
+          VER="$(node -p "require('./programs/console/package.json').version")"
           echo "  版本: $VER"
           if [ -z "$(ls -A ui-dist 2>/dev/null)" ]; then
             echo "::error::未生成任何 UI 构建产物"; exit 1
           fi
-          tar -czf "dsh-android-kernel-panel-$VER.tar.gz" -C ui-dist .
-          ls -lh "dsh-android-kernel-panel-$VER.tar.gz"
+          tar -czf "lobos-console-panel-$VER.tar.gz" -C ui-dist .
+          ls -lh "lobos-console-panel-$VER.tar.gz"
       - name: 附加到 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dsh-android-kernel-panel-*.tar.gz
+          files: lobos-console-panel-*.tar.gz
           generate_release_notes: true
 
   # ══════════════════════════════════════════════════════════════════════════

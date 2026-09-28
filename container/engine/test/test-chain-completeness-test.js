@@ -1,6 +1,6 @@
 'use strict';
 // engine 测试链完整性门禁：test/ 下的测试脚本必须都在 package.json 的 test:logic 链里 ——
-// 否则**新增测试会静默漏跑**（kernel 侧早有同型门禁，engine 侧此前没有）。
+// 否则**新增测试会静默漏跑**（console 侧早有同型门禁，engine 侧此前没有）。
 // 门禁法③：≤60 行 + 违例样本自证（见 proofs）。
 const fs = require('node:fs');
 const path = require('node:path');

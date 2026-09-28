@@ -7,7 +7,7 @@
 // ============================================================================
 //  「这把公钥能不能用来验我们签的内核」原先在两条 CI 链上各查了一半：build-apk 只在
 //  锚点文件缺失时 exit 1，「是不是有效 PEM 公钥」那一问只打 ::warning:: 就继续出包；
-//  kernel-ota 只查存在与字节数，从不与签名私钥对照。两边都绿的产物可以是这样的：
+//  program-ota 只查存在与字节数，从不与签名私钥对照。两边都绿的产物可以是这样的：
 //  私钥轮换后重焊了 APK 公钥却忘了改 secret（或反之）—— 签出的每个内核包在所有设备上
 //  判 signature-invalid，OTA 静默死亡，而发现它要一轮真机取证。
 //  还有一处是两边都没想到的：`openssl pkey -pubin` 对 RSA 公钥一样退 0，所以
@@ -176,10 +176,10 @@ const mk = (name, content) => {
 // ---------------------------------------------------------------------------
 const WF = {
   build: path.join(ROOT, '.github/workflows/build-apk.yml'),
-  ota: path.join(ROOT, '.github/workflows/kernel-ota.yml'),
+  ota: path.join(ROOT, '.github/workflows/program-ota.yml'),
   fast: path.join(ROOT, '.github/workflows/fast-apk.yml'),
 };
-const BUNDLE = path.join(ROOT, 'scripts/build-kernel-bundle.sh');
+const BUNDLE = path.join(ROOT, 'scripts/build-program-bundle.sh');
 // stripComments 的唯一实现住 harness.js（门禁法①，勿在本文件再写第二份）。
 const stripComments = makeRunner.stripComments;
 {
@@ -188,27 +188,27 @@ const stripComments = makeRunner.stripComments;
   check('⑤ 三个 workflow 都在（回潮扫描的目标不能指向不存在的文件）', !!src.build && !!src.ota && !!src.fast);
   check('⑤ build-apk 不再把「锚点不是有效公钥」写成 warning 继续出包',
     !/::warning[^\n]*anchor/.test(src.build), '锚点坏 = 所有设备验不过，必须拦');
-  check('⑤ kernel-ota 不再只做「锚点存在 + 数字节」',
+  check('⑤ program-ota 不再只做「锚点存在 + 数字节」',
     !/wc -c[^\n]*ANCHOR/.test(src.ota), '存在性不回答「配不配对」');
-  for (const [what, code] of [['build-apk', src.build], ['kernel-ota', src.ota], ['fast-apk', src.fast]]) {
+  for (const [what, code] of [['build-apk', src.build], ['program-ota', src.ota], ['fast-apk', src.fast]]) {
     const calls = (code.match(/bash "?\S*verify-ota-anchor\.sh/g) || []).length;
     check(`⑤ ${what} 调用宿主恰好 1 次`, calls === 1, `实际 ${calls} 次`);
   }
-  // 私钥只有签名链拿得到：workflow 里只许 kernel-ota 带 --private，别处不许假装查过。
-  check('⑤ 带 --private 的调用只在 kernel-ota（其余两链无从配对）',
+  // 私钥只有签名链拿得到：workflow 里只许 program-ota 带 --private，别处不许假装查过。
+  check('⑤ 带 --private 的调用只在 program-ota（其余两链无从配对）',
     (src.ota.match(/--private/g) || []).length === 1 &&
     (src.build.match(/--private/g) || []).length === 0 &&
     (src.fast.match(/--private/g) || []).length === 0,
     '在没有私钥的地方写配对判据 = 要么空转要么误红');
   // CI 之外的手工/fork 路径也用同一份脚本签名，配对判据必须长在脚本里而非只长在 CI 上。
   const bundle = fs.existsSync(BUNDLE) ? stripComments(fs.readFileSync(BUNDLE, 'utf8')) : '';
-  check('⑤ 对照组：build-kernel-bundle.sh 在（扫描目标不能指向不存在的文件）', !!bundle);
+  check('⑤ 对照组：build-program-bundle.sh 在（扫描目标不能指向不存在的文件）', !!bundle);
   const bundleCalls = (bundle.match(/verify-ota-anchor\.sh/g) || []).length;
-  check('⑤ build-kernel-bundle.sh 调用宿主恰好 1 次且带 --private',
+  check('⑤ build-program-bundle.sh 调用宿主恰好 1 次且带 --private',
     bundleCalls === 1 && /--private/.test(bundle), `实际 ${bundleCalls} 次`);
   check('⑤ 配对判据排在真正签名那一步之前（不配对就不签）',
     bundle.includes('verify-ota-anchor.sh') &&
-      bundle.indexOf('verify-ota-anchor.sh') < bundle.indexOf('build-kernel-bundle.js'),
+      bundle.indexOf('verify-ota-anchor.sh') < bundle.indexOf('build-program-bundle.js'),
     '顺序反了 = 先签出一个没人能验的包再报错');
   const hostSrc = fs.readFileSync(HOST, 'utf8');
   for (const [what, re] of [

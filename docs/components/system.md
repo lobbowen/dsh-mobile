@@ -22,18 +22,18 @@ Tier S 是底座正解：容器成为特权系统服务，垫片全部消失。
 ## 目录内容
 
 - `Android.bp`：以 priv-app 形式把 APK 打进系统镜像。
-- `privapp-permissions-io.github.lobbowen.dshmobile.xml`：特权权限白名单（priv-app 必需）。
-- `sepolicy/`：容器自有域 `dsh_container` 的最小权限策略与文件标签。
-- `init/init.dsh.rc`：开机即起、崩溃重启的容器服务定义。
-- `kernel/dsh_container.configfrag`：自有内核需打开的内核配置（命名空间等）。
+- `privapp-permissions-lobos.app.xml`：特权权限白名单（priv-app 必需）。
+- `sepolicy/`：容器自有域 `lobos_os` 的最小权限策略与文件标签。
+- `init/init.lobos.rc`：开机即起、崩溃重启的容器服务定义。
+- `container/rom/lobos_os.configfrag`：ROM 侧配置片段（命名空间等）。
 
 ## 集成步骤（AOSP/ROM 树）
 
 1. `Android.bp` 与 `privapp-permissions-*.xml` 放入 `vendor/dsh/container/`。
 2. `sepolicy/` 文件落到 `device/<vendor>/<device>/sepolicy/`（`file_contexts` 需与现有文件合并）。
-3. `init/init.dsh.rc` 落到 `device/<vendor>/<device>/init/`，并把 sepolicy 目录加进 `BOARD_VENDOR_SEPOLICY_DIRS`。
+3. `init/init.lobos.rc` 落到 `device/<vendor>/<device>/init/`，并把 sepolicy 目录加进 `BOARD_VENDOR_SEPOLICY_DIRS`。
 4. 用 `sepolicy-analyze` 与整编校验 neverallow；本目录策略是按最小权限写的模板，必须过整编。
-5. 内核若自编，追加 `kernel/dsh_container.configfrag`，使真命名空间容器（路线 A）可用。
+5. 内核若自编，追加 `container/rom/lobos_os.configfrag`，使真命名空间容器（路线 A）可用。
 
 ## Tier S 到位后可删除的垫片
 

@@ -4,7 +4,7 @@
 #
 #  为什么要有这个宿主：同一条「确保 Release 在 → 覆盖上传 → 事后看一眼」此前在
 #  fast-apk / build-apk / release-admin(publish) / release-admin(repack) /
-#  kernel-ota(滚动通道) 各写了一份，严格程度还不一样 —— 有的带「孤立资产回退」，
+#  program-ota(滚动通道) 各写了一份，严格程度还不一样 —— 有的带「孤立资产回退」，
 #  有的只 clobber，有的先删后传。副本多到这份上，实际代价不是重复而是分歧：
 #  repack 那份把 `/tmp/app-signed.apk#app-debug.apk` 当改名用，而 gh 的资产名
 #  **取 file 的 basename**、`#` 后面只是 label（这条事实记录在 fast-apk.yml
@@ -24,13 +24,13 @@
 #    bash scripts/gh-release-upload.sh <release tag> [选项] <文件>…
 #      --title <文本>        Release 不存在时用它创建（不给则用 tag 本身）
 #      --notes <文本>        创建说明；与 --notes-file 互斥
-#      --notes-file <路径>   创建说明取自文件（kernel-ota 用的是渲染出来的 notes.md）
+#      --notes-file <路径>   创建说明取自文件（program-ota 用的是渲染出来的 notes.md）
 #      --prune <正则>        上传后删掉该 tag 上名字匹配此正则、且不属于本次/--keep 的
 #                            资产 —— 滚动通道只该留「本次」那份，否则随发布无限堆积
 #      --keep <名称>         配合 --prune，可重复；本次刚传的资产名自动列入
-#      --skip-existing       tag 已存在就整步什么都不做、退 0 —— kernel-<version> 这类
+#      --skip-existing       tag 已存在就整步什么都不做、退 0 —— program-<version> 这类
 #                            「归档只建一次」的 tag 用得上：灰度→生产提升是同版本第二次
-#                            发布，把它判成错误就没法提升（判据见 kernel-ota.yml）
+#                            发布，把它判成错误就没法提升（判据见 program-ota.yml）
 #
 #  资产名 = 本地文件的 basename。要换一个名字投（例如把重签后的包投成
 #  app-debug.apk），先把文件放进临时目录改好名再传进来，别指望 `#`。

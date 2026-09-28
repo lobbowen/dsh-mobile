@@ -1,0 +1,35 @@
+{
+  "id": "pi",
+  "name": "Pi",
+  "role": "agent",
+  "version": "0.1.0",
+  "runtime": {
+    "name": "node",
+    "range": ">=24 <25"
+  },
+  "entry": "bin/pi.js",
+  "args": [],
+  "ports": {
+    "http": {
+      "env": "PORT",
+      "health": "/"
+    }
+  },
+  "capabilities": [
+    "fs.workspace",
+    "net.loopback"
+  ],
+  "storage": {
+    "workspace": true,
+    "quotaMB": 256
+  },
+  "resource": {
+    "class": "on-demand",
+    "maxRssMB": 256
+  },
+  "ui": {
+    "kind": "http",
+    "path": "/"
+  },
+  "_note": "第二个载荷：真实可打包（bin/pi.js，只用 Node 标准库），用于验证「装第二个 Program 而 Android 观察面不变」。"
+}

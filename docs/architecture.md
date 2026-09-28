@@ -1,6 +1,16 @@
-# DSH Mobile · 架构与约束
+# Lob OS · 架构与约束
 
-本文件是**唯一的事实来源**。代码注释只写"改这里必须知道什么"，历史排查过程、
+> ⚠ **v4 收敛提示（2026-09-28）**：本文件的部分章节仍描述 v4 之前的「:main/:node 双进程 + 内核热更」形态。
+> 形态主轴以 **[ADR-0010](adr/0010-lob-os-container-form.md)** 与 **[os-architecture-v4.md](plans/os-architecture-v4.md)** 为准：
+> 单一生命周期（1 进程 / 1 FGS / 1 通知 / 1 承载面）、系统职责归 **OS 原生（Kotlin）**、`programs/console` 只是可替换 Program、
+> 常驻 = 五层保活（不设兜底/续跑）、Device Owner 全面退出。§1.1 的职责维与 §2 的 OTA 链正在按 v4 收敛。
+
+> ⚠ **正文按历史读**（2026-09-28 复检）：下文 §1.1 / §2 / §3 里的 `:node` 进程、`ContainerConsole`、
+> `NodeWatchdogPolicy`、binder 监督链、`node.pid`/`node.birth`、`NodeRuntimeService`、「复活」等，
+> **全是 v3 形态，已作废**；现行对象是 `OsHostService` / `InstanceHost` / `CapabilityBroker` / `lobos.os.*`。
+> 本文档**不再是唯一事实来源**，以 `plans/os-architecture-v4.md` + ADR-0010 为准。
+
+本文件是**v3 事实来源**。代码注释只写"改这里必须知道什么"，历史排查过程、
 外部依据、失败现象全部收在这里 —— 避免同一件事在多个文件里各写一份、
 改一处忘两处。
 
@@ -39,11 +49,11 @@ WebView 访问的本地 HTTP 服务。
 
 | 层 | 职责 | 所在进程 | 载体 |
 |---|---|---|---|
-| **L-A 容器生命周期** | 复活运行时宿主（binder 边 + 活性判定）、确保 L-B 在册 | :main | `ContainerSupervisor`、`BootReceiver`、`DshAccessibilityService`（解冻锚点）、判据 `lifecycle/NodeWatchdogPolicy` |
+| **L-A 容器生命周期** | 复活运行时宿主（binder 边 + 活性判定）、确保 L-B 在册 | :main | `ContainerConsole`、`BootReceiver`、`DshAccessibilityService`（解冻锚点）、判据 `lifecycle/NodeWatchdogPolicy` |
 | **L-B 能力桥** | 把安卓独有能力（安装/截屏/无障碍/adb shell…）经 UDS 供内核调用；**不兼任任何监督逻辑** | :main | `HostBridgeService` |
-| **L-C 运行时环境** | 实例宿主：spawn 并退避重启内核子进程、写进程记录、健康轮询 | :node | `NodeRuntimeService`（boot 循环 + `runtime/SupervisorPolicy`） |
-| **L-D 生态适配** | 补齐"guest 在安卓上缺的语境"：DSH_* 注入、flock/LD_PRELOAD 垫片、$PREFIX、权限模式 | 装配期 | `runtime/GuestAdapter`（**唯一装配点**）、`PrefixProvisioner` |
-| **L-E 内核工具箱** | Agent/工具箱逻辑；**不得实现任何保活假设**（ADR-0006 §2.3），只走 OTA 安装（ADR-0005） | node 子进程（可热更） | `kernel/` |
+| **L-C 运行时环境** | 实例宿主：spawn 并退避重启内核子进程、写进程记录、健康轮询 | :node | `NodeRuntimeService`（boot 循环 + `runtime/ConsolePolicy`） |
+| **L-D 生态适配** | 补齐"guest 在安卓上缺的语境"：LOBOS_* 注入、flock/LD_PRELOAD 垫片、$PREFIX、权限模式 | 装配期 | `runtime/GuestAdapter`（**唯一装配点**）、`PrefixProvisioner` |
+| **L-E 内核工具箱** | Agent/工具箱逻辑；**不得实现任何保活假设**（ADR-0006 §2.3），只走 OTA 安装（ADR-0005） | node 子进程（可热更） | `programs/console/` |
 
 **标签两维制**：L0/L1/L2 是**发布维**（base-spec §2：更新通道与冻结度），L-A..L-E
 是本表的**职责维**（生命周期归属与故障域），两维正交、不可混排编号。历史上
@@ -66,7 +76,7 @@ HostBridge 被标为"L3"——与发布维撞号且暗示存在第四发布通�
    **夹具发明一个 GuestAdapter 没有的键 = CI 红**。装配结果由
    `GuestAdapterTest`（golden 向量）钉住。
 2. **新运行时 = 供给域注册一个单元 + init 域注册一类受管对象；安卓侧零改动。**
-   （取代旧条文「新运行时 = 在 `ContainerSupervisor` 再注册一条 binder 边」—— 2026-09-26
+   （取代旧条文「新运行时 = 在 `ContainerConsole` 再注册一条 binder 边」—— 2026-09-26
    废止，理由与替代形态见 ADR-0008 §3：照旧条文做，python/go 都得变成安卓服务、各挂一条 FGS、
    各被 AMS 语义坑一遍。）
    禁止运行时进程自己拉自己；不变式仍是：**APK（:main + 无障碍锚）不死，运行时环境就不死。**
@@ -83,12 +93,12 @@ HostBridge 被标为"L3"——与发布维撞号且暗示存在第四发布通�
 ```
 开机 / 覆盖安装（BOOT_COMPLETED · MY_PACKAGE_REPLACED）
   └─ BootReceiver
-       ├─ startService ──────► ContainerSupervisor (:main, L-A)
+       ├─ startService ──────► ContainerConsole (:main, L-A)
        └─ startForegroundService ► NodeRuntimeService (:node, L-C)   ← 开机兜底边：
                                         :node 有通知 1001，O+ 要求 FGS 起点配对；
                                         其余互保边（后台调用点）全是普通 startService
 
-ContainerSupervisor.onStartCommand（每次被戳）
+ContainerConsole.onStartCommand（每次被戳）
   ├─ ensureBridge() ──startService──► HostBridgeService (:main, L-B)   ← L-A 确保 L-B
   └─ bindService(BIND_AUTO_CREATE) ──► NodeRuntimeService               ← 监督边
        · onBind 必须返回真 binder（null = null-binding，既不保活也无断开回调）
@@ -99,7 +109,7 @@ ContainerSupervisor.onStartCommand（每次被戳）
 
 NodeRuntimeService.onCreate（:node）
   ├─ 提升 FGS + 写 files/node.pid（早于任何 spawn：慢启动不得攒 strikes）
-  ├─ ContainerSupervisor.ensureRunning()      ← 互保边④
+  ├─ ContainerConsole.ensureRunning()      ← 互保边④
   └─ scheduleBootLoop()                        ← **自出生**：谁创建我（start / bind 复活 /
        │                                       sticky 重投）我都自己发起 boot 循环
        └─ bootLoop: 写 node.birth → GuestAdapter.probePlan/kernelPlan → spawn → 健康轮询 → 退避
@@ -180,7 +190,7 @@ error=13, Permission denied
 重打包工具），"哪些文件要能 exec、各自依赖什么、怎么验证"就必须是**数据**
 而不是散落的特判。
 
-**唯一事实来源**：`app/src/main/java/io/github/lobbowen/dshmobile/native/NativeAssetRegistry.kt`
+**唯一事实来源**：`app/src/main/java/lobos/native/NativeAssetRegistry.kt`
 
 ```kotlin
 val LIBCXX = NativeExecutable(
@@ -297,7 +307,7 @@ provider（只认硬件密钥，导入软件 PKCS8 会 `InvalidKeySpecException`
                    │ spawn 一次性进程，传 zip + 公钥路径
                    ▼
 ┌─ Node（一次性进程，用后即弃）─────────────────────────────┐
-│  kernel-verify.js  sha256 + ed25519 验签 + zip 结构校验    │
+│  program-verify.js  sha256 + ed25519 验签 + zip 结构校验    │
 │  ── crypto.verify 走自带 OpenSSL，与 API level 无关 ──     │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -366,7 +376,7 @@ GET maven.aliyun.com/repository/google/com/android/tools/build/aapt2/<V>/
 
 关键洞察：**「DSH 改自己的内核」根本不需要碰 APK**。内核是
 `files/kernel/<version>/` 下的一个数据目录，容器本来就有权改它。
-唯一缺的是「设备上从哪拿到新内核包」—— 这就是远端 OTA feed（`KernelOtaUpdater`，
+唯一缺的是「设备上从哪拿到新Program 包」—— 这就是远端 OTA feed（`KernelOtaUpdater`，
 ADR-0005：曾经的 `LocalKernelFeed` 本地投放路径已删除）。
 
 ### 2.4 两把独立的信任根（极易混淆，必须辨析）
@@ -377,9 +387,9 @@ ADR-0005：曾经的 `LocalKernelFeed` 本地投放路径已删除）。
 | | APK 签名 | 内核签名 |
 |---|---|---|
 | 算法 | Java keystore（RSA 4096 / EC） | ed25519 |
-| 管什么 | 「这个 APK 是不是同一发布者发的」 | 「这个内核包是不是官方签的」 |
+| 管什么 | 「这个 APK 是不是同一发布者发的」 | 「这个Program 包是不是官方签的」 |
 | 信任锚点 | **设备上已装的那个包**的签名 | **焊死在 APK 里**的 `assets/ota-public.pem` |
-| 谁校验 | Android 安装器（PackageManager） | 设备端 `kernel-verify.js`（Node，随 APK 冻结） |
+| 谁校验 | Android 安装器（PackageManager） | 设备端 `program-verify.js`（Node，随 APK 冻结） |
 | 生成 | `scripts/keygen-android-keystore.sh` | `scripts/keygen.sh` |
 | 产物 | `keys/release.keystore`（gitignored） | `keys/ota-private.pem`（gitignored） |
 
@@ -387,16 +397,16 @@ ADR-0005：曾经的 `LocalKernelFeed` 本地投放路径已删除）。
 （解析得了 RSA 不等于能用它验 ed25519 签名），以及**它与签名用的私钥是一对**（轮换时只改一边
 = 签出的每个包在所有设备上判 `signature-invalid`，OTA 静默死亡而 CI 全绿）。判据只住
 `scripts/verify-ota-anchor.sh` 一份，出口同调：`fast-apk` 与 `build-apk` 查锚点本身
-（出包前，那两条链拿不到私钥），签名侧（`kernel-ota` 那一步，以及它调用的
-`scripts/build-kernel-bundle.sh` —— 手工与 fork 走的也是这条）在真正签名之前带
+（出包前，那两条链拿不到私钥），签名侧（`program-ota` 那一步，以及它调用的
+`scripts/build-program-bundle.sh` —— 手工与 fork 走的也是这条）在真正签名之前带
 `--private` 查配对。
 可证伪夹具（openssl 现造临时密钥对，不碰真凭据）在
 `container/engine/test/ota-anchor-test.js`。
 
 两点容易搞反的推论：
 
-* 内核包签名正确 **≠** APK 能装到设备上。前者不影响安装器决策。
-* APK 签名稳定 **≠** 内核包可信。攻击者用自己的 keystore 重签一个 APK，
+* Program 包签名正确 **≠** APK 能装到设备上。前者不影响安装器决策。
+* APK 签名稳定 **≠** Program 包可信。攻击者用自己的 keystore 重签一个 APK，
   签名一样"稳定"，但里面的 `ota-public.pem` 换了 → 设备会拒装外来内核。
 
 ### 2.5 为什么「稳定签名身份」是自我升级的前提
@@ -681,8 +691,8 @@ aarch64）在 GitHub 免费 runner 上要 **2~3 小时**。
 
 ### 小件能力件：同一套固化（2026-09-27 收敛）
 
-同一套机制已推广到**小件原生能力件**（`libdshflock.so` / `libdshposix.so` /
-`libdshptyprobe.so` / `libbash.so` / `libdshrg.so` / `libdshpty.so`）—— 它们此前**每次
+同一套机制已推广到**小件原生能力件**（`liblobosflock.so` / `liblobosposix.so` /
+`liblobosptyprobe.so` / `libbash.so` / `liblobosrg.so` / `liblobospty.so`）—— 它们此前**每次
 `fast-apk` 都现场编译**（bash 要下源码跑 `make`，node-pty 要跑 `node-gyp`）。
 
 | 环节 | 唯一实现 |
@@ -722,7 +732,7 @@ aarch64）在 GitHub 免费 runner 上要 **2~3 小时**。
 | 阶段 | 含义 | 失败时看什么 |
 |---|---|---|
 | `init` | 服务启动，打印设备信息 | — |
-| `kernel` | 内核版本指针 + 入口布局断言 | 入口被误放到 filesDir 外会在此失败 |
+| `kernel` | Program 版本指针 + 入口布局断言 | 入口被误放到 filesDir 外会在此失败 |
 | `version` | 清单里的版本号 | 与实际 `node -v` 对比 |
 | `native-assets` | **逐资产校验：存在性 → 依赖 → exec-probe** | 见下方「归因速查」，结论是唯一的 |
 | `script` | server.js 就位 | — |

@@ -15,7 +15,7 @@
 #  3) 解释器：只要声明了 PT_INTERP，值必须是 /system/bin/linker64 —— 值是 glibc 的
 #     ld 就说明这份产物是拿主机工具链链出来的，bionic 上无法 exec。
 #     「可执行资产必须有 PT_INTERP」由清单声明（--manifest，即 NativeAssetRegistry 的
-#     投影）：共享库（libc++_shared.so、NDK 现编的 libdshflock.so）天生没有 PT_INTERP，
+#     投影）：共享库（libc++_shared.so、NDK 现编的 liblobosflock.so）天生没有 PT_INTERP，
 #     拿它当硬条件会把好产物判红 —— 这正是构建脚本原来打 [info] 的那件事，两条都对，
 #     区别只在「这个文件是不是要被 exec」，而那件事注册表知道，不必靠猜。
 #  4) 依赖闭环：DT_NEEDED 里的每个库，要么系统提供（白名单只住 scripts/native-deps.txt
@@ -24,7 +24,7 @@
 #     且值里有 $ORIGIN。只有 DT_RPATH 单独判红 —— bionic 忽略它，所以链接必须带
 #     -Wl,--enable-new-dtags；这一档不拦住，三小时 CI 与一轮真机都白跑。
 #
-# 为什么 5 是硬门槛而不是「建议」：dsh 的 run_code 从空环境起子进程，继承不到主进程
+# 为什么 5 是硬门槛而不是「建议」：载荷的 run_code 从空环境起子进程，继承不到主进程
 # 设的 LD_LIBRARY_PATH。完整论证与 2026-09-26 真机实测见 docs/architecture.md 第 3 节。
 #
 # 取数一律 LC_ALL=C：readelf 的字段名会随 locale 本地化（zh_CN 下 "Machine:" 变成
@@ -283,7 +283,7 @@ for f in "$DIR"/*.so; do
         echo "         链接须加 -Wl,--enable-new-dtags 才能产出 DT_RUNPATH。"
       else
         echo "  [FAIL] $base —— 无 DT_RUNPATH，却依赖同目录随包库:$local_deps"
-        echo "         空环境（dsh run_code 起子进程）下必然 CANNOT LINK。"
+        echo "         空环境（载荷 run_code 起子进程）下必然 CANNOT LINK。"
       fi
       printf '%s\n' "$dyn" | { grep -E "RPATH|RUNPATH|NEEDED" || true; } | sed 's/^/         /'
       fail=1

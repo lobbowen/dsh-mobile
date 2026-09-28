@@ -1,7 +1,7 @@
 # L0 GUI 开场管线规格（能力模型 v2）
 
 > 状态：**v2 定稿（2026-09-25）**。v1 的串行五段模型经真机定罪证伪（§2.0），本版把
-> 「能力」立为一等对象。决策依据见 [ADR-0007](../adr/0007-l0-gui-onboarding-pairing-ux.md)
+> 「能力」立为一等对象。决策依据见 [ADR-0007](../adr/0007-l0-gui-onboarding-and-pairing-ux.md)
 > 与本文 §2.0。本文件是 GUI 开工的契约：能力登记表、依赖图、配对交互时序、验收判据。
 >
 > **本文只回答「每项能力的判据是什么」，不回答「App 打开后按什么顺序做」** —— 后者见
@@ -18,7 +18,7 @@
   1. F1–F4 四张阶段卡：每卡一行状态 + 一句话读数，**全页只有一个主行动按钮**（挂在当前阶段上），
      只有未成立的 F4（补齐）带一个次要按钮；**开屏授权冲刺 P0 不占卡位**（静默弹窗，
      见 [onboarding-flow-spec.md](onboarding-flow-spec.md) §2.2）；
-  2. 「进入工作台」——判据是 §2.2 的入口三要素（通道 + 运行时 + 内核包），绿了即自动进入；
+  2. 「进入工作台」——判据是 §2.2 的入口三要素（通道 + 运行时 + Program 包），绿了即自动进入；
   3. 判据核对一行：段投影 S0–S4 的紧凑结论（探针期兼作证据出口，随报告一起复制）。
 - 一切「真正的操作」都发生在控制面板内。GUI 不与内核面板抢功能。
 - 现有诊断文本页**不删**，降级为灾难兜底页（运行时起不来时它是唯一可见证据；自检/复制/
@@ -34,7 +34,7 @@ v1 把**页面顺序**当成了**依赖关系**，由此产生四处硬伤，全
 |---|---|---|---|
 | 1 | v1 §2.1 写「S0 判据 = shell.status 报已连接」 | 实现用的是 `files/adb/state.json` 存在性（`AdbClientRunner.isPaired`），而 `assets/node/adb-client/index.js` 的 `status()` 只是 `paired: !!readState()` —— 全栈**没有一处连通性探针** | 端口轮换后（§3.1）首页长期假绿，shell 实打不通 |
 | 2 | v1 §2.1 自己写了 S2 的降级动作「DO 不在位→逐项跳设置页」 | 代码把 S2 硬 BLOCKED 在 S1 之后（`PipelineState.evaluate`：`s1.status != DONE -> BLOCKED`） | DO 在多用户设备不可得（`dpm set-device-owner` 报 `several users`；ColorOS 应用分身即 CLONE 用户）⇒ **S2/S3/S4 永久锁死** |
-| 3 | v1 §2.1 写「S3 判据 = /status 200 + 内核版本自检通过」 | 代码只做了 HTTP 200，`KernelSelfCheck` 从未接入管线 | 内核坏了首页照样绿 |
+| 3 | v1 §2.1 写「S3 判据 = /status 200 + Program 版本自检通过」 | 代码只做了 HTTP 200，`KernelSelfCheck` 从未接入管线 | 内核坏了首页照样绿 |
 | 4 | v1 §4 写「判据与体检/桥用同一把尺子」 | 那是**四处手写复制**（`AdbClientRunner` / `ProvisioningProbe` / `HostBridgeService.deviceCapabilities` / `KernelSelfCheck`），只有注释约束 | 三套「绿」互不等价：无障碍与 MediaProjection 根本不在 `PermissionCatalog.ALL` 里 ⇒ S2 能显示 DONE 而 `bridge:ui_automation` 仍未解锁 |
 
 结论：缺的不是补丁，是「能力」这个对象本身 —— 每项能力要有自己的**判据 / 证据源 / 取法 /
@@ -59,8 +59,7 @@ Capability(id, title, segment, optional, requires, judge, acquirer, bridgeToken,
 - `Evidence`：**类型化**读数快照（含时间戳），作为 `judge` / `acquirer` 唯一的入参；
   禁止从日志文本反解状态（v1 的 `lastPairError = substringAfter("[pair]") + "失败" in it` 是反面教材）。
 - `acquirer`：**有序**取法链，第一项就是主路径，失败才落下一项；档位 ∈
-  `AUTO / USER_TAP(intent) / USER_CODE(6位码) / SILENT_VIA_ADB / SILENT_VIA_DO`。
-  `SILENT_VIA_DO` 一律排在降级位 —— DO 是**加速器**，不是前置。
+  `AUTO / USER_TAP(intent) / USER_CODE(6位码) / SILENT_VIA_ADB`。
 - `requires`：**硬**前置能力 id 集合。只有这里产生的未达成才允许显示 BLOCKED，且**实测优先**：
   `judge` 直接读到为真（凭据在册 / 探针 LIVE / 控制面在线）时不再被前置缺位改成 BLOCKED ——
   `evaluate` 里 BLOCKED 只回答「前置没齐，现在还不该做」，不能否认「已经做完的事」；
@@ -87,17 +86,16 @@ Capability(id, title, segment, optional, requires, judge, acquirer, bridgeToken,
 | `post-notifications` | **S0** | `checkSelfPermission(POST_NOTIFICATIONS)` | RUNTIME_DIALOG：系统弹窗（shell 侧 `pm grant` 在 Android 17 不可用） | —— | |
 | `adb-credentials` | S0 | 凭据在册（`adbkey.pem` + `state.json`）**且**最近一次配对尝试非 FAILED | USER_CODE：通知栏 RemoteInput 输 6 位码（§3） | dev-options, wireless-debug, **post_notifications** | |
 | **`adb-channel`** | **S0** | **活探针为真：现问 mDNS 端点 → `id` 返回 `uid=2000`，且读数未过期（TTL 内）** | AUTO：`AdbChannelProbe`（LIVE 读数 10s 内复用、可信期 TTL 30s；DEAD 5s 冷却；事件可强制作废） | adb-credentials | |
-| `device_owner` | S1 | `isDeviceOwnerApp(packageName)`（系统侧回读；`dpm` 命令 exit 0 不算数，真机 2026-09-25 17:12） | SILENT_VIA_ADB：`dpm set-device-owner` → 输出含 `several users` 归因 UNREACHABLE | adb-channel | **是（加速器）** |
-| `manage-external-storage` | S2 | `Environment.isExternalStorageManager()` | USER_TAP（AppOps 档：Android 17 shell 已无 `MANAGE_APP_OPS_MODES`，实测只能人点）→ SILENT_VIA_DO | —— | |
-| `request-install-packages` | S2 | `canRequestPackageInstalls()` | USER_TAP → SILENT_VIA_DO | —— | |
-| `system-alert-window` | S2 | `Settings.canDrawOverlays()` | USER_TAP → SILENT_VIA_DO | —— | |
+| `manage-external-storage` | S2 | `Environment.isExternalStorageManager()` | USER_TAP（AppOps 档：Android 17 shell 已无 `MANAGE_APP_OPS_MODES`，实测只能人点） | —— | |
+| `request-install-packages` | S2 | `canRequestPackageInstalls()` | USER_TAP  | —— | |
+| `system-alert-window` | S2 | `Settings.canDrawOverlays()` | USER_TAP  | —— | |
 | `battery-optimization` | S2（**锚**） | `isIgnoringBatteryOptimizations()` | USER_TAP：`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | —— | |
 | `notification-access` | S2（**锚**） | `Secure.enabled_notification_listeners` 含本包 | **SILENT_VIA_ADB**：`settings put secure`（§2.0 实测）→ USER_TAP 通知使用权页 | —— | |
-| `accessibility` | S2（**锚**） | 服务实例已连（`DshAccessibilityService.isReady()`，与桥 caps 同一把尺子；设置串残留不作数） | **SILENT_VIA_ADB**：`settings put secure enabled_accessibility_services` → USER_TAP 无障碍页 | —— | |
+| `accessibility` | S2（**锚**） | 服务实例已连（`OsAccessibilityService.isReady()`，与桥 caps 同一把尺子；设置串残留不作数） | **SILENT_VIA_ADB**：`settings put secure enabled_accessibility_services` → USER_TAP 无障碍页 | —— | |
 | `mediaprojection` | S2 | `ScreenCaptureService.isReady()` | USER_TAP：App 内「授权屏幕捕获」（每次会话，物理不可预置） | —— | 是 |
 | `runtime` | S3 | 控制面 `/status` 200 | USER_TAP：「看运行时启动日志」→ 诊断页。**没有「重启运行时」动作**：它的实现是 destroy 正在跑的内核，运行时死活归常驻监督链（onboarding-flow-spec §1 总则 8） | —— | |
-| `kernel-bundle` | S3 | `KernelSelfCheck` 无失败项 | AUTO → 重跑自检 | runtime | |
-| `workbench`（**非 Capability**，由 `PipelineProjection.workbenchReady` 派生） | S4 | **入口三要素**（`adb-channel` + `runtime` + `kernel-bundle`）全为 GRANTED | USER_TAP：进入控制面板 | adb-channel, runtime, kernel-bundle | |
+| `program-bundle` | S3 | `KernelSelfCheck` 无失败项 | AUTO → 重跑自检 | runtime | |
+| `workbench`（**非 Capability**，由 `PipelineProjection.workbenchReady` 派生） | S4 | **入口三要素**（`adb-channel` + `runtime` + `program-bundle`）全为 GRANTED | USER_TAP：进入控制面板 | adb-channel, runtime, program-bundle | |
 
 必须钉住的五点：
 
@@ -108,7 +106,7 @@ Capability(id, title, segment, optional, requires, judge, acquirer, bridgeToken,
    走通知栏 RemoteInput（§3.2），通知权限被拒 = 输码入口根本不存在 = S0 死锁。把它登记在 S2
    就是 §3.4 反对的「顺序倒挂」的漏网一条 —— 而 `nm.notify()` 在缺权限时不抛异常、只是不显示，
    死锁连案底都不留。修法与状态机位置见 [onboarding-flow-spec.md](onboarding-flow-spec.md) §3。
-4. **S4 的绿 ≠ S2 全绿。** 进工作台的门槛只有「通道能跑 shell + 运行时在线 + 内核自检无失败项」
+4. **S4 的绿 ≠ S2 全绿。** 进工作台的门槛只有「通道能跑 shell + 运行时在线 + Program 自检无失败项」
    三要素；悬浮窗/全部文件/电池这些补齐项在 F4 里继续要，但不挡门（onboarding-flow-spec §5）。
    反过来也不许把「三要素绿」写成「权限集全绿」。
 5. **三项「锚」不是 S2 的普通待办**。`battery_optimization` / `notification-access` /
@@ -127,14 +125,14 @@ post-notifications ┘
 notification-access / accessibility / manage-external-storage / request-install-packages /
 system-alert-window / battery-optimization / mediaprojection     ← 无 requires，各自独立（不挂在通道下）
 
-runtime ─→ kernel-bundle ─→ workbench（派生行，非 Capability）
+runtime ─→ program-bundle ─→ workbench（派生行，非 Capability）
 ```
 
 - S0–S4 五段是能力按 `requires` **拓扑排序后的呈现视图**（用户要的简单），不再是模型本身。
 - 段状态聚合规则（写死，便于单测）：段内**任一 FAILED → FAILED**；否则**任一 ACTION → ACTION**；
   否则**任一 BLOCKED → BLOCKED**；否则**存在 UNREACHABLE → UNREACHABLE**；否则 DONE。
   `optional` 能力不参与取 worst（它只把自己单列一行灰字，供极客核对）。
-- **退化恢复**：任一能力日常退化（权限被 ROM 回收、端口轮换、内核掉线）→ 该段变黄/红并直达
+- **退化恢复**：任一能力日常退化（权限被 ROM 回收、端口轮换、Program 掉线）→ 该段变黄/红并直达
   该能力的取法动作。活探针的 TTL 保证「拔开关后 ≤30s 必然变红」，不允许凭缓存续绿。
 
 ### 2.4 证据采集与新鲜度
@@ -189,7 +187,7 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
 
 该门禁已接入 `container/engine/package.json` 的 `test:logic` 序列，由 `ci.yml` 的
 `container` job 执行；纯层退化路径 golden 在
-`container/app/src/test/java/io/github/lobbowen/dshmobile/capability/CapabilityDegradationTest.kt`，
+`container/app/src/test/java/lobos/capability/CapabilityDegradationTest.kt`，
 由同一 workflow 的 `app-tests` job 跑 `:app:testDebugUnitTest`（JDK 17 + runner 自带 SDK）。
 出包用的 `build-apk.yml` 是 `workflow_dispatch` 专用，刻意**不**在那里重复跑一遍单测。
 
@@ -211,7 +209,7 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
 ```
 用户                          我方 APK (:main)                     系统
 ────                          ─────────────                       ────
-打开 App                ──→  Application.onCreate 戳常驻链（ContainerSupervisor 升前台 + 状态通知）
+打开 App                ──→  Application.onCreate 戳常驻链（OsHostService 升前台 + 状态通知）
                               P0 静默授权冲刺（通知排第一、三项锚紧随；界面不出卡）
 点「开始配对」          ──→  ① startService：browse pairing + connect（必须早于对话框）
                               ② 现场重采一次 → PairingGate.decide：
@@ -279,8 +277,8 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
 ## 4. 技术选型与分层纪律
 
 - **原生 View + Material Components**；不上 Compose（minSdk24/targetSdk28，收益为负）。
-- 新代码包：`io.github.lobbowen.dshmobile.capability`（判据层）+ `.ui`（渲染层），与 E2 重构后的
-  `lifecycle/ bridge/ runtime/ kernelota/ permissions/` 并列。
+- 新代码包：`lobos.capability`（判据层）+ `.ui`（渲染层），与 E2 重构后的
+  `lifecycle/ bridge/ runtime/ ota/ permissions/` 并列。
 - **四层职责钉死**（v1 的 §4 只有口号没有归属，本版按可门禁的方式写）：
 
 | 层 | 允许做什么 | 禁止做什么 |
@@ -303,7 +301,7 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
 
 | 页面 | 内容 | 落点（现状） |
 |---|---|---|
-| 开场首页 | §1 三块：阶段卡驱动器在 [onboarding-flow-spec.md](onboarding-flow-spec.md) §2，段投影退为核对行 | `ui/OnboardingActivity.kt`（launcher Activity） |
+| 开场首页 | §1 三块：阶段卡驱动器在 [onboarding-flow-spec.md](onboarding-flow-spec.md) §2，段投影退为核对行 | `ui/setup/SetupActivity.kt`（launcher Activity） |
 | 配对现场 | 输码通知（RemoteInput）+ mDNS 在册读数回显 | `ui/PairingProbeService.kt`；**无独立向导 Activity**，F1 卡显示现场 |
 | 能力明细 | 登记表逐项 + 每项按其 `acquirer` 首项派发 | **无独立页面**：本期由「复制探针报告」逐项输出（`OnboardingActivity.copyReport`） |
 | 工作台宿主帧 / 灾难兜底页 | 内核面板；运行时起不来时是同帧的诊断文本（自检/复制/重试/授权截屏四按钮） | `MainActivity` |
@@ -316,18 +314,18 @@ compileSdk 35 的公开桩里（run 36135584213 编译失败为证），两半�
 
 | 目标 | 动作 |
 |---|---|
-| `kernel/src/adb/`（`index.js pairing.js transport.js spake2.js ed25519.js x509.js adbkey.js`） | 整目录删除 |
-| `kernel/test/adb-*-test.js` ×5 + `test/_adb-mocks.js`，及 `package.json` test 链中对应条目 | 随源同删（L0 侧 `assets/node/adb-client` 的测试在容器仓，不动） |
-| `kernel/src/api/adb.js`（`/adb/pair` `/adb/shell` `/adb/forget` 路由） | 删除；`/adb/status` 改为只读透传桥 `shell.status` |
-| `kernel/src/api/index.js:25` | **保留** `require('./adb')` 注册（承载只读 `/adb/status` 路由，删了就少一条只读入口）|
-| `kernel/src/api/surface.js:100-103` | 契约表同步：仅留 `/adb/status`（category 由 `public` 改只读语义），删其余三行 |
-| `kernel/ui/src/features/supervisor/PairingPage.tsx` | 删除 |
-| `kernel/ui/src/features/supervisor/nav.ts`（`"pairing"` 视图键 + 「ADB 配对」导航项）、`SupervisorApp.tsx`（lazy import + 路由分支 + PAGE_META 行） | 删除对应条目（6 域 → 5 域） |
-| `kernel/ui/src/services/supervisor/client.ts` / `types.ts` / `client.test.ts` | 仅删**写面**：`adbPair/adbShell/adbForget` 与 `AdbPairResult/AdbShellResult` 及其测试；`adbStatus`（只读）保留 |
-| `kernel/ui/src/features/supervisor/OverviewPage.tsx` | 新增只读「ADB 环境状态」瓦片（消费 `/adb/status`，使该端点有真实一方消费者，非幽灵） |
-| 全内核 `grep -rn "PairingPage\|/adb/pair\|/adb/shell\|/adb/forget\|src/adb" kernel/` | 0 命中 = 零残留门禁（`/adb/status` 白名单放行） |
+| `programs/console/src/adb/`（`index.js pairing.js transport.js spake2.js ed25519.js x509.js adbkey.js`） | 整目录删除 |
+| `programs/console/test/adb-*-test.js` ×5 + `test/_adb-mocks.js`，及 `package.json` test 链中对应条目 | 随源同删（L0 侧 `assets/node/adb-client` 的测试在容器仓，不动） |
+| `programs/console/src/api/adb.js`（`/adb/pair` `/adb/shell` `/adb/forget` 路由） | 删除；`/adb/status` 改为只读透传桥 `shell.status` |
+| `programs/console/src/api/index.js:25` | **保留** `require('./adb')` 注册（承载只读 `/adb/status` 路由，删了就少一条只读入口）|
+| `programs/console/src/api/surface.js:100-103` | 契约表同步：仅留 `/adb/status`（category 由 `public` 改只读语义），删其余三行 |
+| `programs/console/ui/src/features/console/PairingPage.tsx` | 删除 |
+| `programs/console/ui/src/features/console/nav.ts`（`"pairing"` 视图键 + 「ADB 配对」导航项）、`ConsoleApp.tsx`（lazy import + 路由分支 + PAGE_META 行） | 删除对应条目（6 域 → 5 域） |
+| `programs/console/ui/src/services/console/client.ts` / `types.ts` / `client.test.ts` | 仅删**写面**：`adbPair/adbShell/adbForget` 与 `AdbPairResult/AdbShellResult` 及其测试；`adbStatus`（只读）保留 |
+| `programs/console/ui/src/features/console/OverviewPage.tsx` | 新增只读「ADB 环境状态」瓦片（消费 `/adb/status`，使该端点有真实一方消费者，非幽灵） |
+| Program 侧 `grep -rn "PairingPage\|/adb/pair\|/adb/shell\|/adb/forget\|src/adb" programs/console/` | 0 命中 = 零残留门禁（`/adb/status` 白名单放行） |
 
-清理后需一次内核 OTA 发布（版本 bump + canary 链路，见 `docs/runbook/kernel-ota.md`）。
+清理后需一次Program OTA 发布（版本 bump + canary 链路，见 `docs/runbook/program-ota.md`）。
 
 ## 7. 真机验证清单（PLP120 / Android 17 已定罪，2026-09-25）
 

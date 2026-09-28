@@ -1,0 +1,164 @@
+package lobos.native
+
+import android.content.Context
+import lobos.runtime.InstanceHost
+import java.io.File
+
+/**
+ * 随包原生资产的**唯一事实来源**。
+ *
+ * 所有需要知道「包里有哪些 .so、谁依赖谁、谁要能 exec」的地方（运行时启动链、
+ * 构建脚本、CI 流水线、Gradle 打包配置、一致性测试）都必须从这里派生，
+ * **不得再出现硬编码文件名**。
+ *
+ * ## 同步契约
+ *
+ * 注册表是源头，以下三处是它的**投影**，由 `container/engine/test/native-assets-test.js`
+ * 做双向一致性守护（任一方向漏项都会让测试失败）：
+ *
+ * | 投影 | 位置 | 内容 |
+ * |---|---|---|
+ * | 打包保留符号 | `app/build.gradle.kts` → `keepDebugSymbols` | [keepDebugSymbolsGlobs] |
+ * | 构建期 NEEDED 白名单 | `scripts/native-deps.txt` | [bundledDeps] + 系统库白名单 |
+ * | CI 资产清单 | `.github/native-assets.txt` | [libNames] + `manifest.json` |
+ *
+ * ## 新增一个二进制资产要做什么
+ *
+ * 1. 在 [ALL] 里加一行；
+ * 2. 跑 `node container/engine/test/native-assets-test.js`，按报错补齐三处投影；
+ * 3. 改 `scripts/build-node-android.sh` 让它把产物拷进 `jniLibs/<abi>/`。
+ *
+ * 就这些 —— 运行时启动链、诊断、exec-probe、`sys.nativeAssets` 全部自动跟上。
+ */
+object NativeAssetRegistry {
+
+    /**
+     * libc++ 运行期。
+     *
+     * 它**不是**可执行文件（`probeArgs` 为空 + `probeExpect` 为 null 时，
+     * [NativePreparer] 只校验存在性与可读性，不做 exec-probe）。
+     * 但它**必须**在 `nativeLibraryDir` —— `libnode.so` 的 `DT_NEEDED` 里有它，
+     * 而它不在 Android 系统镜像里，只能随包提供。
+     */
+    val LIBCXX = NativeExecutable(
+        id = "libcxx",
+        libName = "libc++_shared.so",
+        humanName = "C++ 运行期",
+        probeArgs = emptyList(),
+        probeExpect = null,
+        requiredDeps = emptyList(),
+        required = true,
+        note = "不是可执行文件，但必须在 nativeLibraryDir —— libnode.so 的 DT_NEEDED 依赖它",
+    )
+
+    /**
+     * Node 运行时。
+     *
+     * 它**实际是一个可执行文件**（有 `PT_INTERP = /system/bin/linker64`），
+     * 只是被改名为 `lib*.so` 以借道 `jniLibs` 打包通道 —— 该通道是系统唯一会自动
+     * 解压落地的目录，省掉一次首启解压 116MB。
+     *
+     * 旧注释在此写「这是 W^X 约束下的唯一出路，Android 10+ 不允许从 filesDir execve」，
+     * 与 ADR-0001 (b)/D1 冲突：我们把 targetSdk 钉在 28 换的就是 app home 可 exec，
+     * `PrefixProvisioner` 往 `files/usr/bin` 放的 bash/rg/node 全依赖这条能力。
+     * 「借道 jniLibs」因此是**省事**而非**唯一**；真·唯一约束是依赖：libnode 的
+     * `DT_RUNPATH=$ORIGIN` 要求 `libc++_shared.so` 与它同目录，见 verify-runtime-elf.sh。
+     * 域内 exec 的自证归供给表 `exec-domain` 格（真机读数未采）。
+     */
+    val NODE = NativeExecutable(
+        id = "node",
+        libName = "libnode.so",
+        humanName = "Node 运行时",
+        probeArgs = listOf("-v"),
+        probeExpect = "v",
+        requiredDeps = listOf("libc++_shared.so"),
+        required = true,
+        note = "实为可执行文件，改名 lib*.so 借 jniLibs 通道落到 exec_type 目录",
+    )
+
+    /**
+     * 能力件（bash / ripgrep / flock / posix / PTY 探针）。
+     * 刻意不进 [ALL]：ALL 投影到 .github/native-assets.txt（CI 下载与 APK 审计），
+     * 小体积自编件登记会把配方软失败变硬红。此处用 listOf 直构，由 [NativePreparer] 逐项探针上屏。
+     */
+    val CAPABILITY: List<NativeExecutable> get() = listOf(
+        NativeExecutable(
+            id = "bash", libName = "libbash.so", humanName = "bash 执行器",
+            probeArgs = listOf("-c", "exit 0"), probeExpect = null,
+            requiredDeps = emptyList(), required = false, buildTier = "upstream",
+            note = "jniLibs 路径；P2 起 bash 改由前缀目录提供",
+        ),
+        NativeExecutable(
+            id = "ripgrep", libName = "liblobosrg.so", humanName = "ripgrep（glob/grep）",
+            probeArgs = listOf("--version"), probeExpect = "ripgrep",
+            requiredDeps = emptyList(), required = false, buildTier = "upstream",
+            note = "缺件时 glob/grep 报 SEARCH_FAILED",
+        ),
+        NativeExecutable(
+            id = "flock", libName = "liblobosflock.so", humanName = "flock(2) 原生桥",
+            probeArgs = emptyList(), probeExpect = null,
+            requiredDeps = emptyList(), required = false, buildTier = "self-c",
+            note = "dlopen 依赖；缺件回退 vendor 实现",
+        ),
+        NativeExecutable(
+            id = "posix", libName = "liblobosposix.so", humanName = "link/linkat 用户态替代",
+            probeArgs = emptyList(), probeExpect = null,
+            requiredDeps = emptyList(), required = false, buildTier = "self-c",
+            note = "经 LD_PRELOAD 注入；缺件会让会话落盘失败",
+        ),
+        NativeExecutable(
+            id = "ptyprobe", libName = "liblobosptyprobe.so", humanName = "PTY 探针",
+            probeArgs = emptyList(), probeExpect = null,
+            requiredDeps = emptyList(), required = false, buildTier = "self-c",
+            note = "真实 exec 由 InstanceHost.runPtyProbe() 执行",
+        ),
+    )
+    // ← 未来加资产在这里加一行即可，例如：
+    // val APKREPACK = NativeExecutable(
+    // id = "apkrepack", libName = "libapkrepack.so", humanName = "APK 重打包器",
+    // probeArgs = listOf("--version"), probeExpect = null,
+    // requiredDeps = listOf("libc++_shared.so"), required = false, ...)
+
+    /** 全部资产。顺序即诊断输出顺序（必需项放前面，便于人眼先看关键项）。 */
+    val ALL: List<NativeExecutable> get() = listOf(LIBCXX, NODE)
+
+    /** 仅必需资产。 */
+    val REQUIRED: List<NativeExecutable> get() = ALL.filter { it.required }
+
+    /** 全部资产的文件名（CI 资产清单的来源）。 */
+    val libNames: List<String> get() = ALL.map { it.libName }
+
+    /**
+     * 按 id 取随包 `.so` 的文件名 —— 运行时各处的**唯一取数口**。
+     *
+     * 为什么需要它：`PrefixProvisioner` 与 `InstanceHost` 曾各自硬编码
+     * `libbash.so` / `liblobosrg.so` / `liblobosflock.so` / `liblobosposix.so` / `liblobosptyprobe.so`，
+     * 于是「包里有哪些小件」被抄成四份，改一处必漏三处 —— [ALL] 那条同步契约有
+     * `native-assets-test.js` 守着，小件这一路此前没有。
+     *
+     * id 拼错**当场抛**，不静默回落成空路径（那会在真机上表现为"文件不存在"，难查）。
+     */
+    fun libNameOf(id: String): String =
+        (ALL + CAPABILITY).firstOrNull { it.id == id }?.libName
+            ?: error("NativeAssetRegistry 里没有 id=" + id + " 的资产 —— 拼错的 id 必须当场炸。")
+
+    /**
+     * 解析资产在设备上的绝对路径。
+     *
+     * 永远指向 `nativeLibraryDir` —— **不要**复制到 `filesDir`：那里 `app_data_file`
+     * label 禁止 execve，复制过去只会在真机上炸，而 `canExecute()` 还会骗你说没问题。
+     */
+    fun resolve(ctx: Context, e: NativeExecutable): File =
+        File(ctx.applicationInfo.nativeLibraryDir, e.libName)
+
+    /**
+     * Gradle `keepDebugSymbols` 的 glob 列表。
+     *
+     * 这些文件不能被 strip：`libnode.so` 是真正要被 exec 的 ELF（strip 会破坏它），
+     * `libc++_shared.so` 要提供符号（strip 后 `cannot locate symbol`）。
+     */
+    val keepDebugSymbolsGlobs: List<String> get() = ALL.map { "**/${it.libName}" }
+
+    /** 全部随包依赖库名（去重）。CI 资产清单与构建期 NEEDED 白名单均以此为源。 */
+    val bundledDeps: List<String> get() = ALL.flatMap { it.requiredDeps }.distinct()
+}

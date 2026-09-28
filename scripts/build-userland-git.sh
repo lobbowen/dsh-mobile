@@ -11,7 +11,7 @@
 #   $PREFIX/lib/toolchain，bin/git 是指向它的 symlink）天然合拍。
 #
 # 为什么 NO_INSTALL_HARDLINKS=1：安卓上硬链接不可用（Termux 同款），改用符号链接；
-#   而我们的解包器**支持符号链接**（为此专门补过，见 kernel/src/supply/materialize.js）。
+#   而我们的解包器**支持符号链接**（为此专门补过，见 programs/console/src/supply/materialize.js）。
 # 为什么 NO_GETTEXT / NO_ICONV / NO_NSEC：安卓无对应设施（gettext、iconv、nsec 时间戳）。
 #
 # 写法纪律：命令替换只在裸赋值里；不写带嵌套命令替换的双引号串；每步有声音。

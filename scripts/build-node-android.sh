@@ -504,7 +504,7 @@ echo "==> 宿主工具链: CC_host=$CC_host  CXX_host=$CXX_host  AR_host=$AR_hos
 
 # ---------------------------------------------------------------------------
 # 目标侧链接标志：把 DT_RUNPATH=$ORIGIN 写进 node 本体，让它自己找得到同目录的
-# libc++_shared.so。不能靠调用方补 LD_LIBRARY_PATH —— dsh 的 run_code 从空环境起
+# libc++_shared.so。不能靠调用方补 LD_LIBRARY_PATH —— 载荷的 run_code 从空环境起
 # 子进程，补了也传不下去。论证与 2026-09-26 真机实测见 docs/architecture.md 第 3 节。
 #
 # 两个 flag 缺一不可：bionic 忽略 DT_RPATH，不加 --enable-new-dtags 就只写进 RPATH，
@@ -591,7 +591,7 @@ echo "    [ok] 宿主编译器校验通过（非 android 工具链，且实测�
 #   所以这里用 make -n 把配方真正展开一次，直接读最终交给 ld 的原文。
 #   判据取自实测输出，不是取自对本脚本的推理。
 # ---------------------------------------------------------------------------
-DRY_LOG="${TMPDIR:-/tmp}/dsh-node-make-n.log"
+DRY_LOG="${TMPDIR:-/tmp}/lobos-node-make-n.log"
 # make -n 只展开不执行；node 的 Makefile 图大，退出码偶有非零（缺规则之类），
 # 那不影响我们判链接行 —— 真正执行时会由 make 本身报错。
 # 退出码要记下来而不是 `|| true` 一吞了之：取证段得区分「make 压根没展开出东西」

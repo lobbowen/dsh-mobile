@@ -7,6 +7,10 @@
   容器不是"一个会拉起 Node 的 App"，而是"这台机器"；它下面要有用户态（开发环境），
   上面才是各 agent 与工具产品。
 
+## 0. errata（2026-09-28）
+
+文中的 `libdsh*` 原生件已改名 **`liblobos*`**；`kernel/src/d2/pieces.json` 等旧路径随「kernel→console Program」重写已不存在（见 ADR-0010）。
+
 ## 1. 问题（环境报告定罪的那一类）
 
 外部环境检测报告列出一串缺口（pnpm / git / python3 / jq / sqlite3 缺失、

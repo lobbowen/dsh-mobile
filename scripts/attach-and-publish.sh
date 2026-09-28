@@ -4,13 +4,13 @@
 # 用法：
 #   scripts/attach-and-publish.sh <工作副本目录> [远端URL] [分支名]
 # 例：
-#   scripts/attach-and-publish.sh ~/work/dsh-mobile https://github.com/lobbowen/dsh-mobile.git chore/attach-working-tree
+#   scripts/attach-and-publish.sh ~/work/lobos https://github.com/lobbowen/lobos.git chore/attach-working-tree
 #
 # 红线（本脚本强制）：不 init、不 force-push、必须先 dry-run。
 set -euo pipefail
 
 SRC="${1:?用法: $0 <工作副本目录> [远端URL] [分支名]}"
-REMOTE="${2:-https://github.com/lobbowen/dsh-mobile.git}"
+REMOTE="${2:-https://github.com/lobbowen/lobos.git}"
 BRANCH="${3:-chore/attach-working-tree}"
 WORK="$(mktemp -d)"
 
@@ -48,5 +48,5 @@ cat <<EOF
 完成。下一步（人工）：
   1) 在 GitHub 开 PR: $BRANCH -> main
   2) 评审合并后打 tag:  git tag baseline-$(date +%Y%m%d) && git push origin baseline-$(date +%Y%m%d)
-  3) 若渲染 OTA/发版，按 GIT-REPO-STANDARD §5/§6 用 container-v* / kernel-v* tag
+  3) 若渲染 OTA/发版，按 GIT-REPO-STANDARD §5/§6 用 container-v* / program-v* tag
 EOF

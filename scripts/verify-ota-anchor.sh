@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
 # OTA 公钥锚点的形态与配对判据 —— 「设备将来会不会认我们签的内核」的唯一实现。
-# 调用点：build-apk.yml 的 ensure-ota-anchor（只管锚点本身）、kernel-ota.yml 的签名前
+# 调用点：build-apk.yml 的 ensure-ota-anchor（只管锚点本身）、program-ota.yml 的签名前
 # （带 --private，把「私钥与焊进 APK 的公钥是一对」这件事判死）。
 #
 # 两条判据此前各查一半、谁都不查全部：build-apk 只在锚点文件**缺失**时 exit 1，
-# 「锚点是有效 PEM」那一问只打 ::warning:: 就继续出包；kernel-ota 只查**存在与字节数**。
+# 「锚点是有效 PEM」那一问只打 ::warning:: 就继续出包；program-ota 只查**存在与字节数**。
 # 于是私钥轮换后重焊了 APK 公钥、却忘了改 secrets.OTA_PRIVATE_KEY_PEM（或反之），
 # 两条链都绿着把内核签成一个所有设备拒收的东西 —— 而这件事在 CI 里完全不可见，
 # 到设备上表现为「OTA 永远不更新」，取证要一轮真机。
@@ -48,7 +48,7 @@ command -v "$OPENSSL" >/dev/null 2>&1 || { echo "[error] 找不到 openssl —�
 # 锚点缺失是**交付缺陷**（APK 里没有信任源），不是环境问题，所以判 1 不判 2。
 if [ ! -s "$ANCHOR" ]; then
   echo "[error] OTA 公钥锚点缺失或为空：$ANCHOR"
-  echo "        设备端 kernel-verify.js 拿它验签；没有它，任何内核包都装不上。"
+  echo "        设备端 program-verify.js 拿它验签；没有它，任何内核包都装不上。"
   echo "        请先 commit 该文件，或用 secrets.OTA_PUBLIC_KEY 覆盖写入。"
   exit 1
 fi

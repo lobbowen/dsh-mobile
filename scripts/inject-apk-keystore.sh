@@ -16,7 +16,7 @@
 #   退 2  = 配了但注入不成（解码失败 / 密码错 / 别名错 / keytool 不可用）—— 禁止继续构建
 #
 # 用法: bash scripts/inject-apk-keystore.sh [目标目录，默认 keys]
-# 读入: KS_B64(必) KS_PASS(配了 KS_B64 则必) KS_ALIAS(默认 dsh) KS_KEYPASS(默认=KS_PASS)
+# 读入: KS_B64(必) KS_PASS(配了 KS_B64 则必) KS_ALIAS(默认 lobos) KS_KEYPASS(默认=KS_PASS)
 #       —— 与 fast-apk / build-apk / release-admin 早已在用的那组 secret 同名，不另立一套
 set -euo pipefail
 
@@ -25,9 +25,9 @@ KS="$DEST/release.keystore"
 CERT="$DEST/release.cert"
 
 if [ -z "${KS_B64:-}" ]; then
-  echo "[dsh-signing] 未配置 ANDROID_KEYSTORE_BASE64 —— 本次产物将是 AGP 现场生成的一次性 debug 签名。"
-  echo "[dsh-signing] 后果：指纹每次都不同 ⇒ 新包装到已装设备上会 INSTALL_FAILED_UPDATE_INCOMPATIBLE。"
-  echo "[dsh-signing] 发布链路（build-apk / repack）据此判红；日常开发构建放行。"
+  echo "[lobos-signing] 未配置 ANDROID_KEYSTORE_BASE64 —— 本次产物将是 AGP 现场生成的一次性 debug 签名。"
+  echo "[lobos-signing] 后果：指纹每次都不同 ⇒ 新包装到已装设备上会 INSTALL_FAILED_UPDATE_INCOMPATIBLE。"
+  echo "[lobos-signing] 发布链路（build-apk / repack）据此判红；日常开发构建放行。"
   exit 10
 fi
 # 配了 keystore 却没配口令 = 配坏了，不是「未配置」：退 10 会让发布链路把它读成
@@ -49,7 +49,7 @@ fi
 command -v keytool >/dev/null 2>&1 \
   || { echo "[error] keytool 不可用 —— 无法核验注入结果，禁止继续。"; exit 2; }
 
-ALIAS="${KS_ALIAS:-dsh}"
+ALIAS="${KS_ALIAS:-lobos}"
 KEYPASS="${KS_KEYPASS:-$KS_PASS}"
 export KS_PASS KS_KEYPASS="$KEYPASS"
 # 口令一律用 keytool 的 :env 形态传（-storepass:env / -keypass:env，见 keytool(1)：
@@ -74,18 +74,18 @@ case "$PEM_TXT" in (*"-----BEGIN CERTIFICATE-----"*) ;; (*) echo "[error] 导出
 # docs/architecture.md：正则写 "SHA256:" 永不匹配 → 健康路径也误报校验失败）。
 # 真正的身份比对在 scripts/verify-apk-signing.sh 里做，那里对三种写法都做了归一。
 while IFS= read -r ln; do
-  case "${ln,,}" in (*"ingerprint"*) echo "[dsh-signing] keystore 证书 $ln" ;; esac
+  case "${ln,,}" in (*"ingerprint"*) echo "[lobos-signing] keystore 证书 $ln" ;; esac
 done <<<"$(keytool -printcert -file "$CERT" 2>/dev/null || true)"
 
 # gradle 读这三个变量决定 signingConfig（container/app/build.gradle.kts:93-103，
-# 名字要与它逐字对齐）；第四个 DSH_APK_CERT_FILE 是给下游签名身份门禁取锚点用的。
+# 名字要与它逐字对齐）；第四个 LOBOS_APK_CERT_FILE 是给下游签名身份门禁取锚点用的。
 # 一律走 GITHUB_ENV，不把口令写进步骤命令行。
 if [ -n "${GITHUB_ENV:-}" ]; then
   {
-    echo "DSH_KEYSTORE_PASSWORD=$KS_PASS"
-    echo "DSH_KEY_ALIAS=$ALIAS"
-    echo "DSH_KEY_PASSWORD=$KEYPASS"
-    echo "DSH_APK_CERT_FILE=$CERT"
+    echo "LOBOS_KEYSTORE_PASSWORD=$KS_PASS"
+    echo "LOBOS_KEY_ALIAS=$ALIAS"
+    echo "LOBOS_KEY_PASSWORD=$KEYPASS"
+    echo "LOBOS_APK_CERT_FILE=$CERT"
   } >> "$GITHUB_ENV"
 fi
-echo "[dsh-signing] [ok] keystore 已注入并核验：$KS（别名 $ALIAS，锚点 $CERT）"
+echo "[lobos-signing] [ok] keystore 已注入并核验：$KS（别名 $ALIAS，锚点 $CERT）"

@@ -1,6 +1,6 @@
 'use strict';
 
-// 签名/验签：ed25519 对 kernel.json 规范化摘要签名，正确公钥过、篡改/缺签/错钥不过。
+// 签名/验签：ed25519 对 program-manifest.json 规范化摘要签名，正确公钥过、篡改/缺签/错钥不过。
 const crypto = require('crypto');
 const { signManifest, canonical } = require('../src/sign');
 const { verifyManifest } = require('../src/verify');
@@ -14,13 +14,13 @@ const kp = crypto.generateKeyPairSync('ed25519', {
 });
 
 const kj = {
-  name: 'dsh-kernel',
+  name: 'console',
   version: '1.4.0',
   abi: 'node24-arm64-android35',
   engines: { node: '>=24 <25' },
-  entry: 'bin/dsh-supervisor',
+  entry: 'bin/panel',
   requires: ['bridge:app_control'],
-  managedAgents: [],
+  programs: [],
 };
 kj.signature = signManifest(kp.privateKey, kj);
 

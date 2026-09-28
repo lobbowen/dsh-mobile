@@ -12,10 +12,10 @@
 #
 # 判据（gate 模式，逐条硬红）：
 #   1) APK 可读且 lib/ 下有条目            —— 零条目 = 审计无对象，不放行
-#   2) 不含 assets/kernel/                 —— ADR-0005：内核只从 OTA 源安装
-#   3) 自有小件必产（libdshflock/libdshposix/libdshptyprobe）
-#   4) $PREFIX 依赖件必产（libbash/libdshrg，无回退路径）
-#   5) libdshpty.so 软失败 —— 缺席只是终端 PTY 降级，::warning::
+#   2) 不含 assets/kernel（legacy 内核资产目录） —— ADR-0005：Program 只从 OTA 源安装
+#   3) 自有小件必产（liblobosflock/liblobosposix/liblobosptyprobe）
+#   4) $PREFIX 依赖件必产（libbash/liblobosrg，无回退路径）
+#   5) liblobospty.so 软失败 —— 缺席只是终端 PTY 降级，::warning::
 #   6) assets/npm/npm.zip 与 version.txt   —— 缺了面板装不了任何 Agent
 #   7) .github/native-assets.txt 逐资产（名字即判据数据，加资产不改这里）
 #   8) adb-client 逐个 JS + 件数与源码目录一致 —— ADR-0003 权限通道的字节
@@ -56,7 +56,7 @@ command -v zipinfo >/dev/null 2>&1 || { echo "[error] 找不到 zipinfo —— �
 # 真机前科（2026-09-26 fast-apk run 36255730715）：旧写法 `printf '%s\n' "$LIST" | grep -q`
 # 一旦命中就提前退出，printf 撞上 SIGPIPE 回吐 `write error: Broken pipe`，
 # 而 set -o pipefail 把【左侧的非零】当成整条管道的退码 —— 于是「命中」被翻成「未命中」：
-# 确在包内的 libdshposix.so 被判成缺项，同一份日志末尾的 unzip -v 明明白白列着它。
+# 确在包内的 liblobosposix.so 被判成缺项，同一份日志末尾的 unzip -v 明明白白列着它。
 # 判定因此【永不经过管道/子 shell】。审计器自己制造假阳性，比漏检更糟：
 # 它会把人往不存在的构建缺陷里带。
 # 退码语义（本机实测 Info-ZIP 6.00）：0 可读（合法空包也回 0、零行）；
@@ -132,22 +132,22 @@ elif ! has_prefix 'lib/'; then
   exit 1
 fi
 
-# --- 内核资产（必须为空，ADR-0005）---
+# --- legacy 内核资产（必须为空，ADR-0005）---
 echo
-echo "--- 内核资产（必须为空）---"
-if has_prefix 'assets/kernel/'; then
+echo "--- legacy 内核资产（必须为空）---"
+if has_prefix 'assets/kernel'; then
   # 列证据：直接重读包，不复用内存表（审计器不信任自己的中间态）。
   if [ "$REPORT" = "1" ]; then
     # 「不该有却有」不是「缺项」—— 单记 FAIL，不混进缺项清单。
-    echo "  [FAIL] 含 assets/kernel/ —— ADR-0005 规定内核不随 APK 分发"
-    zipinfo -1 "$APK" 2>/dev/null | { grep '^assets/kernel/' || true; } | sed 's/^/    /'
+    echo "  [FAIL] 含 assets/kernel —— ADR-0005 规定 Program 不随 APK 分发"
+    zipinfo -1 "$APK" 2>/dev/null | { grep '^assets/kernel' || true; } | sed 's/^/    /'
   else
-    echo "::error title=APK 含内核资产::ADR-0005 规定内核不随 APK 分发（内核只从 OTA 源安装）。"
-    zipinfo -1 "$APK" 2>/dev/null | { grep '^assets/kernel/' || true; }
+    echo "::error title=APK 含 Program 资产::ADR-0005 规定 Program 不随 APK 分发（只从 OTA 源安装）。"
+    zipinfo -1 "$APK" 2>/dev/null | { grep '^assets/kernel' || true; }
     exit 1
   fi
 else
-  echo "[ok] APK 不含内核资产（内核经 OTA 安装）"
+  echo "[ok] APK 不含 legacy 内核资产（Program 经 OTA 安装）"
 fi
 
 # --- 小体积原生件（刻意不登记 native-assets.txt 的那批）---

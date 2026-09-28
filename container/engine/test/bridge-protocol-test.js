@@ -16,15 +16,15 @@ check('error 结构含 code/message', proto.error(5, proto.ERROR_CODES.ERR_CAPAB
 check('ERR_CAPABILITY_MISSING = -32001', proto.ERROR_CODES.ERR_CAPABILITY_MISSING === -32001);
 check('ERR_TIMEOUT = -32002', proto.ERROR_CODES.ERR_TIMEOUT === -32002);
 
-check('methodCaps app.install = [device_owner]', JSON.stringify(methods.methodCaps('app.install')) === JSON.stringify(['device_owner']));
-check('missingCaps app.install 缺 device_owner', JSON.stringify(methods.missingCaps('app.install', ['base'])) === JSON.stringify(['device_owner']));
+check('methodCaps app.install = [base]（用户手动同意路径）', JSON.stringify(methods.methodCaps('app.install')) === JSON.stringify(['base']));
+check('missingCaps ui.tap 缺 accessibility', JSON.stringify(methods.missingCaps('ui.tap', ['base'])) === JSON.stringify(['accessibility']));
 const npMiss = methods.missingCaps('notif.post', ['base']);
 check('notif.post 仅需 base → 满足', npMiss !== null && npMiss.length === 0);
 check('未知方法 methodCaps = null', methods.methodCaps('nope.nope') === null);
 check('isAudited app.install = true', methods.isAudited('app.install') === true);
 check('notif.post 审计（与 Kotlin MethodDef 第二参数一致）', methods.isAudited('notif.post') === true);
-check('BRIDGE_TOKENS 含 8 组', methods.BRIDGE_TOKENS.length === 8);
-check('DEVICE_CAPS 含 device_owner/accessibility/adb_shell', ['device_owner', 'accessibility', 'adb_shell'].every((c) => methods.DEVICE_CAPS.includes(c)));
+check('BRIDGE_TOKENS 含 7 组', methods.BRIDGE_TOKENS.length === 7);
+check('DEVICE_CAPS 含 accessibility/adb_shell/program_update', ['accessibility', 'adb_shell', 'program_update'].every((c) => methods.DEVICE_CAPS.includes(c)));
 
 const round = JSON.parse(JSON.stringify(proto.response(2, { ok: true })));
 check('response 往返 id 保持', round.id === 2 && round.result.ok === true);

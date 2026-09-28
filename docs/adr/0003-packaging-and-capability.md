@@ -7,6 +7,10 @@
 
 ---
 
+## 0. errata（2026-09-28）
+
+本 ADR 写作时 `applicationId = io.github.lobbowen.dshmobile`；现已改为 **`lobos.app`**，namespace / Kotlin 包根为 **`lobos`**（见 ADR-0010 与 docs/standards/branding.md）。下文的包名按新身份读；任何 Device Owner 相关能力项已随台账 §J 整体退出。
+
 ## 结论一：包名 —— 定 `io.github.lobbowen.dshmobile`
 
 **证据**

@@ -4,15 +4,15 @@
 //
 // 把「密钥管理 / 配对 / 连接执行」收成一处，供 AdbClientRunner（Kotlin）经
 // cli.js 调用：
-//   · 密钥落 <DSH_ADB_DIR>/adbkey.pem（0600）——ADB 身份，跨重启复用；
-//   · 配对成功后把「host + 连接端口 + GUID」落 <DSH_ADB_DIR>/state.json；
+//   · 密钥落 <LOBOS_ADB_DIR>/adbkey.pem（0600）——ADB 身份，跨重启复用；
+//   · 配对成功后把「host + 连接端口 + GUID」落 <LOBOS_ADB_DIR>/state.json；
 //   · shell() 默认走已持久化的连接端点，也可显式传 host/connectPort。
 //
 // 为什么在容器侧而不在内核：凭据生命周期必须与信任根（APK）同层——
 // 内核是 OTA 可换的 JS 包，不该持久持有 uid 2000 通道的密钥；特权执行统一
 // 经桥方法 shell.exec 出口，保证门禁与审计。决策与理由见 ADR-0003（勘误 2026-09-24）。
 //
-// 目录注入：DSH_ADB_DIR 环境变量（由 AdbClientRunner 传入 files/adb）。
+// 目录注入：LOBOS_ADB_DIR 环境变量（由 AdbClientRunner 传入 files/adb）。
 // 缺失即抛错——绝不悄悄落到别处产生第二把身份密钥。
 //
 // 常驻形态（2026-09-27 根治"无限连接断开"）：serve 进程内 transport 维护一条
@@ -30,8 +30,8 @@ const NAME_FILE = 'adbkey.name';
 const STATE_FILE = 'state.json';
 
 function dir() {
-  const d = process.env.DSH_ADB_DIR;
-  if (!d) throw new Error('DSH_ADB_DIR 未注入（adb-client 必须由容器指定凭据目录）');
+  const d = process.env.LOBOS_ADB_DIR;
+  if (!d) throw new Error('LOBOS_ADB_DIR 未注入（adb-client 必须由容器指定凭据目录）');
   return d;
 }
 function keyPath() { return path.join(dir(), KEY_FILE); }
@@ -53,13 +53,13 @@ function applyStoredName(key, fallback) {
 /** 读取已有 ADB 密钥（name 以 sidecar 为准）；不存在返回 null。 */
 function readKey() {
   if (!fs.existsSync(keyPath())) return null;
-  return applyStoredName(adbkey.loadOrCreate(keyPath()), 'dsh@device');
+  return applyStoredName(adbkey.loadOrCreate(keyPath()), 'lobos@device');
 }
 
 /** 读取已有 ADB 密钥；不存在则生成并落盘（0600 + name sidecar）。 */
 function ensureKey(name) {
   ensureDir();
-  return applyStoredName(adbkey.loadOrCreate(keyPath(), name || 'dsh@device'), name || 'dsh@device');
+  return applyStoredName(adbkey.loadOrCreate(keyPath(), name || 'lobos@device'), name || 'lobos@device');
 }
 
 function readState() { try { return JSON.parse(fs.readFileSync(statePath(), 'utf8')); } catch (e) { return null; } }

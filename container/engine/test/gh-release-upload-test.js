@@ -7,7 +7,7 @@
 // ============================================================================
 //  这一步产出的不是「构建成功」而是「设备能取到新包」。同一句
 //  「确保 Release 在 → 覆盖上传 → 看一眼」原先在 fast-apk / build-apk /
-//  release-admin(publish、repack、pin) / kernel-ota(归档 + 滚动通道) 各抄了一份，
+//  release-admin(publish、repack、pin) / program-ota(归档 + 滚动通道) 各抄了一份，
 //  分歧的实际代价是 repack 那份：它把 `file#app-debug.apk` 当改名用，而 gh 的资产名
 //  取 file 的 basename（`#` 后面只是 label），于是它**删掉了 app-debug.apk、
 //  传上去的是 app-signed.apk** —— latest 的下载地址当场 404，且没有任何一份副本
@@ -105,7 +105,7 @@ function fixture(flags = {}) {
 function run(c, args) {
   const env = {
     PATH: path.join(c.ST, 'bin') + ':/usr/local/bin:/usr/bin:/bin',
-    GITHUB_REPOSITORY: 'lobbowen/dsh-mobile',
+    GITHUB_REPOSITORY: 'lobbowen/lobos',
     ST: c.ST,
   };
   for (const k of FLAGS) {
@@ -230,22 +230,22 @@ const asset = (c, n) => path.join(c.ST, 'assets', n);
   const c = fixture({ exists: true });
   const r = run(c, ['apk-latest', path.join(c.ST, 'pkg.apk')]);
   check('基线：先传 pkg.apk', r.rc === 0 && r.out.includes('已就位'), detail(r));
-  const zip = path.join(c.ST, 'kernel-9.9.9.zip');
+  const zip = path.join(c.ST, 'program-9.9.9.zip');
   fs.copyFileSync(path.join(c.ST, 'pkg.apk'), zip);
-  fs.writeFileSync(asset(c, 'kernel-1.0.0.zip'), 'old\n');
-  const r2 = run(c, ['apk-latest', zip, '--prune', '^kernel-[0-9]']);
+  fs.writeFileSync(asset(c, 'program-1.0.0.zip'), 'old\n');
+  const r2 = run(c, ['apk-latest', zip, '--prune', '^program-[0-9]']);
   check('--prune 清掉同族旧资产、留下本次（名单自动包含刚传的资产）',
-    r2.rc === 0 && r2.out.includes('清理旧资产 kernel-1.0.0.zip')
-      && !fs.existsSync(asset(c, 'kernel-1.0.0.zip')) && fs.existsSync(asset(c, 'kernel-9.9.9.zip')), detail(r2));
+    r2.rc === 0 && r2.out.includes('清理旧资产 program-1.0.0.zip')
+      && !fs.existsSync(asset(c, 'program-1.0.0.zip')) && fs.existsSync(asset(c, 'program-9.9.9.zip')), detail(r2));
 }
 {
   const c = fixture({ exists: true });
-  fs.writeFileSync(asset(c, 'kernel-1.2.3.zip'), 'archived\n');
-  const r = run(c, ['kernel-1.2.3', path.join(c.ST, 'pkg.apk'), '--skip-existing']);
+  fs.writeFileSync(asset(c, 'program-1.2.3.zip'), 'archived\n');
+  const r = run(c, ['program-1.2.3', path.join(c.ST, 'pkg.apk'), '--skip-existing']);
   check('--skip-existing 且 tag 已在 → 0 且整步不动线上（灰度→生产提升不算错误）',
     r.rc === 0 && r.out.includes('归档只建一次') && !fs.existsSync(asset(c, 'pkg.apk')), detail(r));
   const c2 = fixture();
-  const r2 = run(c2, ['kernel-1.2.3', path.join(c2.ST, 'pkg.apk'), '--skip-existing']);
+  const r2 = run(c2, ['program-1.2.3', path.join(c2.ST, 'pkg.apk'), '--skip-existing']);
   check('--skip-existing 但 tag 不在 → 照常创建并上传', r2.rc === 0 && r2.out.includes('已就位'), detail(r2));
 }
 
@@ -273,13 +273,13 @@ const asset = (c, n) => path.join(c.ST, 'assets', n);
   // 判据是**集合相等**而非「包含」—— 多出第六个调用方必须在此显式登记，
   // 否则「上传判据只住宿主」这条纪律会被悄悄抄出第二份。
   check('上传宿主被五条链路同调（日常/全量/内核/小件固化/管理）',
-    JSON.stringify(callers) === JSON.stringify(['build-apk.yml', 'fast-apk.yml', 'kernel-ota.yml', 'pin-capabilities.yml', 'release-admin.yml']),
+    JSON.stringify(callers) === JSON.stringify(['build-apk.yml', 'fast-apk.yml', 'program-ota.yml', 'pin-capabilities.yml', 'release-admin.yml']),
     callers.join(','));
-  const ko = wfs.find(([f]) => f === 'kernel-ota.yml')[1];
+  const ko = wfs.find(([f]) => f === 'program-ota.yml')[1];
   // 先展平反斜杠续行：这条链路盯的是「同一宿主被调两次、两档政策各自表达」，
   // 政策开关写在哪一行是排版，不是不变量。
   const koFlat = ko.replace(/\\\n\s*/g, ' ');
-  check('kernel-ota 的两档政策各自表达：归档 --skip-existing、通道 --prune',
+  check('program-ota 的两档政策各自表达：归档 --skip-existing、通道 --prune',
     /gh-release-upload\.sh[^\n]*--skip-existing/.test(koFlat)
       && /gh-release-upload\.sh[^\n]*--prune/.test(koFlat),
     '政策标记丢了就等于把「提升」判成错误');

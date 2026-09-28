@@ -2,14 +2,16 @@
 
 // 内核 OTA 引擎（单写入者 = 容器）。对齐 docs/contracts/base-spec.md §5 通道一。
 //
+//   D8 统一改为 programs/console/<version>/（见 W4 待改清单）。
+//
 // 这份是**构建/校验库**，不是设备上跑的那条链：真机流程由 Kotlin 编排、验签在
-// container/app/src/main/assets/node/kernel-verify.js（KernelInstaller 刻意不复用本文件）。
+// container/app/src/main/assets/node/program-verify.js（ProgramInstaller 刻意不复用本文件）。
 // 所以「manifest 文档自身的签名」这一问只在那边判（挡住重放旧 manifest），本文件收到的是
 // 已解析的 manifest 条目，无文档可验 —— 拿本文件的 ok:true 当设备端判据的覆盖证据是错的。
 //
-// 校验顺序：poll manifest → download zip → sha256 校验 → 解包取 kernel.json →
+// 校验顺序：poll manifest → download zip → sha256 校验 → 解包取 program-manifest.json →
 //   验签(焊死公钥) → engines.node 比对固定运行时 → requires ⊆ 设备能力 →
-//   原子解包到 files/kernel/<new>/ → 切 CURRENT 指针(tmp+rename) → 杀旧 :node、spawn 新。
+//   原子解包到 files/programs/console/<new>/ → 切 CURRENT 指针(tmp+rename) → 杀旧实例、spawn 新。
 // 坏包永不生效：任一校验不过直接抛错，绝不切指针。
 // 回滚：保留上一版本；新包健康检查失败 → 指针回退 + 重启。
 
@@ -17,7 +19,7 @@ const fs = require('fs');
 const path = require('path');
 const { extractZip } = require('./zip');
 const { sha256, verifyManifest } = require('./verify');
-const { isNewer } = require('./kernel-version');
+const { isNewer } = require('./program-version');
 
 class OtaEngine {
   constructor({ baseDir, httpGet, publicKeyPem, capabilities, runtime, protocol, log }) {
@@ -31,8 +33,8 @@ class OtaEngine {
     // 刻意**不**静默跳过：漏传就装不上，CI 会立刻暴露。
     this.shellProtocol = Number(protocol || 0);
     this.log = log || (() => {});
-    this.kernelDir = path.join(baseDir, 'kernel');
-    this.currentPointer = path.join(this.kernelDir, 'CURRENT');
+    this.programDir = path.join(baseDir, 'programs', 'console');
+    this.currentPointer = path.join(this.programDir, 'CURRENT');
   }
 
   currentVersion() {
@@ -40,45 +42,45 @@ class OtaEngine {
   }
 
   _setPointer(v) {
-    fs.mkdirSync(this.kernelDir, { recursive: true });
-    const tmp = path.join(this.kernelDir, 'CURRENT.tmp');
+    fs.mkdirSync(this.programDir, { recursive: true });
+    const tmp = path.join(this.programDir, 'CURRENT.tmp');
     fs.writeFileSync(tmp, v);
     fs.renameSync(tmp, this.currentPointer); // 原子切换
   }
 
   installedVersions() {
     try {
-      return fs.readdirSync(this.kernelDir)
-        .filter((d) => d !== 'CURRENT' && fs.statSync(path.join(this.kernelDir, d)).isDirectory());
+      return fs.readdirSync(this.programDir)
+        .filter((d) => d !== 'CURRENT' && fs.statSync(path.join(this.programDir, d)).isDirectory());
     } catch (_e) { return []; }
   }
 
   /**
    * 校验一包。坏包返回 { ok:false, reason }，绝不抛错到调用方之外。
    * @param {Buffer} zipBuf
-   * @param {object} manifest 对应 kernel-manifest 条目（含 sha256 / version）
+   * @param {object} manifest 对应 program-manifest 条目（含 sha256 / version）
    */
   verifyPackage(zipBuf, manifest) {
     if (sha256(zipBuf) !== manifest.sha256) return { ok: false, reason: 'sha256-mismatch' };
     const tmp = path.join(this.baseDir, '.ota-verify-' + process.pid + '-' + Date.now());
     try {
       extractZip(zipBuf, tmp);
-      const kjPath = path.join(tmp, 'kernel', manifest.version, 'kernel.json');
-      if (!fs.existsSync(kjPath)) return { ok: false, reason: 'no-kernel-json' };
-      const kernelJson = JSON.parse(fs.readFileSync(kjPath, 'utf8'));
-      if (!verifyManifest(this.publicKeyPem, kernelJson, kernelJson.signature))
+      const kjPath = path.join(tmp, 'program', manifest.version, 'program-manifest.json');
+      if (!fs.existsSync(kjPath)) return { ok: false, reason: 'no-program-manifest' };
+      const manifestJson = JSON.parse(fs.readFileSync(kjPath, 'utf8'));
+      if (!verifyManifest(this.publicKeyPem, manifestJson, manifestJson.signature))
         return { ok: false, reason: 'signature-invalid' };
-      if (!this._nodeSatisfied(kernelJson.engines && kernelJson.engines.node))
+      if (!this._nodeSatisfied(manifestJson.engines && manifestJson.engines.node))
         return { ok: false, reason: 'node-engine-unsatisfied' };
-      const missing = (kernelJson.requires || []).filter((r) => !this.capabilities.includes(r));
+      const missing = (manifestJson.requires || []).filter((r) => !this.capabilities.includes(r));
       if (missing.length) return { ok: false, reason: 'capability-missing', missing };
       // 桥协议兼容（ADR-0004 §3）：内核要求的最低协议 <= 壳实现的协议。
       // 与 engines/requires 并列，回答"能不能装在这台壳上"。
-      const reqProto = Number(kernelJson.requiresProtocol || 0);
+      const reqProto = Number(manifestJson.requiresProtocol || 0);
       if (reqProto > this.shellProtocol) {
         return { ok: false, reason: 'protocol-unsatisfied', required: reqProto, have: this.shellProtocol };
       }
-      return { ok: true, kernelJson };
+      return { ok: true, manifestJson };
     } catch (e) {
       return { ok: false, reason: 'extract-failed', error: String(e && e.message) };
     } finally {
@@ -115,17 +117,17 @@ class OtaEngine {
    * @returns {string} 新内核目录绝对路径
    */
   apply(version, zipBuf) {
-    const dest = path.join(this.kernelDir, version);
+    const dest = path.join(this.programDir, version);
     const tmp = dest + '.tmp-' + process.pid + '-' + Date.now();
     fs.rmSync(tmp, { recursive: true, force: true });
     try {
       extractZip(zipBuf, tmp);
-      const inner = path.join(tmp, 'kernel', version);
-      if (!fs.existsSync(inner)) throw new Error('包内缺少 kernel/' + version + ' 目录');
+      const inner = path.join(tmp, 'program', version);
+      if (!fs.existsSync(inner)) throw new Error('包内缺少 program/' + version + ' 目录');
       fs.rmSync(dest, { recursive: true, force: true });
       fs.renameSync(inner, dest);
     } catch (e) {
-      // 半途失败必须收走临时树：否则每次坏包都在 files/kernel/ 里留一份永久残留。
+      // 半途失败必须收走临时树：否则每次坏包都在 files/programs/console/ 里留一份永久残留。
       fs.rmSync(tmp, { recursive: true, force: true });
       throw e;
     }

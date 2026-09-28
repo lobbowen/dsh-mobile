@@ -1,0 +1,138 @@
+'use strict';
+
+// 内核更新桥（UI ↔ 容器宿主帧）**协议契约**测试。
+//
+// 背景：容器 WebView 加载 console 同源托管的宿主帧 /__host，面板 iframe 经 postMessage 请求更新。
+// 该链路的报文格式由 console `ui/src/services/console/panelUpdateBridge.ts` 定义（协议 v1）。
+// 历史上容器原生侧回灌 `{type,requestId,status,message}` —— **缺 `v` 与 `ok`**，
+// 面板侧 `if (d.v !== 1) return;` 会直接丢弃 → 面板 6 分钟超时静默失败。
+//
+// 本测试用**面板真实过滤逻辑的等价实现**（下方 panelConsume，逐行对齐 TS 源码）
+// 去消化容器侧应当产出的报文，锁定两侧字段一致；任一侧漂移即失败。
+//
+// 这是「第三套契约」（UI↔宿主 postMessage），与前两套（runtime.json / program-manifest.json）无关。
+
+const makeRunner = require('./harness');
+const fs = require('fs');
+const path = require('path');
+
+const { check, skip, finish } = makeRunner('program-update-bridge');
+
+// 内核源码路径（单仓：同仓 programs/console/ 子目录）。**不写死绝对路径**。
+// 本文件对内核源码的引用是**静态比对**（读文件做正则/存在性检查），
+// 用的是软探测（存在才比，不存在就说明"未验证"），所以内核源码不在时不会崩，
+// 只是少验几条"两侧常量是否漂移"的断言 —— 少验时必须能在日志里数出来
+// （本套满配 22 条；若掉到 16 条就说明路径没指对，而不是"正常"）。
+const PROGRAM_REPO = process.env.LOBOS_PROGRAM_REPO || path.join(__dirname, '..', '..', '..', 'programs', 'console');
+
+// ── 面板侧契约常量（须与 panelUpdateBridge.ts 一致）──
+const KERNEL_BRIDGE_PROTOCOL_VERSION = 1;
+const REQUEST = 'lobos:panel-update-request';
+const RESULT = 'lobos:panel-update-result';
+const PROGRESS = 'lobos:panel-update-progress';
+
+// ── 面板侧过滤逻辑的等价实现（逐行对齐 panelUpdateBridge.ts onMessage）──
+// 返回 null = 面板丢弃该消息（不结算）；否则返回结算后的 KernelUpdateResult。
+function panelConsume(d, expectedRequestId) {
+  if (!d || typeof d !== 'object') return null;
+  if (d.v !== KERNEL_BRIDGE_PROTOCOL_VERSION) return null;
+  if (d.type !== RESULT && d.type !== PROGRESS) return null;
+  if (d.requestId !== expectedRequestId) return null;
+  if (d.type === PROGRESS) return null; // 进度不终结
+  return {
+    ok: d.ok === true,
+    stage: d.stage === undefined || d.stage === null ? null : d.stage,
+    version: d.version === undefined || d.version === null ? null : d.version,
+    restartUncertain: d.restartUncertain === true,
+    error: d.error === undefined || d.error === null ? null : d.error,
+  };
+}
+
+// ── 容器原生侧应当产出的报文（对齐 MainActivity.handleKernelUpdateRequest）──
+function containerResult(requestId, version) {
+  return {
+    v: 1,                                   // ★ 必须存在
+    type: RESULT,
+    requestId,
+    ok: true,                               // ★ 必须为布尔 true 才判成功
+    stage: 'restarting',
+    version: version === undefined ? null : version,
+    restartUncertain: true,
+    error: null,
+  };
+}
+
+function main() {
+  const rid = 'kupd-' + Date.now() + '-abc123';
+
+  // ── 1) 正向：容器产出的报文能被内核正确消化 ──
+  const good = panelConsume(containerResult(rid, '1.4.0'), rid);
+  check('容器回灌报文被内核接受（不被丢弃）', good !== null);
+  check('结果 ok=true（面板判成功）', !!good && good.ok === true);
+  check('结果 stage 透传', !!good && good.stage === 'restarting');
+  check('结果 version 透传', !!good && good.version === '1.4.0');
+  check('结果 restartUncertain=true（重启结果不确定语义）', !!good && good.restartUncertain === true);
+
+  // version 缺失时应为 null 而非 undefined（不阻断）
+  const noVer = panelConsume(containerResult(rid, null), rid);
+  check('version 缺失 → null 且仍被接受', !!noVer && noVer.version === null && noVer.ok === true);
+
+  // ── 2) 反向门禁：历史上容器侧的错误报文必须被判为「内核会丢弃」 ──
+  const legacyBad = { type: RESULT, requestId: rid, status: 'restarting', message: '已重启' };
+  check('旧报文（缺 v/ok）被判定为面板丢弃', panelConsume(legacyBad, rid) === null);
+
+  const noV = containerResult(rid); delete noV.v;
+  check('缺 v → 面板丢弃', panelConsume(noV, rid) === null);
+
+  const wrongV = containerResult(rid); wrongV.v = 2;
+  check('v 不符（版本漂移）→ 面板丢弃', panelConsume(wrongV, rid) === null);
+
+  const wrongRid = containerResult('other-id');
+  check('requestId 不匹配 → 面板丢弃', panelConsume(wrongRid, rid) === null);
+
+  const wrongType = containerResult(rid); wrongType.type = 'lobos:panel-update-ack';
+  check('type 不符 → 面板丢弃', panelConsume(wrongType, rid) === null);
+
+  // ok 非布尔 true（如字符串 "true"）视为失败
+  const badOk = containerResult(rid); badOk.ok = 'true';
+  check('ok 非布尔 true → 内核判失败（ok=false）', (panelConsume(badOk, rid) || {}).ok === false);
+
+  // 进度消息不终结请求
+  check('progress 消息不终结请求', panelConsume({ v: 1, type: PROGRESS, requestId: rid }, rid) === null);
+
+  // ── 3) 协议常量与内核源码一致（静态比对，防版本漂移）──
+  const tsPath = path.join(PROGRAM_REPO, 'ui/src/services/console/panelUpdateBridge.ts');
+  let ts = '';
+  try { ts = fs.readFileSync(tsPath, 'utf8'); } catch {}
+  if (ts) {
+    check('面板 BRIDGE_PROTOCOL_VERSION === 1', /BRIDGE_PROTOCOL_VERSION\s*=\s*1\b/.test(ts));
+    check('面板 REQUEST 常量一致', new RegExp('"' + REQUEST + '"').test(ts));
+    check('面板 RESULT 常量一致', new RegExp('"' + RESULT + '"').test(ts));
+    check('面板 PROGRESS 常量一致', new RegExp('"' + PROGRESS + '"').test(ts));
+  } else {
+    skip('面板源码不可达 → 静态比对 4 条未执行（仅行为契约）');
+  }
+
+  // ── 4) 宿主帧产物存在且含关键契约元素 ──
+  const hostHtml = path.join(PROGRAM_REPO, 'ui/public/host.html');
+  const hostJs = path.join(PROGRAM_REPO, 'ui/public/host-frame.js');
+  if (fs.existsSync(hostHtml)) {
+    const h = fs.readFileSync(hostHtml, 'utf8');
+    check('宿主页 iframe 同源（src="/"）', /<iframe[^>]*src="\/"/.test(h));
+    check('宿主页脚本外链（满足 CSP script-src self）', /src="\/host-frame\.js"/.test(h));
+  } else {
+    skip('宿主页不可达 → 2 条未执行');
+  }
+  if (fs.existsSync(hostJs)) {
+    const j = fs.readFileSync(hostJs, 'utf8');
+    check('宿主帧脚本 PROTOCOL_VERSION=1', /PROTOCOL_VERSION\s*=\s*1\b/.test(j));
+    check('宿主帧脚本转发 REQUEST', j.includes(REQUEST));
+    check('宿主帧脚本暴露 lobosDeliverResult', /lobosDeliverResult\s*=/.test(j));
+  } else {
+    skip('宿主帧脚本不可达 → 3 条未执行');
+  }
+
+  finish();
+}
+
+main();

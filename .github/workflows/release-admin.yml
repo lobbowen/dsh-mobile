@@ -234,9 +234,9 @@ jobs:
               W="/tmp/apkchk"
               rm -rf "$W"; mkdir -p "$W"
 
-              echo "  [1/3] 下载 artifact（android-node-container-apk）" >> "$OUT"
+              echo "  [1/3] 下载 artifact（lobos-apk）" >> "$OUT"
               if ! gh run download "$TARGET" --repo "$REPO" \
-                     --name android-node-container-apk --dir "$W" >> "$OUT" 2>&1; then
+                     --name lobos-apk --dir "$W" >> "$OUT" 2>&1; then
                 echo "  [FAIL] artifact 下载失败（已过期？run 失败？）" >> "$OUT"
               elif ! APK="$(bash scripts/pick.sh ci-ok-apk "$W" -name '*.apk' -type f)"; then
                 # 这一步没有 set -e，所以 pick.sh 的 exit 1 只会落在这里而不是中止整个 step。
@@ -352,7 +352,7 @@ jobs:
                         --jq '.[0].databaseId')"
             if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
               echo "[error] 找不到任何成功的 build-apk 运行。"
-              echo "        请先让 Build Android Node Container APK 成功一次。"
+              echo "        请先让 Build Lob OS APK 成功一次。"
               exit 1
             fi
           fi
@@ -363,11 +363,11 @@ jobs:
           gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/artifacts" \
             --jq '.artifacts[] | "\(.name)  (\(.size_in_bytes) bytes, expired=\(.expired))"' || true
 
-          echo "== 下载 artifact: android-node-container-apk =="
+          echo "== 下载 artifact: lobos-apk =="
           rm -rf /tmp/dl && mkdir -p /tmp/dl
           gh run download "$RUN_ID" \
             --repo '${{ github.repository }}' \
-            --name android-node-container-apk \
+            --name lobos-apk \
             --dir /tmp/dl
 
           echo "== 下载内容 =="
@@ -412,7 +412,7 @@ jobs:
             echo "[version] latest 清单将与 APK 同批覆盖（来源 run ${{ steps.get.outputs.run_id }}）"
           fi
           bash scripts/gh-release-upload.sh "$TAG" \
-            --title "DSH Mobile APK (latest)" \
+            --title "Lob OS APK (latest)" \
             --notes "Android 原生 Node 容器 APK。来源 run: ${{ steps.get.outputs.run_id }}" \
             "${EXTRA[@]}"
           echo
@@ -497,7 +497,7 @@ jobs:
           rm -rf /tmp/dl && mkdir -p /tmp/dl
           gh run download "$RUN_ID" \
             --repo '${{ github.repository }}' \
-            --name android-node-container-apk \
+            --name lobos-apk \
             --dir /tmp/dl
           APK="$(bash scripts/pick.sh pin-src-apk /tmp/dl -name '*.apk' -type f)"
           echo "源 APK: $APK ($(du -h "$APK" | cut -f1))"
@@ -548,7 +548,7 @@ jobs:
 
           # 上面的 verify.py 只回答「条目在不在、CRC 好不好」——那是**打包**层面的完整性。
           # 装到真机上跑不跑得起来是另一件事：libnode.so 依赖同目录的 libc++_shared.so，
-          # 而 dsh run_code 从空环境起子进程，补不到 LD_LIBRARY_PATH，
+          # 而 载荷 run_code 从空环境起子进程，补不到 LD_LIBRARY_PATH，
           # 本体必须自带含 $ORIGIN 的 DT_RUNPATH。repack 完全可能被人拿来重签一个
           # 「修复之前」的包 —— 那种包条目齐全、CRC 正确、签名也没问题，装上就是 CANNOT LINK。
           # 判据与构建期/打包期/pin 同源（scripts/verify-runtime-elf.sh），这里不再自己写一份。
@@ -602,7 +602,7 @@ jobs:
           APKSIGNER="$(bash scripts/pick.sh --last apksigner "$ANDROID_HOME/build-tools" -name apksigner -type f)"
           "$APKSIGNER" sign \
             --ks "$KS" --ks-pass "pass:$KS_PASS" \
-            --ks-key-alias "${KS_ALIAS:-dsh}" --key-pass "pass:$KS_KEYPASS" \
+            --ks-key-alias "${KS_ALIAS:-lobos}" --key-pass "pass:$KS_KEYPASS" \
             --min-sdk-version 24 --max-sdk-version 35 \
             --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
             --out /tmp/app-signed.apk /tmp/app-injected.apk
@@ -775,7 +775,7 @@ jobs:
           fi
           if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
             echo "[error] 找不到成功的 build-apk 运行。"
-            echo "        先手动跑一次 'Build Android Node Container APK'，再固化。"
+            echo "        先手动跑一次 'Build Lob OS APK'，再固化。"
             exit 1
           fi
 
@@ -810,7 +810,7 @@ jobs:
           rm -rf /tmp/pin && mkdir -p /tmp/pin/dl /tmp/pin/out
 
           # 该 run 挂着的 artifact 就是那个 APK（build-apk.yml 的 upload 步只投
-          # android-node-container-apk，裸 .so 从 APK 的 lib/arm64-v8a/ 里取）。
+          # lobos-apk，裸 .so 从 APK 的 lib/arm64-v8a/ 里取）。
           # 这里下载全部 artifact 再按文件名挑，比按 artifact 名硬编码更稳：
           # 名字一旦调整，这里不会静默漏文件，而是走到「找不到 libnode.so」判红。
           echo "== 下载 artifact 列表 =="

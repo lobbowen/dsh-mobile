@@ -1,6 +1,6 @@
 // D1：/tmp 语义兑现的**路径 syscall 面**（open/openat 由 open-fallback.c 负责）。
 //
-// 为什么需要：libdshposix 经 LD_PRELOAD 落地 Linux 语义，而 shell 工具用的是
+// 为什么需要：liblobosposix 经 LD_PRELOAD 落地 Linux 语义，而 shell 工具用的是
 // mkdir/stat/unlink/rename… 这一整片路径 syscall，不只 open。缺一片，/tmp 就只通一半
 // （真机定罪 2026-09-27：动态 bash 下 `> /tmp/x` 通了，而 `mkdir /tmp/d`、
 // `[ -e /tmp/x ]`、`rm /tmp/x` 全失败）。

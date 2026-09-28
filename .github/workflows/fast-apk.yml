@@ -64,8 +64,8 @@ on:
       # 而本 workflow 的版本门禁正是拿它比较 —— 原先不在白名单，会出现
       # 「改了版本却不触发构建 / 只改版本时无人验证」。
       - 'version.json'
-      # 注意【不】包含 kernel/**：ADR-0005 后内核不随 APK 分发（下面有专门断言），
-      # 内核改动走 kernel-ota.yml 出 OTA 包 —— 让 fast-apk 监听它只会白烧机时。
+      # 注意【不】包含 programs/console/**：ADR-0005 后 Program 不随 APK 分发（下面有专门断言），
+      # 内核改动走 program-ota.yml 出 OTA 包 —— 让 fast-apk 监听它只会白烧机时。
     # 额外的 tag 触发：推 fast-<任意> 即可手动跑一次，不必改代码。
     # 维护环境（沙箱）无法操作网页、workflow_dispatch 点不了，
     # tag 是最干净的显式触发手段。
@@ -300,7 +300,7 @@ jobs:
 
           # 依赖自解析门禁：目录里每个 .so 若 DT_NEEDED 了同目录的随包库，它必须自带
           # 含 $ORIGIN 的 DT_RUNPATH。不查这一条就会放行「只有靠调用方补
-          # LD_LIBRARY_PATH 才跑得起来」的产物 —— 而 dsh run_code 清空环境，那条路
+          # LD_LIBRARY_PATH 才跑得起来」的产物 —— 而 载荷 run_code 清空环境，那条路
           # 在真机上必然 CANNOT LINK。判据与 NativePreparer.probe 的裸环境探针同形。
           # readelf 由 binutils 提供；"工具没装"和"产物不合格"是两回事，缺就先装
           # （唯一宿主 scripts/ensure-tool.sh，判据本身只住 verify-runtime-elf.sh）。
@@ -311,8 +311,8 @@ jobs:
         run: |
           set -euo pipefail
           # 本链出的包就是设备上那个**唯一验签信任源**的载体（assets/ota-public.pem）。
-          # 判据只住 scripts/verify-ota-anchor.sh（build-apk 与 kernel-ota 同调；配对那一问
-          # 在 kernel-ota，因为只有它拿得到私钥）。这里缺的是「锚点本身能不能用」这一问：
+          # 判据只住 scripts/verify-ota-anchor.sh（build-apk 与 program-ota 同调；配对那一问
+          # 在 program-ota，因为只有它拿得到私钥）。这里缺的是「锚点本身能不能用」这一问：
           # 焊一把解析不了的、或算法不是 ed25519 的公钥进 APK，此后每个内核包在所有设备上
           # 都判 signature-invalid，而这在打包期完全看不出来。
           bash scripts/ensure-tool.sh openssl openssl
@@ -336,17 +336,17 @@ jobs:
 
       # ADR-0005：内核**不随 APK 分发**。这里刻意**什么都不做** —— 曾经这一步会现场拉内核源码、
       # 签名、把 baseline.zip 塞进 APK，后果是"内核一改就要重出 APK"。现在内核只从 OTA 源安装
-      # （见 kernel-ota.yml）。若有人把内核塞回 assets/kernel/，下面这条断言会直接红。
-      - name: Assert the APK carries NO kernel assets
+      # （见 program-ota.yml）。若有人把 Program 塞回 assets/kernel，下面这条断言会直接红。
+      - name: Assert the APK carries NO Program assets
         run: |
           set -euo pipefail
           KD=container/app/src/main/assets/kernel
           if [ -d "$KD" ] && [ -n "$(ls -A "$KD" 2>/dev/null)" ]; then
-            echo "::error title=APK 含内核资产::ADR-0005 规定内核不随 APK 分发；assets/kernel/ 必须为空或不存在。"
+            echo "::error title=APK 含内核资产::ADR-0005 规定 Program 不随 APK 分发；assets/kernel 必须为空或不存在。"
             ls -la "$KD"
             exit 1
           fi
-          echo "[ok] APK 不含内核资产（内核只从 OTA 源安装）"
+          echo "[ok] APK 不含 Program 资产（只从 OTA 源安装）"
 
       - name: Inject release keystore (optional, for stable signing)
         id: signing
@@ -372,7 +372,7 @@ jobs:
             echo "::error title=keystore 注入失败::ANDROID_KEYSTORE_BASE64 已配置但用不成（原因见上方 [error] 行）—— 不许带着坏配置继续构建。"
             exit 1
           fi
-          [ "$rc" = 0 ] || echo "[dsh-signing] 按「未配置密钥」档继续：本次产物是 debug 签名包（不可覆盖安装到既有设备）。"
+          [ "$rc" = 0 ] || { echo "::error title=未配置稳定签名密钥::本链路（会写 apk-latest）不允许 debug 档产物 —— 请配置 ANDROID_KEYSTORE_BASE64/PASSWORD/KEY_ALIAS/KEY_PASSWORD，或改跑不发版的构建。"; exit 1; }
 
       - name: Build debug APK
         run: |
@@ -387,8 +387,9 @@ jobs:
           set -euo pipefail
           APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)"
           ARGS=()
-          [ -z "${DSH_APK_CERT_FILE:-}" ] || ARGS=(--cert "$DSH_APK_CERT_FILE")
-          bash scripts/verify-apk-signing.sh "$APK" "${ARGS[@]}"
+          [ -z "${LOBOS_APK_CERT_FILE:-}" ] || ARGS=(--cert "$LOBOS_APK_CERT_FILE")
+          # --require-stable：写 apk-latest 的链路必须稳定签名（§5.10；复检 AUD-G33）。
+          bash scripts/verify-apk-signing.sh "$APK" --require-stable "${ARGS[@]}"
 
       - name: Audit APK contents
         # 判据的唯一实现是 scripts/verify-apk-native.sh（与 build-apk 同调，
@@ -401,7 +402,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: android-node-container-apk
+          name: lobos-apk
           path: container/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
@@ -443,7 +444,7 @@ jobs:
           # 上传命令退 0 也不算数，宿主会回读清单比对字节数才报 [ok]。
           # latest 下载网址要稳定，所以固定 tag、每轮覆盖。
           bash scripts/gh-release-upload.sh "$TAG" \
-            --title "DSH Mobile APK (latest)" \
+            --title "Lob OS APK (latest)" \
             --notes "Android 原生 Node 容器 APK（由 fast-apk 构建，运行时来自 ${{ env.runtime-tag }}）。" \
             "$APK" version.json
 
@@ -451,7 +452,7 @@ jobs:
           # 否则 latest 会随每次发布无限堆积历史 APK（滚动通道只该有"当前"）。
           VTAG="v$VN"
           bash scripts/gh-release-upload.sh "$VTAG" \
-            --title "DSH Mobile $VN" \
+            --title "Lob OS $VN" \
             --notes "版本化归档：versionName=$VN，versionCode=$VC。滚动别名见 apk-latest。" \
             "$VDIR/$VAPK"
 

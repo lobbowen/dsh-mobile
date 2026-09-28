@@ -13,7 +13,7 @@ const CODE_DIRS = [
   'container/engine/src',     // 桥契约（methods.js / server.js mock）
   'container/engine/test',    // 门禁/测试自身也不许留示例写法（本文件除外，见 SKIP_FILES）
   'scripts',                  // 发布/校验脚本曾差一点把 shizuku 路径写回 CI
-  'kernel/src', 'kernel/ui/src', // 内核侧也不得反向依赖已删除的能力名
+  'programs/console/src', 'programs/console/ui/src', // 内核侧也不得反向依赖已删除的能力名
 ];
 const SKIP_DIRS = new Set(['node_modules', 'build', '.gradle', 'dist']);
 const CODE_EXT = new Set(['.kt', '.kts', '.js', '.mjs', '.cjs', '.json', '.xml', '.yml', '.yaml', '.sh', '.py']);
@@ -56,5 +56,5 @@ if (blind || hits.length) {
   console.log('\n结果: 0 passed, 1 failed');
   process.exit(1);
 }
-console.log('PASS 代码目录无 shizuku 字样（app / engine 契约+测试 / scripts / kernel 两侧 + 根构建脚本）');
+console.log('PASS 代码目录无 shizuku 字样（app / engine 契约+测试 / scripts / container 两侧 + 根构建脚本）');
 console.log('结果: 1 passed, 0 failed');

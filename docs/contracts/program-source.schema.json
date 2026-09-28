@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Program 源清单（programs/<id>/manifest.json，仓内声明；与 OTA 包内 program-manifest.json 是两套）",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "role",
+    "version",
+    "runtime",
+    "entry"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "system",
+        "agent"
+      ]
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runtime": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "range": {
+          "type": "string"
+        }
+      }
+    },
+    "entry": {
+      "type": "string",
+      "minLength": 1
+    },
+    "args": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ports": {
+      "type": "object"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "storage": {
+      "type": "object"
+    },
+    "resource": {
+      "type": "object"
+    },
+    "ui": {
+      "type": "object"
+    },
+    "_note": {
+      "type": "string"
+    }
+  }
+}

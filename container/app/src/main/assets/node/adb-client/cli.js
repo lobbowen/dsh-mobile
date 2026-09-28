@@ -5,7 +5,7 @@
 // 两种形态：
 //   1. 一次性子命令（spawn → 干活 → stdout 结果行 → 退出）：
 //        node cli.js status | pair | shell | forget
-//      结果行协议：`DSH_ADB_RESULT {json}`（Kotlin 按前缀提取，允许自由调试输出）。
+//      结果行协议：`LOBOS_ADB_RESULT {json}`（Kotlin 按前缀提取，允许自由调试输出）。
 //      退出码：0=成功，1=失败（失败也在结果行里给 ok:false + error，不靠 stderr 归因）。
 //   2. 常驻 serve（Kotlin 复用一个 Node 进程，消灭"每次 shell 新起 ~100MB libnode"）：
 //        node cli.js serve
@@ -22,7 +22,7 @@
 //   node cli.js shell --cmd "<command>" [--host <h> --connect-port <p>] [--timeout-ms <n>]
 //   node cli.js forget
 //   node cli.js serve
-// 凭据目录：DSH_ADB_DIR（必填，容器注入 files/adb）。
+// 凭据目录：LOBOS_ADB_DIR（必填，容器注入 files/adb）。
 // 迁移：--migrate-from <旧目录>（可选，内核 supervisorDir/adb → files/adb 的一次性搬家，
 //       仅当目标无密钥且旧目录有密钥时执行；保住已配对身份，设备上免重新授权）。
 
@@ -31,7 +31,7 @@ const path = require('node:path');
 const readline = require('node:readline');
 const adb = require('./index');
 
-const RESULT_PREFIX = 'DSH_ADB_RESULT ';
+const RESULT_PREFIX = 'LOBOS_ADB_RESULT ';
 
 // serve 模式下 stdout 只许有帧；一次性模式沿用旧行为（信息行可与结果行共存）。
 let serveMode = false;

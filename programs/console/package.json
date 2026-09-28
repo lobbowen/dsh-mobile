@@ -1,0 +1,20 @@
+{
+  "name": "lobos-console-panel",
+  "version": "0.1.0-android.47",
+  "private": true,
+  "description": "Lob OS 控制面板 Program：状态监控 / 安装管理编排 / 小组件（可停可换，系统职责归 OS 原生）。",
+  "license": "UNLICENSED",
+  "bin": {
+    "panel": "bin/panel"
+  },
+  "scripts": {
+    "test": "node --require ./test/_preload.js test/console-not-init-test.js && node --require ./test/_preload.js test/api-surface-test.js && node --require ./test/_preload.js test/host-bridge-test.js && node --require ./test/_preload.js test/market-test.js && node --require ./test/_preload.js test/panel-smoke-test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "lobos": {
+    "requiresProtocol": 1
+  }
+}
+

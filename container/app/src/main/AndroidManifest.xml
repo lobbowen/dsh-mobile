@@ -27,23 +27,23 @@
     <!--
       悬浮窗（bridge:ui_automation 的辅助能力，也是无障碍不可用时的降级路径）。
       同样属 AppOps 特殊权限：声明后还需 Settings.canDrawOverlays() 授权的跳转。
-      Device Owner 可经 setPermissionGrantState 静默授予，无需用户点确认。
+      此档只能由用户在系统页手动授予，不接受任何静默授予。
     -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!--
       外部存储全量访问（bridge:storage 的代表能力）。
       ⚠ 这是 AppOps 特殊权限（非运行时权限）：Manifest 声明后，还需跳到
-        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION 由用户/Device Owner 授权，
+        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION 由用户手动授权，
         授权后 Environment.isExternalStorageManager() 才为 true。
       tools:ignore 抑制 Lint 对「全文件访问」的强提示（本应用定位即为受管设备上的容器）。
     -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
 
-    <!-- 开机/重启后自启容器（拉起 NodeRuntimeService） -->
+    <!-- 开机/重启后自启容器（拉起 OsHostService） -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <!-- HostBridge：静默安装应用（Device Owner） -->
+    <!-- HostBridge：安装应用（用户手动确认，PackageInstaller 会话） -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- HostBridge：列举全部已装应用 -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
@@ -54,12 +54,12 @@
     <uses-feature android:name="android.hardware.ram.normal" android:required="false" />
 
     <application
-        android:name=".NodeContainerApp"
+        android:name=".OsApplication"
         android:allowBackup="false"
         android:networkSecurityConfig="@xml/network_security_config"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.NodeContainer"
+        android:theme="@style/Theme.LobOs"
         tools:targetApi="34"
         tools:ignore="UnusedAttribute"
         android:extractNativeLibs="true">
@@ -81,12 +81,12 @@
           也不影响 minSdk/兼容性。
         -->
 
-        <!-- L-A 容器监督者（主进程，**常驻前台**）：唯一职责是监督 :node 实例宿主的死活
+        <!-- L-A 容器监督者（主进程，**常驻前台**）：唯一职责是监督 运行时实例 实例宿主的死活
              （ADR-0006）。它住 :main、被无障碍绑定托底，从而"重拉者"不再与被重拉者同进程
              —— 旧设计的根病。前台化是 2026-09-26 真机定罪的结论：不占通知位 = 锁屏被 ROM
              合法清掉，整条重拉链随 :main 一起归零。 -->
         <service
-            android:name=".lifecycle.ContainerSupervisor"
+            android:name=".lifecycle.OsHostService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
@@ -94,40 +94,27 @@
                 android:value="resident supervisor keeping the local runtime alive across screen-off" />
         </service>
 
-        <!-- Node 运行时：独立进程 :node，与 UI 进程隔离；exported=false 防外部拉起。
-             specialUse = 无限期驻留的本地运行时（Play 才需要审核说明；本包侧载分发）。
-             onBind 必须返回真 binder（ContainerSupervisor 的 BIND_AUTO_CREATE 边依赖它）。 -->
-        <service
-            android:name=".runtime.NodeRuntimeService"
-            android:exported="false"
-            android:process=":node"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="persistent local Node.js runtime hosting the DSH kernel" />
-        </service>
+        <!-- 运行时实例宿主（与 UI 同进程）：Node 是本进程的子进程，不再是独立 Android 进程。
+             不占前台服务——唯一 FGS = OsHostService（单一生命周期）。 -->
 
-        <!-- HostBridge（UDS 能力桥）：随 APK 冻结；exported=false，仅本应用 :node 进程连接。
-             由 ContainerSupervisor（L-A）startService 拉起并回戳互保；本服务自转前台
-             （bind/普通 start 路径无 FGS-start 契约，startForeground 被拒时吞异常 ——
-             抛出会炸掉 :main 宿主）。 -->
-        <service
-            android:name=".bridge.HostBridgeService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="host capability bridge (UDS) for the DSH kernel" />
-        </service>
+        <!-- 能力桥（UDS）：随 APK 冻结；exported=false，仅本进程内的 Program 连接。
+             由 OsHostService 拉起；不单独占前台服务（单一生命周期）。 -->
 
-        <!-- 截屏（ui.screenshot）：Android 14+ 硬性要求 mediaProjection 类型前台服务 -->
-        <service
-            android:name=".bridge.ScreenCaptureService"
-            android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
 
         <!-- 开机自启 + 覆盖安装后自动复活（升级 APK 后系统杀进程但不重启服务，
              MY_PACKAGE_REPLACED 是唯一能在“更新完”这一刻拿到的回调） -->
+        <!-- 快速设置磁贴（A14 可见性载体）：状态出口 + 拉起宿主；不新增 FGS/通知 -->
+        <service
+            android:name=".lifecycle.StatusTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_lobos_logo"
+            android:label="Lob OS"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".lifecycle.BootReceiver"
             android:exported="true">
@@ -143,18 +130,7 @@
             android:name=".lifecycle.PackageInstallReceiver"
             android:exported="false" />
 
-        <!-- Device Owner 接收器（静默装卸/锁屏/密码/Kiosk/用户限制） -->
-        <receiver
-            android:name=".lifecycle.DeviceAdminReceiver"
-            android:exported="true"
-            android:permission="android.permission.BIND_DEVICE_ADMIN">
-            <meta-data
-                android:name="android.app.device_admin"
-                android:resource="@xml/device_admin" />
-            <intent-filter>
-                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
-            </intent-filter>
-        </receiver>
+        <!-- 设备管理器（DO）已退出本产品（不做机制也不做能力）：不声明 device-admin 接收器。 -->
 
         <!-- 通知监听（bridge:notification → notif.read 能力的真实载体）。
              Secure 设置类授权：用户可在「设置 → 通知 → 通知使用权」手点，S0 通道在位时
@@ -162,7 +138,7 @@
              （Android 17 仍保留 WRITE_SECURE_SETTINGS；真机 2026-09-25 定罪）。
              DO 反而**不能**静默授予这一档 —— 取法链见 capability/CapabilityCatalog。 -->
         <service
-            android:name=".bridge.DshNotificationListenerService"
+            android:name=".bridge.OsNotificationListenerService"
             android:exported="true"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
@@ -172,7 +148,7 @@
 
         <!-- 无障碍服务（bridge:ui_automation 能力） -->
         <service
-            android:name=".lifecycle.DshAccessibilityService"
+            android:name=".lifecycle.OsAccessibilityService"
             android:exported="true"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
@@ -192,7 +168,7 @@
         <!-- 入口 = 开场管线首页（G1）。诊断页/工作台降级为页内可达（S3/S4 按钮跳转），
              MainActivity 仍 exported：am start / 旧快捷方式直达不被切断。 -->
         <activity
-            android:name=".ui.OnboardingActivity"
+            android:name=".ui.setup.SetupActivity"
             android:exported="true"
             android:label="@string/app_name">
             <intent-filter>
@@ -202,8 +178,24 @@
         </activity>
 
         <activity
+            android:name=".ui.console.ConsoleActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name" />
+
+        <!-- Doze 兜底唤醒（AUD-G22）：周期投递"确保宿主在"，不是复活机制（ADR-0006 D4）。 -->
+        <receiver
+            android:name=".lifecycle.DozeBackstopReceiver"
+            android:exported="false" />
+
+        <!-- 截屏会话的临时 FGS（A5）：持有 MediaProjection 期间必须存在，类型 mediaProjection。
+             稳态不常驻 —— 会话结束即 stopSelf。 -->
+        <service
+            android:name=".bridge.ScreenCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
     </application>
 </manifest>

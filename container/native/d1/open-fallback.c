@@ -1,5 +1,5 @@
 // Android 上 /data/user/0、/data、/ 等祖先目录对 app 均不可读（root 所有），
-// 而 DSH 的 durable-home 会把祖先逐级 fsync 到文件系统根：open 目录即 EACCES，
+// 而 Program 的 durable-home 会把祖先逐级 fsync 到文件系统根：open 目录即 EACCES，
 // 附件保存（含 read_image）整条失败。这里在 open/openat 因权限失败、且目标确为
 // $HOME 的祖先目录时，返回 $HOME 的只读目录句柄，让调用方的 fsync 正常完成——
 // 不可读祖先的持久性本就不由 app 负责。见 docs/ADR-001。

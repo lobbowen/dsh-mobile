@@ -39,7 +39,7 @@ const ROOT = path.resolve(__dirname, '..', '..', '..');
 // ---------------------------------------------------------------------------
 
 const REGISTRY_KT = path.join(
-  ROOT, 'container/app/src/main/java/io/github/lobbowen/dshmobile/native/NativeAssetRegistry.kt'
+  ROOT, 'container/app/src/main/java/lobos/native/NativeAssetRegistry.kt'
 );
 
 /** 去掉注释（行注释 + 块注释），避免注释里的示例被当成真声明。 */
@@ -373,7 +373,7 @@ for (const [wf, want] of VALIDATOR_CALLERS) {
 // build-apk 的 node 缓存不许有前缀回退：key 是 node-android-<版本>-<hashFiles(构建脚本)>，
 // key 变了就说明脚本动过，此时前缀回退命中拿到的是**旧脚本的产物** —— 而脚本承载的正是
 // 链接标志本身（`LDFLAGS.target=-Wl,-rpath,'$$ORIGIN'`），旧产物没有 $ORIGIN，
-// 在 dsh run_code 的空环境里上机即死，而流程看起来和正常命中一模一样。
+// 在 Program 裸环境里上机即死，而流程看起来和正常命中一模一样。
 // 也就是说：回退命中会把「脚本没生效」伪装成「缓存命中」。宁可不缓存，也不许拿旧二进制充数。
 const BUILD_APK_YML = path.join(ROOT, '.github/workflows/build-apk.yml');
 const fallbackHits = (stripHashComments(fs.readFileSync(BUILD_APK_YML, 'utf8'))
@@ -737,7 +737,7 @@ if (fs.existsSync(RRA)) {
       env: {
         ...process.env,
         PATH: fakeBin + path.delimiter + process.env.PATH,
-        GITHUB_REPOSITORY: 'lobbowen/dsh-mobile',
+        GITHUB_REPOSITORY: 'lobbowen/lobos',
         ...extraEnv,
       },
     });
@@ -777,7 +777,7 @@ if (fs.existsSync(RRA)) {
   // 分类只准住一处：调用方再写一遍「404 / no assets」就等于两个真相。
   const CLASSIFIER = /no assets|matching pattern|HTTP 404/i;
   const scanned = ['.github/workflows/fast-apk.yml', '.github/workflows/build-apk.yml',
-    '.github/workflows/release-admin.yml', '.github/workflows/kernel-ota.yml',
+    '.github/workflows/release-admin.yml', '.github/workflows/program-ota.yml',
     'scripts/check-apk-release-version.sh'];
   for (const rel of scanned) {
     check(`取数分类复写清零：${rel} 不再自己判「不存在 vs 取不到」`,
@@ -789,7 +789,7 @@ if (fs.existsSync(RRA)) {
   // 接线：调用点必须真有一行命令式调用。只扫「文件里出现过脚本名」= 把注释当成接线，
   // 谁哪天删掉调用、留着那行解释，门禁照样绿（VCALL 那条钉过的同一失效形态）。
   const RRACALL = /^[^\S\n]*bash\s+"?(?:scripts|\$\(dirname "\$0"\))\/read-release-asset\.sh/m;
-  for (const rel of ['.github/workflows/kernel-ota.yml', 'scripts/check-apk-release-version.sh']) {
+  for (const rel of ['.github/workflows/program-ota.yml', 'scripts/check-apk-release-version.sh']) {
     check(`取数宿主接线：${rel} 真的调用 read-release-asset.sh`,
       RRACALL.test(stripHashComments(fs.readFileSync(path.join(ROOT, rel), 'utf8'))),
       '找不到 bash …/read-release-asset.sh 的调用行');
@@ -803,7 +803,7 @@ if (fs.existsSync(RRA)) {
 
 // 运行期探针必须与 run_code 同形：裸环境。补 LD_LIBRARY_PATH = 给被测对象装脚手架。
 const PREPARER_KT = path.join(
-  ROOT, 'container/app/src/main/java/io/github/lobbowen/dshmobile/native/NativePreparer.kt'
+  ROOT, 'container/app/src/main/java/lobos/native/NativePreparer.kt'
 );
 if (fs.existsSync(PREPARER_KT)) {
   const kt = stripKotlinComments(fs.readFileSync(PREPARER_KT, 'utf8'));
@@ -811,7 +811,7 @@ if (fs.existsSync(PREPARER_KT)) {
   check(
     '① 探针不再自行补 LD_LIBRARY_PATH（那会掩盖空环境下的链接失败）',
     !/environment\(\)\s*\[\s*"LD_LIBRARY_PATH"/.test(kt),
-    'NativePreparer.probe 必须与 dsh run_code 的裸环境同形'
+    'NativePreparer.probe 必须与 Program 裸环境同形'
   );
 }
 
@@ -845,7 +845,7 @@ if (fs.existsSync(INJECT_PY)) {
 //   NativeAssetRegistry.kt 自身除外（它就是定义处）。
 // ---------------------------------------------------------------------------
 
-const KT_DIR = path.join(ROOT, 'container/app/src/main/java/io/github/lobbowen/dshmobile');
+const KT_DIR = path.join(ROOT, 'container/app/src/main/java/lobos');
 const REGISTRY_BASENAME = 'NativeAssetRegistry.kt';
 
 /** 递归收集 .kt 文件。 */
@@ -1073,7 +1073,7 @@ check('APK 原生件审计宿主 scripts/verify-apk-native.sh 存在', fs.exists
   const libOnly = mkZip('libonly', { 'lib/arm64-v8a/libnode.so': 'ELFAKE' });
   const rLo = runVan([libOnly, 'arm64-v8a']);
   check('verify-apk-native：缺件逐条点名（libc++_shared / 自有小件 / npm 都要出现在缺项里）',
-    rLo.rc === 1 && rLo.out.includes('libc++_shared.so') && rLo.out.includes('libdshflock.so')
+    rLo.rc === 1 && rLo.out.includes('libc++_shared.so') && rLo.out.includes('liblobosflock.so')
       && rLo.out.includes('assets/npm/npm.zip') && rLo.out.includes('审计不通过'),
     JSON.stringify({ rc: rLo.rc, out: rLo.out.slice(-260) }));
 
@@ -1082,8 +1082,8 @@ check('APK 原生件审计宿主 scripts/verify-apk-native.sh 存在', fs.exists
     rLoNoAbi.rc === 2 && rLoNoAbi.out.includes('ABI'), JSON.stringify({ rc: rLoNoAbi.rc }));
 
   // 不该有的东西单独红：内核资产进门 = ADR-0005 被改回去。
-  const withKernel = mkZip('wkernel', { 'lib/arm64-v8a/libnode.so': 'ELFAKE', 'assets/kernel/k.zip': 'x' });
-  const rK = runVan([withKernel, 'arm64-v8a']);
+  const withProgram = mkZip('wprogram', { 'lib/arm64-v8a/libnode.so': 'ELFAKE', 'assets/program/k.zip': 'x' });
+  const rK = runVan([withProgram, 'arm64-v8a']);
   check('verify-apk-native：APK 含内核资产 → 立刻退 1（ADR-0005，先于其它条目拦）',
     rK.rc === 1 && rK.out.includes('APK 含内核资产'), JSON.stringify({ rc: rK.rc, out: rK.out.slice(0, 140) }));
 
@@ -1092,7 +1092,7 @@ check('APK 原生件审计宿主 scripts/verify-apk-native.sh 存在', fs.exists
   check('verify-apk-native：--report 对坏包退 0 且逐条列事实（诊断通道永不判红）',
     rRep.rc === 0 && rRep.out.includes('[MISSING]') && rRep.out.includes('结果:'),
     JSON.stringify({ rc: rRep.rc, out: rRep.out.slice(-200) }));
-  const rRepK = runVan([withKernel, 'arm64-v8a', '--report']);
+  const rRepK = runVan([withProgram, 'arm64-v8a', '--report']);
   check('verify-apk-native：--report 把「不该有」记成 FAIL（不混进缺项清单）',
     rRepK.rc === 0 && rRepK.out.includes('[FAIL]'), JSON.stringify({ rc: rRepK.rc }));
 
@@ -1108,11 +1108,11 @@ check('APK 原生件审计宿主 scripts/verify-apk-native.sh 存在', fs.exists
   // 小体积原生件清单**从注册表派生**，不再在这里手抄第二份（门禁法②：清单禁手维护）。
   // 由 NativeAssetRegistry.kt 的 libName 声明推出「除 libnode/libc++ 之外的全部资产」；
   // 注册表新增一件，这里自动跟上 —— 漏抄一件就是「条目齐备」对照组悄悄失真。
-  // libdshpty.so 是 node-pty 的**软失败件**，不登记在 CAPABILITY 里，故显式补一个。
+  // liblobospty.so 是 node-pty 的**软失败件**，不登记在 CAPABILITY 里，故显式补一个。
   const registryLibs = [...stripKotlinComments(fs.readFileSync(REGISTRY_KT, 'utf8'))
     .matchAll(/libName\s*=\s*"([^"]+)"/g)].map((m) => m[1]);
   const provenSmall = registryLibs.filter((n) => n !== 'libnode.so' && n !== 'libc++_shared.so');
-  if (!provenSmall.includes('libdshpty.so')) provenSmall.push('libdshpty.so');
+  if (!provenSmall.includes('liblobospty.so')) provenSmall.push('liblobospty.so');
   for (const b of provenSmall) {
     all[`lib/arm64-v8a/${b}`] = 'ELFAKE';
   }
@@ -1125,11 +1125,11 @@ check('APK 原生件审计宿主 scripts/verify-apk-native.sh 存在', fs.exists
   check('verify-apk-native：条目齐备 → 退 0 打「审计通过」（全绿对照组，缺此则判红无从证伪）',
     rFull.rc === 0 && rFull.out.includes('APK 原生件审计通过'),
     JSON.stringify({ rc: rFull.rc, out: rFull.out.slice(-220) }));
-  // libdshpty.so 缺席只降级：从全绿夹具里拿掉它，仍须退 0 且出现软失败告警。
+  // liblobospty.so 缺席只降级：从全绿夹具里拿掉它，仍须退 0 且出现软失败告警。
   const softZip = mkZip('soft', Object.fromEntries(
-    Object.entries(all).filter(([k]) => !k.endsWith('libdshpty.so'))));
+    Object.entries(all).filter(([k]) => !k.endsWith('liblobospty.so'))));
   const rSoft = runVan([softZip, 'arm64-v8a']);
-  check('verify-apk-native：libdshpty.so 缺席 → 软失败 ::warning:: 且整体仍放行',
+  check('verify-apk-native：liblobospty.so 缺席 → 软失败 ::warning:: 且整体仍放行',
     rSoft.rc === 0 && rSoft.out.includes('::warning') && rSoft.out.includes('PTY'),
     JSON.stringify({ rc: rSoft.rc, out: rSoft.out.slice(-160) }));
   fs.rmSync(tmp, { recursive: true, force: true });

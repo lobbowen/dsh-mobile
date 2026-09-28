@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Program 包清单（OTA 包内 program-manifest.json；与仓内 programs/*/manifest.json 是两套）",
+  "type": "object",
+  "required": [
+    "name",
+    "version",
+    "abi",
+    "engines",
+    "entry",
+    "requires",
+    "signature"
+  ],
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+"
+    },
+    "abi": {
+      "type": "string"
+    },
+    "engines": {
+      "type": "object",
+      "properties": {
+        "node": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "node"
+      ]
+    },
+    "entry": {
+      "type": "string",
+      "description": "如 bin/panel"
+    },
+    "requires": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Program 要求的能力组。"
+    },
+    "requiresProtocol": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Program 要求的最低 HostBridge 协议版本（ADR-0004 §3）。OS 不满足则拒绝安装：protocol-unsatisfied。"
+    },
+    "signature": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

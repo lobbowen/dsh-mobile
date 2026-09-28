@@ -207,7 +207,7 @@ if (!hasReadelf) {
   // 那条前置判据上退 2 —— 那是对的空转防护，不是本条要判的事。
   const k = makeCase({
     'libnode.so': elf({ needed: ['libc.so'] }),
-    'libdshflock.so': elf({ interp: null, needed: ['libc.so', 'liblog.so'] }),
+    'liblobosflock.so': elf({ interp: null, needed: ['libc.so', 'liblog.so'] }),
   });
   const r = run(k);
   check('① 非可执行资产缺 PT_INTERP 不判红 → 0（构建脚本原来打 [info] 的那件事）',
