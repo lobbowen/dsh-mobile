@@ -467,6 +467,10 @@ jobs:
               echo "[warn] clone 失败，跳过上报"; exit 0; }
 
           APK_SHA="$(sha256sum "$GITHUB_WORKSPACE"/container/app/build/outputs/apk/debug/*.apk | awk '{print $1}')"
+          # 跨步骤没有共享 shell 变量：版本号必须在本步骤内自算（原写法引用上一段的变量 = unbound）。
+          VN="$(node -p "require('$GITHUB_WORKSPACE/version.json').shell.versionName")"
+          VC="$(node -p "require('$GITHUB_WORKSPACE/version.json').shell.versionCode")"
+          VAPK="app-debug-${VN}+${VC}.apk"
           {
             echo "BUILD_OK"
             echo "time    : $(date -u)"
