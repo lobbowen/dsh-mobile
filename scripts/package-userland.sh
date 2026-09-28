@@ -19,7 +19,10 @@ STAGE=$(mktemp -d)
 cp -a dist/. "$STAGE/"
 rm -f "$STAGE"/*.version "$STAGE"/SHA256SUMS $(find "$STAGE" -maxdepth 1 -name '*.zip') 2>/dev/null || true
 echo "[package] 打包（zip）：bin + 其它 prefix 目录"
-( cd "$STAGE" && zip -q -r -X "$ROOT_DIR/$RAW" . )
+# ⚠ 必须 -y（存链接，不跟随）：zip 默认**跟随符号链接**，而 git 的链接农场有上百个指向同一
+#   多兆字节二进制的链接 ⇒ 包体会暴涨（tar 默认只存链接，所以从前 23 MB 传得动）。
+#   设备侧由 link-farm.txt 重建真实符号链接（原生 Os.symlink），所以包里只要有那份清单即可。
+( cd "$STAGE" && zip -q -r -X -y "$ROOT_DIR/$RAW" . )
 rm -rf "$STAGE"
 SHA=$(sha256sum "$RAW" | cut -c1-12)
 ZIP="dist/userland-${TOOL}-${VER}-${SHA}-android-arm64.zip"

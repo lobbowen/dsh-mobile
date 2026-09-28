@@ -153,6 +153,21 @@ object SupplyProvisioner {
         return applied
     }
 
+    /** 农场建成核验：清单里每一条都必须是**真的符号链接**（包内存的是链接目标文本，不是链接本身）。 */
+    private fun farmBroken(root: File): Int {
+        val farm = File(root, "link-farm.txt")
+        if (!farm.isFile) return 0
+        var broken = 0
+        for (line in farm.readLines()) {
+            if (line.isEmpty() || line.startsWith("#")) continue
+            val rel = line.split("\t")[0].trim()
+            if (rel.isEmpty()) continue
+            val f = File(root, rel)
+            try { if (!java.nio.file.Files.isSymbolicLink(f.toPath())) broken++ } catch (e: Throwable) { broken++ }
+        }
+        return broken
+    }
+
     private fun linkEntry(ctx: Context, name: String, entry: File, aliases: List<String>): Boolean {
         return try {
             val link = entryLink(ctx, name)
