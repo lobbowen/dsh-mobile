@@ -372,7 +372,7 @@ jobs:
             echo "::error title=keystore 注入失败::ANDROID_KEYSTORE_BASE64 已配置但用不成（原因见上方 [error] 行）—— 不许带着坏配置继续构建。"
             exit 1
           fi
-          [ "$rc" = 0 ] || { echo "::error title=未配置稳定签名密钥::本链路（会写 apk-latest）不允许 debug 档产物 —— 请配置 ANDROID_KEYSTORE_BASE64/PASSWORD/KEY_ALIAS/KEY_PASSWORD，或改跑不发版的构建。"; exit 1; }
+          [ "$rc" = 0 ] || echo "[lobos-signing] 按「未配置密钥」档继续：本次产物是 debug 签名包（日常链允许，但**不会**写 apk-latest）。"
 
       - name: Build debug APK
         run: |
@@ -388,8 +388,7 @@ jobs:
           APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)"
           ARGS=()
           [ -z "${LOBOS_APK_CERT_FILE:-}" ] || ARGS=(--cert "$LOBOS_APK_CERT_FILE")
-          # --require-stable：写 apk-latest 的链路必须稳定签名（§5.10；复检 AUD-G33）。
-          bash scripts/verify-apk-signing.sh "$APK" --require-stable "${ARGS[@]}"
+          bash scripts/verify-apk-signing.sh "$APK" "${ARGS[@]}"
 
       - name: Audit APK contents
         # 判据的唯一实现是 scripts/verify-apk-native.sh（与 build-apk 同调，
@@ -412,7 +411,10 @@ jobs:
         run: |
           set -euo pipefail
           APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)"
-          TAG="apk-latest"
+          # 日常链（fast-apk）**不得占用 apk-latest**：那是发布面（build-apk / release-admin，
+          # 带 --require-stable）的滚动别名。日常链允许 debug 档，一旦写 latest 就会把
+          # "装了就是稳定签名"这个前提静默破坏（复检 AUD-G33）。
+          TAG="apk-daily"
           VN="$(node -p "require('./version.json').shell.versionName")"
           VC="$(node -p "require('./version.json').shell.versionCode")"
           VAPK="app-debug-${VN}+${VC}.apk"
@@ -442,9 +444,9 @@ jobs:
           # 判据只住 scripts/gh-release-upload.sh：同名资产记录还在、后端对象却孤立时
           # --clobber 会 404（2026-09-23 实证），回退成「按名字删旧记录再普通上传」；
           # 上传命令退 0 也不算数，宿主会回读清单比对字节数才报 [ok]。
-          # latest 下载网址要稳定，所以固定 tag、每轮覆盖。
+          # 自有滚动 tag（apk-daily）下载网址要稳定，所以固定 tag、每轮覆盖。
           bash scripts/gh-release-upload.sh "$TAG" \
-            --title "Lob OS APK (latest)" \
+            --title "Lob OS APK (daily)" \
             --notes "Android 原生 Node 容器 APK（由 fast-apk 构建，运行时来自 ${{ env.runtime-tag }}）。" \
             "$APK" version.json
 
@@ -453,7 +455,7 @@ jobs:
           VTAG="v$VN"
           bash scripts/gh-release-upload.sh "$VTAG" \
             --title "Lob OS $VN" \
-            --notes "版本化归档：versionName=$VN，versionCode=$VC。滚动别名见 apk-latest。" \
+            --notes "版本化归档：versionName=$VN，versionCode=$VC。日常滚动别名见 apk-daily（发布面用 apk-latest）。" \
             "$VDIR/$VAPK"
 
           rm -rf "$VDIR"
@@ -483,7 +485,7 @@ jobs:
             echo "sha     : ${GITHUB_SHA:0:7}"
             echo "apk     : app-debug.apk"
             echo "apk_sha : $APK_SHA"
-            echo "url     : https://github.com/${{ github.repository }}/releases/download/apk-latest/app-debug.apk"
+            echo "url     : https://github.com/${{ github.repository }}/releases/download/apk-daily/${VAPK}"
           } > ci-ok.txt
 
           git config user.email "ci@workbuddy.local"
