@@ -64,11 +64,22 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="8dp"
                     android:text="复制自检" />
+
+                <!--
+                  Node 探针：**点一下才跑一次**的显式诊断动作，证明随包 node 在这台设备上能
+                  exec + listen。它不是运行时、也不参与任何启动判定（结论只进 nodeprobe 阶段）。
+                -->
+                <Button
+                    android:id="@+id/probeBtn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="Node 探针" />
             </LinearLayout>
         </LinearLayout>
     </ScrollView>
 
-    <!-- Node 探针 UI：端口就绪后切换显示 -->
+    <!-- 宿主帧 WebView：面板承载面已归 ConsoleActivity（E8），本页不再把它切到前台。 -->
     <WebView
         android:id="@+id/webview"
         android:layout_width="match_parent"

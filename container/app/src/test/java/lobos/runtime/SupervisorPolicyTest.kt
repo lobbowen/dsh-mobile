@@ -11,6 +11,7 @@ import org.junit.Test
  * 每条规则都对应一次真机事故，因此逐条钉住：
  *   · 退避必须**增长且有上限**（否则紧循环风暴把设备拖死）
  *   · 退避清零只看**存活时长**，不看"健康探测回 200"（残留守卫会造成假成功）
+ *   · 一次 boot 的归宿分三态：**只有控制面就绪算成功**，没有内核包就不重试（D15）
  */
 class SupervisorPolicyTest {
 
@@ -67,5 +68,29 @@ class SupervisorPolicyTest {
     @Test fun 退出归因区分曾就绪与从未拉起() {
         assertTrue("曾就绪必须给出排查方向", SupervisorPolicy.exitNote(true).contains("曾就绪"))
         assertEquals("从未就绪时不追加噪音", "", SupervisorPolicy.exitNote(false))
+    }
+
+    @Test fun 成功判据只有RUNNING一条() {
+        // D15：旧实现把探针点亮的 3080 也算成启动成功，于是"没有运行时"在屏幕上是绿的。
+        // 这条钉住"成功"只有一个来源；有人再加一条 or 判据，这条必须红。
+        val all = SupervisorPolicy.BootOutcome.values()
+        assertEquals("boot 归宿必须正好三态", 3, all.size)
+        assertEquals(
+            "唯一算成功的归宿",
+            listOf(SupervisorPolicy.BootOutcome.RUNNING),
+            all.filter { SupervisorPolicy.bootSucceeded(it) },
+        )
+    }
+
+    @Test fun 无内核包时循环停手_拉不起来才退避重试() {
+        assertFalse(
+            "没有内核包不许重试：重试变不出内核，只会把等装包演成一直在努力",
+            SupervisorPolicy.keepsLooping(SupervisorPolicy.BootOutcome.NO_PROGRAM),
+        )
+        assertTrue(
+            "有内核拉不起来是真故障，必须退避重试",
+            SupervisorPolicy.keepsLooping(SupervisorPolicy.BootOutcome.FAILED),
+        )
+        assertTrue(SupervisorPolicy.keepsLooping(SupervisorPolicy.BootOutcome.RUNNING))
     }
 }

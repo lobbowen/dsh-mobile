@@ -9,7 +9,7 @@ import java.io.File
  *  - L-C 只回答"环境怎么起来"：node 二进制、解释哪个入口、基础环境变量。
  *  - L-D 只回答"guest 缺什么安卓语境"：LOBOS_* 注入、POSIX 垫片（flock/link）、
  *    $PREFIX 可执行名映射、权限模式旋钮。
- *  - **本对象是这两层启动计划（探针/内核，command/cwd/env）的唯一装配点**。此前它们散在
+ *  - **本对象是这两层装配（内核启动计划 + 探针诊断计划，command/cwd/env）的唯一生产点**。此前它们散在
  *    ProcessBuilder 的 `.apply{}` 表达式里（PATH 被写两次、后写覆盖先写、provision
  *    副作用夹在 map 中间），又与 engine 侧旧 boot.js 的孪生装配漂移（TMPDIR/BRIDGE_SOCKET
  *    两边不一致）。漂移的根治不是同步注释，而是生产装配只剩一处、另一处物理迁入
@@ -62,13 +62,18 @@ object GuestAdapter {
     /** 内核控制面端口（supervisor API）；与内核 src/platform/config.js 的 apiPort 默认值一致。 */
     const val CONSOLE_PORT = 36360
 
-    /** 内置探针 server.js 端口（首启验证 Node 原生链路；不是控制面）。 */
+    /** 内置探针 server.js 端口。**永不参与启动判定**：控制面只有 [CONSOLE_PORT] 这一个。 */
     const val PROBE_PORT = 3080
 
     /** HostBridge 抽象命名空间 socket 名；与 CapabilityBroker.SOCKET_NAME 一致。 */
     const val BRIDGE_SOCKET = "lobos_hostbridge"
 
-    /** 探针模式（无内核包）的最小装配：只跑 server.js，验证原生 exec 链路。 */
+    /**
+     * 探针的最小装配（L-C，不含任何 L-D 旋钮）：只跑 server.js，验 node 能否 exec + listen。
+     *
+     * 调用方只有 `InstanceHost.runNativeProbe`（诊断页显式驱动）。启动链**不许**用它：
+     * 探针不承载控制面，点亮 3080 不等于有运行时在服务（真机 2026-09-28 定罪 D15）。
+     */
     fun probePlan(base: BaseInputs, script: File, inheritedPath: String?): BootPlan = BootPlan(
         command = listOf(base.nodeBin.absolutePath, script.absolutePath, "--port", PROBE_PORT.toString()),
         cwd = base.filesDir,

@@ -10,6 +10,25 @@ import lobos.os.Backoff
  */
 object SupervisorPolicy {
 
+    /**
+     * 一次 boot 尝试的**三种归宿**（纯枚举，CI 可钉）。
+     *
+     * 以前只有 `Boolean`，于是「没有可跑的内核」和「内核拉不起来」被压成同一个 false：
+     * 前者是**合法状态**（首装尚未成功，见 [lobos.ota.ProgramOtaResolution]），重试它只会
+     * 变成每 30s 一次的 OTA 轰炸；后者才需要退避重试。两者混在一起时，屏幕上的
+     * 「启动成功」还靠 spawn 探针点亮端口来兑现（真机 2026-09-28 定罪的 D15）。
+     */
+    enum class BootOutcome {
+        /** 进程已起且控制面（127.0.0.1:36360/status）实测就绪。唯一算成功的归宿。 */
+        RUNNING,
+
+        /** 有内核，但这一拍没跑起来（缺资产 / spawn 失败 / 控制面超时）→ 退避重试。 */
+        FAILED,
+
+        /** 没有内核包可跑 → **不重试**，等一次明确的外界动作（装包 / 用户点重试）。 */
+        NO_PROGRAM,
+    }
+
     const val BACKOFF_BASE_MS = 1_000L
     const val BACKOFF_MAX_MS = 30_000L
 
@@ -42,6 +61,16 @@ object SupervisorPolicy {
      */
     fun nextRestartCount(currentCount: Int, bootOk: Boolean, aliveMs: Long): Int =
         if (bootOk && aliveMs >= STABLE_MS) 0 else currentCount + 1
+
+    /** 只有 [BootOutcome.RUNNING] 算成功。判据收在这里：D15 的形状就是「成功」有了第二个来源（探针端口点亮）。 */
+    fun bootSucceeded(outcome: BootOutcome): Boolean = outcome == BootOutcome.RUNNING
+
+    /**
+     * 这一轮之后循环还继不继续。只有 [BootOutcome.NO_PROGRAM] 停手：没有可跑的东西，
+     * 退避重试变不出内核，只会把「等装包」伪装成「一直在努力」（每 30s 一次 OTA 往返）。
+     * 恢复一律由明确动作发起（装包后的重拉、诊断页重试、下次开屏），不做周期自愈。
+     */
+    fun keepsLooping(outcome: BootOutcome): Boolean = outcome != BootOutcome.NO_PROGRAM
 
     /**
      * 退出时的补充归因。

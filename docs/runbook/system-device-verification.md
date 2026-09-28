@@ -117,8 +117,8 @@ adb shell run-as lobos.app cat files/diagnostics.txt
 
 | 项 | 内容 |
 |---|---|
-| **触发** | **自动 + 按需两条，各答一个问题**：① 自动 —— 容器启动链每拉起一次内核就验一轮（`lobos/runtime/InstanceHost.kt:343` 在 `bootProgramOnce()` 里调 `NativePreparer.prepare()`，循环由 `lobos/runtime/InstanceHost.kt:164` 驱动），所以**首装、升级、每次重拉只要走到装配这一步都会验**，结论当场落盘；② 按需 —— 桥方法 `sys.nativeAssets` 现场再验一次（会真 spawn 探针）。「落盘的那一轮」与「现在再验一次」不许混成一句：把没验过的读成验过、或让界面每刷新一次就重跑 exec-probe，都是这条链的坏形态（债表 D12） |
-| **看哪里** | ① 落盘的**结构化结论**（首选）：读 `os.nativeAssets.status`（面板侧 `GET /native/capabilities`），它取 `files/os/diag.jsonl` 里最新一轮的 `data` 字段，**不重跑探针**；没有记录就回 `collected:false` —— 「没验过」与「验过且坏」是两档，不许拿前者当后者；② 现场重验一次：`sys.nativeAssets` 的返回逐格 `status` + `detail`/`missingDep`/`hint`（实现 `lobos/bridge/CapabilityBroker.kt:709`，契约 `container/engine/src/bridge/methods.js:146`；默认每次真跑一次 exec-probe；传 `{"walkProbes": false}` 只做存在性+依赖检查，避免频繁 spawn）；③ 人读落盘 `files/diagnostics.txt` 与机读 `files/os/diag.jsonl` 的三行结论：`stage=native-assets`（大件 libcxx / node）、`stage=capability-assets`（能力件 bash / rg / flock / posix / PTY 探针）、`stage=prefix`（`$PREFIX` 缺件，`lobos/runtime/InstanceHost.kt:419`）；④ 开机快照 `files/provisioning.json`（`ProvisioningProbe`） |
+| **触发** | **自动 + 按需两条，各答一个问题**：① 自动 —— 容器启动链每跑一轮就验一轮（`lobos/runtime/InstanceHost.kt:371` 在 `bootProgramOnce()` 里调 `NativePreparer.prepare()`，循环由 `lobos/runtime/InstanceHost.kt:181` 驱动），所以**首装、升级、每次重拉都会验**，结论当场落盘。核验排在「无内核包就收口」之前：`files/programs` 缺失时也照样验、照样落盘 —— 原生链路坏在哪一格是设备事实，不该被「这次没东西可跑」挡住；② 按需 —— 桥方法 `sys.nativeAssets` 现场再验一次（会真 spawn 探针）。「落盘的那一轮」与「现在再验一次」不许混成一句：把没验过的读成验过、或让界面每刷新一次就重跑 exec-probe，都是这条链的坏形态（债表 D12） |
+| **看哪里** | ① 落盘的**结构化结论**（首选）：读 `os.nativeAssets.status`（面板侧 `GET /native/capabilities`），它取 `files/os/diag.jsonl` 里最新一轮的 `data` 字段，**不重跑探针**；没有记录就回 `collected:false` —— 「没验过」与「验过且坏」是两档，不许拿前者当后者；② 现场重验一次：`sys.nativeAssets` 的返回逐格 `status` + `detail`/`missingDep`/`hint`（实现 `lobos/bridge/CapabilityBroker.kt:709`，契约 `container/engine/src/bridge/methods.js:146`；默认每次真跑一次 exec-probe；传 `{"walkProbes": false}` 只做存在性+依赖检查，避免频繁 spawn）；③ 人读落盘 `files/diagnostics.txt` 与机读 `files/os/diag.jsonl` 的三行结论：`stage=native-assets`（大件 libcxx / node）、`stage=capability-assets`（能力件 bash / rg / flock / posix / PTY 探针）、`stage=prefix`（`$PREFIX` 缺件，`lobos/runtime/InstanceHost.kt:449`）；④ 开机快照 `files/provisioning.json`（`ProvisioningProbe`） |
 | **判据** | `status` 是闭集：`ready` 才算可用；`missing_from_lib` / `missing_dependency` / `not_executable` / `probe_failed` 都是**坏或未知**，一律不许报通过。`File.canExecute()` 对 `filesDir` 也返回 `true`，对 SELinux 的 W^X **完全无感（假阳性）** —— 所以判据必须真 exec 一次，不能只查权限位 |
 | **与投放结局对照** | 「补装动过手」与「能力可用」是两个正交结论：前者看 ④ 那份 `provisioning.json`，后者只看 ① ② ③ 的读数。两排不一致是设计如此，读能力以核验报告的 `status` 为准 —— 落盘那份（①）与现场重跑那份（②）是同一实现，只是时点不同 |
 | **为什么重要** | 真机 2026-09-26：`sharp-image` 那格报「已投放」（`@img/sharp-wasm32` 就在依赖树里）而 sharp 取不到绑定，`read_image` 全灭，界面上零痕迹 —— ADR-0001 P4 因此把「已解决」写了出去（现已作废） |
@@ -130,7 +130,7 @@ adb shell run-as lobos.app cat files/diagnostics.txt
 不在散文里复述结论，也不在面板侧另拼一把尺子。
 
 落盘的结构化结论就是探针自己算出来的那一份（`NativePreparer.prepare()` 把 `PrepareReport.toJson()` 作为
-`data` 字段随诊断事件写入，见 `container/app/src/main/java/lobos/native/NativePreparer.kt:239`）：
+`data` 字段随诊断事件写入，见 `container/app/src/main/java/lobos/native/NativePreparer.kt:247`）：
 `os.nativeAssets.status` 原样读出它，不重新解释、不补默认值。**读不到 ≠ 都就位** ——
 这一格丢了要在界面上看得见，不许用一次现场重跑来假装它一直在。
 
@@ -148,7 +148,7 @@ adb shell run-as lobos.app cat files/diagnostics.txt
 ```
 
 （`diag.jsonl` 的住址唯一：`RuntimeDiagnostics.structFile()`；设备侧 `LOBOS_SUPERVISOR_HOME` 就是应用
-`filesDir` —— 见 `runtime/GuestAdapter.kt:90`。）
+`filesDir` —— 见 `runtime/GuestAdapter.kt:100`。）
 
 > 已废止的旧形态（随「D4 职责下沉」整段删除，本节不再指向它们）：旧供给表 `programs/console/src/assembler/supply-table.json` 的 `units[].verify`、执行器 `capability-probe.js`、CI 门 `native-supply-gate-test.js`、落盘 `files/console/native-manifest.json` 与 `nativeUnits`/`nativeCaps` 两排。
 

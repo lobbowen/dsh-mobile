@@ -37,7 +37,7 @@ WebView 访问的本地 HTTP 服务。
                           │ exec
                           ▼
    Node 进程（宿主服务 :node，由 :main 监督者持有）
-        │ 首启探针 127.0.0.1:3080 / 内核控制面 127.0.0.1:36360
+        │ 内核控制面 127.0.0.1:36360（探针 3080 只由诊断页显式驱动，不在启动链上）
         ▼
    MainActivity 的 WebView（加载内核同源托管的 /__host 宿主帧）
 ```
@@ -585,7 +585,9 @@ packaging {
 
 ## 6. 应用侧：端口约定与参数解析
 
-App 侧启动命令：
+下面这条命令形态是**探针**的（`GuestAdapter.probePlan`，只由诊断页 `InstanceHost.runNativeProbe`
+显式驱动）。启动链上跑的是内核入口（`GuestAdapter.programPlan`：`[nodeBin, 入口脚本, "daemon"]`，
+控制面 `127.0.0.1:36360`）—— 探针端口从不参与启动判定，见 §9 阶段表的 `nodeprobe` 行。
 
 ```kotlin
 ProcessBuilder(nodeBin, script, "--port", "3080")
@@ -732,18 +734,21 @@ aarch64）在 GitHub 免费 runner 上要 **2~3 小时**。
 | 阶段 | 含义 | 失败时看什么 |
 |---|---|---|
 | `init` | 服务启动，打印设备信息 | — |
-| `kernel` | Program 版本指针 + 入口布局断言 | 入口被误放到 filesDir 外会在此失败 |
+| `program` | Program 版本指针三态归因 + 入口布局断言 | 入口被误放到 filesDir 外会在此失败 |
 | `version` | 清单里的版本号 | 与实际 `node -v` 对比 |
 | `native-assets` | **逐资产校验：存在性 → 依赖 → exec-probe** | 见下方「归因速查」，结论是唯一的 |
-| `script` | server.js 就位 | — |
 | `runtime` | runtime.json 已写入 | — |
 | `exec` | node 进程已启动 | pid |
+| `health` | **内核控制面 `127.0.0.1:36360/status` 就绪 = 启动成功的唯一判据** | 进程早死 / 30s 内未应答 |
 | `process` | node 退出了 | `exitCode` |
 | `node-stderr` | node 自己报的错 | **最关键的一项** |
-| `port` | 端口是否就绪 | 成功标志 |
+| `nodeprobe` | Node **探针**（只由诊断页点一下才跑，非运行时、不参与启动判定） | 见「§6 端口约定」 |
 
 > 历史阶段名 `libdir` / `apk-libs` / `exec-probe` 已合并为 `native-assets` 一项。
-> 注意：`provision` 这个阶段名**尚未完全消灭** —— `NodeRuntimeService` 的原生资产失败出口仍以 `"provision"` 上屏，待收口。
+> 历史阶段名 `script` / `port` 随探针降格一并消失：探针不再出现在启动链上，
+> 曾经那个 `port` 就是 D15 定罪的假绿出口（探针端口点亮被当成"运行成功"）。
+> 注意：`provision` 这个阶段名**尚未完全消灭** —— `InstanceHost.bootProgramOnce` 的
+> 原生资产失败出口仍以 `"provision"` 上屏（成功侧写的是 `native-assets`），待收口。
 
 ### 归因速查（`native-assets` 结构化结论）
 

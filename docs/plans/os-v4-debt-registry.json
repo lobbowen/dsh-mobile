@@ -1378,13 +1378,25 @@
     {
       "group": "E-logic",
       "id": "D12",
-      "desc": "本条立案时的前提也是错的：核验**每轮启动都跑**（InstanceHost.kt:343 在 bootProgramOnce() 里调 NativePreparer.prepare()，循环由 InstanceHost.kt:164 驱动），首装/升级/每次重拉都会验一轮并落盘。真正的缺口在**读法**：探针算好的结构化结论当场丢弃，diag.jsonl 只有文案，RuntimeDiagnostics.events() 在产品里零调用点 —— 面板要问「上一轮验出什么」只能现场重跑探针或 parse 文案",
+      "desc": "本条立案时的前提也是错的：核验**每轮启动都跑**（InstanceHost.kt:371 在 bootProgramOnce() 里调 NativePreparer.prepare()，循环由 InstanceHost.kt:181 驱动），首装/升级/每次重拉都会验一轮并落盘。真正的缺口在**读法**：探针算好的结构化结论当场丢弃，diag.jsonl 只有文案，RuntimeDiagnostics.events() 在产品里零调用点 —— 面板要问「上一轮验出什么」只能现场重跑探针或 parse 文案",
       "where": "RuntimeDiagnostics.kt(DiagEvent.data/latestByStage) + native/NativePreparer.kt:239 + bridge/CapabilityBroker.kt:665 + programs/console/src/api/native.js:23",
       "action": "已给落盘一个不重算的消费者：诊断事件新增 data 字段承载 PrepareReport.toJson()，os.nativeAssets.status 原样读出最新一轮（无记录=collected:false，不编造），面板 GET /native/capabilities 走它。runbook §9 与 console-system-api.md 已按现实改写。React 概览卡片归 W10/E8 批次（有面还要有人看的那一面）",
       "status": "done",
       "evidenceTier": "static",
       "workstream": "W2",
       "note": "自我更正记录：B3（commit 8195267c）把 §9 写成「按需、装完不会自动跑」，还顺手在 action 里写下「不许反过来把文档改成已经自动验过」—— 那句话拦的是别人，错的是我自己：写文档前没 grep 全部生产调用点，InstanceHost 启动链里那一行一直在。ADR-0001「投放≠能力」的罪案前提（没人看=零痕迹）今天仍成立，但成因不是没验，是验完的结论没地方读。真机面待发布批次核（E9/E10 同批）。",
+      "updated": "2026-09-29"
+    },
+    {
+      "group": "E-logic",
+      "id": "D15",
+      "desc": "无内核包时启动链去 spawn 随包 server.js 探针顶替运行时，而探针点亮的 3080 被算成「启动成功」：屏幕写「Node 原生运行成功 ✓」、诊断记 [OK] port、监督循环认定健康、退避清零 —— 唯独没有任何运行时在服务（探针不是产品，也不承载控制面 36360）。同一文件自己的意图注释写的是「回落探针模式（把未安装**如实记为状态，不伪造内核**）」，实现与意图直接矛盾；归因文本还把 CURRENT 缺失叙述成「本次回落到探针模式」。违反 ADR-0005「不做离线兜底…如实失败」",
+      "where": "runtime/InstanceHost.kt（boot 链 spawn 分支 + pollControlPlane 双判定）+ ota/ProgramOtaResolution.kt（ABSENT/INCOMPLETE 归因文本）+ runtime/SupervisorPolicy.kt（一次 boot 的归宿）",
+      "action": "从结构上拆掉第二个成功来源，而不是给文案打补丁：① 启动链的施工判据只剩 ProgramOtaResolution.ok（READY），无内核直接 return NO_PROGRAM，不 spawn 任何东西；② bootLoop 对 NO_PROGRAM **停手不退避**（重试变不出内核，只会变成 30s 一次的 OTA 轰炸），恢复一律由明确动作发起；③ pollControlPlane 删掉 3080 那一支，成功判据只剩 127.0.0.1:36360/status，portUp 字段随之删除；④ 探针降格为**显式诊断件**：诊断页按钮经 ACTION_PROBE 单独驱动，用自己的 probeProcess（不碰 nodeProcess/healthUp、不复用 program-* 阶段名），结论标注「探针（非运行时）」并只进 nodeprobe 阶段，跑完即退；⑤ 归因文本改说「本次不启动运行时」。三条用例名入 .github/convicted-cases.txt（成功判据只有RUNNING一条 / 无内核包时循环停手_拉不起来才退避重试 / 非READY绝不承诺回落探针）",
+      "status": "done",
+      "evidenceTier": "static",
+      "workstream": "W1",
+      "note": "为什么 NO_PROGRAM 不重试：资源模型已拍板「装进来即常驻、失败如实可见」（见 project-resource-model-parent-duty），周期自愈会把「等装包」演成「一直在努力」。为什么探针不删而只降格：它仍是「这台设备的 node 到底能不能起来」的唯一现场取证手段（能力不许砍掉掩盖缺陷），只是它的答案再也不能被读成「有运行时在服务」。真机面（A8：files/programs 缺失时任何出口不出现「就绪/在线/OK」）待 E9 同批核。",
       "updated": "2026-09-29"
     },
     {

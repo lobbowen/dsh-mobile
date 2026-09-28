@@ -45,13 +45,20 @@ import org.json.JSONObject
  * 环境"，与 Termux 无关、不需要 root。可执行性的全部约束（W^X / linker / 架构 /
  * libc 四道关）与验证手段收敛在 `native/` 包，见 [NativePreparer]。
  *
- * 启动链路（每次 boot 的固定顺序，对齐 docs/contracts/base-spec.md §9）：
+ * 启动链路（每次 boot 的固定顺序，对齐 docs/contracts/base-spec.md §9；与方法内
+ * `---- n) ----` 标号逐条对应）：
  * 1. 内核版本指针 + OTA 检查（ADR-0005：内核只来自 OTA）
  * 2. 原生资产统一准备（存在性 → 依赖前置 → exec-probe）
- * 3. 探针脚本 / npm 就位
- * 4. runtime.json 契约落盘（容器写、内核读，schema 2）
- * 5. GuestAdapter 装配 + spawn（有内核跑内核，无内核回落探针）
- * 6. 控制面轮询（就绪=成功；失败交 bootLoop 退避重试）
+ * 3. 没有内核包就如实收口（[SupervisorPolicy.BootOutcome.NO_PROGRAM]）：不 spawn 任何东西
+ * 4. npm + 安卓语义垫片就位
+ * 5. runtime.json 契约落盘（容器写、内核读，schema 2）
+ * 6. GuestAdapter 装配 + spawn（唯一出口 = 到场的那份内核入口）
+ * 7. 控制面轮询（**只有 127.0.0.1:36360/status 算就绪**；失败交 bootLoop 退避重试）
+ *
+ * 随包的 `assets/node/server.js` 是**探针**，不在本链路上：它只由诊断页显式驱动
+ * （[ACTION_PROBE] → [runNativeProbe]），结论一律标注「探针（非运行时）」。
+ * 曾经它在无内核时被当作回落启动路径，而它亮起的 3080 端口被算成启动成功 ——
+ * 屏幕、界面、监督循环三处同时认定健康，唯独没有运行时在服务（真机 2026-09-28 定罪 D15）。
  *
  * 关键点：一次包升级 = 重启 runtime 进程（用户侧"热"的，无 APK 重编）。
  */
@@ -69,8 +76,12 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
 
     /** 暂存清扫的每进程一次闸门：boot 可以重试，重复扫只会把同一件事写进诊断好几遍。 */
     @Volatile private var stagingSwept = false
-    private var portUp = false
+    /** 控制面（36360）实测就绪 —— 启动成功的**唯一**判据。探针端口永不写入这里。 */
     private var healthUp = false
+
+    /** 探针进程：诊断页显式驱动，与实例完全隔离（不碰 [nodeProcess] / [healthUp]）。 */
+    @Volatile private var probeProcess: Process? = null
+    @Volatile private var probeRunning = false
 
     /**
      * 随包 `.so` 所在目录（= `nativeLibraryDir`）。
@@ -93,6 +104,12 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
 
     /** OsHost 转发 UI/系统/桥投递的命令（幂等）。 */
     fun onHostStart(intent: Intent?) {
+        // 探针是**诊断动作**，不是生命周期命令：在落到下面的 lifecycle 分支前先分流出去，
+        // 绝不顺带把 boot 循环点起来（一次探针点击 = 额外一轮 OTA + spawn，两件事会糊成一件）。
+        if (intent?.action == ACTION_PROBE) {
+            scheduleNativeProbe()
+            return
+        }
         when (intent?.action) {
             ACTION_RESTART -> requestRestart()
             ACTION_STOP_RUNTIME -> requestStop()
@@ -166,13 +183,23 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
         while (keepRunning) {
             // 干活期间短持（预算 60s；bootProgramOnce 内部含网络 OTA 与 spawn）。
             acquireBriefWakeLock(60_000L)
-            val ok = try { bootProgramOnce() } finally { releaseWakeLock() }
+            val outcome = try { bootProgramOnce() } finally { releaseWakeLock() }
+            val bootOk = SupervisorPolicy.bootSucceeded(outcome)
+            if (!SupervisorPolicy.keepsLooping(outcome)) {
+                // 没有内核包就**停手**：退避重试不会凭空变出内核，只会把"等装包"演成"一直在努力"，
+                // 每 30s 一次 OTA 网络往返。恢复一律由明确动作发起（见 SupervisorPolicy.keepsLooping）。
+                RuntimeDiagnostics.append(
+                    this, "supervisor", false, "无内核包，监督循环停手（不退避重试）",
+                    "装包后由诊断页「重试」或桥 os.instances.action(restart) 重拉，或下次开屏",
+                )
+                return
+            }
             var bornAt = 0L
-            if (ok) {
+            if (bootOk) {
                 // 内核在跑；等待其退出或被外部停止（1s 轮询；ACTION_RESTART 的
                 // destroy 会在此被感知为 isAlive=false，1s 内进入重拉）。
                 bornAt = SystemClock.elapsedRealtime()
-                while (keepRunning && nodeProcess?.isAlive == true && (healthUp || portUp)) {
+                while (keepRunning && nodeProcess?.isAlive == true && healthUp) {
                     try { Thread.sleep(1000) } catch (_: InterruptedException) { }
                 }
             }
@@ -180,7 +207,7 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
             // 退避清零的判据见 SupervisorPolicy.nextRestartCount（以**存活时长**为准，
             // 不以「health 探到 200」为准 —— 真机 2026-09-22 的紧循环风暴实锤）。
             restartCount = SupervisorPolicy.nextRestartCount(
-                restartCount, ok, SystemClock.elapsedRealtime() - bornAt,
+                restartCount, bootOk, SystemClock.elapsedRealtime() - bornAt,
             )
             val backoff = SupervisorPolicy.backoffMs(restartCount)
             RuntimeDiagnostics.append(this, "supervisor", null, "退避 ${backoff}ms 后重启", "attempt=$restartCount")
@@ -189,13 +216,13 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
     }
 
     /**
-     * 单次拉起内核；成功返回 true（进程已起 + 控制面就绪），失败返回 false。
+     * 单次拉起内核；三态归宿见 [SupervisorPolicy.BootOutcome]。
      *
      * 可执行性验证由 [NativePreparer.prepare] 完成 —— 它**真跑一次**进程。
      * `canExecute()` 只查 stat 权限位，对 SELinux W^X 无感（假阳性），
      * 这是上游真机排查得出的结论，务必保留。
      */
-    private fun bootProgramOnce(): Boolean {
+    private fun bootProgramOnce(): SupervisorPolicy.BootOutcome {
         try {
             RuntimeDiagnostics.append(
                 this, "init", null, "InstanceHost 启动内核 (进程 runtime)",
@@ -206,7 +233,7 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
             // （docs/runbook/provisioning.md §4；真机报告「全盘不可写 EACCES」的定位探针；
             //   PTY 判定实验见 docs/components/native.md。）
             // C 层共享供给：**容器执行、Android 原生**（机制随 APK 走；内核只检测/触发）。
-            //   异步、不阻塞启动：供给要下载几十 MB；探针照旧先跑，下一拍看到已就位的真相。
+            //   异步、不阻塞启动：供给要下载几十 MB；体检照旧先跑，下一拍看到已就位的真相。
             if (!supplyStarted) {
                 supplyStarted = true
                 Thread {
@@ -235,7 +262,9 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
             // 顺序是刻意设计的（ADR-0005：内核**只**来自 OTA）：
             // 1a) 已有内核 → 直接用（最常见路径，零额外开销）
             // 1b) OTA      → CURRENT 缺失则**首次安装**；存在则按需**升级**
-            // 1c) 仍无内核 → 回落探针模式（把"未安装"如实记为状态，不伪造内核）
+            // 1c) 仍无内核 → 如实记「未安装 + 原因」并**停在这里**：不 spawn 任何东西。
+            //     随包的 server.js 探针**不是**回落启动路径（它亮端口≠有运行时在服务，
+            //     真机 2026-09-28 定罪 D15），只由诊断页显式驱动。
             val km = ProgramManager(this)
 
             // 1a′) 开机清扫安装暂存（每进程一次，且必须在任何安装动作之前）：
@@ -301,17 +330,16 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
             //   从未安装 / CURRENT 在但入口缺失（只落地一半）/ 就位。
             // 旧实现只有两态，把"只落地一半"也说成"尚未安装成功"，排查方向被带偏。
             val res = ProgramOtaResolution.resolve(kVersion, entry?.absolutePath, entry != null && entry.exists())
-            val hasKernel = res.state == ProgramOtaResolution.State.READY
             // 不变式守护：内核入口是【脚本】，必须交给 node 解释执行，且必须落在 filesDir
             // 子树内（内核 OTA 的落盘布局）。旧注释把这条说成「W^X 禁止 execve 所以不能直接跑」——
             // 与 ADR-0001 (b)/D1 冲突（我们钉 targetSdk=28 正是为了 app home 可 exec），
             // 域内自证归供给表 exec-domain 格；断言本身不依赖那个解释，照旧成立。
-            if (hasKernel && kVersion != null) {
+            if (res.ok && kVersion != null) {
                 try {
                     km.assertNotDirectlyExecutable(kVersion)
                 } catch (e: IllegalStateException) {
                     RuntimeDiagnostics.append(this, "program", false, "内核入口布局异常", err(e))
-                    return false
+                    return SupervisorPolicy.BootOutcome.FAILED
                 }
             }
             // 结构自检：CURRENT 与目录/入口/manifest 是否自洽。发现问题**不阻断**
@@ -348,14 +376,20 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
                 RuntimeDiagnostics.append(
                     this, "provision", false, "原生资产校验未通过，中止启动", what
                 )
-                return false
+                return SupervisorPolicy.BootOutcome.FAILED
             }
             val nodeAsset = NativeAssetRegistry.NODE
             val nodeBin = NativeAssetRegistry.resolve(this, nodeAsset)
 
-            // ---- 3) 探针脚本 + npm 就位 ----
-            val script = NodeProvisioner.ensureServerScript(this)
-            RuntimeDiagnostics.append(this, "script", true, "server.js 探针就位", script.absolutePath)
+            // ---- 3) 无内核包 → 如实收口，**不 spawn 任何东西** ----
+            //
+            // 上面第 2 步照跑是有意的：原生资产的 exec-probe 是**设备事实**，没有内核也该上屏
+            // （屏幕要能回答"这台设备缺哪环"）。但到此必须停 —— 随包 server.js 点亮 3080 曾被
+            // 算成启动成功（D15），而它既不承载控制面也不是产品。探针只由诊断页显式驱动。
+            // 归因文本已在 1c 的 program 那条落盘，这里不重复写结论。
+            if (!res.ok) return SupervisorPolicy.BootOutcome.NO_PROGRAM
+
+            // ---- 4) npm + 安卓语义垫片就位 ----
             // npm 基础环境（纯 JS，由 libnode.so 代跑；失败不阻断启动 ——
             // 只影响内核侧 Agent 安装能力，LOBOS_NPM_ENTRY 不注入即可）。
             val npmCli = NodeProvisioner.ensureNpm(this)
@@ -372,7 +406,7 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
                 envShim?.absolutePath ?: "assets/node/android-env-shim.cjs 落地失败"
             )
 
-            // ---- 4) 写 runtime.json（schema 2，容器写内核读） ----
+            // ---- 5) 写 runtime.json（schema 2，容器写内核读） ----
             // minNode 单源：就是随包清单里的 Node 版本（上方 version），不再手写字面量。
             writeRuntimeJson(
                 nodePath = nodeBin.absolutePath,
@@ -395,10 +429,10 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
                 npmrc?.absolutePath ?: "写入失败（无路径可报）"
             )
 
-            // ---- 5) 装配并 spawn（L-C/L-D 的唯一装配点 = GuestAdapter） ----
+            // ---- 6) 装配并 spawn（L-C/L-D 的唯一装配点 = GuestAdapter） ----
             //
-            // 有内核包：跑内核入口（控制面 36360）；无内核包：回落内置探针 server.js
-            // （便于首启验证 Node 原生链路）。环境变量**一项都不许在这外面组装** ——
+            // 到这里**只有一条路**：跑到场的内核入口（控制面 36360）。无内核的分支已在第 3 步
+            // 如实收口，探针不再出现在启动链上（D15）。环境变量**一项都不许在这外面组装** ——
             // 旧实现把 L-D 旋钮夹在 ProcessBuilder 的 .apply{} 表达式里，PATH 被写
             // 两次互相覆盖、provision 副作用藏在 map 中间，与 boot.js 孪生管线漂移。
             //
@@ -406,40 +440,39 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
             // 存活时，新进程 acquireLock 失败即 exit(1) —— 不回收就是必死重启循环。
             reapOrphanKernel()
 
-            val base = GuestAdapter.BaseInputs(
-                filesDir = filesDir, cacheDir = cacheDir, nodeBin = nodeBin, nativeLibDir = libSearchPath
+            // $PREFIX 复制是**副作用**：必须先于装配执行（plan 只声明、不生产）。
+            // 缺件必须上屏 —— 真机 2026-09-26 报告 §五 就是「$PREFIX 里到底有没有
+            // node/rg/bash」无人可查，guest 侧只会得到「command not found」。
+            val prefixReady = PrefixProvisioner.provision(this, nodeBin)
+            val prefixMissing = PrefixProvisioner.expected - prefixReady.toSet()
+            RuntimeDiagnostics.append(
+                this, "prefix", prefixMissing.isEmpty(),
+                if (prefixMissing.isEmpty()) "\$PREFIX 能力件全就位" else "\$PREFIX 缺件：${prefixMissing.joinToString()}",
+                PrefixProvisioner.root(this).absolutePath + " 已有=" + prefixReady.joinToString()
             )
-            val plan = if (hasKernel && programDir != null && entry != null) {
-                // $PREFIX 复制是**副作用**：必须先于装配执行（plan 只声明、不生产）。
-                // 缺件必须上屏 —— 真机 2026-09-26 报告 §五 就是「$PREFIX 里到底有没有
-                // node/rg/bash」无人可查，guest 侧只会得到「command not found」。
-                val prefixReady = PrefixProvisioner.provision(this, nodeBin)
-                val prefixMissing = PrefixProvisioner.expected - prefixReady.toSet()
-                RuntimeDiagnostics.append(
-                    this, "prefix", prefixMissing.isEmpty(),
-                    if (prefixMissing.isEmpty()) "\$PREFIX 能力件全就位" else "\$PREFIX 缺件：${prefixMissing.joinToString()}",
-                    PrefixProvisioner.root(this).absolutePath + " 已有=" + prefixReady.joinToString()
-                )
-                val nativeDir = nodeBin.parentFile!!
-                GuestAdapter.programPlan(
-                    GuestAdapter.ProgramInputs(
-                        base = base,
-                        programDir = programDir,
-                        programEntry = entry,
-                        uiDir = File(programDir, "ui/dist"),
-                        flockNative = File(nativeDir, NativeAssetRegistry.libNameOf("flock")),
-                        posixShim = File(nativeDir, NativeAssetRegistry.libNameOf("posix")),
-                        prefixRoot = PrefixProvisioner.root(this),
-                        prefixBin = PrefixProvisioner.binDir(this),
-                        bashBin = PrefixProvisioner.bashBin(this),
-                        npmEntry = npmCli,
-                        envShim = envShim,
+            // programDir/entry 非空是第 3 步的 res.ok 兑现的（READY 才可能走到这里），
+            // 不在此重言一遍"再判一次空"——那等于承认 ok 不是唯一施工判据。
+            val kernelDir = programDir!!
+            val kernelEntry = entry!!
+            val nativeDir = nodeBin.parentFile!!
+            val plan = GuestAdapter.programPlan(
+                GuestAdapter.ProgramInputs(
+                    base = GuestAdapter.BaseInputs(
+                        filesDir = filesDir, cacheDir = cacheDir, nodeBin = nodeBin, nativeLibDir = libSearchPath
                     ),
-                    getenv("PATH"),
-                )
-            } else {
-                GuestAdapter.probePlan(base, script, getenv("PATH"))
-            }
+                    programDir = kernelDir,
+                    programEntry = kernelEntry,
+                    uiDir = File(kernelDir, "ui/dist"),
+                    flockNative = File(nativeDir, NativeAssetRegistry.libNameOf("flock")),
+                    posixShim = File(nativeDir, NativeAssetRegistry.libNameOf("posix")),
+                    prefixRoot = PrefixProvisioner.root(this),
+                    prefixBin = PrefixProvisioner.binDir(this),
+                    bashBin = PrefixProvisioner.bashBin(this),
+                    npmEntry = npmCli,
+                    envShim = envShim,
+                ),
+                getenv("PATH"),
+            )
             //
             // command[0] 恒为 nodeBin，entry 是**脚本参数**、不是被 exec 的目标。
             // 本行旧版把这条理由写成「filesDir 被 W^X 禁止 execve」——那是 targetSdk≥29 的规矩，
@@ -448,28 +481,27 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
             // 归供给表 exec-domain 格（真机读数未采），在它出读数前不许拿 W^X 当结论用。
             // 不变式由 km.assertNotDirectlyExecutable() 守护。
             val pb = ProcessBuilder(plan.command).directory(plan.cwd)
-            // 环境以 plan 为**完整事实**：先清空继承环境，两侧（内核/探针）同一契约，
+            // 环境以 plan 为**完整事实**：先清空继承环境，启动计划就是全部环境事实，
             // 不再有"第二处 apply 悄悄覆盖 NODE_PATH/PATH"的暗通道。
             pb.environment().clear()
             pb.environment().putAll(plan.env)
             nodeProcess = pb.start()
-            portUp = false
             healthUp = false
             RuntimeDiagnostics.append(
                 this, "exec", true, "内核进程已启动",
-                "pid=${currentPid(nodeProcess)}, 控制面 127.0.0.1:${GuestAdapter.CONSOLE_PORT}（探针端口 ${GuestAdapter.PROBE_PORT}）"
+                "pid=${currentPid(nodeProcess)}, 控制面 127.0.0.1:${GuestAdapter.CONSOLE_PORT}"
             )
 
             forward(nodeProcess!!.inputStream, "stdout")
             forward(nodeProcess!!.errorStream, "stderr")
             watchExit()
-            // ---- 6) 控制面轮询 ----
+            // ---- 7) 控制面轮询 ----
             pollControlPlane()
-            return healthUp || portUp
+            return if (healthUp) SupervisorPolicy.BootOutcome.RUNNING else SupervisorPolicy.BootOutcome.FAILED
         } catch (e: Throwable) {
             RuntimeDiagnostics.append(this, "fatal", false, "启动流程异常", err(e))
             Log.e(TAG, "启动 Node/内核失败", e)
-            return false
+            return SupervisorPolicy.BootOutcome.FAILED
         }
     }
 
@@ -677,11 +709,11 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
         Thread {
             val code = runCatching { p.waitFor() }.getOrDefault(-1)
             // 主动停机（onDestroy）与人为重启（ACTION_RESTART 的 destroy）不算故障；
-            // 但**其余任何退出都必须记录** —— 旧实现在 portUp/healthUp=true 时直接
+            // 但**其余任何退出都必须记录** —— 旧实现在「已就绪」时直接
             // return，「起来过又秒死」这一失败形态的 exitCode/stderr 永远进不了
             // 诊断（真机 2026-09-22 排查实锤的盲区）。
             if (!keepRunning) return@Thread
-            val readyNote = SupervisorPolicy.exitNote(healthUp || portUp)
+            val readyNote = SupervisorPolicy.exitNote(healthUp)
             RuntimeDiagnostics.append(this, "process", false, "内核/node 进程已退出", "exitCode=$code$readyNote")
 
             var err = RuntimeDiagnostics.readNodeStderr(this)
@@ -704,8 +736,11 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
     /**
      * 轮询控制面是否就绪（最多 30s）。
      *
-     * 双判定：内核真跑起来时看 /status（36360）；无内核包、仅跑内置探针 server.js 时
-     * 看探针端口（3080）。任一就绪即认定启动成功。
+     * 判据**只有一条**：内核控制面 `127.0.0.1:36360/status` 回 200。
+     * 旧实现是"双判定"（另一个是探针端口 3080，任一就绪即算启动成功）—— 那正是 D15 定罪的
+     * 假绿形状：探针亮着 ≠ 有运行时在服务，而这条判据把「装不上内核」洗成了「一切正常」。
+     * 探针端口不参与本方法，也不参与任何生命周期判定（它只在 [runNativeProbe] 里被读一次）。
+     *
      * 子进程已死则**提前收轮**：端口不可能再被它点亮，30s 干等只会拖死退避节奏
      * （假成功防线见 poll 前 reapOrphanKernel 的注释）。
      */
@@ -722,14 +757,6 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
                     this, "health", true,
                     "内核控制面就绪 (127.0.0.1:${GuestAdapter.CONSOLE_PORT}/status)",
                     "内核原生运行成功 ✓"
-                )
-                return
-            }
-            if (isPortUp()) {
-                portUp = true
-                RuntimeDiagnostics.append(
-                    this, "port", true, "127.0.0.1:${GuestAdapter.PROBE_PORT} 已就绪（探针模式）",
-                    "Node 原生运行成功 ✓（尚未下发内核包，当前为内置 server.js 探针）"
                 )
                 return
             }
@@ -801,15 +828,113 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
         false
     }
 
-    /** 内置探针 server.js 的端口（首启验证 Node 原生链路用；内核就绪后走 36360）。 */
-    private fun isPortUp(): Boolean = try {
-        val c = URL("http://127.0.0.1:${GuestAdapter.PROBE_PORT}/").openConnection() as HttpURLConnection
-        c.connectTimeout = 300
-        c.readTimeout = 300
-        c.requestMethod = "GET"
-        c.responseCode in 200..499
-    } catch (_: Throwable) {
-        false
+    /**
+     * 探针端口读数：取 `127.0.0.1:3080/api/version` 的响应体（探针的结构化结论）。
+     *
+     * 只在 [runNativeProbe] 里用；进程一死就提前收轮，不必等满预算。
+     */
+    private fun pollProbeReport(p: Process): String? {
+        var waitedMs = 0
+        while (waitedMs < PROBE_POLL_BUDGET_MS) {
+            if (!p.isAlive) return null
+            try {
+                val c = URL("http://127.0.0.1:${GuestAdapter.PROBE_PORT}/api/version")
+                    .openConnection() as HttpURLConnection
+                c.connectTimeout = 300
+                c.readTimeout = 1500
+                c.requestMethod = "GET"
+                if (c.responseCode == 200) return c.inputStream.bufferedReader().use { it.readText() }
+            } catch (_: Throwable) {
+            }
+            try { Thread.sleep(300) } catch (_: InterruptedException) { }
+            waitedMs += 300
+        }
+        return null
+    }
+
+    /**
+     * 探针的**显式驱动入口**（诊断页 / 桥诊断动作）：串行、可重复点，重复点只留一条案底。
+     *
+     * 它跑在**自己的线程**上而不是 [bootExec]：boot 循环在内核健康时长期占用那条串行执行器，
+     * 把诊断动作排到它后面就等于永远不执行。
+     */
+    private fun scheduleNativeProbe() {
+        if (probeRunning) {
+            RuntimeDiagnostics.append(this, "nodeprobe", null, "探针（非运行时）已在跑，忽略这次重复驱动")
+            return
+        }
+        probeRunning = true
+        Thread {
+            try {
+                runNativeProbe()
+            } catch (e: Throwable) {
+                RuntimeDiagnostics.append(this, "nodeprobe", false, "探针（非运行时）异常", err(e))
+            } finally {
+                try { probeProcess?.destroy() } catch (_: Throwable) { }
+                probeProcess = null
+                probeRunning = false
+            }
+        }.apply { name = "nodeprobe"; isDaemon = true }.start()
+    }
+
+    /**
+     * Node 原生链路探针：**一次性、有人点才跑**的诊断件，不在启动链上。
+     *
+     * 它证明的是「随包 node 二进制在这台机器上能 exec、能 listen」，**不是**「有运行时在服务」
+     * —— 探针端口 3080 从来不是控制面。过去它充当无内核时的回落启动路径，那个端口被
+     * [pollControlPlane] 算成启动成功，于是「装不上内核」在屏幕上长成「Node 原生运行成功 ✓」，
+     * 监督循环也认定健康、退避清零（真机 2026-09-28 定罪 D15）。
+     *
+     * 隔离是结构性的：用 [probeProcess]，不碰 [nodeProcess] / [healthUp]，不走 [forward]
+     * （那条管线写的是 `program-*` 阶段，探针的行混进去就是冒充内核日志）；跑完即终结，
+     * 不留常驻 —— 探针不是保活对象，长期驻留会变成第二条无人跟踪的 node 进程。
+     */
+    private fun runNativeProbe() {
+        val nodeBin = NativeAssetRegistry.resolve(this, NativeAssetRegistry.NODE)
+        if (!nodeBin.isFile) {
+            RuntimeDiagnostics.append(
+                this, "nodeprobe", false, "探针（非运行时）未起跑：node 二进制不在场", nodeBin.absolutePath
+            )
+            return
+        }
+        val script = NodeProvisioner.ensureServerScript(this)
+        val plan = GuestAdapter.probePlan(
+            GuestAdapter.BaseInputs(
+                filesDir = filesDir, cacheDir = cacheDir, nodeBin = nodeBin, nativeLibDir = libSearchPath
+            ),
+            script, getenv("PATH"),
+        )
+        RuntimeDiagnostics.append(
+            this, "nodeprobe", null, "探针（非运行时）开始：只验 exec + listen，不代表运行时在线",
+            "端口 ${GuestAdapter.PROBE_PORT}（控制面是 ${GuestAdapter.CONSOLE_PORT}，本探针不碰）"
+        )
+        val lines = java.util.concurrent.ConcurrentLinkedQueue<String>()
+        val p = ProcessBuilder(plan.command).directory(plan.cwd).redirectErrorStream(true).start()
+        probeProcess = p
+        val pump = Thread {
+            try {
+                p.inputStream.bufferedReader().forEachLine {
+                    if (lines.size < PROBE_OUTPUT_LINES) lines.add(it)
+                }
+            } catch (_: Throwable) {
+            }
+        }
+        pump.isDaemon = true
+        pump.start()
+        val report = pollProbeReport(p)
+        if (report == null) {
+            RuntimeDiagnostics.append(
+                this, "nodeprobe", false,
+                "探针（非运行时）${PROBE_POLL_BUDGET_MS}ms 内没有应答 —— node 起不来或 listen 失败",
+                "进程存活=" + p.isAlive + "；探针输出：\n" + lines.joinToString("\n")
+            )
+        } else {
+            RuntimeDiagnostics.append(
+                this, "nodeprobe", true,
+                "探针（非运行时）通了：Node 原生 exec + listen 可用。**这不等于运行时在线**（控制面未验）",
+                report
+            )
+        }
     }
 
     private fun getenv(k: String): String? = System.getenv(k)
@@ -846,6 +971,9 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
         keepRunning = false
         nodeProcess?.destroy()
         nodeProcess = null
+        // 探针也是 node 子进程：宿主销毁时留着它，就又多一个无人跟踪的 node（真机 D10 的形状）。
+        try { probeProcess?.destroy() } catch (_: Throwable) { }
+        probeProcess = null
         bootExec.shutdownNow()
         releaseWakeLock()
     }
@@ -858,8 +986,18 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
         /** 停/启被管运行时（桥的 os.instances.action / os.session.stop 走这两条）。 */
         const val ACTION_STOP_RUNTIME = "lobos.action.STOP_RUNTIME"
         const val ACTION_START_RUNTIME = "lobos.action.START_RUNTIME"
+
+        /**
+         * 驱动一次 Node 原生链路**探针**（诊断页专用）。它不是生命周期命令：
+         * 不改 desired、不拉 boot 循环、结论只进 nodeprobe 阶段（见 [runNativeProbe]）。
+         */
+        const val ACTION_PROBE = "lobos.action.PROBE_NODE"
         /** 控制面就绪轮询预算（原硬编码 100×300ms；提出常量供早退日志引用）。 */
         const val HEALTH_POLL_BUDGET_MS = 30_000
+        /** 探针应答预算：诊断动作要快回，不等 boot 的 30s。 */
+        const val PROBE_POLL_BUDGET_MS = 10_000
+        /** 探针输出上屏的行数上限（探针只跑一次，不需要 boot 那种分级限量）。 */
+        const val PROBE_OUTPUT_LINES = 60
         /** stderr 上屏的行数上限（全文始终落 node-stderr.log）。 */
         const val STDERR_SCREEN_LINES = 60
         /** 子进程崩溃镜像（守卫给实例 stderr 行加 "[stderr] " 前缀）单独放宽：

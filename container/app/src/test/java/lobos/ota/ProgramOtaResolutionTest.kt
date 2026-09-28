@@ -15,7 +15,7 @@ class ProgramOtaResolutionTest {
         assertEquals(ProgramOtaResolution.State.ABSENT, r.state)
         assertFalse("无内核时 ok=false", r.ok)
         assertTrue(r.title.contains("尚无内核包"))
-        assertTrue("应说明回落探针模式", r.detail.contains("探针模式"))
+        assertTrue("必须如实说不启动运行时", r.detail.contains("不启动运行时"))
     }
 
     @Test fun 空白CURRENT等同缺失() {
@@ -46,5 +46,17 @@ class ProgramOtaResolutionTest {
         assertTrue(ProgramOtaResolution.resolve("1.0", "/p", true).ok)
         assertFalse(ProgramOtaResolution.resolve("1.0", "/p", false).ok)
         assertFalse(ProgramOtaResolution.resolve(null, null, false).ok)
+    }
+
+    @Test fun 非READY绝不承诺回落探针() {
+        // 真机定罪的假绿：无内核时去 spawn 随包 server.js 探针，探针点亮端口被算成「启动成功」。
+        // 探针已降格为诊断页显式驱动的诊断件，所以归因文本里不许再出现「回落」这条路。
+        for (r in listOf(
+            ProgramOtaResolution.resolve(null, null, entryExists = false),
+            ProgramOtaResolution.resolve("0.1.0-android.11", "/p/bin/panel", entryExists = false),
+        )) {
+            assertFalse(r.state.name + " 不该承诺回落探针", r.detail.contains("回落"))
+            assertFalse(r.state.name + " 非 READY 就不该有可跑的东西", r.ok)
+        }
     }
 }

@@ -52,6 +52,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var retryBtn: Button
     private lateinit var captureBtn: Button
     private lateinit var copyBtn: Button
+    private lateinit var probeBtn: Button
     private val handler = Handler(Looper.getMainLooper())
     private var uiMode = false // false=诊断面板, true=WebView(内核 /__host 宿主帧 + 面板 iframe)
     /** 设备端自检结果（后台算一次，渲染时前缀到诊断面板）。 */
@@ -114,6 +115,7 @@ class MainActivity : AppCompatActivity() {
         retryBtn = findViewById(R.id.retryBtn)
         captureBtn = findViewById(R.id.captureBtn)
         copyBtn = findViewById(R.id.copyBtn)
+        probeBtn = findViewById(R.id.probeBtn)
 
         // 授权发起权只属于开场流程：开屏的 P0 静默冲刺 + 首页的 F4 补齐行（PermissionSprint / OnboardingFlow）。
         // 这里过去自己发过一次通知弹窗与电池豁免跳转，等于把同一步做了两遍，
@@ -123,6 +125,9 @@ class MainActivity : AppCompatActivity() {
         captureBtn.setOnClickListener { requestScreenCapture() }
         // 一键把自检结果交出去：设备 adb 关闭，剪贴板是唯一可行的导出方式。
         copyBtn.setOnClickListener { copySelfCheck() }
+        // Node 探针：**只有点它才跑一次**的显式诊断动作（跑完即退，不常驻）。它回答"这台设备的
+        // node 起不起得来"，不回答"有没有运行时在服务" —— 过去两句被同一句「运行成功」混成一谈（D15）。
+        probeBtn.setOnClickListener { runNativeProbeOnce() }
 
         setupWebView()
         // 通道状态条：工作台与诊断页同帧，红条挂 FrameLayout 顶层，两种模式都看得见。
@@ -358,6 +363,15 @@ class MainActivity : AppCompatActivity() {
         diagText.text = "正在重启运行时..."
         startRuntime(InstanceHost.ACTION_RESTART)
         RuntimeDiagnostics.append(this, "runtime", null, "已请求宿主重读 CURRENT", "单进程模型：经宿主 intent 转发 ACTION_RESTART")
+    }
+
+    /** 手动驱动一次 Node 探针：只投递动作，结论由 InstanceHost 写进 nodeprobe 阶段、随下一帧上屏。 */
+    private fun runNativeProbeOnce() {
+        // **不**清空诊断日志：探针是追加的一次取证，清一下等于顺手抹掉本次启动的案底。
+        probeBtn.isEnabled = false
+        startRuntime(InstanceHost.ACTION_PROBE)
+        // 探针自带预算（最长 10s）+ 2s 收敛，之后允许再点；重复点由 InstanceHost 侧的串行闸门挡下。
+        handler.postDelayed({ probeBtn.isEnabled = true }, InstanceHost.PROBE_POLL_BUDGET_MS + 2000L)
     }
 
     private fun startPolling() {
