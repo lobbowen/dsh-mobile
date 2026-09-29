@@ -1,9 +1,10 @@
 package lobos.bridge
 
 import android.content.Context
+import android.system.Os
 import lobos.os.Backoff
 import lobos.native.NativeAssetRegistry
-import lobos.native.NativePreparer
+import lobos.os.RuntimeEnvironment
 import lobos.runtime.NodeProvisioner
 import java.io.BufferedReader
 import java.io.BufferedWriter
@@ -213,17 +214,13 @@ object AdbClientRunner {
     private fun backoffMs(failures: Int): Long =
         Backoff.exponential(failures - 1, RESTART_BASE_MS, RESTART_MAX_MS)
 
-    /** 子进程环境注入：HOME/TMPDIR/LOBOS_ADB_DIR/LD_LIBRARY_PATH 一样都不能少。 */
-    private fun baseEnv(context: Context, adbDir: File): List<Pair<String, String>> {
-        return listOf(
-            "HOME" to context.filesDir.absolutePath,
-            "TMPDIR" to context.cacheDir.absolutePath,
-            "LOBOS_ADB_DIR" to adbDir.absolutePath,
-            // 本进程派生的后续子进程（$PREFIX 里的工具）无 RUNPATH，靠继承这个变量找库。
-            // NativePreparer.probe 刻意不设 —— 那才是 run_code 的真实形态。
-            "LD_LIBRARY_PATH" to NativePreparer.libSearchPath(context),
-        )
-    }
+    /**
+     * adb 客户端树根的环境：共享语义一份（HOME/TMPDIR/PATH/信任根/垫片全在里面）+ 这条
+     * 链路专属的 `LOBOS_ADB_DIR`。曾在这里另抄一份最小 env ⇒ 与启动链漂移（债表 ENV-2）。
+     */
+    private fun envFor(context: Context, adbDir: File): Map<String, String> =
+        RuntimeEnvironment.treeRootEnv(RuntimeEnvironment.treeRootFor(context), Os.getenv("PATH")) +
+            mapOf("LOBOS_ADB_DIR" to adbDir.absolutePath)
 
     private fun startProcess(context: Context): ServeProcess {
         val scriptDir = NodeProvisioner.ensureAdbClientScripts(context)
@@ -234,7 +231,7 @@ object AdbClientRunner {
         val pb = ProcessBuilder(args)
             .directory(context.filesDir)
             .redirectErrorStream(false) // stdout 是帧通道，stderr 另收，绝不混流
-        for ((k, v) in baseEnv(context, adbDir)) pb.environment().put(k, v)
+        pb.environment().putAll(envFor(context, adbDir))
         return ServeProcess(pb.start())
     }
 
@@ -274,7 +271,7 @@ object AdbClientRunner {
 
         return try {
             val pb = ProcessBuilder(args).directory(context.filesDir).redirectErrorStream(false)
-            for ((k, v) in baseEnv(context, adbDir)) pb.environment().put(k, v)
+            pb.environment().putAll(envFor(context, adbDir))
             val p = pb.start()
             val out = StringBuilder()
             val err = StringBuilder()

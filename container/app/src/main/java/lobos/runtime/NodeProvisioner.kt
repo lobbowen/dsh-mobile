@@ -29,9 +29,19 @@ object NodeProvisioner {
     }
 
     /** npm 全局前缀的目录名（guest 里唯一可写的 `npm -g` 目标）。
-     *  同一事实 console 侧也写一次（runtime-contract.js 的 npmEnv → npm_config_prefix），
-     *  两边由 console 的 npm-contract-chain-test.js 逐字对账 —— 改名必须同批改。 */
+     *  这个事实**只在这里定义一次**：`.npmrc` 的 prefix、PATH 的 bin 段、NODE_PATH 的
+     *  lib/node_modules 段全部由下面三个纯函数派生。先前这里另记「console 侧 runtime-contract.js
+     *  的 npmEnv 与之逐字对账」——那条门根本不存在（债表 ENV-19 已收口）。 */
     const val NPM_GLOBAL_DIR_NAME = ".npm-global"
+
+    /** npm 全局前缀（= `.npmrc` 里钉住的那个 prefix 的目录）。 */
+    fun globalPrefix(home: File): File = File(home, NPM_GLOBAL_DIR_NAME)
+
+    /** `npm -g` 装出来的 CLI 落点：进 PATH，否则装完找不到（债表 ENV-4）。 */
+    fun globalBin(home: File): File = File(globalPrefix(home), "bin")
+
+    /** `npm -g` 装出来的模块落点：进 NODE_PATH，否则装完 require 不到（债表 ENV-5）。 */
+    fun globalNodeModules(home: File): File = File(File(globalPrefix(home), "lib"), "node_modules")
 
     /** 建 `$HOME/.npmrc` 并钉住 prefix；文件已在则原样交回，绝不覆盖。
      *  npm 的默认 prefix 指向 node 安装目录（这里 = 只读的 /data/app/…/lib），
@@ -41,7 +51,7 @@ object NodeProvisioner {
         val rc = File(context.filesDir, ".npmrc")
         if (rc.isFile) return rc
         return try {
-            rc.writeText("prefix=" + File(context.filesDir, NPM_GLOBAL_DIR_NAME).absolutePath + "\n")
+            rc.writeText("prefix=" + globalPrefix(context.filesDir).absolutePath + "\n")
             rc
         } catch (_: Throwable) {
             null

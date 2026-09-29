@@ -30,7 +30,7 @@ curl -s "$BASE/native/capabilities"          # 上一轮原生件/能力件核�
 curl -s "$BASE/diagnostics/events?limit=400" # 启动链逐事件（含探针 data 原文）
 ```
 
-端口 `36360` 是控制面唯一地址（`runtime/GuestAdapter.kt:63`）；探针端口 3080 **永不参与启动判定**，
+端口 `36360` 是控制面唯一地址（`runtime/GuestAdapter.kt:45`）；探针端口 3080 **永不参与启动判定**，
 它没起来不代表内核没起来。回环请求**不需要 access key**（`api/index.js:147` 的门卫只在非回环上要求），
 所以以上四条不需要任何凭据。
 
@@ -146,8 +146,8 @@ adb -s <serial> shell run-as lobos.app cat files/os/diag.jsonl
 
 | 项 | 内容 |
 |---|---|
-| **触发** | **自动 + 按需两条，各答一个问题**：① 自动 —— 容器启动链每跑一轮就验一轮（`lobos/runtime/InstanceHost.kt:371` 在 `bootProgramOnce()` 里调 `NativePreparer.prepare()`，循环由 `lobos/runtime/InstanceHost.kt:181` 驱动），所以**首装、升级、每次重拉都会验**，结论当场落盘。核验排在「无内核包就收口」之前：`files/programs` 缺失时也照样验、照样落盘 —— 原生链路坏在哪一格是设备事实，不该被「这次没东西可跑」挡住；② 按需 —— 桥方法 `sys.nativeAssets` 现场再验一次（会真 spawn 探针）。「落盘的那一轮」与「现在再验一次」不许混成一句：把没验过的读成验过、或让界面每刷新一次就重跑 exec-probe，都是这条链的坏形态（债表 D12） |
-| **看哪里** | ① 落盘的**结构化结论**（首选）：读 `os.nativeAssets.status`（面板侧 `GET /native/capabilities`），它取 `files/os/diag.jsonl` 里最新一轮的 `data` 字段，**不重跑探针**；没有记录就回 `collected:false` —— 「没验过」与「验过且坏」是两档，不许拿前者当后者；② 现场重验一次：`sys.nativeAssets` 的返回逐格 `status` + `detail`/`missingDep`/`hint`（实现 `lobos/bridge/CapabilityBroker.kt:743`，契约 `container/engine/src/bridge/methods.js:150`；默认每次真跑一次 exec-probe；传 `{"walkProbes": false}` 只做存在性+依赖检查，避免频繁 spawn）；③ 逐事件的三行结论：`GET /diagnostics/events?stage=native` 与 `?stage=capability`、`?stage=prefix` —— `stage=native-assets`（大件 libcxx / node）、`stage=capability-assets`（能力件 bash / rg / flock / posix / PTY 探针）、`stage=prefix`（`$PREFIX` 缺件，`lobos/runtime/InstanceHost.kt:449`）；④ 开机快照：`GET /diagnostics/provisioning`（`ProvisioningProbe` 落盘那份：`checks` 逐格结论 + 三条版本流身份 + `checkedAt`）；逐格的体检事件本身走 `GET /diagnostics/events?stage=probe`。① ③ ④ 都只读已落盘的；落盘原文的住址见 §0.1，控制面起不来时按 §0.1 的 debug 归档复现 |
+| **触发** | **自动 + 按需两条，各答一个问题**：① 自动 —— 容器启动链每跑一轮就验一轮（`lobos/runtime/InstanceHost.kt:360` 在 `bootProgramOnce()`（`:224` 起）里调 `NativePreparer.prepare()`，循环由 `lobos/runtime/InstanceHost.kt:180-182` 驱动），所以**首装、升级、每次重拉都会验**，结论当场落盘。核验排在「无内核包就收口」之前：`files/programs` 缺失时也照样验、照样落盘 —— 原生链路坏在哪一格是设备事实，不该被「这次没东西可跑」挡住；② 按需 —— 桥方法 `sys.nativeAssets` 现场再验一次（会真 spawn 探针）。「落盘的那一轮」与「现在再验一次」不许混成一句：把没验过的读成验过、或让界面每刷新一次就重跑 exec-probe，都是这条链的坏形态（债表 D12） |
+| **看哪里** | ① 落盘的**结构化结论**（首选）：读 `os.nativeAssets.status`（面板侧 `GET /native/capabilities`），它取 `files/os/diag.jsonl` 里最新一轮的 `data` 字段，**不重跑探针**；没有记录就回 `collected:false` —— 「没验过」与「验过且坏」是两档，不许拿前者当后者；② 现场重验一次：`sys.nativeAssets` 的返回逐格 `status` + `detail`/`missingDep`/`hint`（实现 `lobos/bridge/CapabilityBroker.kt:743`，契约 `container/engine/src/bridge/methods.js:150`；默认每次真跑一次 exec-probe；传 `{"walkProbes": false}` 只做存在性+依赖检查，避免频繁 spawn）；③ 逐事件的三行结论：`GET /diagnostics/events?stage=native` 与 `?stage=capability`、`?stage=prefix` —— `stage=native-assets`（大件 libcxx / node）、`stage=capability-assets`（能力件 bash / rg / flock / posix / PTY 探针）、`stage=prefix`（`$PREFIX` 缺件，读数在装配本体里，`lobos/os/RuntimeEnvironment.kt:181-185`）；④ 开机快照：`GET /diagnostics/provisioning`（`ProvisioningProbe` 落盘那份：`checks` 逐格结论 + 三条版本流身份 + `checkedAt`）；逐格的体检事件本身走 `GET /diagnostics/events?stage=probe`。① ③ ④ 都只读已落盘的；落盘原文的住址见 §0.1，控制面起不来时按 §0.1 的 debug 归档复现 |
 | **判据** | `status` 是闭集：`ready` 才算可用；`missing_from_lib` / `missing_dependency` / `not_executable` / `probe_failed` 都是**坏或未知**，一律不许报通过。`File.canExecute()` 对 `filesDir` 也返回 `true`，对 SELinux 的 W^X **完全无感（假阳性）** —— 所以判据必须真 exec 一次，不能只查权限位 |
 | **与投放结局对照** | 「补装动过手」与「能力可用」是两个正交结论：前者看 ④（`snapshot.checkedAt` 证明体检确实跑过、`snapshot.checks` 给逐格结论），后者只看 ① ② ③ 的读数。两排不一致是设计如此，读能力以核验报告的 `status` 为准 —— 落盘那份（①）与现场重跑那份（②）是同一实现，只是时点不同 |
 | **为什么重要** | 真机 2026-09-26：`sharp-image` 那格报「已投放」（`@img/sharp-wasm32` 就在依赖树里）而 sharp 取不到绑定，`read_image` 全灭，界面上零痕迹 —— ADR-0001 P4 因此把「已解决」写了出去（现已作废） |
@@ -177,7 +177,7 @@ curl -s "http://127.0.0.1:36360/diagnostics/events?stage=native&limit=50"  # 同
 ```
 
 （落盘原文 `files/os/diag.jsonl` 的住址唯一：`RuntimeDiagnostics.structFile()`；设备侧
-`LOBOS_SUPERVISOR_HOME` 就是应用 `filesDir` —— 见 `runtime/GuestAdapter.kt:100`。
+`LOBOS_SUPERVISOR_HOME` 就是应用 `filesDir` —— 见 `runtime/GuestAdapter.kt:88`。
 发布包上 `run-as` 这条路已经断了，直接读那两份文件只在 debug 归档包里成立，见 §0.1。）
 
 > 已废止的旧形态（随「D4 职责下沉」整段删除，本节不再指向它们）：旧供给表 `programs/console/src/assembler/supply-table.json` 的 `units[].verify`、执行器 `capability-probe.js`、CI 门 `native-supply-gate-test.js`、落盘 `files/console/native-manifest.json` 与 `nativeUnits`/`nativeCaps` 两排。
