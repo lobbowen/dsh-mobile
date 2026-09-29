@@ -137,6 +137,9 @@ base64 -w0 keys/release.keystore > /tmp/ks.b64
 - 滚动别名上的**历史资产**：`app-debug.apk` 这个名字在形态收口（AUD-G33）之前一直是 latest 的资产名，
   线上那份 debug 形态的包要等写 latest 的三条链路里任意一条下一次真跑完才被 `--prune '^app-debug\.apk$'` 清掉。
   在那之前，按旧地址取包的人拿到的仍是 debuggable 包 —— 三个写者都已判形态，所以这是**投递滞后**，不是判定缺口。
+  线上现读（2026-09-29 05:2x，`GET /releases/tags/apk-latest`）：资产 594507819 `app-debug.apk`（53 254 712 字节，
+  digest `sha256:8329235acf2f…`，2026-09-28T04:39:35Z 上传）与 594507888 `version.json` 仍是 latest 的全部内容，
+  即 prune 从没执行过 —— 它的首次真执行要等 build-apk run 36513213633（head `ee1bab3a`）走到 publish 步骤。
 - `fast-apk` 的 release 控件构建**带着稳定签名**（2026-09-29 run 36490042734 读到 `[lobos-signing] 使用稳定签名`），
   但它只用来验形态，不投递；若哪天 fast-apk 撤掉 keystore，同一条会出 `app-release-unsigned.apk`——形态照样读得出，
   只是不是可投递的发布包。可投递的 release 包仍只由 build-apk / release-admin 产，而那两条要人按。
