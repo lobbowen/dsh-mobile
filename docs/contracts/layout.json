@@ -369,6 +369,7 @@
     "gate-scan.js": "cross",
     "delivery-gate.js": "cross",
     "publish-userland-manifest.js": "cross",
+    "check-userland-manifest-drift.js": "cross",
     "build-userland-pnpm.sh": "cross",
     "build-userland-jq.sh": "cross",
     "userland-verify.json": "cross",

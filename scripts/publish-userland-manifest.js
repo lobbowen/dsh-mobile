@@ -17,8 +17,9 @@
 // 发布前**自检**：用焊在 APK 的那把公钥验一遍，不配对就**硬失败** —— 与内核 OTA 的
 //   verify-ota-anchor.sh 同一条纪律（发一个设备验不过的清单 = 假装发布成功）。
 //
-// 用法：node scripts/publish-userland-manifest.js <dist目录> <输出目录> <私钥> [channel]
+// 用法：node scripts/publish-userland-manifest.js <dist目录> <输出目录> <私钥> [channel] [--project]
 //   env: USERLAND_BASE_URL（缺省 https://hubcdn.zll.ink）、GITHUB_RUN_NUMBER（进版本号）
+//   --project：只打 tools 投影到 stdout（不签名、不读私钥），供漂移对照用
 // ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
@@ -27,10 +28,13 @@ const cp = require('node:child_process');
 const crypto = require('node:crypto');
 
 const ROOT = path.resolve(__dirname, '..');
-const DIST = process.argv[2] || 'dist';
-const OUT = process.argv[3] || 'release';
-const KEY = process.argv[4] || 'keys/ota-private.pem';
-const CHANNEL = process.argv[5] || 'canary';
+// 旗标先摘掉再按位置取参数：`--project` 落到 OUT 那一格上，等于让同一个脚本的两种用法互相顶位。
+const POS = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const PROJECT_ONLY = process.argv.includes('--project');
+const DIST = POS[0] || 'dist';
+const OUT = POS[1] || 'release';
+const KEY = POS[2] || 'keys/ota-private.pem';
+const CHANNEL = POS[3] || 'canary';
 const BASE = (process.env.USERLAND_BASE_URL || 'https://hubcdn.zll.ink').replace(/\/+$/, '');
 const PUBKEY = path.join(ROOT, 'container', 'app', 'src', 'main', 'assets', 'ota-public.pem');
 const VERIFY = path.join(__dirname, 'userland-verify.json');
@@ -189,6 +193,13 @@ function main() {
     if (!t.name || !t.version || !t.sha256) throw new Error('件缺字段(name/version/sha256): ' + JSON.stringify(t).slice(0, 120));
   }
   assertNameUniqueness(tools);
+  // `--project`：只输出「这份代码现在声明什么」（tools 投影），不签名、不落盘、不读私钥。
+  // 住在这里的理由：投影的组装口必须与发布的组装口是**同一个**，否则漂移对照比的是两把尺子，
+  // 线上缺一格时对照自己也可能缺一格 —— 那就是又一处空转门禁（scripts/check-userland-manifest-drift.js 只做比较）。
+  if (PROJECT_ONLY) {
+    process.stdout.write(JSON.stringify(tools, null, 2) + '\n');
+    return;
+  }
   const man = {
     schema: 1,
     channel: CHANNEL,
