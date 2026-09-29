@@ -89,6 +89,10 @@ locale 空、os.cpus() 返回 0、/tmp 不可写）。逐条修会修成"补丁"
 1. **APK ＝ 这套 OS 的运行时环境本体**，不是一个「引导器/中转站」。基础运行时（**node · python · go · java**）
    **打进 APK**：可执行/可 dlopen 的进 `jniLibs`（`nativeLibraryDir` 是 W^X 下唯一可 `execve`/`dlopen` 的通道），
    纯数据（npm 资产、python stdlib 的 `.py`、site-packages）进 `assets`。装完即自足、离线可用。
+   **（勘误 2026-09-30）**：这里举的「npm 资产」已不成立 —— npm 是**工具**、不是运行时本体，它与
+   pnpm·git·jq·curl·sqlite3 同级由 C 自己的签名清单投放，APK 内**不留** `assets/npm/`（投放脚本已删，
+   `scripts/verify-apk-native.sh` 第 6 格反向判红：随包那份与清单那份是两本账，留着就是工程债务）。
+   本条今天真正随 APK 的纯数据是 CA bundle 与供给通道锚/信任根（`assets/supply/`）。
    ⇒ 判据：**运行时从网络取**即形态错误（我曾在 python 上犯过：推「前缀路线」把运行时交给通道）。
 2. **工具集的落点在「属于 APK 的系统层」**（`$PREFIX`＝`files/usr`），但**不打包**：由环境自己按需装进去、
    随环境自适应、能自更新；**内核检测并触发**升级，面板可见。像电脑：有了运行时就装工具。

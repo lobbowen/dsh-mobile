@@ -57,7 +57,8 @@ lobos/
 |---|---|---|
 | 源码 | `container/**` `programs/**` `scripts/**` `docs/**` | ✅ |
 | 构建产物 | `container/app/build/`、`.gradle/`、`container/engine/node_modules/`、`programs/console/ui/{dist,node_modules}/` | ❌ gitignore |
-| 运行时资产 | `container/app/src/main/assets/{npm,node-bin}/` | ❌ 可重建 |
+| 原生件（构建现编） | `container/app/src/main/jniLibs/`（`libnode.so` + `liblobos*.so`）、`container/app/src/main/assets/supply/`（通道锚与信任根，随 APK 冻结） | ❌ jniLibs 可重建 |
+| C 层工具（npm·pnpm·git·jq·curl·sqlite3…） | 设备上 `$PREFIX/lib/toolchain/<name>/`，真名链接在 `$PREFIX/bin/` | ❌ 不在 git、也不在 APK —— 由签名清单投放，随包那份是第二事实源 |
 | Program 投递产物 | `release/`、`feed/` | ❌ |
 | **秘密** | `<filesDir>/.secrets/`（**仓库之外**）、`keys/` | ❌ 绝不入库 |
 | **发布物** | GitHub Release：`node-runtime-<ver>-<abi>`、`apk-latest`、`program-*` | 不入 git |

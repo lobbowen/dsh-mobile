@@ -14,8 +14,6 @@ const obj = writeRuntimeJson({
   home,
   nodePath: '/data/app/node/24.21.0/node',
   nodeBinDir: '/data/app/node/24.21.0',
-  npmPath: '/data/app/node/24.21.0/npm',
-  npmEntry: '/data/app/node/24.21.0/npm-cli.js',
   prefix: '/data/user/0/x/files/usr',
   minNode: 'v24.12.0',
 });
@@ -23,21 +21,19 @@ const obj = writeRuntimeJson({
 check('schema = 2（对齐内核 SUPPORTED_SCHEMA）', obj.schema === 2 && SCHEMA === 2);
 check('含 nodePath', obj.nodePath === '/data/app/node/24.21.0/node');
 check('含 nodeBinDir', obj.nodeBinDir === '/data/app/node/24.21.0');
-check('含 npmPath', obj.npmPath === '/data/app/node/24.21.0/npm');
-// npmEntry = npm-cli.js 绝对路径（schema 2 新增可选键，内核据此 node 代跑 npm）。
-check('含 npmEntry', obj.npmEntry === '/data/app/node/24.21.0/npm-cli.js');
+// npm 在这份契约里**没有键**（归口 C 清单、按裸名从 PATH 兑现）：写出来就算宿主代跑回潮。
+check('不含任何 npm 键', !Object.keys(obj).some((k) => /npm/i.test(k)), Object.keys(obj).join(','));
 // prefix = $PREFIX 根（内核投放单元的唯一取件路径）。
 check('含 prefix', obj.prefix === '/data/user/0/x/files/usr');
 check('含 minNode', obj.minNode === 'v24.12.0');
 check('含 writtenBy', obj.writtenBy === 'lobos-os');
 
 const read = readRuntimeJson(home);
-check('读回 object 与写入一致', read && read.schema === 2 && read.nodePath === obj.nodePath && read.npmEntry === obj.npmEntry);
+check('读回 object 与写入一致', read && read.schema === 2 && read.nodePath === obj.nodePath && read.prefix === obj.prefix);
 
-// 未投放 npm / 旧容器无 $PREFIX（可选键）时**省略**该键而非写 null：内核按缺失键降级。
-const objNoEntry = writeRuntimeJson({ home, nodePath: '/x/node', nodeBinDir: '/x', npmPath: '/x/npm' });
-check('缺省 npmEntry 时不写该键', !('npmEntry' in objNoEntry));
-check('缺省 prefix 时不写该键', !('prefix' in objNoEntry));
+// 旧容器无 $PREFIX（可选键）时**省略**该键而非写 null：内核按缺失键降级。
+const objMinimal = writeRuntimeJson({ home, nodePath: '/x/node', nodeBinDir: '/x' });
+check('缺省 prefix 时不写该键', !('prefix' in objMinimal));
 
 // schema 不符抛错
 const badPath = path.join(home, 'supervisor', 'runtime.json');

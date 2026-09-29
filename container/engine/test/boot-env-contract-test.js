@@ -98,6 +98,10 @@ check('NODE_PATH 双段次序（programDir 前 + 全局前缀目录为第二段�
   /put\(\s*"NODE_PATH"[\s\S]{0,260}?programDir[\s\S]{0,200}?NodeProvisioner\.globalNodeModules\(/.test(guest));
 check('boot-fixture.js NODE_PATH 双段次序（programDir 前）',
   /NODE_PATH:\s*\[\s*path\.join\(programDir,\s*'node_modules'\),\s*path\.join\(o\.sandboxHome,\s*'node_modules'\)/.test(boot));
+// ENV-5 的同一形状要扫遍每个消费者：旧第二段 File(home,"node_modules") 指向全仓无人创建的目录。
+const ORPHAN_NODE_PATH = /File\(\s*(?:i\.)?root\.home,\s*"node_modules"\s*\)/;
+check('没有任何树根把 NODE_PATH 指回无人创建的 filesDir/node_modules（含探针）',
+  !ORPHAN_NODE_PATH.test(guestSrc), 'guest 侧命中=' + ORPHAN_NODE_PATH.test(guestSrc));
 
 // 命令形态：两侧都是 [nodeBin, entry, 'daemon']（探针模式仅生产有，不比对）。
 check('GuestAdapter command = nodeBin + entry + daemon',
@@ -110,9 +114,9 @@ check('GuestAdapter 端口常量齐备（36360 控制面 / 3080 探针）',
 check('InstanceHost 不再自带端口常量（读 GuestAdapter）',
   !/const val (CONSOLE_PORT|PORT) =/.test(runtimeSrc) && /GuestAdapter\.CONSOLE_PORT/.test(runtimeSrc));
 
-// ── 判定 4：环境装配的触发点与唯一入口（债表 ENV-1 / ENV-3）──
+// ── 判定 4：环境装配的触发点与唯一入口（债表 ENV-1）──
 //
-// 修的是「能力长在某个消费者的路径上」：$PREFIX、随包 npm、信任根重播、C 层供给过去只在
+// 修的是「能力长在某个消费者的路径上」：$PREFIX、信任根重播、C 层供给过去只在
 // InstanceHost.bootProgramOnce 里装配 —— 没有 Program、或内核被杀掉时环境就是空的，
 // 第二个住户永远等不到。现在触发点挂在「宿主就位」这条边上，本体住 lobos/os/RuntimeEnvironment。
 //
@@ -120,17 +124,28 @@ check('InstanceHost 不再自带端口常量（读 GuestAdapter）',
 //   a) 从 RuntimeEnvironment 删掉任一供给件调用 → 断言 1 红（本体不是空壳）；
 //   b) 从 OsHostService 删掉 ensure 调用 → 断言 2 红（触发点回退到只有启动链）；
 //   c) 在 InstanceHost 里重新内联 PrefixProvisioner.provision( → 断言 3 红（装配点不许再分叉）；
-//   d) 把 linkNpm 改成写包装脚本 → 断言 4 红（exec-path.c:8-9 定罪的「中间多了一层」回潮）。
+//   d) 把 SupplyProvisioner.linkEntry 改成写包装脚本 → 断言 4 红（exec-path.c:8-9 定罪的
+//      「中间多了一层」回潮）；
+//   e) 在 APK 侧重新引入 npm 面（linkNpm / ensureNpm / LOBOS_NPM_ENTRY / runtime.json 的 npm 键）
+//      → 断言 5 红（npm 与 git/curl 同级归口 C 清单，宿主代跑形状不再存在）；
+//   f) 把收尾换回 `append(ctx, "supply", true, "C 层供给完成：就位 N 件")` → 断言 6 红
+//      （聚合的就位数不是对账：声明 5 件、可用 4 件时它仍写 OK）；
+//   g) 让 marker 命中分支重新只 `okCount++` 而不重申真名入口 → 断言 7 红
+//      （件在磁盘上 ≠ 按真名调得到；建链只发生在新落位那趟）。
 const HOST_KT = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'lobos', 'lifecycle', 'OsHostService.kt');
 const PREFIX_KT = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'lobos', 'runtime', 'PrefixProvisioner.kt');
+const SUPPLY_KT = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'lobos', 'runtime', 'SupplyProvisioner.kt');
+const NODE_KT = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'lobos', 'runtime', 'NodeProvisioner.kt');
 const hostSrc = fs.readFileSync(HOST_KT, 'utf8');
 const prefixSrc = fs.readFileSync(PREFIX_KT, 'utf8');
+const supplySrc = fs.readFileSync(SUPPLY_KT, 'utf8');
+const nodeSrc = fs.readFileSync(NODE_KT, 'utf8');
 
-// 供给件的三个真实调用（provision / ensureNpm / SupplyProvisioner.ensure）。
+// 供给件的三个真实调用（provision / ensureEnvShim / SupplyProvisioner.ensure）。
 // 用同一组正则同时判「本体里有」与「InstanceHost 里没有」，两侧对照组共用一把尺子。
 const SUPPLY_CALLS = [
   /\bPrefixProvisioner\.provision\(/,
-  /\bNodeProvisioner\.ensureNpm\(/,
+  /\bNodeProvisioner\.ensureEnvShim\(/,
   /\bSupplyProvisioner\.ensure\(/,
 ];
 check('RuntimeEnvironment 真的调用三个供给件（搬家不是空壳，防空转）',
@@ -142,17 +157,71 @@ check('InstanceHost 不再直接驱动供给件（装配点唯一 = RuntimeEnvir
   SUPPLY_CALLS.every((re) => !re.test(runtimeSrc)),
   SUPPLY_CALLS.filter((re) => re.test(runtimeSrc)).map((re) => re.source).join(', '));
 
-const linkNpmAt = prefixSrc.indexOf('fun linkNpm(');
-const linkNpmEnd = prefixSrc.indexOf('\n    fun ', linkNpmAt + 1);
-const linkNpmBody = linkNpmAt < 0 ? '' : prefixSrc.slice(linkNpmAt, linkNpmEnd > 0 ? linkNpmEnd : prefixSrc.length);
-check('npm 真名 = $PREFIX/bin 下的符号链接，不是包装脚本（ENV-3）',
-  /const val NPM_BIN_NAME = "npm"/.test(prefixSrc) &&
-    linkNpmBody.includes('Os.symlink(target, link.absolutePath)') &&
+// C 层件（含 npm）的真名兑现只有一处：SupplyProvisioner.linkEntry。
+const linkEntryAt = supplySrc.indexOf('private fun linkEntry(');
+const linkEntryEnd = supplySrc.indexOf('\n    fun ', linkEntryAt + 1);
+const linkEntryBody = linkEntryAt < 0 ? '' : supplySrc.slice(linkEntryAt, linkEntryEnd > 0 ? linkEntryEnd : supplySrc.length);
+check('$PREFIX/bin 下的真名 = 符号链接，不是包装脚本（判据 D）',
+  linkEntryBody.includes('Os.symlink(entry.absolutePath, link.absolutePath)') &&
     // 包装脚本 = exec-path.c:8-9 已定罪的「中间多了一层」，一次落盘写入都不许有
-    !/writeText|outputStream|#!\//.test(linkNpmBody),
-  'linkNpm 定位=' + linkNpmAt + ' 体长=' + linkNpmBody.length);
-check('RuntimeEnvironment 用 linkNpm 兑现 npm 真名（不是只在 npmEntry 上报成功）',
-  /PrefixProvisioner\.linkNpm\(/.test(envSrc));
+    !/writeText|outputStream|#!\//.test(linkEntryBody),
+  'linkEntry 定位=' + linkEntryAt + ' 体长=' + linkEntryBody.length);
+check('APK 侧不留 npm 面（归口 C 清单：解包/建链/自造键/契约键四处全零命中）',
+  !/fun linkNpm|NPM_BIN_NAME/.test(prefixSrc) &&
+    !/fun ensureNpm\(/.test(nodeSrc) &&
+    !/LOBOS_NPM_ENTRY/.test(guestSrc) &&
+    !/"npmPath"|"npmEntry"/.test(runtimeSrc),
+  'linkNpm=' + /fun linkNpm/.test(prefixSrc) + ' ensureNpm=' + /fun ensureNpm\(/.test(nodeSrc) +
+    ' NPM_ENTRY 键=' + /LOBOS_NPM_ENTRY/.test(guestSrc) + ' 契约键=' + /"npmPath"|"npmEntry"/.test(runtimeSrc));
+
+// 供给收尾的真尺（DS-9 设备那半）：分母是**清单声明数**，不是这次运气装上几件；
+// 不平要写「不平」，且 ok 位必须是算出来的变量 —— 聚合的「就位 N 件」在 4/5 时仍报 OK。
+const SUPPLY_RECON = [
+  /= tools\.length\(\)/,
+  /"supply", balanced,/,
+  /balanced = shortPieces\.isEmpty\(\)/,
+  /C 层供给对账不平/,
+];
+const supplyReconciles = (src) => SUPPLY_RECON.every((re) => re.test(src));
+check('C 层供给收尾按「声明数 vs 可用数」对账，且不平才红',
+  supplyReconciles(supplySrc) && !/append\(\s*ctx, "supply", true,/.test(supplySrc),
+  SUPPLY_RECON.map((re) => re.source + '=' + re.test(supplySrc)).join(' ') +
+    ' 写死 true 的收尾=' + /append\(\s*ctx, "supply", true,/.test(supplySrc));
+const OLD_AGGREGATE = [
+  'val tools = manifest.optJSONArray("tools")',
+  'var okCount = 0',
+  'RuntimeDiagnostics.append(ctx, "supply", true, "C 层供给完成：就位 " + okCount + " 件", base)',
+  'return okCount',
+].join('\n');
+check('对照组：旧的聚合收尾被同一把尺子判红（尺子不是恒真）', !supplyReconciles(OLD_AGGREGATE),
+  SUPPLY_RECON.map((re) => re.source + '=' + re.test(OLD_AGGREGATE)).join(' '));
+
+// 「投放≠能力」的最后一格：真名的判据是 $PREFIX/bin 那条链，marker 命中也要重申一次。
+const ensureEntryCalls = (supplySrc.match(/ensureEntry\(ctx,/g) || []).length;
+const linkEntryCalls = (supplySrc.match(/linkEntry\(ctx,/g) || []).length;
+check('真名入口在两条落位路径上都重申，建链出口唯一 = linkEntry',
+  ensureEntryCalls >= 2 && linkEntryCalls === 1,
+  'ensureEntry(ctx, 调用=' + ensureEntryCalls + ' linkEntry(ctx, 调用=' + linkEntryCalls);
+check('落盘件的可执行位按内容判且两条路径都覆盖（ENV-25：解包 apply / 命中 repair）',
+  /ExecBits\.apply\(out\)/.test(supplySrc) && /ExecBits\.repair\(root\)/.test(supplySrc),
+  'apply=' + /ExecBits\.apply\(out\)/.test(supplySrc) + ' repair=' + /ExecBits\.repair\(root\)/.test(supplySrc));
+
+// ENV-25 的第三种形状：按**名单**给位（旧 PrefixProvisioner 的 `if (executable) dst.setExecutable(...)`）。
+// 今天对 bash/rg 恰好正确，换一个名单外却可执行的件就静默不可用 —— 裁判只留 ExecBits 一个。
+const KT_ROOT = path.join(ROOT, 'container', 'app', 'src', 'main', 'java');
+const ktFiles = [];
+(function walkKt(dir) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) walkKt(p); else if (e.name.endsWith('.kt')) ktFiles.push(p);
+  }
+})(KT_ROOT);
+const xCallers = ktFiles
+  .filter((f) => /setExecutable\(/.test(fs.readFileSync(f, 'utf8')))
+  .map((f) => path.relative(ROOT, f).split(path.sep).join('/'));
+check('可执行位裁判唯一 = ExecBits（其余 Kotlin 出现 setExecutable 即把名单/目录猜位装回来）',
+  xCallers.length === 1 && xCallers[0] === 'container/app/src/main/java/lobos/runtime/ExecBits.kt',
+  '命中文件=' + xCallers.join(',') + '（kt 文件共 ' + ktFiles.length + ' 个）');
 
 // ── 判定 5：树根收编 —— 环境语义只有一份，所有进程树根共享（债表 ENV-2 / ENV-4）──
 //

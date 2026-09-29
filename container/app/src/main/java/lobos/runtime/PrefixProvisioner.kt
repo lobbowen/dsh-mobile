@@ -32,9 +32,6 @@ object PrefixProvisioner {
      *  于是 npm 生命周期脚本、`#!/usr/bin/env node` 的 shim、以 node 自起的 MCP server 一律起不来。 */
     const val NODE_BIN_NAME = "node"
 
-    /** npm 在 $PREFIX/bin 下的真名（债表 ENV-3）：环境里按名字调 npm 的载体。 */
-    const val NPM_BIN_NAME = "npm"
-
     /** CA bundle 的文件名与 assets 名（信任根随产品走，见 provision 里的说明）。 */
     const val CA_BUNDLE_NAME = "ca-bundle.pem"
     private const val CA_BUNDLE_ASSET = "ca-bundle.pem"
@@ -63,7 +60,10 @@ object PrefixProvisioner {
                 if (!dst.isFile || dst.length() != src.length()) {
                     try {
                         src.copyTo(dst, overwrite = true)
-                        if (executable) dst.setExecutable(true, false)
+                        // 该不该有 x 由**件自己**判（ELF∨shebang），不由这张名单判 ——
+                        //   「按目录/名单猜执行位」是 ENV-25 定罪的第三种形状：今天对 bash/rg 恰好对，
+                        //   换一个名单外的可执行件就静默不可用。裁判只有 ExecBits 一个。
+                        if (executable) ExecBits.apply(dst)
                     } catch (_: Exception) { dst.delete(); continue }
                 }
                 ready += name
@@ -105,30 +105,11 @@ object PrefixProvisioner {
         }
     }
 
-    /** npm 以**符号链接**进 $PREFIX/bin（npm 是纯 JS，可执行性来自解释器，不需要也不许再包一层
-     *  入口脚本 —— 逐件包装是 `d1/exec-path.c:8-9` 定罪过的「中间多了一层」）。目标目录名带版本号，
-     *  故每次装配按调用方现算出的路径复核链接。shebang `#!/usr/bin/env node` 由 D1 按 PATH 兑现。 */
-    fun linkNpm(ctx: Context, npmCli: File?): File? {
-        if (npmCli == null || !npmCli.isFile) return null
-        binDir(ctx).mkdirs()
-        val link = File(binDir(ctx), NPM_BIN_NAME)
-        val target = npmCli.absolutePath
-        val current = try { Os.readlink(link.absolutePath) } catch (_: Exception) { null }
-        if (current == target) return link
-        return try {
-            link.delete()
-            Os.symlink(target, link.absolutePath)
-            link
-        } catch (_: Exception) {
-            null
-        }
-    }
-
     fun bashBin(ctx: Context): File? = File(binDir(ctx), "bash").takeIf { it.isFile }
 
-    /** 供诊断比对：$PREFIX 里应当存在的条目（缺哪个 = 哪个能力没落地）。
-     *  npm 不在这里：它的来源是 assets 解包后的 npm-cli.js，不是 nativeLibraryDir 的复制/链接，
-     *  混进同一张表会让「复制类缺件」与「解包类缺件」两种成因共用一个读数。npm 的读数单列
-     *  （linkNpm 的返回值，由 `lobos/os/RuntimeEnvironment` 上屏）。 */
+    /** 供诊断比对：$PREFIX 里**由本件播下**的条目（缺哪个 = 哪个能力没落地）。
+     *  npm 不在这里，也不在任何 C 层件：本表只覆盖 nativeLibraryDir 派生的复制/链接类与随包 assets，
+     *  C 层签名清单供给的件由 `SupplyProvisioner` 按「声明数 vs 可用数」自己对账 —— 两种成因的读数
+     *  混进同一张表，缺件时就无法指出是哪一条供给链断了。 */
     val expected: List<String> = BINS.map { it.second } + DEPS.map { it.second } + LIBS.map { it.second } + NODE_BIN_NAME + CA_BUNDLE_NAME
 }

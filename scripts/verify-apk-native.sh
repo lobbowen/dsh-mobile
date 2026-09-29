@@ -16,7 +16,7 @@
 #   3) 自有小件必产（liblobosflock/liblobosposix/liblobosptyprobe）
 #   4) $PREFIX 依赖件必产（libbash/liblobosrg，无回退路径）
 #   5) liblobospty.so 软失败 —— 缺席只是终端 PTY 降级，::warning::
-#   6) assets/npm/npm.zip 与 version.txt   —— 缺了面板装不了任何 Agent
+#   6) 不含 assets/npm（反向判定）—— npm 与 git/curl 同级，只由 C 层签名清单投放
 #   7) .github/native-assets.txt 逐资产（名字即判据数据，加资产不改这里）
 #   8) adb-client 逐个 JS + 件数与源码目录一致 —— ADR-0003 权限通道的字节
 #
@@ -182,20 +182,22 @@ while read -r TIER LIB _ID; do
 done < "$CAPS"
 [ "$CAP_N" -gt 0 ] || { echo "[error] $CAPS 里一条小件都没有 —— 循环会什么都不检查就放行。"; exit 1; }
 
-# --- npm 基础环境（缺了面板装不了任何 Agent，核心能力不是可选增强）---
+# --- npm 归口（反向判定：APK 里不许有）---
+# 随包 npm 与清单里的 npm 是同一能力的两份来源，谁生效取决于取件顺序，而 APK 那份永远不随
+# 清单更新（加件/升级只发清单、Program 与 APK 都不动是这条链的立身之本）。留它就是工程债务。
 echo
-echo "--- npm 基础环境 ---"
-if has_prefix 'assets/npm/npm.zip'; then
-  # 字节数只是给人看的读数，取值同样重读包、拿不到就打 ?，不参与判定。
-  SIZE="$(unzip -v "$APK" 2>/dev/null | { grep -F 'assets/npm/npm.zip' || true; } | head -1 | awk '{print $1}')"
-  echo "[ok] 含 assets/npm/npm.zip（${SIZE:-?} 字节）"
-  if has_prefix 'assets/npm/version.txt'; then
-    echo "[ok] 含 assets/npm/version.txt"
+echo "--- npm 归口（必须为空）---"
+if has_prefix 'assets/npm/'; then
+  if [ "$REPORT" = "1" ]; then
+    echo "  [FAIL] 含 assets/npm —— npm 只由 C 层清单投放（scripts/build-userland-npm.sh）"
+    zipinfo -1 "$APK" 2>/dev/null | { grep '^assets/npm' || true; } | sed 's/^/    /'
   else
-    note_missing "assets/npm/version.txt" "npm.zip 在但版本戳缺失（解包版本无从确定）"
+    echo "::error title=APK 里留着 npm::assets/npm 在包内 —— npm 应与 git/curl 同级走 C 层签名清单，随包那份是不随清单更新的第二事实源。"
+    zipinfo -1 "$APK" 2>/dev/null | { grep '^assets/npm' || true; }
+    exit 1
   fi
 else
-  note_missing "assets/npm/npm.zip" "面板无法安装任何 Agent。常见原因：Stage pinned npm 步骤（scripts/stage-npm-assets.sh）被删/改名。"
+  echo "[ok] APK 内无 assets/npm（npm 走 C 清单）"
 fi
 
 # --- 原生资产清单：名字住在 .github/native-assets.txt，这里不硬编码 ---

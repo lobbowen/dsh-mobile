@@ -32,8 +32,6 @@ const { writeRuntimeJson } = require('../src/runtime-json');
  *  - programVersion: CURRENT 指向的版本
  *  - nodeBin: node 可执行文件绝对路径
  *  - nodeBinDir: node 所在目录（注入 PATH）
- *  - npmPath: npm 可执行绝对路径
- *  - npmEntry?: npm-cli.js 绝对路径（容器内嵌 npm 时投放，内核代跑）
  *  - uiDir?: 面板产物目录（默认 <program>/ui/dist）
  *  - cacheDir?: TMPDIR（生产恒 = cacheDir；桌面夹具缺省回落 os.tmpdir()，
  *               但键必须存在 —— 与 RuntimeEnvironment.treeRootEnv 同构）
@@ -48,8 +46,6 @@ function bootKernel(o) {
     home: o.sandboxHome,
     nodePath: o.nodeBin,
     nodeBinDir: o.nodeBinDir,
-    npmPath: o.npmPath,
-    npmEntry: o.npmEntry,
     writtenBy: 'lobos-os',
   });
 
@@ -74,7 +70,7 @@ function bootKernel(o) {
     TMPDIR: o.cacheDir || os.tmpdir(),
     // D1 Linux 语义：与生产树根装配件同构（bionic 只认 C.UTF-8）。
     LANG: 'C.UTF-8',
-  }, o.npmEntry ? { LOBOS_NPM_ENTRY: o.npmEntry } : {}, o.extraEnv || {});
+  }, o.extraEnv || {});
 
   const child = spawn(o.nodeBin, [entry, 'daemon'], {
     env, cwd: programDir, stdio: ['ignore', 'pipe', 'pipe'],

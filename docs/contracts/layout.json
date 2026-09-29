@@ -312,7 +312,6 @@
     "container/app/build/",
     ".gradle/",
     "container/engine/node_modules/",
-    "container/app/src/main/assets/npm/",
     "container/app/src/main/assets/node-bin/",
     "release/",
     "feed/"
@@ -330,7 +329,6 @@
     "build-apk-local.sh": "L0",
     "keygen-android-keystore.sh": "L0",
     "inject-libcxx-into-apk.py": "L0",
-    "stage-npm-assets.sh": "L0",
     "build-program-bundle.sh": "L1",
     "keygen.sh": "L1",
     "sign-program-manifest.js": "L1",
@@ -342,7 +340,7 @@
     "debt-gate.js": "cross",
     "run-engine-tests.sh": "L0",
     "build-native-capabilities.sh": "L0",
-    "build-userland-sqlite3.sh": "L1",
+    "build-userland-sqlite3.sh": "cross",
     "verify-userland-artifact.sh": "cross",
     "package-userland.sh": "cross",
     "bionic-compat.c": "L0",
@@ -374,7 +372,9 @@
     "build-userland-jq.sh": "cross",
     "userland-verify.json": "cross",
     "build-userland-git.sh": "cross",
-    "build-userland-curl.sh": "cross"
+    "build-userland-curl.sh": "cross",
+    "build-userland-npm.sh": "cross",
+    "read-userland-entry.sh": "cross"
   },
   "deliveryLayers": {
     "_note": "交付维（六层，与上面的发布维 layers 正交）：层=职责，上面 layers=车辆。物理组织必须同时满足两轴。这里每条 paths 是**目标位**；尚未达成的进 deliveryDebt（有到期日、修好必须销账，否则门禁红）。",
@@ -396,7 +396,7 @@
         "container/app/src/main/assets/node-versions.json"
       ],
       "shape": "内容按**性质**分裂：运行时（node·python·go·java）随 APK 冻结（jniLibs+assets）；工具（npm·pnpm·git·jq·sqlite3·rg·curl·coreutils）由环境自己装进 $PREFIX、自适应、自更新，内核检测并触发",
-      "_bootstrap": "C 通道的**自举种子**：npm（构建期由 CI 注入 assets/npm，**仓内不存在该目录**，故只在此说明不进 paths）—— 装 pnpm/git 等都要先有它，故它必须随 APK 落地；这是**设计**，不是把工具冻结在 APK。其余工具（pnpm/git/jq/sqlite3/rg/curl/coreutils）一律由环境自己装进 $PREFIX。",
+      "_bootstrap": "C 通道**没有自举种子**。先前那句「npm 必须随 APK 落地，装 pnpm/git 都要先有它」是错的：取回/校验/解包/落位/建链全由 APK 里的原生供给件完成，一件运行时都不依赖。所以 npm 与 pnpm/git/jq/sqlite3/curl 走同一条口（构建→打包→对象存储→签名清单），APK 里不留任何工具（`scripts/verify-apk-native.sh` 第 6 格反向判红）。判据：加件或升级只发清单 —— APK 与内核都不动（真机 2026-09-30 现读：装机 `$PREFIX/bin` 的 git/jq/sqlite3/curl 四颗链接都由清单建立）。",
       "_where": "C 是**共享层**（服务所有产品，与产品无关）。供给机制住 APK 侧（**必须 Android 原生实现：Kotlin/Android API —— 取回/校验/解包/落位/建链，不得依赖 node 或任何运行时**）；检测与触发归原生（lobos/native + lobos/runtime）；console 只做只读展示。判据：加/更新一件工具**不需要内核 OTA、不需要 APK 更新**（只发清单）。"
     },
     "D1": {

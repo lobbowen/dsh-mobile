@@ -10,7 +10,7 @@ import lobos.runtime.SupplyProvisioner
 import java.io.File
 
 /**
- * 运行环境是 OS 自己的事实：$PREFIX 的能力件、随包 npm、信任根重播、C 层签名清单供给，
+ * 运行环境是 OS 自己的事实：$PREFIX 的能力件、信任根重播、C 层签名清单供给，
  * 由宿主就位这一条边装配，与「哪颗 Program 装上了」无关（债表 ENV-1）。
  *
  * 先前这些只长在一颗 Program 的启动路径上（`InstanceHost.bootProgramOnce` 内）：没有 Program
@@ -24,13 +24,13 @@ object RuntimeEnvironment {
         val nodeBin: File,
         val prefixReady: List<String>,
         val prefixMissing: List<String>,
-        val npmEntry: File?,
-        val npmBin: File?,
         val envShim: File?,
         val npmrc: File?,
     ) {
-        /** 环境是否自洽：$PREFIX 无缺件，且 npm 在 `$PREFIX/bin` 有真名（ENV-3）。 */
-        val complete: Boolean get() = prefixMissing.isEmpty() && npmBin != null
+        /** 环境是否自洽：$PREFIX 的随包能力件无缺件。
+         *  C 层供给件（含 npm）不在这一格 —— 它们走 `SupplyProvisioner` 的「声明数 vs 可用数」对账，
+         *  把两条供给链的完整性混进一个布尔，缺件时就分不出是随包件没播还是清单没取。 */
+        val complete: Boolean get() = prefixMissing.isEmpty()
     }
 
     @Volatile private var cached: Snapshot? = null
@@ -175,21 +175,13 @@ object RuntimeEnvironment {
     private fun assemble(ctx: Context): Snapshot {
         val nodeBin = NativeAssetRegistry.resolve(ctx, NativeAssetRegistry.NODE)
 
-        // $PREFIX 是真名的家：bash/rg 复制、node 链接、libc++ 随附、CA 重播、npm 链接。
+        // $PREFIX 是真名的家：bash/rg 复制、node 链接、libc++ 随附、CA 重播。
         val ready = PrefixProvisioner.provision(ctx, nodeBin)
         val missing = PrefixProvisioner.expected - ready.toSet()
         RuntimeDiagnostics.append(
             ctx, "prefix", missing.isEmpty(),
             if (missing.isEmpty()) "\$PREFIX 能力件全就位" else "\$PREFIX 缺件：${missing.joinToString()}",
             PrefixProvisioner.root(ctx).absolutePath + " 已有=" + ready.joinToString()
-        )
-
-        val npmCli = NodeProvisioner.ensureNpm(ctx)
-        val npmBin = PrefixProvisioner.linkNpm(ctx, npmCli)
-        RuntimeDiagnostics.append(
-            ctx, "npm", npmBin != null,
-            if (npmBin != null) "npm 就位（\$PREFIX/bin/npm 可按名字调用）" else "npm 未就位 —— 仅影响 Agent 安装，内核照常运行",
-            (npmBin?.absolutePath ?: "无真名") + " → " + (npmCli?.absolutePath ?: "assets/npm 解包失败，详见 logcat")
         )
 
         val envShim = NodeProvisioner.ensureEnvShim(ctx)
@@ -217,6 +209,6 @@ object RuntimeEnvironment {
             }.start()
         }
 
-        return Snapshot(nodeBin, ready, missing.toList(), npmCli, npmBin, envShim, npmrc)
+        return Snapshot(nodeBin, ready, missing.toList(), envShim, npmrc)
     }
 }

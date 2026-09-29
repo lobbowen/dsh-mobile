@@ -31,7 +31,6 @@ object GuestAdapter {
         val uiDir: File,
         /** "声明即可、不要求此刻存在"的 L-D 垫片（缺席 ⇒ guest 侧逐字回退）。 */
         val flockNative: File,
-        val npmEntry: File?,
     )
 
     /** 最终交给 ProcessBuilder 的完整指令。command/cwd/env 一起进 golden 向量。 */
@@ -61,9 +60,10 @@ object GuestAdapter {
     fun probePlan(root: RuntimeEnvironment.TreeRoot, script: File, inheritedPath: String?): BootPlan = BootPlan(
         command = listOf(root.nodeBin.absolutePath, script.absolutePath, "--port", PROBE_PORT.toString()),
         cwd = root.home,
-        env = RuntimeEnvironment.treeRootEnv(root, inheritedPath) + mapOf(
-            "NODE_PATH" to File(root.home, "node_modules").absolutePath,
-        ),
+        // 探针只要 [root] 的共享语义，**不追加 NODE_PATH**：先前这里补了一段 `filesDir/node_modules`，
+        // 而全仓没有任何代码创建那个目录 —— 与 ENV-5 定罪的旧第二段同一形状（指向不存在处的路径）。
+        // server.js 只 require 内置模块，模块解析路径对它不构成输入。
+        env = RuntimeEnvironment.treeRootEnv(root, inheritedPath),
     )
 
     /** 内核模式：共享树根语义 + console 的 `LOBOS_*` 申报。 */
@@ -98,9 +98,6 @@ object GuestAdapter {
             // flock(2) 原生绑定（fast-apk CI 现编进 jniLibs，见 docs/components/native.md）。
             // 文件缺席时垫片 dlopen 失败 ⇒ 逐字回退 vendor 原始语义，故只是声明、不要求存在。
             put("LOBOS_FLOCK_NATIVE", i.flockNative.absolutePath)
-            // npm 入口的内核侧交接：这是**申报**，不是可用性判据 —— 按名字调用 npm 由
-            // $PREFIX/bin/npm 的真名兑现（PrefixProvisioner.linkNpm 建链，装配触发见 RuntimeEnvironment）。
-            i.npmEntry?.let { put("LOBOS_NPM_ENTRY", it.absolutePath) }
         },
     )
 }

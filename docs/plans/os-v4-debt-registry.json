@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "updated": "2026-09-29",
-  "note": "Lob OS 总施工图的机器可读债务台账；status ∈ pending|in-progress|done；D8 前必须全 done。 2026-09-29：新增 ENV-layer 组（运行环境层 §4/§4.1 全量入账）。",
+  "updated": "2026-09-30",
+  "note": "Lob OS 总施工图的机器可读债务台账；status ∈ pending|in-progress|done；D8 前必须全 done。 2026-09-29：新增 ENV-layer 组（运行环境层 §4/§4.1 全量入账）。 2026-09-30：ENV-layer 补 ENV-26（一件一入口 ⇒ npx 无真名）与 ENV-27（文档门不核验符号名空指）；ENV-1/2/3/5/6/8/19/20/22/25 与 DS-9 随「npm 归口 C 清单」重钉引用与状态。",
   "evidenceRule": "done 必须写 evidenceTier ∈ {static, ci, online, device}：static=只在仓内 grep/静态核对过；ci=CI 上跑过判据；online=交付面（CDN/Release/Workflow）线上现读过；device=真机读数过。未标 evidenceTier 的历史 done 项一律按 static 记账，**不得当作交付证据**（D24：原 115 个 done 里没有任何 online/device 档）。既有自由文本 `evidence` 字段记的是\"当初看到的现场\"，与 evidenceTier（这个 done 站得住到哪一层）是两回事，两者不得互相代替。本轮凡结论来自线上/真机的，都带 evidenceRef 写明现读时间与读数。",
   "items": [
     {
@@ -1516,12 +1516,13 @@
       "id": "DS-9",
       "desc": "C 层清单声明 pnpm（`provider: \"npm\"`、`pkg: @pnpm/exe.android-arm64`、47033992 字节、并随件下发 `verify` 判据「共享入口 $PREFIX/bin/pnpm 真能跑起来并打印版本 —— 文件在不算数」），而供给循环里**没有任何 provider 分支**：npm 投放的件没有 `url`，被 `url.isEmpty()` 直接 `continue` 掉，于是「清单声明 5 件」与「设备只装到 4 件」同时为真、且 `就位 4 件` 这行 OK 把它读起来像正常 —— 计数单位是「zip 件的落位数」，不是「清单声明的能力面」",
       "where": "container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt:257（`if (name.isEmpty() || url.isEmpty() || want.isEmpty()) continue`）；全文件 grep `provider` 零命中，仓内 Kotlin 侧 `pnpm` 零命中（定罪时的声明表 `scripts/userland-external-tools.json` 已于 2026-09-29 随本格修复删除；`pnpm` 现只在 scripts/build-userland-pnpm.sh / scripts/userland-verify.json / docs/adr/0009-delivery-layers.md）",
-      "action": "口径已定并落地（2026-09-29，纯发布面、零 Kotlin）：`scripts/build-userland-pnpm.sh` 取上游 `@pnpm/exe.android-arm64@12.7.0` 里的 ELF 进 `dist/bin/pnpm`（双钉 tarball 的 sha512 = 上游 packument 的 `dist.integrity`、件内 ELF 的 sha256），进 `build-userland.yml:48` 的矩阵 ⇒ 与其余四颗走**同一条口**：verify-artifact 判形态 → 打包成内容寻址 zip → 投对象存储 → 清单自然带 `url`/`sha256`/`entry=bin/pnpm`。那张「只声明、不投放」的外部件表连同发布器里的合并步一并删除。**另新立一扇读线上的门**：`scripts/delivery-gate.js` 见清单里有 tool 没有 `url` 即判红，且打出 `tools=N`（缺不再隐身，也不再靠人记得改）。①投放已走完（2026-09-30 run 36598918309，`publish=true channel=canary`，五条 build 腿 + manifest 腿全 success）⇒ 线上清单 `version=2026.09.29.145` 里这颗带上 `url`，读线上的门随之转绿。仍欠两步才算交付：②设备复点 `$PREFIX/bin/pnpm --version`；③「缺必须显形」的设备侧那半（`SupplyProvisioner.kt:257` 的静默 `continue` 不点名）归壳改动，与 npm/git 的 exec 位同批",
+      "action": "口径已定并落地（2026-09-29，纯发布面）：`scripts/build-userland-pnpm.sh` 取上游 `@pnpm/exe.android-arm64@12.7.0` 里的 ELF 进 `dist/bin/pnpm`，进 `build-userland.yml:52-54` 的矩阵 ⇒ 与其余各颗走**同一条口**；「只声明、不投放」的外部件表连同发布器里的合并步一并删除；`scripts/delivery-gate.js` 读线上清单，见 tool 没有 `url` 即判红并打出 `tools=N`。①**投放已走完**（2026-09-30 run 36598918309，`publish=true channel=canary`）⇒ 线上清单 `.145` 里这颗带上 `url`，读线上的门转绿。②**「缺必须显形」的设备侧那半本批已落地**（原写「归壳改动、与 npm/git 的 exec 位同批」，即在册 ENV-25 那一批）：`SupplyProvisioner.kt:283-296` 把「静默 continue」改成逐键点名缺的是 `name/url/sha256` 哪一个并计入 `shortPieces`；每一件各自包 try（`:374-375`）⇒ 一颗网络失败不再中断整轮；`marker` 命中也重申真名链接（`:315`）⇒「件在磁盘上但按真名调不到」不再算就位；收尾按「**清单声明数 vs 按真名可用数**」对账、不平即红且逐件点名（`:380-387`）。仍欠：③设备复点 `$PREFIX/bin/pnpm --version`（真机裸名读数）与 `npm --version`、`git clone` 同批；④这半 Kotlin 未经 CI 编译（ENV-25 同一批）。",
       "status": "in-progress",
       "evidenceTier": "device",
       "evidenceRef": "2026-09-29 13:2x 真机现读：设备副本清单 = 6970 字节 / `.142`，tools 里含 pnpm（provider=npm、sha256 `ce0b5e064552…`、带 verify.node 判据）；但 `run-as lobos.app ls -l files/usr/bin/pnpm` → 「No such file or directory」、`files/usr/lib/toolchain/pnpm` 目录不存在、marker 只有 `.curl.ok .git.ok .jq.ok .sqlite3.ok` 四个，同轮 diag 只有 `[OK] supply: C 层供给完成：就位 4 件`（FAIL 计数 0），`files/probe-journal.txt`（4606 字节）内 `grep -a pnpm` 零命中 ⇒ 那条 verify 判据从没为 pnpm 跑过。同日修后现读：`node scripts/delivery-gate.js` → `FAIL（1 项）— C（工具链清单） 线上清单声明的件没有取件 URL（设备永远不会装上它）：pnpm`，同行打出 `tools=5`（线上仍是 `.142` 那份旧清单，所以这条红得对）；上游侧现读：registry packument 的 `dist.integrity`=sha512 `gJTCsUbazAEbIMF9l2t+…`、tgz 成员为 `package/pnpm` 47033992 字节（由 tgz 前缀 inflate 读到的 tar 头），ELF 头 `e_type=3`(PIE)、`e_machine=183`(aarch64)、`PT_INTERP=/system/bin/linker64` ⇒ 动态 bionic 件。2026-09-30 投放后线上现读：清单 `.145` tools=5、这颗 `url=…/userland/userland-pnpm-12.7.0-8830e2a78936-android-arm64.zip`、`sha256=8830e2a78936063c…`、`entry=bin/pnpm`、`verify.node` 为裸名判据；实下载件本体 22,691,176 字节，其 sha256 与清单字段、与文件名里的内容哈希三者全等；件内 `bin/pnpm` 47,033,992 字节、sha256 `ce0b5e064552f60e…` 与在仓外独立取到的上游 ELF 逐字节全等；`node scripts/delivery-gate.js` → `声明键全部在线且身份干净`（rc=0）。**设备侧仍是旧状态**：复点未做 ⇒ 本格仍 in-progress",
       "workstream": "MAIN",
-      "updated": "2026-09-29"
+      "updated": "2026-09-30",
+      "note": "2026-09-30：本格从「发布面已闭环、设备侧仍隐身」推进到「发布面＋设备显形都落地」。**status 不转 done 的唯一理由**是真机读数：`.145` 清单投放在设备上的效果没读过（`ls -l files/usr/bin/pnpm`、`pnpm --version`、供给对账那一行的实际文案）。另记：这条对账只答「按真名调不调得到」，不跑清单里的 `tools[].verify` 能力判据 ⇒ 不替 ENV-6/ENV-8 关账。"
     },
     {
       "group": "delivery-surface",
@@ -1586,43 +1587,43 @@
       "group": "ENV-layer",
       "id": "ENV-1",
       "desc": "环境的生命周期只长在一颗 Program 的启动路径上：$PREFIX 装配与工具链供给在全仓各只有一个调用点，且都在同一个函数（bootProgramOnce）里 ⇒ console 未装/被杀时环境不在，第二个住户永远等不到环境",
-      "where": "搬家前唯一装配路径 = InstanceHost.kt:224 起（bootProgramOnce）内的 provision/npm/供给三块（现已删净）；现装配点 = RuntimeEnvironment.kt:175-221，触发点 = OsHostService.kt:93-106；PrefixProvisioner.kt:53-84（provision 本体）、:128-133（expected 对账表）；SupplyProvisioner.kt:24-25,37,198-211",
+      "where": "现装配点 = RuntimeEnvironment.kt:175-213（assemble 本体），触发点 = lifecycle/OsHostService.kt:93-106（handler.post 在 :97、`RuntimeEnvironment.ensure` 在 :99；注意本件在 `lobos/lifecycle/`，不在 runtime/）；PrefixProvisioner.kt:50-84（provision 本体）、:114（expected 对账表）；供给件 ensure = SupplyProvisioner.kt:232-391（对账收尾 :380-387）；InstanceHost 侧的另一个调用方 = :385。旧位置（随 S1/S2/B2 消失，行号为改前）：InstanceHost.kt:224 起的 bootProgramOnce 三块、旧 PrefixProvisioner.kt:53-84/:128-133、旧 SupplyProvisioner.kt:198-211（现 linkEntry 在 :215-228）",
       "action": "S1：新增 lobos/os/RuntimeEnvironment.kt，触发点搬到 OsHostService 的宿主挂点（与账本/注册同族路径）；两个 Provisioner 本身不重写，改由环境件调用。局部判据 V-0b（停掉 console 后 $PREFIX 仍在位）",
       "status": "done",
       "workstream": "W5",
-      "updated": "2026-09-29",
+      "updated": "2026-09-30",
       "evidenceTier": "static",
       "evidence": "现读（2026-09-29 S1）：新增 lobos/os/RuntimeEnvironment.kt（provision/ensureNpm/SupplyProvisioner.ensure 三个调用都在里面），OsHostService.kt:93-106 在「宿主就位」一次性块里 handler.post 触发装配；InstanceHost 里三个供给件调用已删净（grep 该文件：PrefixProvisioner.provision( / NodeProvisioner.ensureNpm( / SupplyProvisioner.ensure( 均 0 命中，只剩 root()/binDir()/bashBin() 这类纯路径声明）。boot-env-contract-test.js 判定 4 三条断言 25 passed 0 failed，并用四个受控突变逐一证明能红（删本体调用/删触发点/启动链重新分叉/npm 改包装脚本 → 各自 1 failed），突变后按 sha256 逐文件还原一致。",
-      "note": "局部判据 V-0b（停掉 console 后 $PREFIX 仍在位）是设备读数，未采 —— 本格关的是「只长在一颗 Program 的启动路径上」这个代码事实。本轮 Kotlin 未经编译验证（本地无 Android SDK，CI 是唯一编译器），推送与触发 CI 需逐次请示。"
+      "note": "局部判据 V-0b（停掉 console 后 $PREFIX 仍在位）已于 2026-09-29 真机复点（见方案 §9 与 project memory 的 V-0 读数）。**2026-09-30 B 批次对本格的连带影响**：assemble 里原先有一格 npm 解包＋建链（`NodeProvisioner.ensureNpm` → `PrefixProvisioner.linkNpm`），随「npm 归口 C 清单」整块删净 ⇒ 本格的「环境的生命周期只长在 OS 自己的一条边上」不变，但装配格从四格（provision/envShim/npm/供给 kick）变三格（provision/envShim/npmrc/供给 kick，见现读 :180-209），债表与契约里指向旧装配格序的引用一并重钉。推送与触发 CI 仍需逐次请示。"
     },
     {
       "group": "ENV-layer",
       "id": "ENV-2",
       "desc": "兼容语义的附着点错位：语义（LD_PRELOAD/CA/TMPDIR/SHELL/NODE_OPTIONS/PATH）写在 console 的启动装配里，另有 7 个树根各设自己的最小 env；同一份 baseEnv 有三份副本。env 沿进程树继承 ⇒ 附着单位本应是树根，不是单次调用",
-      "where": "语义唯一生产点 RuntimeEnvironment.kt:65-124（TreeRoot 数据 :45-55、Context→树根映射 :141/:144-158、按段去重 :128-133）；console 专属申报 GuestAdapter.kt:70-105；四个载荷树根消费者 InstanceHost.kt:415-425 与 :851-854、ProgramVerifier.kt:100-102、AdbClientRunner.kt:221-223（spawn 侧 :234/:274）；豁免在册 KillAudit.kt:28、InstanceHost.kt:537、NativePreparer.kt:336-338；门 boot-env-contract-test.js:74/:184/:191/:199-202。定罪时的旧位置（副本随 S2 删净，行号已消失）= 旧 GuestAdapter.kt:113-149/:154-170、旧 ProgramVerifier.kt:96-105、旧 AdbClientRunner.kt:216-226、旧 KillAudit.kt:25",
+      "where": "语义唯一生产点 RuntimeEnvironment.kt:65-124（TreeRoot 数据 :45-55、Context→树根映射 :141/:144-158、按段去重 :128-133）；console 专属申报 GuestAdapter.kt:70-105；四个载荷树根消费者 InstanceHost.kt:413-422（内核）与 :848-851（随包探针，剥垫片的理由在 RuntimeEnvironment.kt:42-43）、ProgramVerifier.kt:100-102、AdbClientRunner.kt:221-223（spawn 侧 :234/:274）；豁免在册 lobos/os/KillAudit.kt:28（exec 的是系统件 sh+dumpsys，豁免理由写在 :25-27）、InstanceHost.kt:535（随包 PTY 探针直接 exec 静态 C；改前旧写 :537）；门 boot-env-contract-test.js:245（三个消费者都走 treeRootEnv/treeRootFor）、:253（消费者不重复拼 HOME/TMPDIR）、:260（树根语义只住 RuntimeEnvironment）、:268（KillAudit 豁免在册）。**本格 where 在 2026-09-30 重钉过**：InstanceHost 的两个消费者旧写 :415-425/:851-854、门的四条旧写 :184/:191/:199-202，全部因 B 批次增删（删 npm 装配格、契约门新增 6 条判据）整体上移或下移；旧写的那四个门行号今天落在「C 层供给对账」判据块内，照旧引用会把人带到别的事实上。定罪时的旧位置（副本随 S2 删净）= 旧 GuestAdapter.kt:113-149/:154-170、旧 ProgramVerifier.kt:96-105、旧 AdbClientRunner.kt:216-226、旧 KillAudit.kt:25",
       "action": "S2：语义簇抽成 lobos/os/ 的纯函数装配件、被所有树根共享，三份 baseEnv 副本删除，GuestAdapter 只剩 console 的 LOBOS_* 申报值；NativePreparer.probe 的豁免写成断言。判据：golden 迁移后逐键等值 + boot-env-contract 改判据对象后仍绿 + 反向对照（把 LD_PRELOAD 手工放回 GuestAdapter ⇒ 契约门红）",
       "status": "done",
       "evidenceTier": "static",
       "evidence": "现读（2026-09-29 S2）：12 个兼容旋钮整簇只在一处生产 = RuntimeEnvironment.kt:65-124（HOME :69／TMPDIR :70／LANG :74／LD_LIBRARY_PATH :78／NODE_BIN :79／PATH :83-91／LD_PRELOAD :93／SSL_CERT_DIR :101-106／SSL_CERT_FILE·CURL_CA_BUNDLE·GIT_SSL_CAINFO :110-119／SHELL :120／NODE_OPTIONS :123）；GuestAdapter.kt:70-105 里已无一个树根键装配、只剩 console 的 LOBOS_* 申报与 command/cwd，自述 :6-19 同批改口径（旧「本对象是唯一生产点」那句随搬家删除）。三份 baseEnv 副本删净后的消费者：内核 InstanceHost.kt:415-425、随包探针 :851-854（树根 .copy(posixShim=null, envShim=null)，剥垫片的理由写在 RuntimeEnvironment.kt:42-43）、包校验器 ProgramVerifier.kt:100-102、adb 客户端 AdbClientRunner.kt:221-223。boot-env-contract-test.js 31 passed/0 failed；九次受控突变各自变红：GuestAdapter 复制一份 LANG ⇒「树根语义只住 RuntimeEnvironment」；PATH 删掉 npm 全局 bin 段 ⇒ ENV-4 断言；adb 客户端自拼 HOME ⇒「消费者不再重复拼 HOME/TMPDIR」；TMPDIR 落点改回 home ⇒「树根装配的 TMPDIR 取自 TreeRoot.tmpDir」；NODE_PATH 第二段退回 filesDir/node_modules ⇒ 双段次序；多出第二处 PATH 组装 ⇒「PATH 组装点全仓唯一」；PATH 键删净 ⇒ 三条同时红（28 passed/3 failed）；宿主就位不触发装配 ⇒ ENV-1 断言；KillAudit 改取共享树根 ⇒「豁免在册」。突变后 5 个 Kotlin 文件按 sha256 逐文件还原一致，还原后基线仍 31 passed/0 failed。",
       "note": "未做：Kotlin 未经编译（本地无 Android SDK，CI 是唯一编译器），逐键等值的 golden 断言（GuestAdapterTest.kt:83-124 与 :142-151）要等 CI 读数才算兑现；V-0/V-0b/V-0c/V-0d 均为设备读数，未采。与 §8 原写「8 个 spawn 点收编」的偏离：KillAudit 以断言豁免而非收编，理由见方案 §1 ④ 与 §5 E2。推送与触发 CI 需逐次请示。",
       "workstream": "W5",
-      "updated": "2026-09-29"
+      "updated": "2026-09-30"
     },
     {
       "group": "ENV-layer",
       "id": "ENV-3",
       "desc": "npm 在环境里没有真名：只产 npm-cli.js 的绝对路径并挂到自造键 LOBOS_NPM_ENTRY（＋runtime.json 的 npmEntry），而自定义 LOBOS_* 会被载荷子进程剥掉 ⇒ 环境内按名字 spawn(\"npm\") 不成立。与 ENV-6/ENV-7 同形（可用性能否只落在真名或生态标准键上）",
-      "where": "NodeProvisioner.kt:35,96-133（ensureNpm 产 npm-cli.js）；GuestAdapter.kt:103（LOBOS_NPM_ENTRY 申报）；InstanceHost.kt:393（runtime.json 的 npmEntry 取快照）、:890-911（writeRuntimeJson，npmEntry 写于 :901）；按名字调用由 container/native/d1/exec-path.c:11-13 ＋ PATH 段 RuntimeEnvironment.kt:83-91 兑现",
-      "action": "S1：在 $PREFIX/bin 建 npm 真名入口（判据同 PrefixProvisioner.kt:31-33 那次 command -v node 全 MISSING 的报告）。局部判据 V-0c：任一树根下 npm --version 按名字可得。禁止以「加申报格/加桥方法」为解法",
+      "where": "**现（2026-09-30 归口后）**：件与入口由 C 层签名清单声明（`scripts/build-userland-npm.sh:81,109` 取上游 `bin/npm-cli.js`；`.github/workflows/build-userland.yml:54` 矩阵含 npm），真名入口 = `SupplyProvisioner.kt:209-228`（`ensureEntry` → `linkEntry`：`$PREFIX/bin/npm` → 件内 `bin/npm-cli.js` 的符号链接，marker 命中也重申），PATH 段 = `RuntimeEnvironment.kt:83-91`，`#!/usr/bin/env node` 由 `container/native/d1/exec-path.c:11-13` 按**调用方 PATH** 兑现。**本批删净的旧形状（行号为改前，登记以免成为空指）**：旧 `NodeProvisioner.kt:96-133`（ensureNpm 解 `assets/npm/npm.zip` 只产绝对路径）、旧 `PrefixProvisioner.kt:111-125`（linkNpm）、旧 `GuestAdapter.kt:103`（自造键 `LOBOS_NPM_ENTRY` 申报）、旧 `InstanceHost.kt:890-911`（runtime.json 的 `npmEntry`/`npmPath` 两键）——这四个符号今天全仓零命中，由 `boot-env-contract-test.js:169` 反向钉住",
+      "action": "S1 建的「APK 侧真名」已于 2026-09-30 换成「C 清单侧真名」（与 pnpm/git/curl/jq/sqlite3 同一条口），APK 内**不留任何 npm 面**：投放脚本、解包格、建链格、自造键、契约键四处同批删净。判据不变：任一树根下 `npm --version` 按名字可得（V-0c，设备读数）。禁止以「加申报格/加桥方法/放包装脚本」为解法。**本格的 done 仍只覆盖「真名存在」，不覆盖「按名字能不能 execve」**（后者在册 ENV-25）；成对入口 `npx` 无真名另立 ENV-26",
       "status": "done",
       "workstream": "W1",
-      "updated": "2026-09-29",
+      "updated": "2026-09-30",
       "dependsOn": [
         "ENV-1"
       ],
       "evidenceTier": "static",
-      "evidence": "现读（2026-09-29 S1）：PrefixProvisioner.kt:36 NPM_BIN_NAME=\"npm\"、:111-125 linkNpm() 用 Os.symlink 指向 npm-cli.js（体内无一次落盘写脚本）；RuntimeEnvironment.kt 先 NodeProvisioner.ensureNpm(ctx) 再 PrefixProvisioner.linkNpm(ctx, npmCli)，npmBin 为 null 即 Snapshot.complete=false（不进进程缓存，钉在 lobos/os/RuntimeEnvironmentTest.kt）。expected 未加 npm 并注明成因分离（复制/链接类 vs assets 解包类）。boot-env-contract-test.js 断言「npm 真名=符号链接、不是包装脚本」绿，反向突变（linkNpm 改 writeText 包装）实测红。",
-      "note": "LOBOS_NPM_ENTRY 作为 console 的申报仍在写（GuestAdapter.kt:103，注释已写明「申报≠可用性判据」）；可用性由 $PREFIX/bin/npm 真名兑现，ENV-2/ENV-4 已于 S2 把 PATH 铺到每个树根。「任一树根下 npm --version 按名字可得」= 设备读数 V-0c，未采。本格只关「环境里有没有真名」。"
+      "evidence": "现读（2026-09-29 S1）：旧形状下 PrefixProvisioner 建 `npm` 符号链接、`Snapshot.complete` 以 npmBin 为条件，boot-env-contract 断言「真名=符号链接、不是包装脚本」绿，反向突变（linkNpm 改 writeText 包装）实测红。**该兑现方式已被 2026-09-30 的归口取代**（同一判据、另一条口）：真名由 C 清单的 `entry` 建链，`ensureEntry` 在 marker 命中支（`SupplyProvisioner.kt:315`）与新落位支（`:365`）各重申一次；门 `boot-env-contract-test.js:169`（四处符号零命中＋包内无 `assets/npm/`）、`:202`（两条落位路径都重申、建链出口唯一 = linkEntry），实测 37 passed / 0 failed。APK 侧另有 `scripts/verify-apk-native.sh:185-200` 反向格（包内出现 `assets/npm/` 即退 1）",
+      "note": "**别把这格读成 npm 已可用**：①「按名字跑得动」要等 ENV-25 的 exec 位修完再取 V-0c 读数；②旧 note 里「LOBOS_NPM_ENTRY 作为 console 的申报仍在写（GuestAdapter.kt:103）」这句**已过期**——该申报连同 runtime.json 的两个 npm 键随归口删净，今天 npm 在环境里没有任何自造键，只有真名与 `.npmrc` 的 prefix（`NodeProvisioner.kt:50-59`，那是生态标准件、不是我们发明的键）；③`npx` 仍无真名（ENV-26）。 **2026-09-30 追加（CI 实读，别把本格读成「有单测在判 npm 完整性」）**：S1 时代那两条 Kotlin 用例（旧 `齐件且npm有真名才算完整`／`npm没有PREFIX真名就不完整`）随归口改名与删除，被 `.github/convicted-cases.txt` 的地板门当场抓出（run 36617792213 `FAIL: 单测「齐件且npm有真名才算完整」没有执行记录`）。删除是必然的：APK 侧不再解包 npm，`Snapshot` 无 `npmEntry`/`npmBin`，C 层供给在后台线程、装配时点尚未落位，留着会让 `complete` 永不成立。判据没有消失，是换了宿主：逐件点名在 `SupplyProvisioner`（DS-9 设备那半），APK 侧复归由 `boot-env-contract`「APK 侧不留 npm 面」＋「真名入口两条落位路径都重申」＋「执行位按内容判（ENV-25）」三条实名判据拦，终判仍未采的 V-0c。登记已同批改写并写明去处。"
     },
     {
       "group": "ENV-layer",
@@ -1644,14 +1645,14 @@
       "group": "ENV-layer",
       "id": "ENV-5",
       "desc": "NODE_PATH 第二段与 npm 全局前缀指向不同目录：前者 filesDir/node_modules、后者 filesDir/.npm-global，且全仓 Kotlin 里没有任何代码创建 filesDir/node_modules ⇒ 用 npm 装给环境里应用使用的库 require 不到，链断在最后一环",
-      "where": "GuestAdapter.kt:78-84（NODE_PATH 双段，第二段 = globalNodeModules(i.root.home) 在 :82）；NodeProvisioner.kt:35,44；.npmrc 的 prefix = NodeProvisioner.kt:50-59；消费者单测 GuestAdapterTest.kt:142-152",
+      "where": "GuestAdapter.kt:75-84（programPlan 的 NODE_PATH 双段，第二段 = globalNodeModules(i.root.home)）；探针支不再追加（:60-67）；NodeProvisioner.kt:35,44；.npmrc 的 prefix = NodeProvisioner.kt:50-59；消费者单测 GuestAdapterTest.kt（NODE_PATH 双段与探针不追加两条）；门 boot-env-contract-test.js:97/:99/:103",
       "action": "S2：装配纯函数把两段对齐（真名进 PATH、全局库进 NODE_PATH）。判据：任一树根下 require 一个 npm -g 装出来的库能成",
       "status": "done",
       "evidenceTier": "static",
       "evidence": "现读（2026-09-29 S2）：NODE_PATH 第二段取自 NodeProvisioner.globalNodeModules(root.home)（GuestAdapter.kt:82 → filesDir/.npm-global/lib/node_modules），与 ensureNpmPrefixRc 钉进 .npmrc 的 prefix（NodeProvisioner.kt:50-59 → globalPrefix :38）共用同一个常量 NPM_GLOBAL_DIR_NAME(:35) ⇒「装到哪」与「去哪 require」是同一事实源。旧第二段指 filesDir/node_modules、全仓零创建者的形状已消失。门禁：boot-env-contract-test.js:97（生产装配的双段次序）、:99（boot-fixture.js 同构）；受控突变把第二段退回 File(home, \"node_modules\") ⇒ 1 failed。",
-      "note": "「任一树根下 require 一个 npm -g 装出来的库」= 设备读数（与 V-0c 同批），未采。",
+      "note": "「任一树根下 require 一个 npm -g 装出来的库」= 设备读数（与 V-0c 同批），未采。**2026-09-30 本格的形状在一处复归并被杀掉**：`GuestAdapter.probePlan` 在共享树根之外又追加过一段 `NODE_PATH=filesDir/node_modules`（正是本格定罪的「指回无人创建的目录」），现 `GuestAdapter.kt:60-67` 只取共享语义、不追加，理由写在 :63-65；门 = boot-env-contract-test.js:103（「没有任何树根把 NODE_PATH 指回无人创建的 filesDir/node_modules（含探针）」，含探针这一格就是为这个复归加的）。npm 归口后 `probePlan` 的这一格与 ENV-3 的删链同批落地。",
       "workstream": "W1",
-      "updated": "2026-09-29",
+      "updated": "2026-09-30",
       "dependsOn": [
         "ENV-2"
       ]
@@ -1661,13 +1662,14 @@
       "id": "ENV-6",
       "desc": "pnpm 的逐件能力判据今天产生不了读数：形状已按判据 D 改对（2026-09-29 前它读 LOBOS_SUPERVISOR_HOME ＋ runtime.json 拼绝对路径去 spawn，而 sqlite3/jq/git/curl 四颗一直写成裸名 ⇒ 只在带那个自造键的树里跑得动），但线上清单里这颗根本没有 url，设备上按裸名 spawn 永远 ENOENT ⇒ 「文件在不算数」这条判据要真能跑，前置是 DS-9 投放走完",
       "where": "scripts/userland-verify.json:5-8（对照 :11,15,19,23 四颗裸名）；GuestAdapter.kt:88",
-      "action": "判据形状已改（2026-09-29）：`scripts/userland-verify.json` 的 pnpm 那颗不再读 `LOBOS_SUPERVISOR_HOME`＋`runtime.json` 拼绝对路径，改为按裸名 `cp.spawnSync('pnpm', ['--version'])` 并要求三段版本，与 sqlite3/jq/git/curl 四颗同形状。仍欠两步才有读数：①DS-9 的投放走完（2026-09-30 已走完：run 36598918309 发布后线上清单 `.145` 里这颗带 `url`，`scripts/delivery-gate.js` 由 `FAIL（1 项）… 没有取件 URL：pnpm` 转为 `声明键全部在线且身份干净`）；②S7（ENV-8）在内核侧按清单跑一次 `tools[].verify` ⇒ 本格留 in-progress",
+      "action": "判据形状已改（2026-09-29）：`scripts/userland-verify.json` 的 pnpm 那颗不再读 `LOBOS_SUPERVISOR_HOME`＋`runtime.json` 拼绝对路径，改为按裸名 `cp.spawnSync(\"pnpm\", [\"--version\"])` 并要求三段版本，与 sqlite3/jq/git/curl 四颗同形状。①DS-9 的投放已走完（2026-09-30 run 36598918309：线上清单 `.145` 里这颗带 `url`，`scripts/delivery-gate.js` 转为 `声明键全部在线且身份干净`）；②**「隐身」这一半本批已停**：设备侧供给收尾不再打「就位 N 件」的聚合 OK，改成「清单声明数 vs 按真名可用数」且逐件点名（`SupplyProvisioner.kt:380-387`）⇒ pnpm 若拿不到位会在诊断里被指名，不再读起来像正常；③仍欠**执行者**：S7（ENV-8）在内核侧按清单跑一次 `tools[].verify` ⇒ 本格留 in-progress",
       "status": "in-progress",
       "workstream": "W4",
-      "updated": "2026-09-29",
+      "updated": "2026-09-30",
       "dependsOn": [
         "ENV-8"
-      ]
+      ],
+      "note": "2026-09-30 补：本格 desc 里那句「设备上按裸名 spawn 永远 ENOENT」的**可见性**部分已被供给对账接管（缺不再隐身）；但「判据今天产生不了读数」这个事实没变——对账只答「按真名调不调得到件」，不跑 `tools[].verify` 的能力判据（那是 ENV-8）。不要把对账转绿读成本格关账。"
     },
     {
       "group": "ENV-layer",
@@ -1686,15 +1688,16 @@
       "group": "ENV-layer",
       "id": "ENV-8",
       "desc": "逐件「什么算数」的能力判据早已随签名清单发到设备上，而全仓没有任何执行者：发布器缺判据即硬失败并把 t.verify={criterion,node} 写进清单，内核侧只取 name/url/sha256/entry；LOBOS_PROBE_PASS 在仓里只有判据自身一处命中 ⇒ 环境清单读数是暗账（判据已就位、执行者缺席）",
-      "where": "scripts/publish-userland-manifest.js:88-92,112-116；SupplyProvisioner.kt:253-257；scripts/userland-verify.json；NativePreparer.kt:97,264；CapabilityBroker.kt:666,743；PrefixProvisioner.kt:133",
+      "where": "scripts/publish-userland-manifest.js:44-45,65-67,93-96（发布期硬要求 `t.verify={criterion,node}` 并写进清单）；container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt:232-391（取件只用 name/url/sha256/entry/aliases，`verify` 字段全文件零消费）；scripts/userland-verify.json；NativePreparer.kt:97,264；CapabilityBroker.kt:666,743；PrefixProvisioner.kt:114",
       "action": "S7：内核按清单跑一次 tools[].verify，把「三集相等」（注册表声明 ∈ 已落位 ∈ 判据通过）拼成一处读数。判据 V-1 + V-0d",
       "status": "pending",
       "workstream": "W5",
-      "updated": "2026-09-29",
+      "updated": "2026-09-30",
       "dependsOn": [
         "ENV-1",
         "ENV-2"
-      ]
+      ],
+      "note": "2026-09-30 补：B 批次新立的「声明数 vs 可用数」对账**不是**本格的执行者——它答「真名入口在不在」，不跑清单里那颗 `verify.node`。`LOBOS_PROBE_PASS` 在仓里仍然只有判据自身一处命中 ⇒ 判据已就位、执行者缺席这个事实未变。"
     },
     {
       "group": "ENV-layer",
@@ -1815,25 +1818,27 @@
       "group": "ENV-layer",
       "id": "ENV-19",
       "desc": "契约空指（本轮 S0 收口）：base-spec.md 的 npm 一格先前声明「两处目录名由 container/engine/test/test-chain-completeness-test.js 逐字对账」，并隐含「内核侧 npm_config_prefix 显式注入」；实读该测试 33 行且 npm 零命中（它管的是 engine 测试脚本必须入 test:logic 链），npm_config_prefix 全仓只出现在注释里，另引的 runtime-contract.js 与 npm-contract-chain-test.js 两个文件不存在 ⇒ 「两侧同一事实」实际只剩 .npmrc 一侧",
-      "where": "docs/contracts/base-spec.md:50；container/engine/test/test-chain-completeness-test.js:1-33；NodeProvisioner.kt:31-34,38-44",
+      "where": "docs/contracts/base-spec.md:50；container/engine/test/test-chain-completeness-test.js:1-33（被空指的一方，本体无错）；NodeProvisioner.kt:31-35,46-59（`.npmrc` 的 prefix 与三个派生路径 = 今天唯一的单侧事实源）",
       "action": "已按 §10 第 8 条「删净」收口：契约改成单侧写入的真话＋指回本债表；真正的两侧对账由 S7 的载体判据 V-0d 接管（那时才允许契约指名门）",
       "status": "done",
       "workstream": "W3",
-      "updated": "2026-09-29",
+      "updated": "2026-09-30",
       "evidenceTier": "static",
-      "evidence": "现读：test-chain-completeness-test.js 共 33 行、grep npm 命中 0；find runtime-contract.js / npm-contract-chain-test.js 零结果；grep -rn npm_config_prefix 仅命中注释与文档。base-spec.md:50 已改写并在 doc-gate 规范面 0 命中"
+      "evidence": "现读：test-chain-completeness-test.js 共 33 行、grep npm 命中 0；find runtime-contract.js / npm-contract-chain-test.js 零结果；grep -rn npm_config_prefix 仅命中注释与文档。base-spec.md:50 已改写并在 doc-gate 规范面 0 命中",
+      "note": "**同一形状本批扫遍整节，又抓到一批**（判据「指出一处错＝扫遍同类对象」）：`docs/runbook/contributing.md` 的「设备内 spawn 的硬边界」一节点名了 5 个仓内零命中的符号 （`runtimeContract.npmInvocation()`、`npmEnv()`、`NativeManager.dshCliInvocation()`、`resolveDshCli`、以及「装机成功后 `config.command` 会被写回并落盘」这个不存在的写回），并把行为门禁宿主写成 `test-chain-completeness-test.js`（该文件管的是 engine 测试脚本入链，与 spawn 无关）。2026-09-30 已按实读整节重写为「设备内 spawn 的边界」：targetSdk=28 执行域＋裸名真调用＋门宿主改 `boot-env-contract-test.js`。**结构性缺口另立 ENV-27**：`doc-gate` 只核验 `File.ext:NN` 形态的引用，这种「反引号里的符号名」没有任何门，本轮全靠人工 grep 兜住。"
     },
     {
       "group": "ENV-layer",
       "id": "ENV-20",
       "desc": "契约与实现两本账（本轮 S0 收口）：base-spec.md 的 C 层一格先前要求机制「自写 #!/system/bin/sh 可执行入口（安卓无 /usr/bin/env，npm 生成的 bin shim 不可 execve）」——全仓没有写 shebang 入口的代码（system/bin/sh 在主干只出现在树根装配的 SHELL 兜底值，现 RuntimeEnvironment.kt:120），实际建的是 bin/<name> 符号链接；而该补法正是原生兼容件 exec-path.c:8-9 定罪的「中间多了一层」，:11-13 声称约定补回后 npm 的原生 shim 按原样工作",
-      "where": "docs/contracts/base-spec.md:51；SupplyProvisioner.kt:198-211；RuntimeEnvironment.kt:120（SHELL 兜底）；container/native/d1/exec-path.c:8-9,11-13",
+      "where": "docs/contracts/base-spec.md:51-52；container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt:215-228（Os.symlink 建链，含 aliases）；container/native/d1/exec-path.c:8-9,11-13；scripts/build-userland-npm.sh:10-16,81,109",
       "action": "已按 §10 第 9 条改成实现的形状（符号链接＋按调用方 PATH 兑现 shebang，明确「不逐件写包装」）；「npm bin shim 能不能 execve」的口径交给 V-0c 真机读数，不许反过来照旧契约补一层包装",
       "status": "done",
       "workstream": "W3",
-      "updated": "2026-09-29",
+      "updated": "2026-09-30",
       "evidenceTier": "static",
-      "evidence": "现读：SupplyProvisioner.kt:198-211 为 Os.symlink 建链（含 aliases），无写脚本入口的代码路径；exec-path.c 共 236 行，:8-9/:11-13 文本与引用逐字相符。base-spec.md:51 已改写"
+      "evidence": "现读：SupplyProvisioner.kt:198-211 为 Os.symlink 建链（含 aliases），无写脚本入口的代码路径；exec-path.c 共 236 行，:8-9/:11-13 文本与引用逐字相符。base-spec.md:51 已改写",
+      "note": "2026-09-30 归口后本格更干净了：npm 不再是 APK 侧的例外，`build-userland-npm.sh` 直接把上游 `bin/npm-cli.js` 当 entry 投放，设备侧只建符号链接（`SupplyProvisioner.kt:215-228`），**全链路没有任何一处写 shebang**；「逐件包装」这个补法连同它定罪的旧契约文案一起删净。「npm bin shim 能不能 execve」的口径仍交给 V-0c 真机读数（在册 ENV-25 的执行位）。引用形态的空指（符号名不带行号）无门，见 ENV-27。"
     },
     {
       "group": "ENV-layer",
@@ -1849,11 +1854,11 @@
       "group": "ENV-layer",
       "id": "ENV-22",
       "desc": "§4.1 复审对 pnpm 那格原先记成「真名可达（C 清单投放并建链）」是错的：它 provider 为 npm、没有 url，被供给循环的 url.isEmpty() 直接 continue ⇒ 今天根本没有落位。真名建链的机制形状存在，这颗件却从未走过它（与 DS-9 同一事实，此处只记账面修正，避免重复定罪）",
-      "where": "scripts/userland-external-tools.json:3-15（定罪时的表，2026-09-29 随 DS-9 的修复已删；行号为旧）；SupplyProvisioner.kt:257；docs/plans/app-environment-plan.md §4.1",
+      "where": "SupplyProvisioner.kt:283-296（今天不再是静默 `continue`，而是逐键点名后计入 shortPieces；改前位置 = 旧 :257 `if (name.isEmpty() || url.isEmpty() || want.isEmpty()) continue`）；旧 `scripts/userland-external-tools.json:3-15`（2026-09-29 随 DS-9 修复删除）；docs/plans/app-environment-plan.md §4.1",
       "action": "计划文档已改为「机制有、件未投放 → 见 DS-9」；投放口径的裁定归 DS-9，不在本格重复决定",
       "status": "done",
       "workstream": "W4",
-      "updated": "2026-09-29",
+      "updated": "2026-09-30",
       "evidenceTier": "static",
       "evidence": "现读：userland-external-tools.json 的 pnpm 条目只有 provider/pkg/version/entry/kind/size/sha256，无 url；SupplyProvisioner.kt:257 `if (name.isEmpty() || url.isEmpty() || want.isEmpty()) continue`。§4.1 pnpm 行已改为 ✗",
       "note": "与 DS-9 同事实，登记为账面修正"
@@ -1880,6 +1885,43 @@
       "evidenceTier": "static",
       "evidence": "现读：polling.ts:48-50 只 Promise.all([status, ports])、注释 :5 为「运行态 + 增量事件（after=seq）」；find programs/console/ui/src -name \"RouterPage*\" 零结果；ConsoleApp.tsx:25-28 恰 4 个 lazy 页；nav.ts:15 ConsoleViewKey 四值；grep -rn \"router|Router\" programs/console/ui/src 收口后 0 命中，programs/console/src 亦无 /router 端点。注：面板文案改动只在 console Program 重新发布后才到设备（发布需逐次请示），文档面即时生效",
       "note": "EXEC-G2（智能路由整域消失）与 DS-13（首页读旧 /status 形状）保持在册未清——本格只删冒充「功能还在」的自述，不替那两格做裁定"
+    },
+    {
+      "group": "ENV-layer",
+      "id": "ENV-25",
+      "desc": "落盘件的**可执行位按路径前缀／名单猜**，不按内容形状 ⇒ 「真名入口」建好了却指向一个不能 execve 的文件。同一形状三处（**以下代码行号全为改前现读**，2026-09-30）：① **npm**——`NodeProvisioner.kt:107-125` 解 `assets/npm/npm.zip` 时逐条只 `outputStream().use { copyTo }`，整段没有一次 setExecutable，而 S1 建的 `$PREFIX/bin/npm` 是指向 `bin/npm-cli.js` 的**符号链接**（`PrefixProvisioner.kt:111-125`）⇒ 链接能解析、目标无 x ⇒ 裸名 `spawn(\"npm\")` EACCES，ENV-3 的 done 只到「有名字」为止；② **git 件里 libexec 的真二进制**——`SupplyProvisioner.kt:145` 写作 `if (name.startsWith(\"bin/\")) out.setExecutable(true, false)`，而 `build-userland-git.sh:335-345` 明确保留「与 bin/git 不同尺寸的**真独立文件**」（KEPT 那格，git-remote-http / git-upload-pack 一类）在 `libexec/git-core/` 下 ⇒ 这些条目出不了 `bin/` 前缀，落盘无 x，`git clone/fetch/push` 按路径 exec 子命令即红（DS-3 修的是建链，没碰执行位）；③ **规则本身错**——能不能跑取决于打包者把件放进哪个目录：pnpm 恰好打成 `bin/pnpm` 才侥幸拿到 x，sqlite3/jq/curl 同理，换成任何落在 `lib/`、`libexec/`、`bin/` 之外的可执行件就静默不可用。附带登记：`PrefixProvisioner.kt:58` 的 `val executable = items === BINS` 是第三种同形写法（按名单不按内容），今天对 bash/rg 恰好正确。",
+      "where": "**现（2026-09-30）**：`runtime/ExecBits.kt`（全 43 行；`apply` :18-29 按内容给位、`repair` :35-42 走整棵树并跳过链接本身）；唯一消费口两处解包/复验 = `SupplyProvisioner.kt:145`（zip 逐条 apply）与 `:314`（marker 命中支 repair）；`PrefixProvisioner.kt:55`（`val executable = items === BINS`）→ :66 已由「自己 setExecutable」改成 `ExecBits.apply(dst)`，即名单不再判位、只判要不要交给内容裁判；`build-userland-git.sh:335-345`（`libexec/git-core/` 下 KEPT 的真独立文件，正是旧前缀判据漏掉的那批）。**改前位置（已随 B 批次消失，登记防成空指）**：旧 `NodeProvisioner.kt:107-125`（解 `assets/npm/npm.zip` 全程无 setExecutable）、旧 `PrefixProvisioner.kt:111-125`（linkNpm 指向那个无位目标）、旧 `SupplyProvisioner.kt:145` 的 `startsWith(\"bin/\")`",
+      "action": "按「内容自证」收口已完成（仓内侧）：新增 `ExecBits`（`\\u007fELF` ∨ `#!` ⇒ setExecutable，其余一律不碰），两条落位路径都接上（解包 apply／marker 命中 repair —— 少了后者则「规则修好了」对已就位件永不起效，DS-7 同一条理由），第三种形状（按名单给位）改为把件交给同一个裁判。**门禁侧已能红住这个形状**：boot-env-contract-test.js:205（内容判位＋两条路径都覆盖）、:222（`setExecutable(` 在 main Kotlin 里的调用方**唯一** = ExecBits.kt，出现第二个即把目录/名单猜位装回来），实测打印命中文件与 kt 文件总数（84 个）以防切片空转。仍欠两步才算交付：①壳批次 CI 的 app-tests 真跑过 `ExecBitsTest.kt`（本地无 Android SDK，Kotlin 未编译）；②设备 `ls -l` 现读 x 位＋裸名读数：`npm --version`、`git clone` 走一次 https（触到 `git-remote-http`）、`pnpm --version`",
+      "status": "in-progress",
+      "workstream": "W1",
+      "updated": "2026-09-30",
+      "dependsOn": [
+        "ENV-3"
+      ],
+      "note": "2026-09-30 状态更新（三处形状逐个交代）：**①npm 那一半不是「修好了」而是「整块没了」**——npm 归口 C 清单后 APK 侧不再解包任何 npm 文件（旧 `NodeProvisioner.ensureNpm` 与 `PrefixProvisioner.linkNpm` 删净，`verify-apk-native.sh:185-200` 反向拦住 `assets/npm/` 复归），npm 的落盘路径变成 C 层的 `unzipInto` ⇒ 与 git/curl 同一条给位判据，形状 ① 与形状 ② 合并成同一个口。**③规则本身错**：前缀判据已删，且 :222 的门把「再出现第二个 setExecutable 调用方」直接判红；对照组按门禁法双向（把判据换回 `startsWith(\"libexec/\")` 或让 PrefixProvisioner 自己 setExecutable ⇒ 红）。**本格仍是 in-progress 的唯一原因**：CI 没编译过这份 Kotlin、设备没读过 x 位与裸名。在这两个读数到手前，任何「npm 现在能用了」的说法都不成立。"
+    },
+    {
+      "group": "ENV-layer",
+      "id": "ENV-26",
+      "desc": "C 层供给是**一件一入口** ⇒ 一颗件里多个可执行入口时只有 `entry` 那一颗拿到真名。npm 正是这一格：`scripts/build-userland-npm.sh:109` 明确给 `bin/npm-cli.js`、`bin/npx-cli.js`、`bin/npm-prefix.js` 三颗 chmod 0755 投进件里，而发布器每颗 tool 只写 `url/sha256/entry`（`publish-userland-manifest.js:65-67`，`entry` 唯一出口是 `scripts/read-userland-entry.sh`），清单里没有任何地方产出「别名/多入口」这一格 ⇒ 设备侧 `aliasesOf`（`SupplyProvisioner.kt:198-204`）永远读到空，`npx` 按裸名调用永远 ENOENT。npm 与 npx 在生态里是成对约定（任何用 `npx` 的载荷都会撞上），且这一格今天不让任何门红：对账只数件（npm 那颗可用），delivery-gate 只看 url",
+      "where": "scripts/build-userland-npm.sh:109（件内三颗可执行入口）；scripts/publish-userland-manifest.js:44-45,60-67（只产出单颗 entry）；scripts/read-userland-entry.sh（entry 的唯一出口，不推导）；container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt:198-204（读方 aliasesOf）、:215-228（linkEntry 已支持把别名一并建链——**机制在，生产者缺席**）；grep -rn \"aliases\" scripts/ 零命中",
+      "action": "把「一件的多个可执行入口」变成清单里的一等事实：发布器从**件内现读**（与 `entry` 同一条纪律——`read-userland-entry.sh` 是唯一出口，绝不从名字推导），写进 `tools[].aliases`；设备侧零新概念、零新键（`linkEntry` 的别名支已经写好，marker 命中支也会重申）。判据：任一树根下 `npx --version` 按裸名可得（与 V-0c 同批复点）。**禁止**以「在 APK 里放一颗 npx 包装脚本」或「让内核代跑」为解法（前者是 ENV-20 定罪的「中间多了一层」，后者是 ENV-3 定罪的原形状）",
+      "status": "pending",
+      "workstream": "W1",
+      "dependsOn": [
+        "ENV-25"
+      ],
+      "updated": "2026-09-30"
+    },
+    {
+      "group": "ENV-layer",
+      "id": "ENV-27",
+      "desc": "文档门对「契约/规范文档指向仓内不存在的东西」只有一半判据：`doc-gate` 的 CODE_CITE 只核验 `File.ext` 或 `File.ext:NN` 形态的引用（scripts/doc-gate.js:46），因此**反引号里的符号名**——函数、常量键、自造 env 键、不存在的写回承诺——完全在判据之外，写成什么样都不会红。这不是理论风险：ENV-19 定罪的「指向一把不存在的门」同一形状，2026-09-30 在同一节 runbook 里又人工抓到 5 处零命中符号（`npmInvocation()`/`npmEnv()`/`dshCliInvocation()`/`resolveDshCli`/`config.command` 写回），全靠人逐条 grep 兜住；与 ENV-23 同族但是**不同事实**：ENV-23 是行引用的扩展名集不含 `.c/.h`，本格是符号名根本没有可核验的形态",
+      "where": "scripts/doc-gate.js:43-46（CODE_CITE 与「只核代码引用」的口径注释）；.github/gate-policy.json citations.strictScope；已收口的旧文案 = docs/runbook/contributing.md「设备内 spawn 的边界」（2026-09-30 重写，5 个零命中符号删净）",
+      "action": "给文档门加一条与行引用同构的判据：规范面文档（strictScope 内）里出现的反引号符号名，若形似仓内实体（`a.b()`、`a.b.c`、全大写键、`X.kt` 里的成员），则该符号在仓内**至少一处命中**，否则判红。配双向对照夹具：故意写一个不存在的符号 ⇒ 必须红；`git`/`npm`/`PATH`/`HOME` 这类生态真名与散文词不误伤（误伤即红，逼人绕过门禁）。先量历史面命中数再决定 enforce 范围与 strictScope 扩不扩（同 ENV-23 与 §10 第 7 条口径：不要为一格把整条 CI 打死）",
+      "status": "pending",
+      "workstream": "MAIN",
+      "updated": "2026-09-30"
     }
   ],
   "progressNote": "D0 完成：快照、债表、禁词/品牌门（报告模式）、文档清场。D1a 物理完成：kernel→programs/console、system→container/rom、bin/panel、programs/{console,dsh,pi} manifest、console package.json 改名、CI/scripts/layout.json 路径更新；engine 测试路径部分更新。 | 2026-09-28 第二轮：拆 W1–W4 四个子代理并行执行；简报 docs/plans/lobos-workstream-brief.md。 | 第二轮验证：gen-version --check 通过（修 requiresProtocol 字段名）；layout-manifest-test 报告模式 1 passed / 0 failed，登记 INT1–INT3 三项集成待办。 | 第三轮：W1 包迁移完成（61 文件 package lobos，旧包残留 0）；纠正 applicationId 单段错误（INT4）；根 settings/version 归位（INT5 done）；登记 INT6。 | 第四轮：确认子代理在活跃写入（mtime 15:20）；MAIN 落定 applicationId=lobos.app（INT4 done）；向 W3 出裁定、向 W4 转达 W3 重命名引用点（INT7）；登记集成复验清单。 | 第五轮：W2 删除 guard/assembler/console（D9/A10 销账）；W2 给出 4 条 layout 处置，已转 W3（INT3）；SYSTEM-API.md 尚未落盘。 | 第六轮：layout missing=0（INT3 done）；归档目录建立（D4 done）；出 program-* 命名裁定（INT8）并纠偏 privapp 命名。 | 第七轮：W4 完成 container/rom 改名（B9 done）；W1 完成 kernelota→ota（B4）；W3 完成 schema/组件文档改名（D5/D8）；SYSTEM-API.md 与 ADR-0010 仍缺。 | 第七轮续：W2 交付 SYSTEM-API.md（解 W1 阻塞），登记 INT9。 | 第八轮：W3 落 ADR-0010 且 program-* 对齐（program-ota.yml / build-program-bundle.* / sign-program-manifest.js）；W1 范围收窄；新开 W5 专攻 D2 与 DO 清除。 | INT8 done（program-* 全链统一）。 | 第九轮：W5 前台服务已收敛为唯一 OsHostService（startForeground 1 处）；W1 落 lobos/os 骨架并完成 Registry liblobos 改名；已解锁 W3 重生成原生件清单。 | 第十轮：gate 998/150；lobos/os 扩到 7 文件 435 行；对 W5（两轮无落地）与 W3（清单未重生成/ADR 未改）各发催办+可执行微任务。 | 第十一轮：W5 滞速被停，MAIN 接手完成 A1–A6/A8/A13/A15（Manifest 与服务类名对齐、单进程单 FGS、watchdog/DO 清除）；gate 560→341。 | 第十二轮：W2 交付（A10/A11/A12/A16/B2/B3/B7/D9 done）；MAIN 完成 A7 并补 AccessibilityAnchor 缺失实现、修 Manifest（OsAccessibilityService/Theme.LobOs/WRITE_SECURE_SETTINGS）、修 KillAudit import。 | 第十二轮：W2/W4 交付并收工；MAIN 补缺（AccessibilityAnchor/PostPairingAutoFlow/未解析 import=0）、修 Manifest/WRITE_SECURE_SETTINGS/KillAudit import、对齐 lobos_hostbridge 与 panel-update 契约；新开 W6 清扫 OS 侧旧名与 engine DO 方法组。gate 337→190。 | 第十三轮：W2 收尾确认（UI 目录/router 死类型）；W3 完成 README 并入 docs → layout 契约全绿；MAIN 把 Kotlin 未解析 import 检查固化进 gate-scan。 | 第十四轮：发现接口契约被收敛到 docs/components/console-system-api.md 并修齐全仓引用；抽样确认 os.* 接线=0/36，新开 W7 专攻接线（含诚实降级与 gap 清单）。 | 第十五轮：MAIN 交付 D8 验收 runner（work/lobos-verify.sh）并首跑 PASS=11 FAIL=0（os.* 接线 0/6 抽样为信息项）。 | 第十五轮续：确认 W3 的 ADR 修订已落地（0004/0005 改名、0006 重写、0010 新增）→ INT10 done。 | 第十六轮：runner 升级为\"全量契约接线检查\"（2/49，缺失清单落 work/contract-missing.txt）；W6 已删 engine 的 DO 方法组（device_owner 14→0），gate 166→156。 | 第十七轮：W3 收工（A-pkg/A-pkg2=0，scripts/.github/README 0 命中）；MAIN 修掉 layout 交付维 4 条违规（D2/E 归原生 + 测试规则 4/5 改判）→ layout 违规 0；裁定设备协议名 program-*（INT16/17 派给 W6/W3）。 | 第十九轮：W7 停摆被停，MAIN 接手 os.* 接线（36 方法入 CapabilityBroker.OS_METHODS；真实读数/诚实降级二分）→ 接线 2/49→39/49，缺口清单落 lobos/os/METHOD-GAPS.md。 | runner 抽取修正：接线 33/34（唯一 missing 是文档简写伪影）。 | 第二十轮：全部子代理收工；发现 capability-single-source-gate-test.js 已失效（旧架构断言）；新开 W8（门禁测试重写）与 W9（D8 前缀重命名）。 | 第二十一轮：MAIN 清理 CapabilityBroker 的 A-dsh/C-do2 文案（gate 82→79）；落 enforcePrerequisites（P1–P9），其中 P2–P6 已 pass，P1/P7/P8 待 W8/W9，P9 待真机。 | 第二十三轮（里程碑）：MAIN 接手 W8/W9 —— D8 前缀重命名完成、失效门禁重写（5/0）并修 dead-path 生成物误判；gate 77→**0 命中**；**enforce=true 已在 strict 模式通过（exit=0）**；债表批量销账。 | 第二十四轮：MAIN 完成 C1（通知与 console 状态同源）与 C5（退避去重确认）；新开 W10 做 A14 Tile + E8 拆分。 | 第二十六轮：MAIN 接手 W10 —— A14（QS Tile）与 E8（Setup/Console 拆分）完成；gate strict 仍 0/0；债表 71/71（除 P9 外部依赖）。 | 复检轮（新目标）：拆 A1–A5 五个只读审计子代理；MAIN 做 A6（§5 判据逐条）。已发现 AUD-G1..G4 并纠正 INT16 误判。 | 复检第2轮：A1 分区审计回报（§5.8 重灾、§3.2 子包偏差、DO 文档残留、用例表断链等）；MAIN 实跑 engine 全量 26 测试，发现并修好 3 处真断（crosslang/ota-engine/boot-env），另有 5 处环境依赖必红；新增 AUD-G5..G15。 | 复检第3轮：修 G4/G12/G13/G14（活引用/债表 note/ROM 命名/version 注释）与 G3（engine 5 个 kernel-* 文件重命名，链完整性 26/26）。 | 复检第3轮：A2/A4 回报；MAIN 修复 P0（OTA 安装 stageRoot）+ 三处 Manifest 死声明 + BootReceiver 兜底边 + ACTION_RESTART 断路 + console 测试路径，共 5 处；新增 AUD-G16..G26，重开 A5/C5/D6/E5。 | 复检第4轮：A3/A4/A5 全部回报（五分区审计完成）；MAIN 修 P0 CapStatus.TODO（编译断）、悬空 import、Journal.seq 连续性、OsHostService 状态机接线、capability.invoke 登记、F13/F3 残留、CI PR paths；新增 AUD-G27..G46。 | 修复轮1：①OTA 链统一 program-*（INT16/G32 done）；②kernel 去词（G7/G11 代码侧完成，门禁新增裸词 kernel 且绿）；③修复 capability.invoke 引入的跨语言门回归（10/0）。 | 修复轮2：③ 完成 —— os.* 17 个已实现方法全部按契约 §2 形状重写 + 新增形状门禁 R6（6 passed/0 failed）；programs.json 写路径接通（AUD-G37）。 | 修复轮3：④ 起步 —— 新增文档门与债表门（均接线 CI 报告模式），修 3 处死链（doc-gate 0）、批量清 docs 旧名、ADR-0007 改写 + 0003/0009 errata（AUD-G41 done）。 | 修复轮4：④ 收尾 —— 文档门转强制(0 死链)、债表门上线、计划 §6 对齐现实；docs 15 项收口 + AUD-G44/G46 完成；artifact 名去品牌化。 | 目标收口：四项（OTA 链统一 / kernel 去词+词表 / os.* 形状+programs.json / docs 收口+债表门+文档门）全部完成，证据为 gate-scan strict 0、doc-gate 0 死链、debt-gate 88/115、10 项引擎门禁测试 PASS、lobos-verify PASS=12 FAIL=0。 | 清债轮A：C5/G25/G29/G30/G31/G36/G38 done（退避单源、R7 生命周期门、两套 manifest schema+校验、WebView 桥裁定+N-7、UI 命名清零、os.* 跨语言镜像、三向接线门）；顺带把 lodestar 修正：运行时交接文件目录 supervisor/ 与文档对齐。",

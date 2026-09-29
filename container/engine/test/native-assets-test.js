@@ -965,10 +965,15 @@ if (fs.existsSync(RNV)) {
   const probeBack = wfs.filter((w) => PROBE_RE.test(w.src)).map((w) => w.name);
   check('workflow 无内联 binutils 安装探测回潮（唯一宿主 ensure-tool.sh）',
     probeBack.length === 0, probeBack.join(','));
-  const READ_RE = /python3 -c [^\n]*node-versions\.json/;
+  // 读取口唯一：scripts/read-node-versions.sh。判据要覆盖两种「自己解析那份 JSON」的写法：
+  // python3 -c 是老形态，node -p require(...) 是 2026-09-30 在 ci.yml 里发现的第二条旁路 ——
+  // 只防前者的门禁会放着后者一路绿。
+  const READ_RE = /(python3 -c|node (?:-p|--eval)|node --print)[^\n]*node-versions\.json/;
   check('node-versions 内联读法判据自证 + 无回潮（读取只走 read-node-versions.sh）',
     READ_RE.test('V="$(python3 -c "import json; print(json.load(open(\'container/app/src/main/assets/node-versions.json\'))[\'default\'])")"')
+      && READ_RE.test('NPMV="$(node -p "require(\'./container/app/src/main/assets/node-versions.json\').npm")"')
       && !READ_RE.test('V="$(bash scripts/read-node-versions.sh default)"')
+      && !READ_RE.test('NPMV="$(bash scripts/read-node-versions.sh npm)"')
       && wfs.filter((w) => READ_RE.test(w.src)).map((w) => w.name).length === 0);
   const vCallers = wfs.filter((w) => /python3 scripts\/validate-workflow\.py/.test(w.src)).map((w) => w.name).sort();
   check('严格 YAML 校验被 ci/fast-apk/build-apk 三链同调',
@@ -1072,10 +1077,20 @@ check('APK 原生件审计宿主 scripts/verify-apk-native.sh 存在', fs.exists
   // 只有 libnode.so：越过 1)，应在内核之后的小件/清单处逐条点名。
   const libOnly = mkZip('libonly', { 'lib/arm64-v8a/libnode.so': 'ELFAKE' });
   const rLo = runVan([libOnly, 'arm64-v8a']);
-  check('verify-apk-native：缺件逐条点名（libc++_shared / 自有小件 / npm 都要出现在缺项里）',
+  check('verify-apk-native：缺件逐条点名（libc++_shared / 自有小件 / adb-client 都要出现在缺项里）',
     rLo.rc === 1 && rLo.out.includes('libc++_shared.so') && rLo.out.includes('liblobosflock.so')
-      && rLo.out.includes('assets/npm/npm.zip') && rLo.out.includes('审计不通过'),
+      && rLo.out.includes('assets/node/adb-client/cli.js') && rLo.out.includes('审计不通过'),
     JSON.stringify({ rc: rLo.rc, out: rLo.out.slice(-260) }));
+
+  // npm 归口是**反向**判据：条目齐备的全绿包（下面的 fullZip 形态）里若混进 assets/npm，
+  // 单件也必须红 —— 只查「缺」的门禁对「不该有却有」是瞎的。
+  const withNpm = mkZip('wnpm', {
+    'lib/arm64-v8a/libnode.so': 'ELFAKE', 'lib/arm64-v8a/libc++_shared.so': 'ELFAKE',
+    'assets/npm/npm.zip': 'zipzip',
+  });
+  const rNpm = runVan([withNpm, 'arm64-v8a']);
+  check('verify-apk-native：APK 里留着 assets/npm → 立刻退 1（npm 归口 C 清单，随包那份是第二事实源）',
+    rNpm.rc === 1 && rNpm.out.includes('APK 里留着 npm'), JSON.stringify({ rc: rNpm.rc, out: rNpm.out.slice(0, 160) }));
 
   const rLoNoAbi = runVan([libOnly]);
   check('verify-apk-native：gate 模式缺 ABI → 退 2（静默用错默认值会把错 ABI 的包判过）',
@@ -1098,7 +1113,6 @@ check('APK 原生件审计宿主 scripts/verify-apk-native.sh 存在', fs.exists
 
   // 全绿对照组：补齐全部条目后必须真 PASS —— 证明审计不是"怎么跑都红"的摆设。
   const all = {
-    'assets/npm/npm.zip': 'zipzip', 'assets/npm/version.txt': 'v',
     'assets/node/adb-client/cli.js': 'x',
   };
   for (const a of fs.readFileSync(path.join(ROOT, '.github/native-assets.txt'), 'utf8')
