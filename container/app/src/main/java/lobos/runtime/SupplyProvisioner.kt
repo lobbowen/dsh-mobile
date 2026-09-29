@@ -29,15 +29,15 @@ object SupplyProvisioner {
 
     private const val CHANNEL_ASSET = "supply/channel.json"
     private const val PUBKEY_ASSET = "supply/userland-public.pem"
+    // 仅供**设备侧落盘副本**命名；远端对象键一律由通道锚声明，这里不留默认值（见 anchorName）。
     private const val MANIFEST_NAME = "userland-manifest.json"
     private const val FETCH_TIMEOUT_MS = 30000
 
     fun toolchainDir(ctx: Context): File = File(PrefixProvisioner.libDir(ctx), "toolchain")
     fun entryLink(ctx: Context, name: String): File = File(PrefixProvisioner.binDir(ctx), name)
 
-    // 清单所在**目录**：通道锚里的 baseUrl 是主机（hubcdn.zll.ink），真正的路径带通道子目录
-    //   userland-<channel>（线上实证：https://hubcdn.zll.ink/userland-canary/userland-manifest.json）。
-    //   漏了这一段就是 404 —— 2026-09-29 自审时发现。
+    // 清单所在**目录**：通道锚里的 baseUrl 是主机（hubcdn.zll.ink），真正的路径还要带通道子目录
+    //   userland-<channel>。漏了这一段就是 404 —— 2026-09-29 自审时发现。
     private fun manifestDir(ctx: Context): String? {
         return try {
             val t = ctx.assets.open(CHANNEL_ASSET).use { it.readBytes().toString(Charsets.UTF_8) }
@@ -63,12 +63,14 @@ object SupplyProvisioner {
 
     // 清单名/签名名**由通道锚驱动**：换对象键是避开「旧键被长 TTL 缓存钉死」的正规手段
     //   （2026-09-29 实证：清单本身已正确发布 tools=5，但旧键被一年缓存挡住，新上传不作废旧条目）。
-    private fun anchorName(ctx: Context, field: String, dflt: String): String {
+    // 所以这里**不给默认键名**：锚读不到就返回 null 交调用方判红。留一个旧键名当默认，等于
+    //   允许「仓内声明已改名 + 线上仍是废止身份」同时成立而不报错 —— 2026-09-29 线上正是这个形态
+    //   （声明键 404、旧键 200 且内容是 2026.09.27 的陈表），照默认值走的品牌会安静装上陈件。
+    private fun anchorName(ctx: Context, field: String): String? {
         return try {
             val t = ctx.assets.open(CHANNEL_ASSET).use { it.readBytes().toString(Charsets.UTF_8) }
-            val v = JSONObject(t).optString(field, "")
-            if (v.isEmpty()) dflt else v
-        } catch (e: Throwable) { dflt }
+            JSONObject(t).optString(field, "").ifBlank { null }
+        } catch (e: Throwable) { null }
     }
 
     private fun pemToDer(pem: String): ByteArray {
@@ -144,6 +146,7 @@ object SupplyProvisioner {
     private fun applyLinkFarm(root: File): Int {
         val farm = File(root, "link-farm.txt")
         if (!farm.isFile) return 0
+        val inside = root.canonicalPath + File.separator
         var applied = 0
         for (line in farm.readLines()) {
             if (line.isEmpty() || line.startsWith("#")) continue
@@ -151,9 +154,14 @@ object SupplyProvisioner {
             if (parts.size != 2) continue
             val rel = parts[0].trim()
             val target = parts[1].trim()
-            if (rel.isEmpty() || target.isEmpty() || rel.contains("..") || target.contains("..")) continue
+            if (rel.isEmpty() || target.isEmpty()) continue
             try {
                 val dst = File(root, rel)
+                // 防穿越的口径是**落点**，不是字面：`..` 在相对目标里是合法写法（真机 2026-09-29：
+                //   git 件第一行就是 `libexec/git-core/git → ../../bin/git`，一律禁 `..` 会让这个锚点
+                //   永不建立，而它下面 148 条 `git-* -> git` 全部悬空 —— 件照样就位，只是子命令全废）。
+                val resolved = File(dst.parentFile, target).canonicalPath
+                if (!resolved.startsWith(inside) || resolved == root.canonicalPath) continue
                 dst.parentFile?.mkdirs()
                 dst.delete()
                 Os.symlink(target, dst.absolutePath)
@@ -163,7 +171,7 @@ object SupplyProvisioner {
         return applied
     }
 
-    /** 农场建成核验：清单里每一条都必须是**真的符号链接**（包内存的是链接目标文本，不是链接本身）。 */
+    /** 农场建成核验：清单里每一条都必须是**真的、可解析的**符号链接（包内存的是链接目标文本，不是链接本身）。 */
     private fun farmBroken(root: File): Int {
         val farm = File(root, "link-farm.txt")
         if (!farm.isFile) return 0
@@ -173,7 +181,8 @@ object SupplyProvisioner {
             val rel = line.split("\t")[0].trim()
             if (rel.isEmpty()) continue
             val f = File(root, rel)
-            try { if (!java.nio.file.Files.isSymbolicLink(f.toPath())) broken++ } catch (e: Throwable) { broken++ }
+            // 只判「是不是链」会放过悬空链：锚点缺失时 148 条子命令链仍是链，却指向不存在的路径。
+            try { if (!java.nio.file.Files.isSymbolicLink(f.toPath()) || !f.exists()) broken++ } catch (e: Throwable) { broken++ }
         }
         return broken
     }
@@ -208,8 +217,15 @@ object SupplyProvisioner {
         val tc = toolchainDir(ctx)
         tc.mkdirs()
         try {
-            val manName = anchorName(ctx, "manifestName", MANIFEST_NAME)
-            val sigName = anchorName(ctx, "sigName", manName + ".sig")
+            val manName = anchorName(ctx, "manifestName")
+            if (manName == null) {
+                RuntimeDiagnostics.append(
+                    ctx, "supply", false, "C 层供给未启动",
+                    "assets/" + CHANNEL_ASSET + " 没有 manifestName：远端对象键只由通道锚声明，不回落旧键"
+                )
+                return 0
+            }
+            val sigName = anchorName(ctx, "sigName") ?: (manName + ".sig")
             val manifestBytes = httpGet(base + "/" + manName)
             val sigBytes = httpGet(base + "/" + sigName).toString(Charsets.UTF_8).trim().let {
                 android.util.Base64.decode(it, android.util.Base64.DEFAULT)

@@ -305,7 +305,7 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
                     val ota = ProgramOtaUpdater.checkAndUpdate(this, km, budgetMs = otaCfg.startupBudgetMs)
                     if (ota.checked) {
                         RuntimeDiagnostics.append(
-                            this, "program-ota", ota.updated,
+                            this, "program-ota", ota.updated || ota.upToDate,
                             if (ota.updated) "启动自动升级内核到 ${ota.remote}" else "启动内核检查完成（无更新）",
                             ota.detail
                         )

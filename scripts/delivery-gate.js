@@ -3,10 +3,12 @@
 // 交付面门禁：**读线上**，不读仓内声明的镜像。
 // 用法：node scripts/delivery-gate.js [--json]
 //
-// 为什么必须有（D01/D02/D04）：仓内所有其它门禁的输入都是**我们自己写的文件**，
-// 于是「仓内声明的键已改名」和「线上仍是废止身份」可以同时为真、且没有任何东西变红。
-// 本门只做一件事：把 assets 里**声明的每个对象键**拿去线上要一个真实答复 ——
+// 为什么必须有（债 INT8/INT16/EXEC-G1，2026-09-29 现读定罪）：仓内所有其它门禁的输入都是
+// **我们自己写的文件**，于是「仓内声明的键已改名」和「线上仍是废止身份」可以同时为真、
+// 且没有任何东西变红。
+// 本门做两件事：① 把 assets 里**声明的每个对象键**拿去线上要一个真实答复 ——
 //   200 才算存在；body 里不得出现废止身份词；version 必须读得出来；包体 URL 必须可达。
+//   ② 查随清单下发的 C 层判据里写死的对象键，是否还是通道锚当前声明的那一个。
 // 读不到（404/超时/TLS 失败）一律判红：分不清「还没发」和「发坏了」的门禁没有存在价值。
 const fs = require('node:fs');
 const path = require('node:path');
@@ -56,23 +58,48 @@ targets.push({
   expect: 'manifest',
 });
 
+// 每腿限时 60 秒：本门读的是线上，没有上界的 fetch 会把 CI job 挂成六小时超时，
+//   把「通道没答」伪装成「门禁卡住」。
 async function get(url) {
-  const r = await fetch(url, { headers: { 'user-agent': 'lobos-delivery-gate' }, redirect: 'follow' });
+  const r = await fetch(url, {
+    headers: { 'user-agent': 'lobos-delivery-gate' }, redirect: 'follow',
+    signal: AbortSignal.timeout(60000),
+  });
   return { status: r.status, buf: Buffer.from(await r.arrayBuffer()) };
 }
 
 (async () => {
   const problems = [];
   const rows = [];
+
+  // 声明面内部一致：C 层判据（逐字下发到设备执行）里写死的对象键必须等于通道锚声明的键。
+  // 判据跟着旧键、清单发到新键 ⇒ 设备拿 404 去判 curl/git 不可用（线上 2026-09-29 正是这个形态：
+  // 声明键 userland-manifest-2.json 已 200，而判据仍指旧键）。
+  const declared = 'userland-' + supply.channel + '/' + supply.manifestName;
+  const verifyText = fs.readFileSync(path.join(root, 'scripts/userland-verify.json'), 'utf8');
+  for (const m of verifyText.matchAll(/userland-[A-Za-z0-9_-]+\/[A-Za-z0-9._-]+/g)) {
+    if (m[0] !== declared) problems.push('C 层判据引用的对象键已废止：' + m[0] + ' ≠ 通道锚声明的 ' + declared);
+  }
+
   for (const t of targets) {
     // 缓存击穿位：CDN 长 TTL 会替我们撒一次谎（channel.json 的 $comment 就是这么被咬的）
     const probe = t.url + (t.url.includes('?') ? '&' : '?') + 'ts=' + Math.floor(Date.now() / 1000);
     let res;
-    try {
-      res = await get(probe);
-    } catch (e) {
-      problems.push(t.layer + ' 读不到：' + (e.code || e.message) + ' @ ' + t.url);
-      rows.push({ layer: t.layer, url: t.url, status: 'ERR:' + (e.code || e.message) });
+    let lastErr = null;
+    // 读不通重试到 3 次（CDN/链路抖动），但只对「读不到」；内容/身份问题一次都不多重试，
+    // 重试三次仍读不到就是红 —— 门禁不装作正常。
+    for (let a = 1; a <= 3 && !res; a++) {
+      try {
+        res = await get(probe);
+      } catch (e) {
+        lastErr = e;
+        if (a < 3) await new Promise((r) => setTimeout(r, 2000 * a));
+      }
+    }
+    if (!res) {
+      const why = lastErr.name === 'TimeoutError' ? '60s 未答' : (lastErr.code || lastErr.message);
+      problems.push(t.layer + ' 读不到（3 次）：' + why + ' @ ' + t.url);
+      rows.push({ layer: t.layer, url: t.url, status: 'ERR:' + why });
       continue;
     }
     const row = { layer: t.layer, url: t.url, status: res.status, bytes: res.buf.length };
@@ -95,7 +122,7 @@ async function get(url) {
         row.version = v;
         const urls = [...text.matchAll(/https:\/\/[^"'\s]+/g)].map((m) => m[0]);
         // 这条腿只在清单**真写了绝对 URL** 时才查：线上 Program 清单的 `url` 是空串，设备按 feed
-        // 自行推导（ProgramOtaUpdater.kt:198 `ifBlank { cfg.zipUrl(remote) }`）。那条推导是否取得到
+        // 自行推导（`ProgramOtaUpdater.kt:202` `ifBlank { cfg.zipUrl(remote) }`）。那条推导是否取得到
         // 件归真机验收（A9/A10），不在这里复述设备算法 —— 否则又造出第二把尺子。
         for (const u of urls) {
           if (!/\.(zip|tgz|tar\.gz|gz)$/i.test(u)) continue;

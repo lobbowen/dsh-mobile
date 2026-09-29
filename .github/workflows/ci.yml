@@ -67,6 +67,12 @@ jobs:
         run: node scripts/doc-gate.js --strict --strict-cites
       - name: Gate — debt registry (report mode)
         run: node scripts/debt-gate.js
+      - name: Gate — delivery surface read from CDN (strict)
+        # 交付面门禁：输入是**线上读数**，不是仓内镜像。此前所有门禁读的都是我们自己写的文件，
+        # 于是「仓内已改名」与「线上仍是废止身份」能同时为真而无人变红（债 INT8/INT16/EXEC-G1）。
+        # 2026-09-29 收口：E3.1 真投放跑通后接入 —— 三处声明键（C 清单 + 其签名 + Program 清单）
+        # 必须现读 200、version 读得出来、内容不含废止身份词。读不到就是红，不解释成「还没发而已」。
+        run: node scripts/delivery-gate.js
       - name: Upload gate reports
         if: always()
         uses: actions/upload-artifact@v4

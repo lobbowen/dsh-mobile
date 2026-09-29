@@ -67,6 +67,10 @@
   `ProgramOtaSelfCheck` 也复用同一 URL，取证路径与生产路径一致。
 - 结论：**任何人手工核验发布结果，必须带查询串**；看到 `{"probe":true}` 不代表发布失败。
   内核 zip 相反——文件名带版本、内容不可变，可以长缓存、可以断点续传。
+- **发布链路自己也带查询串回读**：`scripts/upload-qiniu.js` 上传后从 `QINIU_PUBLIC_BASE`（= 设备侧
+  feed 声明的那个基址）取回该键并逐字节比对，取不到或对不上即退 1。上传应答只证明七牛收了，
+  不证明设备读得到 —— 这句话现在由脚本担保，不再由某条 workflow 记得 curl 一下来担保
+  （2026-09-29 收口，债 INT16/EXEC-G1；判红的可证伪性钉在 `container/engine/test/upload-qiniu-test.js`）。
 - **未结案**：CI 上传 manifest 时带了 `--cache-control=60`（见 `program-ota.yml` 的 Publish to Qiniu），
   那一路却仍返回旧内容。是边缘节点未遵守该头、还是被控制台侧的缓存配置覆盖，尚未查证；
   设备侧有 cache-buster 兜住，故未继续追。若哪天要让人也能直读该 URL，先解决这个问题。

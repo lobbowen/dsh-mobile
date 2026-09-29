@@ -643,13 +643,13 @@
       "desc": "program-* 命名统一（feed/manifest/verify/OTA 类）跨 W1↔W4 同步",
       "where": "assets + lobos.ota + Programs",
       "action": "按第6轮裁定执行",
-      "status": "in-progress",
+      "status": "done",
       "workstream": "W1",
       "dependsOn": "W4",
-      "note": "命名在**仓内**已统一（program-ota.yml / build-program-bundle.* / sign-program-manifest.js / ProgramOta* 类），但交付面没跟上：Program 这条流一次都没发布过，线上唯一在架的仍是 kernel-* 身份。static 层成立不等于交付完成 ⇒ 降级，收口条件 = E3.1 发布 + delivery-gate 现读 200。",
+      "note": "收口的判据不是「仓内改了名」而是「设备照声明取到了东西并提交了」——本轮首次成立。这条债的真机形态在 journal 里连成一片：`diag:program-ota` 记 `取 manifest 失败（离线或不可达）：IllegalStateException: HTTP 404` 共 16 条（seq 31/109/159/211/220/262/271/280/288/296/304/312/353/363/372/380，最后一条 2026-09-29T02:01:57Z），02:47:41Z 起换成 OK，之后不再出现。",
       "updated": "2026-09-29",
-      "evidenceTier": "static",
-      "evidenceRef": "2026-09-29 00:44–00:52 现读：program-ota.yml runs total_count=0（该工作流从未跑过）；CDN program-canary/program-manifest.json=404；线上滚动 tag 仍是 kernel-0.1.0-android.47（名 \"Kernel OTA 0.1.0-android.47\"，资产 kernel-*.zip / kernel-manifest.json，体内 \"name\":\"dsh-kernel\"）"
+      "evidenceTier": "device",
+      "evidenceRef": "2026-09-29 现读（读数以 UTC 落盘时刻为准）：program-ota.yml run 36512845549 发布后 CDN `program-canary/program-manifest.json`=200（572 字节，version=0.1.0-android.48）、`program-canary/program-0.1.0-android.48.zip`=859810 字节由上传侧逐字节回读比对；真机 `files/os/journal/events.jsonl` seq389 `diag:program-ota` OK「启动自动升级内核到 0.1.0-android.48｜内核安装成功 v=0.1.0-android.48（来源=远端 OTA）」、seq401 `diag:program-commit` OK「from=(无)；floor=0.1.0-android.48」；`GET /status` 与 `GET /diagnostics/provisioning` 同读数（programVersion=programFloor=0.1.0-android.48、programPending 空）"
     },
     {
       "group": "INT-integration",
@@ -736,12 +736,12 @@
       "desc": "设备协议名 kernel-<channel>/kernel-<version>.zip 待统一 program-*",
       "where": "ota/** + program-ota.yml + docs/runbook",
       "action": "W6 改设备侧与测试；W3 改 workflow/docs",
-      "status": "in-progress",
+      "status": "done",
       "workstream": "W6",
-      "note": "仓内侧协议名确已改 program-*（tag/zip/临时名/桥方法/能力令牌/workflow ROLL），但**线上没有任何 program-* 产物**，在架的只有 kernel-* —— 设备照声明去取会 404，照旧名才拿得到东西。\"非 docs 残留 0\" 只覆盖仓内文本，不覆盖交付面 ⇒ 降级到 E3.1 发布完成。",
+      "note": "旧 `kernel-canary/*` 仍在架：设备只读声明键，旧产物不投就不影响交付，也不拿来当反证。旧 `userland-canary/userland-manifest.json`（陈表 2026.09.27.119）同样仍在架，它现在只是被门禁当废止身份盯着的对象键，不再有代码去取它（见 DELIVERY-2026-09-29 DS-4）。",
       "updated": "2026-09-29",
-      "evidenceTier": "static",
-      "evidenceRef": "2026-09-29 00:44–00:52 现读：照 program-feed.json 声明取 userland-canary/userland-manifest-2.json 与 program-canary/program-manifest.json 均 404；旧键 userland-canary/userland-manifest.json=200（version 2026.09.27.103）；kernel-canary/kernel-manifest.json=200（\"name\":\"dsh-kernel\"）"
+      "evidenceTier": "device",
+      "evidenceRef": "2026-09-29 现读：`userland-canary/userland-manifest-2.json`=200 version=2026.09.29.141（6966 字节）、同名 `.sig`=200（89 字节）、`program-canary/program-manifest.json`=200 version=0.1.0-android.48 ⇒ `node scripts/delivery-gate.js` exit 0；真机 `files/usr/lib/toolchain/` 下 curl/git/jq/sqlite3 四件已落位、`files/programs/console/0.1.0-android.48` 已提交（见 INT8 同批读数）"
     },
     {
       "group": "INT-integration",
@@ -1296,11 +1296,11 @@
       "desc": "交付面门禁 scripts/delivery-gate.js 已落地，但尚未接进 ci.yml（现读三处声明键全 404，接上即红）",
       "where": "scripts/delivery-gate.js + .github/workflows/ci.yml",
       "action": "E3.1 用 program-ota.yml workflow_dispatch(publish=true) 把 Program 清单投到声明的键上，同 PR 把本门接进 ci.yml 的 gate job（输入=线上读数，不是仓内镜像）",
-      "status": "pending",
+      "status": "done",
       "evidenceTier": "online",
-      "evidenceRef": "2026-09-29 00:44 首跑：userland-canary/userland-manifest-2.json=404、同名 .sig=404、program-canary/program-manifest.json=404 ⇒ exit 1（3 项）。这是设计内的红，不是链路故障",
+      "evidenceRef": "2026-09-29 10:44 红（C 层两声明键线上 404 ⇒ exit 1，2 项）→ build-userland run 36512850769 发布完成后复跑绿（三键全 200 ⇒ exit 0）→ 接入声明面一致检查后、改判据字面前又红 2 项（两把尺子指同一处，见 DS-6）→ 改字面后复绿：同一把尺子双向都红过，不是接到线上就恒绿的摆设。本门已接进 `.github/workflows/ci.yml` 的 gate job（debt-gate 之后），输入=线上读数。",
       "workstream": "MAIN",
-      "note": "门禁先于绿存在：它现在能红（真实读数），发布完成后才进 CI —— 不为把它提前接上而把 404 判成\"还没发而已\"。",
+      "note": "门禁先于绿存在这条已兑现：它 10:44 就能红（真实读数），发布完成后才接进 CI。",
       "updated": "2026-09-29"
     },
     {
@@ -1409,6 +1409,78 @@
       "evidenceTier": "static",
       "workstream": "MAIN",
       "note": "2026-09-29 随 B3（判据与单一真值）接入 ci.yml gate job：`node scripts/doc-gate.js --strict-cites`。范围按事实切两半，不做「为了让门绿而改文档」的事：**规范面**（docs/contracts、docs/standards、docs/runbook、README）存量清零后转强制，本次接入时 cites(规范)=0，红只可能来自新写的假引用；**历史/对照面**（ADR 与被否决方案的原文、迁移对照表指名的旧 JS 模块）报告模式，79 条数字写在 doc-gate-report.txt 里可见 —— 那一类命中是「记录某样东西已不存在」，逼人改写成活的引用就是烧证据（dead-path-gate 不把 docs 扫进违禁词，同一理由）。豁免要求同一行自己声明废止（`已删/已废止/整段删除…`），依据写在散文里谁都能看见，不是隐形后门；外部包文件（npm-cli.js）按 gate-policy.citations.external 逐条申报理由。核验器自带双向自证：坏引用与越界行号抓不住、好引用被判红，都当场 FAIL。",
+      "updated": "2026-09-29"
+    },
+    {
+      "group": "delivery-surface",
+      "id": "DS-1",
+      "desc": "投放口空转：`scripts/upload-qiniu.js` 被 commit 88192be4 删掉入口调用后，脚本被调用时什么都不做还退 0；三条投放链路连着三天打印「通道已更新」，线上对象全部 404，设备永远装不上内核",
+      "where": "scripts/upload-qiniu.js + .github/workflows/build-userland.yml + .github/workflows/program-ota.yml",
+      "action": "恢复 main() 调用；回读判据收进脚本本身（上传后从 QINIU_PUBLIC_BASE 取回该键逐字节比对，取不到或对不上退 1）；缺 QINIU_PUBLIC_BASE 直接退 2 —— 没有回读锚就不许声称投放生效。workflow 侧不再自己 curl 自证",
+      "status": "done",
+      "evidenceTier": "online",
+      "evidenceRef": "2026-09-29 现读 run 36512845549 与 36512850769 日志：`[qiniu] 回读 [ok] https://hubcdn.zll.ink/userland-canary/userland-manifest-2.json bytes=6966 sha256=26c3e90bb909…`、同名 .sig、`program-canary/program-manifest.json bytes=572`；对照实验：删掉 main() 调用后 `container/engine/test/upload-qiniu-test.js` 18 项 FAIL（已钉进该测试的静态检查）",
+      "workstream": "MAIN",
+      "updated": "2026-09-29"
+    },
+    {
+      "group": "delivery-surface",
+      "id": "DS-2",
+      "desc": "分片上传协议误用：原先一次 mkblk 后用 bput 串接同一块（七牛 v1 里 bput 只在块内续传，块上限 4 MiB），且 mkfile 收到的 ctx 数量与块数不符；`PER_ATTEMPT_MS` 声明在大件分支之后，每片都撞 TDZ 被自己的重试循环报成网络失败",
+      "where": "scripts/upload-qiniu.js(uploadResumable)",
+      "action": "按 v1 语义重写：每块一次 mkblk（≤4 MiB）、ctx 每块一个、mkfile 按序拼；常量前声明。首次真跑就是 24 MB 件",
+      "status": "done",
+      "evidenceTier": "online",
+      "evidenceRef": "2026-09-29 02:35–02:47 现读 run 36512850769 的 build (git) 日志：6 块（4194304×5 + 尾块）→ `已上传（分片）userland/userland-git-2.55.0-27f88e59c8e5-android-arm64.zip（24135693 字节，6 块）` → `回读 [ok] … bytes=24135693 sha256=27f88e59c8e5…`；对照实验：改回 bput 串接后该测试 5 项 FAIL",
+      "workstream": "MAIN",
+      "updated": "2026-09-29"
+    },
+    {
+      "group": "delivery-surface",
+      "id": "DS-3",
+      "desc": "C 层件链接农场把「含 `..`」当穿越一律跳过，而 git 件农场第一行正是 `libexec/git-core/git → ../../bin/git`：锚点永不建立，同目录 148 条 `git-* -> git` 全是指向不存在路径的悬空链，件照样落位并计成「就位」",
+      "where": "container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt:146(applyLinkFarm) :175(farmBroken)",
+      "action": "穿越判据改为按**落点**核（目标 canonical 路径必须仍在件内）而不是按字面禁 `..`；farmBroken 除「是不是链」外还要「链能不能解析」，悬空链计入未建成",
+      "status": "in-progress",
+      "evidenceTier": "device",
+      "evidenceRef": "2026-09-29 真机现读（diag:supply 那条 FAIL 落盘于 10:49:25，目录复测在同一场会话里）：`files/usr/lib/toolchain/git/link-farm.txt` 149 行、其中 1 行含 `..`；`libexec/git-core/git: No such file or directory`、`test -e git-add` → ADD_LINK_RESOLVES=no；`diag:supply` FAIL「C 层件链接农场有 1 条没建成 | git」而同轮又记 `supply` OK「就位 4 件」；`git --version` 可用（内置子命令不走 libexec）⇒ 损害面是外部命令与 `git-*` 直接调用，不是 git 整体起不来。代码已改，待下一次出包在真机复验（本轮 build-apk run 36513213633 用的是改动前的 main）",
+      "workstream": "MAIN",
+      "updated": "2026-09-29"
+    },
+    {
+      "group": "delivery-surface",
+      "id": "DS-4",
+      "desc": "设备侧远端对象键留有代码内默认值（`MANIFEST_NAME`=旧键名）：通道锚读不到或字段缺失时静默回落到旧键，于是「仓内声明已改名 + 线上仍是废止身份」可以同时为真而不报错，设备安静装上陈件",
+      "where": "container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt:69(anchorName) :220(ensure)",
+      "action": "anchorName 不给默认值、读不到即返回 null；`manifestName` 缺失就记 FAIL 并 return 0（不供给），`sigName` 仍按 `<manifestName>.sig` 推导。`MANIFEST_NAME` 只留给设备侧落盘副本命名",
+      "status": "in-progress",
+      "evidenceTier": "device",
+      "evidenceRef": "2026-09-29 10:44 现读：声明键 `userland-canary/userland-manifest-2.json`=404 而旧键 `userland-canary/userland-manifest.json`=200（陈表 2026.09.27.119）——这正是回落会命中的形态；`assets/supply/channel.json:6-7` 才是键的唯一声明处。代码已改，待 CI 编译 + 出包复验",
+      "workstream": "MAIN",
+      "updated": "2026-09-29"
+    },
+    {
+      "group": "delivery-surface",
+      "id": "DS-5",
+      "desc": "启动链把「已是最新（无更新）」记成 FAIL：Outcome 只有 checked/available/updated 三格，调用方拿 `ota.updated` 当 ok 位，于是取 manifest 失败、验签拒绝与「没什么可做」共用同一个级别，取证面读不出通道状态",
+      "where": "container/app/src/main/java/lobos/runtime/InstanceHost.kt:308 + container/app/src/main/java/lobos/ota/ProgramOtaUpdater.kt:70,192",
+      "action": "Outcome 增 `upToDate`（只在 OtaPolicy.Verdict.UpToDate 分支置真），级别改为 `ota.updated || ota.upToDate`；其余非装上路径保持 FAIL —— 「有新版本却没装上」与「通道断了」都必须继续可见",
+      "status": "in-progress",
+      "evidenceTier": "device",
+      "evidenceRef": "2026-09-29 10:49:20 真机现读：`diag:program-ota` seq432 FAIL「启动内核检查完成（无更新）| 已是最新（本地 0.1.0-android.48，远端 0.1.0-android.48）」，同一轮 `health` OK、`program-commit` 已在 10:47 提交 —— 通道明明是通的，读数却要求人去读 detail 才能反推。代码已改，待 CI 编译 + 出包复验",
+      "workstream": "MAIN",
+      "updated": "2026-09-29"
+    },
+    {
+      "group": "delivery-surface",
+      "id": "DS-6",
+      "desc": "随 C 层清单下发的能力判据里写死了旧对象键（curl/git 两条判据取 `userland-canary/userland-manifest.json`）：清单发到新键之后，判据仍在敲旧门 —— 旧键一旦不作废就靠运气为真，且没有任何门禁能把这个错位照出来",
+      "where": "scripts/userland-verify.json(git/curl 两条 node 判据)",
+      "action": "判据字面改到通道锚声明的键；`scripts/delivery-gate.js` 增一条声明面内部一致检查：判据里出现的 `userland-<channel>/<file>` 必须等于通道锚的 manifestName，否则判红",
+      "status": "done",
+      "evidenceTier": "static",
+      "evidenceRef": "2026-09-29 本机现读对照：改字面前 `node scripts/delivery-gate.js` FAIL 2 项（两把尺子都指出同一处），改后 exit 0；`scripts/userland-verify.json` 内旧键字面剩余 0 处、JSON 仍可解析。线上清单要等下一次 build-userland 发布才带上新判据",
+      "workstream": "MAIN",
       "updated": "2026-09-29"
     }
   ],

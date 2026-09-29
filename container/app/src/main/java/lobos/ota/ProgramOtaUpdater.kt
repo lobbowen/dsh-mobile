@@ -56,6 +56,9 @@ object ProgramOtaUpdater {
     /**
      * 一次检查/升级的结果。
      * [available] 与 [updated] 必须分开："有新版本但没装"（checkOnly）与"装了"是两件事。
+     * [upToDate] 也必须分开：「已是最新」是一次成功的检查，而 `available/updated` 双双为 false 的
+     * 其余路径（取不到 manifest、验签拒绝…）是失败 —— 把它们记成同一个级别，取证面就分不清
+     * 「通道通了没什么可做」和「通道断了什么也没发生」（真机 2026-09-29：无更新被记成 FAIL）。
      */
     data class Outcome(
         val checked: Boolean,
@@ -64,6 +67,7 @@ object ProgramOtaUpdater {
         val current: String?,
         val remote: String?,
         val detail: String,
+        val upToDate: Boolean = false,
     )
 
     /**
@@ -185,7 +189,7 @@ object ProgramOtaUpdater {
         )
         when (verdict) {
             is OtaPolicy.Verdict.Reject -> return Outcome(true, false, false, current, remote, verdict.message)
-            is OtaPolicy.Verdict.UpToDate -> return Outcome(true, false, false, current, remote, verdict.message)
+            is OtaPolicy.Verdict.UpToDate -> return Outcome(true, false, false, current, remote, verdict.message, upToDate = true)
             is OtaPolicy.Verdict.Available -> return Outcome(true, true, false, current, remote, verdict.message)
             is OtaPolicy.Verdict.Holdback -> return Outcome(true, true, false, current, remote, verdict.message)
             OtaPolicy.Verdict.Install -> Unit
