@@ -18,10 +18,25 @@ cd "$HERE/.."
 ROOT_DIR=$(pwd)
 
 PNPM_VERSION=12.7.0
-TARBALL_SHA512_B64=gJTCsUbazAEbIMF9l2t+z3YWHCI0AiThtBsxU6FrxXK0tZsBRZZWpleLs0uY8Dy6V0RcPEusn3UyuAyFn3dkeA=
+TARBALL_SHA512_B64=gJTCsUbazAEbIMF9l2t+z3YWHCI0AiThtBsxU6FrxXK0tZsBRZZWpleLs0uY8Dy6V0RcPEusn3UyuAyFn3dkeA==
 ELF_SHA256=ce0b5e064552f60ec5b153d767b464f8d64f7659dbc2c58780679ac7e5bdfe78
 ELF_SIZE=47033992
 TARBALL=https://registry.npmjs.org/@pnpm/exe.android-arm64/-/exe.android-arm64-${PNPM_VERSION}.tgz
+
+# 钉本身先自证形状：sha512 的 base64 恒为 88 字且以 == 结尾（64 字节 %3==1），sha256 十六进制恒 64 字。
+# 抄漏一位 padding 时，比对处的红话会写成「上游内容变了」，把人往错方向支（2026-09-30 CI 实吃到过）。
+if [ "${#TARBALL_SHA512_B64}" != 88 ]; then
+  echo "::error title=钉本身不合法::sha512 的 base64 应为 88 字，实为 ${#TARBALL_SHA512_B64} 字"
+  exit 1
+fi
+case "$TARBALL_SHA512_B64" in
+  *==) : ;;
+  *) echo "::error title=钉本身不合法::sha512 的 base64 应以 == 结尾（64 字节 %3==1），实为 ${TARBALL_SHA512_B64: -2}"; exit 1 ;;
+esac
+if [ "${#ELF_SHA256}" != 64 ]; then
+  echo "::error title=钉本身不合法::sha256 十六进制应为 64 字，实为 ${#ELF_SHA256} 字"
+  exit 1
+fi
 
 OUT="${OUT:-dist}"
 mkdir -p "$ROOT_DIR/$OUT/bin" "$ROOT_DIR/work"
