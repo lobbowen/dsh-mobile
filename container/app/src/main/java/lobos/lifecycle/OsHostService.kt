@@ -60,15 +60,25 @@ class OsHostService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // 先翻旧账再转前台：定罪结论必须在第一条状态出来之前就位（幂等，只有首次读盘）。
         ResidencyAudit.auditPreviousExit(this)
+        // 出生 = thread 还没建；同一次出生里两处要用这个判据，取一次，别写两遍各判各的。
+        val born = thread == null
+        if (born) {
+            // 本世的对外状态先归零，再发第一条通知：否则首行渲染的是上一世留在 state.json 里的
+            // 判决与读数（真机 2026-09-30 实测的 60s 窗口，债 E12）。
+            OsInit.beginLife(this, ResidencyAudit.interruption())
+        }
         // 每次投递都重新自转前台：普通 startService 路径没有 FGS 特权，被拒时吞。
         promoteToForeground()
         ensureComponents(intent)
-        if (thread == null) {
+        if (born) {
             thread = HandlerThread("lobos-host").apply { start() }
             handler = Handler(thread!!.looper)
-            handler?.postDelayed(tick, TICK_MS)
             // 状态机唯一迁移入口：state.json = 通知 = 控制台（C1 三处同源）。
-            OsInit.transition(this, OsPhase.RUNNING, "宿主组件就绪")
+            OsInit.transition(this, OsPhase.RUNNING, "宿主组件就绪", ResidencyAudit.interruption())
+            // 出生后的第一拍**立刻**跑（tick 的 finally 里才按节拍拍）：屏幕上的第一句话
+            // 必须是这一世量出来的，不该等 60s（债 E12 ③）。排在 transition 之后是次序判据 ——
+            // 判据表在 OsPhaseRule 里对 BOOTING 保持沉默，先跑那一拍就量不出降级。
+            handler?.post(tick)
             // 程序登记（AUD-G37）：把 OS 实际在管的 console Program 写进 files/os/programs.json，
             // 否则 os.programs.*/os.instances.* 永远是空账。装没装由 CURRENT 指针如实决定。
             runCatching {
@@ -206,7 +216,7 @@ class OsHostService : Service() {
     }
 
     override fun onDestroy() {
-        runCatching { OsInit.transition(this, OsPhase.STOPPING, "宿主被销毁") }
+        runCatching { OsInit.transition(this, OsPhase.STOPPING, "宿主被销毁", ResidencyAudit.interruption()) }
         handler?.removeCallbacksAndMessages(null)
         thread?.quitSafely()
         thread = null
