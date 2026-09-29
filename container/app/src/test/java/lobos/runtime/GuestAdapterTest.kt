@@ -187,8 +187,9 @@ class GuestAdapterTest {
         assertFalse(env.containsKey("LD_PRELOAD"))
         assertFalse(env.containsKey("NODE_OPTIONS"))
         // 夹具机器上 CA 目录/bundle 不在场 ⇒ 信任根三键不入集合（真机读数在 V-0c）。
+        // 无 NODE_PATH 是刻意的（:109 那条已单独钉住），别把它当缺键补回来。
         assertEquals(
-            setOf("HOME", "TMPDIR", "LANG", "LD_LIBRARY_PATH", "NODE_BIN", "PATH", "SHELL", "NODE_PATH"),
+            setOf("HOME", "TMPDIR", "LANG", "LD_LIBRARY_PATH", "NODE_BIN", "PATH", "SHELL"),
             env.keys,
         )
     }
