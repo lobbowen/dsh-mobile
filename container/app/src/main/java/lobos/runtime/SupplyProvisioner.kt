@@ -249,7 +249,19 @@ object SupplyProvisioner {
                 if (name.isEmpty() || url.isEmpty() || want.isEmpty()) continue
                 val marker = File(tc, "." + name + ".ok")
                 val root = File(tc, name)
-                if (marker.isFile && marker.readText().trim() == want && File(root, entryRel).isFile) { okCount++; continue }
+                if (marker.isFile && marker.readText().trim() == want && File(root, entryRel).isFile) {
+                    // marker 命中**不等于件还能用**：农场完好性必须在这里复验一次。
+                    //   件按 sha256 内容寻址，同一个 sha 只会落位一次 —— 不在这里读，
+                    //   那么「后来修好了建链代码」对已就位件永远不会起效，设备上只剩一堆悬空链
+                    //   而供给一路记 OK（2026-09-29 真机定罪 DS-7）。只记账不自动重下：
+                    //   重建要靠删 `.<name>.ok`，免得农场天生建不成时每次开机都拖 24MB。
+                    val brokenLinks = farmBroken(root)
+                    if (brokenLinks > 0) {
+                        RuntimeDiagnostics.append(ctx, "supply", false, "C 层已就位件的链接农场有 " + brokenLinks + " 条不可解析", name)
+                    }
+                    okCount++
+                    continue
+                }
                 val bytes = httpGet(url)
                 val got = sha256Hex(bytes)
                 if (got != want) {
