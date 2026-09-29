@@ -32,11 +32,10 @@ const KEY = process.argv[4] || 'keys/ota-private.pem';
 const CHANNEL = process.argv[5] || 'canary';
 const BASE = (process.env.USERLAND_BASE_URL || 'https://hubcdn.zll.ink').replace(/\/+$/, '');
 const PUBKEY = path.join(ROOT, 'container', 'app', 'src', 'main', 'assets', 'ota-public.pem');
-const EXTERNAL = path.join(__dirname, 'userland-external-tools.json');
 const VERIFY = path.join(__dirname, 'userland-verify.json');
 const TTL_MS = 30 * 86400_000;
 
-/** 本次构建出的件（zip 命名即契约：userland-<name>-<ver>-<sha12>-android-arm64.zip）。 */
+/** 本轮构建出的件（zip 命名即契约：userland-<name>-<ver>-<sha12>-android-arm64.zip）。 */
 function toolsFromDist() {
   if (!fs.existsSync(DIST)) throw new Error('dist 目录不存在: ' + DIST);
   const out = [];
@@ -61,12 +60,6 @@ function toolsFromDist() {
   return out;
 }
 
-function toolsExternal() {
-  const j = JSON.parse(fs.readFileSync(EXTERNAL, 'utf8'));
-  // 原样透传（含 aliases：件的命令别名由**件的声明**决定，机制照单写入口，内核不写死同名关系）。
-  return (j.tools || []).map((t) => ({ ...t }));
-}
-
 function versionString() {
   const d = new Date().toISOString().slice(0, 10).replace(/-/g, '.');
   const run = process.env.GITHUB_RUN_NUMBER || '0';
@@ -81,8 +74,8 @@ function criteria() {
 
 function main() {
   const crit = criteria();
-  const tools = toolsFromDist().concat(toolsExternal()).sort((a, b) => a.name.localeCompare(b.name));
-  if (!tools.length) throw new Error('清单为空：没有构建产物也没有外部件');
+  const tools = toolsFromDist().sort((a, b) => a.name.localeCompare(b.name));
+  if (!tools.length) throw new Error('清单为空：dist 下没有一颗按命名契约产出的件');
   const seen = new Set();
   for (const t of tools) {
     const v = crit[t.name];

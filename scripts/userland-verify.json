@@ -3,8 +3,8 @@
   "schema": 1,
   "criteria": {
     "pnpm": {
-      "criterion": "共享入口 $PREFIX/bin/pnpm 真能跑起来并打印版本 —— 文件在不算数",
-      "node": "const fs=require('node:fs'),cp=require('node:child_process'),path=require('node:path'); const c=JSON.parse(fs.readFileSync(process.env.LOBOS_SUPERVISOR_HOME+'/supervisor/runtime.json','utf8')); const bin=path.join(c.prefix,'bin','pnpm'); const r=cp.spawnSync(bin,['--version'],{encoding:'utf8',timeout:90000}); const v=String(r.stdout||'').trim(); if(r.status!==0 || v.split('.').length<3) throw new Error('pnpm 不可用: rc='+r.status+' out='+v.slice(0,60)+' err='+String(r.stderr||'').slice(0,80)); process.stdout.write('LOBOS_PROBE_PASS pnpm='+v)"
+      "criterion": "按裸名解析的 pnpm 真能跑起来并打印三段版本 —— 文件在不算数",
+      "node": "const cp = require('node:child_process'); const r = cp.spawnSync('pnpm', ['--version'], { encoding: 'utf8', timeout: 90000 }); if (r.error) { console.error('pnpm 起不来: ' + r.error.message); process.exit(1); } const v = String(r.stdout || '').trim(); if (r.status !== 0 || v.split('.').length < 3) { console.error('pnpm 不可用: rc=' + r.status + ' out=' + v.slice(0, 60) + ' err=' + String(r.stderr || '').slice(0, 80)); process.exit(1); } process.stdout.write('LOBOS_PROBE_PASS pnpm=' + v);"
     },
     "sqlite3": {
       "criterion": "sqlite3 CLI 起得来、能算一条 SQL 并把结果读回来（不是只看 --version）",
