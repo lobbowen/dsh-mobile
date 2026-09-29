@@ -1,7 +1,7 @@
 {
   "version": 1,
   "updated": "2026-09-30",
-  "note": "Lob OS 总施工图的机器可读债务台账；status ∈ pending|in-progress|done；D8 前必须全 done。 2026-09-29：新增 ENV-layer 组（运行环境层 §4/§4.1 全量入账）。 2026-09-30：ENV-layer 补 ENV-26（一件一入口 ⇒ npx 无真名）与 ENV-27（文档门不核验符号名空指）；delivery-surface 补 DS-14（版本门禁参照物是日常链永不写的通道 ⇒ 从未比过数）；ENV-1/2/3/5/6/8/19/20/22/25 与 DS-9 随「npm 归口 C 清单」重钉引用与状态。",
+  "note": "Lob OS 总施工图的机器可读债务台账；status ∈ pending|in-progress|done；D8 前必须全 done。 2026-09-29：新增 ENV-layer 组（运行环境层 §4/§4.1 全量入账）。 2026-09-30：ENV-layer 补 ENV-26（一件一入口 ⇒ npx 无真名）与 ENV-27（文档门不核验符号名空指）；delivery-surface 补 DS-14（版本门禁参照物是日常链永不写的通道 ⇒ 从未比过数）；ENV-1/2/3/5/6/8/19/20/22/25 与 DS-9 随「npm 归口 C 清单」重钉引用与状态。 同日 E-logic 组补 E12（上一世中断判决被当这一世现状渲染，60s 窗口真机实测）、E13（「自愈」口径散在契约/注释/文案/类型名四处而门禁只钉一个文件）、E14（常驻判决的 clean 一档从无生产者 ⇒ 反向对照建在不可达分支上，已删边）、E15（architecture.md §1.2 整节仍描述已删除的 v3 三进程链路）。",
   "evidenceRule": "done 必须写 evidenceTier ∈ {static, ci, online, device}：static=只在仓内 grep/静态核对过；ci=CI 上跑过判据；online=交付面（CDN/Release/Workflow）线上现读过；device=真机读数过。未标 evidenceTier 的历史 done 项一律按 static 记账，**不得当作交付证据**（D24：原 115 个 done 里没有任何 online/device 档）。既有自由文本 `evidence` 字段记的是\"当初看到的现场\"，与 evidenceTier（这个 done 站得住到哪一层）是两回事，两者不得互相代替。本轮凡结论来自线上/真机的，都带 evidenceRef 写明现读时间与读数。",
   "items": [
     {
@@ -1353,6 +1353,55 @@
       "evidenceTier": "device",
       "workstream": "MAIN",
       "note": "本轮顺带更正两处**抄串的字段**（依据是这次真读到的 AOSP android15-release 源，不是记忆）：① `ApplicationExitInfo.getSubReason()` 标着 `@hide`（`:881-883`，注释原文「For internal use only」），公开 SDK 头里没有这颗方法 ⇒ app 侧拿不到 subreason **号**；旧 `ExitRecord` 里那个字段连同 `it.subreason` 的取值一起删除 —— 那行本来就会让编译红（Kotlin 合成属性名跟着真名走，`getSubReason` → `subReason`，旧写法连名字都猜错了）。② 旧注释「本机 API 37 已见 reason 17/20/21/22/28」把字段抄串了：公开 `REASON_*` 表止于 16（`:65-183`），17/20/21/22 是 `SUBREASON_*`（`:353-401`）。系统认识的 subreason 只能经 `getDescription()` 的 `[NAME]` 前缀进入 app 视野（拼法 `:785-802`，名表 `subreasonToString` `:1351-1412`，表外的 OEM 号退 `\"UNKNOWN\"`），所以判据的词分支顺带接管了 `FREEZER BINDER TRANSACTION` / `FORCE STOP` / `REMOVE TASK` 这些系统自己的口径。**「本机到底见过哪些 reason 号」这一格现在无档可引**（旧 dumpsys 原文没有留档进仓），下次上机补，不拿猜测填表。不补反射的理由：`@hide` 成员按 AOSP 自己的口径就是不可依赖，成不成随 ROM/版本变，而这条边的产物是给人看的死因 —— 拿一颗不保证存在的号进判据，等于把猜测重新写成事实。 两处本轮交代不清的：① desc 里「设备 journal 251 行 / kill-audit 0 条」是本日之前那次上机取的数，本轮没有设备可接（adb 现无挂载），所以它是**在册旧读数**，不是本轮现读 —— 新壳上机时这一格要重取，取到非零才算数据源搬家成功。② 上界 MAX_RECORDS=32 有代价：系统按新→旧回（ActivityManager.java:4453-4454），而游标只前进，所以一次成组清理若攒出几十条，比第 32 条更老的那些**永不落盘**。这里不为它加兜底（归因只关心这次中断那一条），但它是有意的可见损耗，别当没有。",
+      "updated": "2026-09-30"
+    },
+    {
+      "group": "E-logic",
+      "id": "E12",
+      "desc": "**上一世的中断判决被新一世读回来当现状**（真机 2026-09-30 实测，60s 窗口）。`OsInit` 把 `interrupted` 存在 `files/os/state.json` 里，`snapshot()` 读回它（`:48`），而 `transition()` 走 `prev.copy(...)`（`:74`）—— 于是宿主出生后、第一次实测刷新之前的这段时间里，`statusLine()` 渲染的是**上一世**那份判决。窗口是实打实的 60s：`onStartCommand` 里第一拍是 `handler?.postDelayed(tick, TICK_MS)`（`OsHostService.kt:69`），`TICK_MS = 60_000`，而 `promoteToForeground()`（`:64`，转前台必须同步做）在这之前就用 `OsInit.statusLine(this)` 建了第一条通知。设备对照（本轮做的）：往 `files/residency.txt` 里写一个假的上一世时间戳后 `am force-stop` 重开，通知首行立刻出现「被打断」，60s 后第一拍 `refresh()` 现取才把它抹平 —— 判决本身没错，错在**它被当成这一世的读数渲染了第一分钟**。",
+      "where": "`container/app/src/main/java/lobos/os/OsInit.kt`（`:48` snapshot 回读 `interrupted`、`:74` transition 的 `prev.copy`、`:90-100` refresh 是唯一实测写入点、`:137` statusLine 前缀）；`container/app/src/main/java/lobos/lifecycle/OsHostService.kt`（`:60-109` onStartCommand 次序、`:111-120` promoteToForeground、`:144-157` tick）",
+      "action": "改法三条，缺一仍会跨世：① `interrupted` **不回读** —— `snapshot()` 里的这一格由本次进程的实测结果填，不再从文件继承（读回的账只能由 `ResidencyAudit.interruption()` 一处给出）；② 每一次写状态都必须自带判决来源（`transition(ctx, phase, note, interrupted)` 显式传参，不再 `prev.copy`）；③ 出生后第一拍**立刻**跑（首次 `handler?.post(tick)`，之后才 `postDelayed`），屏幕上的第一句话必须是这一世量的。禁止的解法：把中断文案从通知里摘掉「眼不见为净」、或给 `statusLine` 加「超过 60s 就不显示」的定时器 —— 前者把可见性砍掉，后者是第二条兜底。",
+      "status": "pending",
+      "evidenceTier": "device",
+      "evidenceRef": "真机 2026-09-30：假上一世时间戳 → force-stop → 重开，通知首行 60s 内出现「被打断」；对照读数已随本轮记录（clean-stamp 实验）",
+      "workstream": "MAIN",
+      "note": "与 E14 同族：都把「上一世留下的东西」当成「这一世的事实」读。E14 是文件里的 clean 行，本条是 state.json 里的 interrupted 行。",
+      "updated": "2026-09-30"
+    },
+    {
+      "group": "E-logic",
+      "id": "E13",
+      "desc": "**「无感自愈」是产品从来没有过的概念，却被写进了契约、代码注释、journal 文案和类型名**（用户 2026-09-30 复核时第四次指出：「我们从来就没有自愈这个概念。挂了就是挂了」）。形状不是笔误而是**两处各说一套**：契约 `docs/contracts/onboarding-flow-spec.md:55` 写「锚掉线由 `AccessibilityAnchor` 无感自愈…不必让用户再点系统页」，而代码注释写「只观测，不复活」（`OsHostService.observeAnchorTransition`）；类型名叫 `HealOutcome{healed}`、日志文案写「锚自愈未成」「监督者的锚监护会尝试无感自愈」（`OsAccessibilityService.onUnbind`）。门禁当时只钉 `OsHostService.includes('ensureBound')` **一个文件**，词表又抄在契约正文里（两份清单必然漂移），所以这些句子全绿。",
+      "where": "落地：`AccessibilityAnchor.kt`（`HealOutcome`→`BindOutcome`、`healed`→`bound`、头注与 `ensureBound` 的 KDoc、两条 journal 文案）、`OsApplication.kt`（读数串 `healed=`→`bound=`、「预防，不是自愈」→「保护激活」）、`OsAccessibilityService.kt`（onUnbind 两条文案）、`CapabilityAcquisitionRunner.kt`（`healAccessibilityAnchor`→`bindAccessibilityAnchor`、「三级自愈」→「三步动作」）、`OsHostService.kt`、`BootReceiver.kt`、`SupervisorPolicy.kt`（「周期自愈」→「定时重试」）、`docs/contracts/onboarding-flow-spec.md`、`docs/plans/residency-verification-plan.md`、`docs/plans/app-environment-plan.md`、`programs/console/ui/src/main-console.tsx`；门禁 `container/engine/test/capability-single-source-gate-test.js` R11（词表唯一宿主 `DEAD_WORDS`）",
+      "action": "只许**如实描述**：掉线是被观测到并上屏的（判决降级告警），挂锚只发生在进程出生的第一毫秒（OsApplication / BootReceiver / 能力采集执行器三处实名钉在 R10 的 `binders` 清单），监护层不写系统设置。改名不带兼容层：`HealOutcome`/`healed`/`healAccessibilityAnchor` 全仓为零。已扫同形状：`自愈` 26 行 / 15 个文件（本轮改 15 处），`无感` 其余命中都是「某 API 对该政策完全无感（假阳性）」的技术散文（`NativePreparer.kt:207`、`docs/architecture.md:170` 等），不是自愈口径，**保留**；`docs/plans/archive/**` 与债表本体是案卷，不改写历史。R11 覆盖面 = 壳全部 Kotlin（含注释，122 项）+ `docs/contracts/*.md` + `docs/adr/*.md`；双向对照实测：往 `AnchorPolicy.kt` 注入一句「无感自愈」⇒ `FAIL R11 … 出现死词汇 自愈`（10 passed, 1 failed），还原 ⇒ 11 passed, 0 failed；规则内另两条自证（词表被掏空必红、误伤 `health`/`pollHealth`/`/healthz` 必红）同批在跑。",
+      "status": "in-progress",
+      "evidenceTier": "static",
+      "workstream": "MAIN",
+      "note": "仍欠的两格，缺一个不许写「口径已收口」：① CI 跑 `test:logic`（本地只算 `CI=true` 预读）；② `docs/architecture.md:107` 的「断开超 30s 自愈预算」不在本轮删除范围也不在 R11 覆盖面内 —— 它所在的 §1.2 整节还在描述已删除的 v3 三进程链路（`ContainerConsole`/`HostBridgeService`/`NodeRuntimeService` 均已不在仓内），换一个词等于把陈旧架构图洗成看起来正确的，见 E15。",
+      "updated": "2026-09-30"
+    },
+    {
+      "group": "E-logic",
+      "id": "E14",
+      "desc": "**常驻判决的「干净收尾」一档从来没有生产者**（死代码，2026-09-30 真机定罪）。`ResidencyAudit` 存三行 `lastAliveMs / bootBasisMs / alive|clean`，其中 `clean` 只由 `markCleanStop()` 写，而 `markCleanStop()` 唯一的调用点是 `OsHostService.onDestroy`；本机没有任何一路能走到那里 —— 真机现读 `adb shell am stopservice lobos.app/lobos.lifecycle.OsHostService` 直接回 `Error stopping service`，系统强杀/划掉任务/osense 更不调用 `onDestroy`。后果有两层：① `auditPreviousExit` 的 `if (lines[2] == STATE_CLEAN) return` 是一条不可达分支，却承担了整个判据的**反向对照组**；② 契约与验收文档把「`am stop-service` 后重开不该出现这一行」写成必须通过的对照（债 E11 的同族：拿走不通的路当证据）。",
+      "where": "落地：`container/app/src/main/java/lobos/lifecycle/ResidencyAudit.kt`（删 `STATE_CLEAN`/`markCleanStop`/第三行状态位与那条不可达分支，`residency.txt` 收成两行 `lastAliveMs / bootBasisMs`，判决只剩 **被打断** 与 **设备重启** 两支；旧文件多出的第三行由新读法自然忽略，不留兼容代码）；`OsHostService.onDestroy`（删调用点）；文档 `docs/adr/0006-background-lifecycle-keepalive.md`（D3 的 journal 条目 + 验收项 6）、`docs/contracts/onboarding-flow-spec.md`（§2.3 表行、门禁条目、判据 11）、`docs/contracts/ui-onboarding-spec.md`（定罪行、判据 ⑪）、`docs/plans/app-environment-plan.md`（V-6 反向对照）",
+      "action": "删边，不加「检测到能停就写 clean」的兼容路径（那是把不可达分支重新接上）。反向对照移到**可达**的那一档：整机重启后首启必须写「结束于设备重启」而不是「被回收」，且 `ResidencyInterruptionTextTest` 两支各自钉住（重启支不许带死因、打断支必须原样带出取证读数）。仍欠：CI 编译 + 新壳上机现读 `residency.txt` 为两行、`am force-stop` 后首启仍如实定罪。",
+      "status": "in-progress",
+      "evidenceTier": "device",
+      "evidenceRef": "真机 2026-09-30：`am stopservice` → `Error stopping service`；旧壳 `files/residency.txt` 现读三行（第三行 `alive`），clean 从未出现",
+      "workstream": "MAIN",
+      "note": "与 E11（归因写成常量）、E12（上一世判决当现状）同族：都是把「没有证据」或「别的世的证据」渲染成当前事实。",
+      "updated": "2026-09-30"
+    },
+    {
+      "group": "E-logic",
+      "id": "E15",
+      "desc": "`docs/architecture.md` §1.2「正确的启动链路」整节仍在描述**已删除的 v3 三进程链路**：`ContainerConsole` / `HostBridgeService` / `NodeRuntimeService` 三颗类都不在仓内（债表 A1/A2/A3 记的是它们已迁成 `InstanceHost`/`CapabilityBroker`/`OsHostService`），互保边、`bindService` 监督边、通知 1001 也随之作废；同一节还留着「自愈预算」那一行（E13 扫到但按「不拿换词洗陈旧图」的原则没动）。§2 那张 SELinux 表内部自相矛盾：正文结论说本包钉 `targetSdk=28` 落 `untrusted_app_27` 域、`filesDir` **可 exec**，表里 `app_data_file` 那行却写 ❌ 禁止。",
+      "where": "docs/architecture.md §1.2（约 :91-120）、§2 表格（约 :124-132）",
+      "action": "整节按现行代码重写（`BootReceiver`/`OsApplication` → `OsHostService` 单进程 + 进程内 `InstanceHost`/`CapabilityBroker`/`ScreenCaptureController`，锚层与心跳的次序照 `OsHostService.kt:60-109` 抄），SELinux 表按 targetSdk 分列。不许只做词替换。重写前 §1.2 不作为任何改动的依据。",
+      "status": "pending",
+      "workstream": "MAIN",
+      "note": "登记理由：E13 的词表扫描若把 architecture.md 纳入覆盖面，就必须整节改写才算数 —— 顺手换词会把一张陈旧架构图洗成看起来正确的，那比留着更糟。",
       "updated": "2026-09-30"
     },
     {

@@ -68,7 +68,7 @@ object SupervisorPolicy {
     /**
      * 这一轮之后循环还继不继续。只有 [BootOutcome.NO_PROGRAM] 停手：没有可跑的东西，
      * 退避重试变不出内核，只会把「等装包」伪装成「一直在努力」（每 30s 一次 OTA 往返）。
-     * 恢复一律由明确动作发起（装包后的重拉、诊断页重试、下次开屏），不做周期自愈。
+     * 恢复一律由明确动作发起（装包后的重拉、诊断页重试、下次开屏），不起定时重试。
      */
     fun keepsLooping(outcome: BootOutcome): Boolean = outcome != BootOutcome.NO_PROGRAM
 

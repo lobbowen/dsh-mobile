@@ -51,7 +51,7 @@ class OsHostService : Service() {
     private var broker: CapabilityBroker? = null
     private var capture: ScreenCaptureController? = null
 
-    // ---- 锚层：只观测状态翻转（复用本服务 tick，不新起闹钟/心跳，也不在这里自愈） ----
+    // ---- 锚层：只观测状态翻转（复用本服务 tick，不新起闹钟/心跳，也不在这里写系统设置） ----
     private var anchorBoundLastTick: Boolean? = null
 
     /** 本服务不对外提供调用面（同进程组件直连），仅维持自身生命周期。 */
@@ -176,14 +176,14 @@ class OsHostService : Service() {
     }
 
     /**
-     * 锚层监护：**只观测，不复活**。
+     * 锚层监护：**只观测，不动手**。
      *
-     * 为什么删掉自愈重试环（2026-09-28 拍板）：锚掉线意味着 ColorOS 的判决已经降到
+     * 为什么这里不写系统设置（2026-09-28 拍板）：锚掉线意味着 ColorOS 的判决已经降到
      * importance=traffic（AnchorPolicy 头注的真机实证），此时反复 `settings put` 是把「已经输掉
-     * 的判决」用重试伪装成正常 —— 那是兜底，不是判据。恢复窗口在**进程出生的第一毫秒**
+     * 的判决」用重试伪装成正常 —— 那是兜底，不是判据。挂锚的唯一时机是**进程出生的第一毫秒**
      * （OsApplication / BootReceiver 各戳一次，硬上界见 [AnchorPolicy.ACTIVATION_BUDGET_MS]），
      * 不在这里。本方法唯一的职责是让状态翻转**可见**：掉线那一刻上屏一条判决降级告警，
-     * 系统重绑成功上屏一条恢复，其余节拍保持安静（重复告警不是可见性，是噪音）。
+     * 系统重绑成功上屏一条回到位，其余节拍保持安静（重复告警不是可见性，是噪音）。
      */
     private fun observeAnchorTransition(st: AnchorState) {
         if (st == AnchorState.UNKNOWN) return      // 读不到是采集失败，不是锚的状态
@@ -207,7 +207,6 @@ class OsHostService : Service() {
 
     override fun onDestroy() {
         runCatching { OsInit.transition(this, OsPhase.STOPPING, "宿主被销毁") }
-        ResidencyAudit.markCleanStop(this)
         handler?.removeCallbacksAndMessages(null)
         thread?.quitSafely()
         thread = null

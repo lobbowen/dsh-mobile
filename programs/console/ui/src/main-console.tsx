@@ -2,7 +2,7 @@
  * lobos-panel 控制面板入口（唯一产品入口）
  * 使用场景：同源托管于 lobos-panel :3100（GET / → console.html → 此入口）。
  *
- * 资源一致性由架构保证（无自愈/强制刷新脚本）：
+ * 资源一致性由架构保证（无定时重试/强制刷新脚本）：
  *  - 后端 HTML no-store：每次请求拿到最新 index
  *  - 资源内容哈希：HTML 引用的 JS/CSS 永远自洽
  *  - 宿主（lobos-panel-gui）每次显示窗口重新导航到 / ：旧 WebView 不留存

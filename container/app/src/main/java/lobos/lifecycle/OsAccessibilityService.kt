@@ -74,11 +74,12 @@ class OsAccessibilityService : AccessibilityService() {
         if (instance === this) instance = null
         Log.i(TAG, "OsAccessibilityService 已解绑")
         // 解绑 = 闸门关闭：HANS 判决即将降到 importance=traffic，进程随时会被 o-kill。
-        // 这里只负责让状态可见；恢复由 [AccessibilityAnchor] 的监护尝试（先摘后写逼 AMS 重绑）。
+        // 本方法唯一的职责是把这件事显示出来；动作不在这里发 —— 下一次挂锚的时机是进程重生
+        // （AccessibilityAnchor 只由 OsApplication/BootReceiver 在出生时戳，监护层只读状态）。
         RuntimeDiagnostics.append(
             this, "accessibility", false,
             "锚 " + AccessibilityAnchor.state(this) + "：服务被解绑（闸门关闭）",
-            "监督者的锚监护会尝试无感自愈；这是预防窗口，不是死后自愈",
+            "挂锚只在进程出生时做；本设计没有任何死后恢复",
         )
         return super.onUnbind(intent)
     }

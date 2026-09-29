@@ -241,7 +241,7 @@ rule('R9 豁免层', appFiles.length, () => {
 // R10 实测账单源（债表 SP-1）：「这项归 adb 还是归人」只由 files/os/permission-ledger.json 的结局推导。
 // 定罪对象是「未试先判」—— 旧实现按档位把没试过的取法预先钉死人点（写作 usable = false），
 // 于是 AppOps 三项与运行时权限从没被 adb 下发过就已经"只能人点"。本规则三个方向都要真：
-// ① 死词汇不回潮；② 每一档都有实测路且执行器真的下发+回读；③ 锚的自愈不得住回监督者。
+// ① 死词汇不回潮；② 每一档都有实测路且执行器真的下发+回读；③ 挂锚动作不得住回监督者。
 // 双向对照组：匹配器对人造反例必须红（判据被掏空时 ① ② 会恒绿，"零命中"就成了假清白）。
 rule('R10 实测账单源（不许未试先判）', appFiles.length, () => {
   const bad = [];
@@ -269,12 +269,37 @@ rule('R10 实测账单源（不许未试先判）', appFiles.length, () => {
   if (!strip(sprint).includes('attemptOutcome')) bad.push('弹人清单没读实测账');
   // ③ 父责非限制、不设兜底：监督者只观测锚的翻转，发起点只有进程出生/开机/用户与自动流。
   const host = strip(read(path.join(APP, 'src/main/java/lobos/lifecycle/OsHostService.kt')));
-  if (host.includes('ensureBound')) bad.push('OsHostService 又在自愈锚（复活式兜底）');
+  if (host.includes('ensureBound')) bad.push('监督者又发起挂锚（复活式兜底）');
   if (!host.includes('observeAnchorTransition')) bad.push('OsHostService 缺锚状态观测（掉线要看得见）');
-  const healers = kt.filter((f) => strip(read(f)).includes('ensureBound('))
+  const binders = kt.filter((f) => strip(read(f)).includes('ensureBound('))
     .map((f) => path.basename(f)).sort().join(',');
-  if (healers !== 'AccessibilityAnchor.kt,BootReceiver.kt,CapabilityAcquisitionRunner.kt,OsApplication.kt') {
-    bad.push('锚激活点漂移: ' + healers);
+  if (binders !== 'AccessibilityAnchor.kt,BootReceiver.kt,CapabilityAcquisitionRunner.kt,OsApplication.kt') {
+    bad.push('锚激活点漂移: ' + binders);
+  }
+  return bad;
+});
+
+// R11 「自愈」口径不回潮（债 E13）：本产品从来没有自愈这个概念 —— 进程死了底下全死，挂了就是挂了。
+// 定罪的形状：同一句话散在契约正文、KDoc、journal 文案、类型名（HealOutcome/healed）四处，
+// 而旧门禁只钉 `OsHostService.includes('ensureBound')` 一个文件 —— 契约写着「无感自愈」、
+// 代码写着「只观测不复活」，门禁全绿。本规则把词表收在**唯一宿主**（这里），契约文档只指这里、
+// 不复述词表；覆盖面 = 壳的全部 Kotlin（**含注释**，文案会被抄进 journal 给人读）
+// + docs/contracts/*.md + docs/adr/*.md（实现者读的两张脸）。
+// 不收 bare `heal`：health/pollHealth/`/healthz` 是内核控制面与面板探针的真名，收进来就是误伤。
+// 不扫 docs/plans/** 与 docs/architecture.md：按日期记的定罪案卷，改写历史等于抹掉当时的判决。
+const DEAD_WORDS = ['自愈', 'HealOutcome', 'healed', 'SelfHeal', 'selfheal'];
+const deadHits = (txt) => DEAD_WORDS.filter((w) => txt.includes(w));
+const deadScope = appFiles.filter((f) => f.endsWith('.kt'))
+  .concat(walk(path.join(ROOT, 'docs', 'contracts')).filter((f) => f.endsWith('.md')))
+  .concat(walk(path.join(ROOT, 'docs', 'adr')).filter((f) => f.endsWith('.md')));
+rule('R11 「自愈」口径不回潮（词表唯一宿主 + 全壳文案与契约）', deadScope.length, () => {
+  const bad = [];
+  // 双向对照：词表被掏空必须红，判据过宽（误伤真名）也必须红。
+  if (!deadHits('锚掉线由锚对象无感自愈（不必让用户再点系统页）').length) bad.push('自证失败：对照组没命中（词表被掏空）');
+  if (deadHits('控制面 health 探针 / pollHealth(healthPath) / /healthz').length) bad.push('自证失败：误伤 health 类真名（判据过宽）');
+  for (const f of deadScope) {
+    const h = deadHits(read(f));
+    if (h.length) bad.push(rel(f) + ' 出现死词汇 ' + h.join(','));
   }
   return bad;
 });
