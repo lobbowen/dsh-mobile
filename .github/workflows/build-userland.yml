@@ -64,6 +64,10 @@ jobs:
         with:
           name: userland-${{ matrix.tool }}
           path: dist/
+          # 下游组装步只读【本轮】的件（download-artifact 不带 name 即本 run 全量），
+          # 设备侧真正读的供给走七牛 —— 跨 run 的这份没有任何读者。
+          # 留一天只为事后取证，此前不设上限=默认 90 天，四个工具轮轮叠加。
+          retention-days: 1
       - name: 发布到对象存储（设备真正读的那条）
         if: ${{ github.event.inputs.publish == 'true' }}
         env:

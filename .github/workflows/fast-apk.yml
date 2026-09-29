@@ -404,6 +404,10 @@ jobs:
           name: lobos-apk
           path: container/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          # 这份不只是构件，还是 pin-node 的唯一裸 .so 来源：release-admin 按 run-id
+          # 回取它、从 APK 的 lib/arm64-v8a/ 里解出 libnode.so。留 14 天 = 覆盖
+          # 「事后想补固化某一轮」的窗口；不设则默认 90 天，每轮 50 MiB 无限叠加。
+          retention-days: 14
 
       - name: Publish APK to Release
         env:

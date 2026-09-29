@@ -710,6 +710,11 @@ jobs:
           name: lobos-apk
           path: container/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+          # 同上：这份是 pin-node 按 run-id 回取裸 .so 的来源（release-admin 的固化步
+          # 先在 artifact 里找 libnode.so，找不到才从 APK 的 lib/arm64-v8a/ 解）。
+          # 本 workflow 只在改 Node 运行时/编译脚本时手动跑，一跑数小时，
+          # 却让每份 APK 挂满 90 天没有意义。
+          retention-days: 14
 
       - name: Gate — APK 形态（发布必须是 release 形态）
         id: formgate
