@@ -78,6 +78,8 @@ jobs:
           fi
           for f in dist/*.zip; do
             B=$(basename "$f")
+            # 回读锚取自 APK 随包的 channel.json（设备侧读的就是它）：另写一个域名就是第二个事实源。
+            QINIU_PUBLIC_BASE="$(node -p "JSON.parse(require('fs').readFileSync('container/app/src/main/assets/supply/channel.json','utf8')).baseUrl")" \
             node scripts/upload-qiniu.js "$f" "userland/$B" --cache-control=31536000
           done
           echo "[qiniu] userland/${{ matrix.tool }} 已发布"
@@ -124,16 +126,15 @@ jobs:
           CH="userland-${{ github.event.inputs.channel || 'canary' }}"
           # 清单对象键与 APK 里 assets/supply/channel.json 的 manifestName **必须一致**（锚驱动）。
           #   换键的理由见该文件 $comment：旧键被长 TTL 缓存钉死，新上传不作废旧条目。
-          MAN=$(node -e "console.log(require('./container/app/src/main/assets/supply/channel.json').manifestName)")
-          SIG=$(node -e "console.log(require('./container/app/src/main/assets/supply/channel.json').sigName)")
+          ANCHOR=./container/app/src/main/assets/supply/channel.json
+          MAN=$(node -p "require('$ANCHOR').manifestName")
+          SIG=$(node -p "require('$ANCHOR').sigName")
+          # 回读锚与件表同源。这里【不再】自己 curl 自证：原先那段只打印不判红，
+          # 线上 404 也照样走到「已更新」；现在每个键的回读比对住在 scripts/upload-qiniu.js，
+          # 对不上就退 1，两条投放口（件与清单）都躲不过。
+          export QINIU_PUBLIC_BASE="$(node -p "require('$ANCHOR').baseUrl")"
           # 清单短缓存（否则设备永远读到旧的，表现为「发了没更新」）；件本体长缓存（文件名带版本号）。
           echo "[qiniu] 目标键: $CH/$MAN 与 $CH/$SIG"
           node scripts/upload-qiniu.js release/userland-manifest.json "$CH/$MAN" --cache-control=60
           node scripts/upload-qiniu.js release/userland-manifest.json.sig "$CH/$SIG" --cache-control=60
-          # CI 自证：上传后立刻从 CDN 回读该键 —— 区分「传上去了但 CDN 不认」与「没传到那个键」。
-          BASE2="${USERLAND_BASE_URL:-https://hubcdn.zll.ink}"
-          BASE2="${BASE2%/}"
-          CODE=$(curl -s -o /tmp/m.json -w "%{http_code}" "$BASE2/$CH/$MAN?ts=$(date +%s)")
-          echo "[readback] $BASE2/$CH/$MAN → HTTP $CODE"
-          if [ "$CODE" = "200" ]; then node -e "const j=require('/tmp/m.json'); console.log('[readback] version=' + j.version + ' tools=' + j.tools.length)"; else echo "[readback] 内容前 200 字节: $(head -c 200 /tmp/m.json)"; fi
-          echo "[qiniu] $CH 已更新"
+          echo "[qiniu] $CH 已更新（两个键都已从 $QINIU_PUBLIC_BASE 回读并逐字节比对）"
