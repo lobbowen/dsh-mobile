@@ -1623,7 +1623,7 @@
       ],
       "evidenceTier": "static",
       "evidence": "现读（2026-09-29 S1）：旧形状下 PrefixProvisioner 建 `npm` 符号链接、`Snapshot.complete` 以 npmBin 为条件，boot-env-contract 断言「真名=符号链接、不是包装脚本」绿，反向突变（linkNpm 改 writeText 包装）实测红。**该兑现方式已被 2026-09-30 的归口取代**（同一判据、另一条口）：真名由 C 清单的 `entry` 建链，`ensureEntry` 在 marker 命中支（`SupplyProvisioner.kt:315`）与新落位支（`:365`）各重申一次；门 `boot-env-contract-test.js:169`（四处符号零命中＋包内无 `assets/npm/`）、`:202`（两条落位路径都重申、建链出口唯一 = linkEntry），实测 37 passed / 0 failed。APK 侧另有 `scripts/verify-apk-native.sh:185-200` 反向格（包内出现 `assets/npm/` 即退 1）",
-      "note": "**别把这格读成 npm 已可用**：①「按名字跑得动」要等 ENV-25 的 exec 位修完再取 V-0c 读数；②旧 note 里「LOBOS_NPM_ENTRY 作为 console 的申报仍在写（GuestAdapter.kt:103）」这句**已过期**——该申报连同 runtime.json 的两个 npm 键随归口删净，今天 npm 在环境里没有任何自造键，只有真名与 `.npmrc` 的 prefix（`NodeProvisioner.kt:50-59`，那是生态标准件、不是我们发明的键）；③`npx` 仍无真名（ENV-26）。"
+      "note": "**别把这格读成 npm 已可用**：①「按名字跑得动」要等 ENV-25 的 exec 位修完再取 V-0c 读数；②旧 note 里「LOBOS_NPM_ENTRY 作为 console 的申报仍在写（GuestAdapter.kt:103）」这句**已过期**——该申报连同 runtime.json 的两个 npm 键随归口删净，今天 npm 在环境里没有任何自造键，只有真名与 `.npmrc` 的 prefix（`NodeProvisioner.kt:50-59`，那是生态标准件、不是我们发明的键）；③`npx` 仍无真名（ENV-26）。 **2026-09-30 追加（CI 实读，别把本格读成「有单测在判 npm 完整性」）**：S1 时代那两条 Kotlin 用例（旧 `齐件且npm有真名才算完整`／`npm没有PREFIX真名就不完整`）随归口改名与删除，被 `.github/convicted-cases.txt` 的地板门当场抓出（run 36617792213 `FAIL: 单测「齐件且npm有真名才算完整」没有执行记录`）。删除是必然的：APK 侧不再解包 npm，`Snapshot` 无 `npmEntry`/`npmBin`，C 层供给在后台线程、装配时点尚未落位，留着会让 `complete` 永不成立。判据没有消失，是换了宿主：逐件点名在 `SupplyProvisioner`（DS-9 设备那半），APK 侧复归由 `boot-env-contract`「APK 侧不留 npm 面」＋「真名入口两条落位路径都重申」＋「执行位按内容判（ENV-25）」三条实名判据拦，终判仍未采的 V-0c。登记已同批改写并写明去处。"
     },
     {
       "group": "ENV-layer",

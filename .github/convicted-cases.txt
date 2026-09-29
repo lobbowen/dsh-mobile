@@ -47,7 +47,20 @@ PATH含npm全局bin且按此序排在继承段之前
 探针模式的PATH与内核模式同源
 HOME_TMPDIR_LD_LIBRARY_PATH_NODE_BIN_单源正确
 NODE_PATH双段且第二段是npm全局前缀的node_modules
-# 同批（S1）：Snapshot.complete 的判据是「能力件齐 + npm 在 $PREFIX 有真名」。它若被放宽成
-# 「node 在就算齐」，npm 真名兑现会静默退回只在环境里申报一个键 —— 与本轮裁定的判据 D 相反。
-齐件且npm有真名才算完整
-npm没有PREFIX真名就不完整
+# 2026-09-30（B 批次 npm 归口 C 清单）这一组**改名两条、删一条**，理由与去处写在下面，别让下一个读者误判成放宽：
+#   旧「齐件且npm有真名才算完整」→「齐件才算完整」；旧「npm没有PREFIX真名就不完整」整条删除。
+#   为什么必须删：npm 与 git/curl 同级由 C 层签名清单投放，APK 侧不再解包任何 npm 文件，
+#   Snapshot 既没有 npmEntry 也没有 npmBin；而 C 层供给跑在后台线程，装配时点还没落位 ——
+#   把 npm 留在这颗布尔（或留在 PrefixProvisioner.expected）会让 complete 永不成立，
+#   一次失败被缓存成常驻态的老破口会以另一种形式回来。
+#   「npm 缺真名必须可见」这半边的新去处：SupplyProvisioner 的「声明数 vs 可用数」逐件点名（债表 DS-9
+#   设备那半）＋ boot-env-contract 三条实名判据「APK 侧不留 npm 面（四处全零命中）」「真名入口在两条
+#   落位路径上都重申，建链出口唯一 = linkEntry」「落盘件的可执行位按内容判且两条路径都覆盖（ENV-25）」；
+#   终判仍是设备读数 V-0c（未采，不许当已通过）。
+#   「complete 会不会被放宽成 node 在就算齐」这一风险由改名后的逐件判据接管：它对 expected 里
+#   每一颗分别压 false，比旧的两键版本更严（只测一件时「判据只看列表长度」「某件永远在位」都能蒙过）。
+齐件才算完整
+缺任意一件能力件都不完整逐件验证
+快照字段与缺件表同源
+探针模式不追加无人创建的NODE_PATH段
+环境里不存在任何npm申报键
