@@ -1285,10 +1285,12 @@
       "desc": "引擎 5 个环境依赖测试未在本地验证（缺 readelf/openssl/python3/gh/签名 env）",
       "where": "container/engine/test/{ota-anchor,verify-runtime-elf,program-selfboot,apk-signing-gate,gh-release-upload}-test.js",
       "action": "在 CI 上跑全量 test:logic 并归档结果",
-      "status": "blocked-external",
+      "status": "done",
       "evidence": "AUD-G6 的剩余面",
       "updated": "2026-09-28",
-      "note": "环境限制（非债务）：本机缺 readelf / openssl / python3 / gh / 签名 env，以下测试只能在 CI 跑 —— verify-runtime-elf-test（readelf）、ota-anchor-test（openssl）、program-selfboot-test（python3，已实测 spawnSync python3 ENOENT）、apk-signing-gate-test（keystore env）、gh-release-upload-test（gh CLI）。已逐项取证归因，本地不伪造通过。"
+      "note": "环境限制（非债务）：本机缺 readelf / openssl / python3 / gh / 签名 env，以下测试只能在 CI 跑 —— verify-runtime-elf-test（readelf）、ota-anchor-test（openssl）、program-selfboot-test（python3，已实测 spawnSync python3 ENOENT）、apk-signing-gate-test（keystore env）、gh-release-upload-test（gh CLI）。已逐项取证归因，本地不伪造通过。",
+      "evidenceTier": "ci",
+      "evidenceRef": "2026-09-29 现读 CI 日志（run 36524580848 = 「CI (gates)」 on head 5bd670cf，job `container`，日志文件 4_container.txt；run 级 `/actions/runs/<id>/logs` 取回后按行匹配）：五个环境依赖套件全部真跑并全绿 —— `结果: 54 passed, 0 failed  (verify-runtime-elf)`、`34 passed, 0 failed  (ota-anchor)`、`42 passed, 0 failed  (apk-signing-gate)`、`77 passed, 0 failed  (program-selfboot)`、`32 passed, 0 failed  (gh-release-upload)`；同一条链末端汇总 `683 个 PASS，0 个 FAIL`。链条本身也在日志里读到原文（`node ../../scripts/require-ci.js && … && node test/verify-runtime-elf-test.js && node test/ota-anchor-test.js && …`），所以「这 5 个在 test:logic 里、CI 真的串到了」不是推断而是现读。唯一的弱档如实留着：verify-runtime-elf 里有一行 `[skip] libnode.so —— 无 PT_DYNAMIC（静态产物），只判架构/对齐/解释器：arch=AArch64 16KB-ok(1段) interp=/system/bin/linker64`，即静态产物那一项按设计只判三小项，不是整项被跳过。"
     },
     {
       "group": "EXEC-v4",
