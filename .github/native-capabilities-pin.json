@@ -2,12 +2,6 @@
   "$comment": "小件能力件的固化记录：源指纹 → 已发布的不可变 Release。由 .github/workflows/pin-capabilities.yml 写入。fast-apk 先算指纹，命中本表就下载校验而不再重编。",
   "abi": "arm64-v8a",
   "pins": {
-    "0fc107ab6f7347ecb067f00501f5f7207aa2fe6aeef7fa4ccf837bfdeb70f35f": {
-      "tag": "native-cap-0fc107ab6f7347ecb067f00501f5f7207aa2fe6aeef7fa4ccf837bfdeb70f35f-arm64-v8a",
-      "zip": "native-cap-0fc107ab6f7347ecb067f00501f5f7207aa2fe6aeef7fa4ccf837bfdeb70f35f-arm64-v8a.zip",
-      "sha256": "f5c0517292008baca12da0caed4accdd7a4d1d09d35ab91c89629407eeef6d90",
-      "abi": "arm64-v8a"
-    },
     "ff0ce690f0ea077b066bed9eb56e2bc52de630c6c15964de09a29742c43efa87": {
       "tag": "native-cap-ff0ce690f0ea077b066bed9eb56e2bc52de630c6c15964de09a29742c43efa87-arm64-v8a",
       "zip": "native-cap-ff0ce690f0ea077b066bed9eb56e2bc52de630c6c15964de09a29742c43efa87-arm64-v8a.zip",
