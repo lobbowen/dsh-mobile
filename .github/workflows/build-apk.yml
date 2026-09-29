@@ -592,6 +592,23 @@ jobs:
           bash scripts/ensure-tool.sh readelf binutils
           bash scripts/verify-runtime-elf.sh container/app/src/main/jniLibs/arm64-v8a
 
+      - name: Build capability binaries (小件原生件)
+        # 唯一实现：scripts/build-native-capabilities.sh，与 fast-apk.yml:322-328 的同名步骤同调
+        # （那边早就是这个形状；本链路的调用点一直不存在，直到本条红出来）。
+        # 这一步为什么现在才出现：本链路把审计收到同一份 scripts/verify-apk-native.sh 之后，
+        # run 36513213633（head ee1bab3a）在 Audit APK contents 当场判红 5 件 ——
+        #   liblobosflock / liblobosposix / liblobosptyprobe / libbash / liblobosrg
+        # （另 liblobospty.so 软红=终端 PTY 不可用），而 APK 45,530,810 字节里 lib/ 只有
+        # libc++_shared.so + libnode.so 两条。收口之前这条链只查 native-assets 清单、
+        # lib/ 零条目只 echo 不红，所以「发布链出的包整套原生能力全缺」在打包期没人看得见。
+        # 失败语义按脚本自身：bash/rg/PTY 探针硬红（$PREFIX 依赖它们，无回退路径）；
+        # node-pty 走上游配方，软失败只降级终端，不陪葬其它能力。
+        run: |
+          set -euo pipefail
+          # 回写 ci-stage：本步骤失败时诊断要显示**这一步**的名字（心跳只读这一个文件）。
+          echo "7.4/9 native-caps" > /tmp/ci-stage
+          bash scripts/build-native-capabilities.sh
+
       - name: Inject release keystore (required for release signing)
         id: signing
         # =====================================================================
@@ -786,17 +803,33 @@ jobs:
           PAT: ${{ secrets.PAT }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           git config --global --add safe.directory '*'
           TOKEN_USE="${PAT:-$GH_TOKEN}"
+          # 构建身份三件（sha / 包名+壳版本 / apk_sha）—— 字段与 fast-apk 的 Report to ci-ok 对齐。
+          # 以前这里只写 time/node/apk(仓内相对路径)/url：读不出 apk_sha 就答不了
+          # 「装在机器上那个包是哪次构建」（2026-09-29 真机只能改用 /data/local/tmp 里的
+          # apk.part 现算 sha256 去比 fast-apk 的 ci-ok 才敢确认）。
+          # 全部在 clone 之前取、一律用 $GITHUB_WORKSPACE 定位：clone 完 cwd 就不在仓里了，
+          # 而跨步骤的 shell 变量在这里是 unbound（第八轮 CI 的实证形态）。
+          APK="$(bash "$GITHUB_WORKSPACE/scripts/pick.sh" apk-release \
+            "$GITHUB_WORKSPACE/container/app/build/outputs/apk/release" -name '*.apk' -type f)"
+          APK_SHA="$(sha256sum "$APK" | cut -d' ' -f1)"
+          VN="$(node -p "require('${GITHUB_WORKSPACE}/version.json').shell.versionName")"
+          VC="$(node -p "require('${GITHUB_WORKSPACE}/version.json').shell.versionCode")"
           rm -rf /tmp/okpush && mkdir -p /tmp/okpush && cd /tmp/okpush
           git clone "https://x-access-token:${TOKEN_USE}@github.com/${{ github.repository }}.git" .
           {
             echo "BUILD_OK"
-            echo "time : $(date -u)"
-            echo "node : ${{ steps.nodever.outputs.tag }}"
-            echo "apk  : container/app/build/outputs/apk/release/app-release.apk"
+            echo "time    : $(date -u)"
+            echo "mode    : build-apk (Node 交叉编译 + release 形态，写 apk-latest)"
+            echo "runtime : ${{ steps.nodever.outputs.tag }}"
+            echo "shell   : ${VN}+${VC}"
+            echo "sha     : ${GITHUB_SHA:0:7}"
+            echo "apk     : $(basename "$APK")"
+            echo "apk_sha : ${APK_SHA}"
             # 可直接下载的稳定网址（Release 资产，见上方 Publish APK 步骤的说明）。
-            echo "url  : https://github.com/${{ github.repository }}/releases/download/apk-latest/app-release.apk"
+            echo "url     : https://github.com/${{ github.repository }}/releases/download/apk-latest/app-release.apk"
           } > ci-ok.txt
           git config user.email "ci@workbuddy.local"
           git config user.name "CI Diagnostic Bot"

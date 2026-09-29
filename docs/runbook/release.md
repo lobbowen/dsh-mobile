@@ -139,7 +139,16 @@ base64 -w0 keys/release.keystore > /tmp/ks.b64
   在那之前，按旧地址取包的人拿到的仍是 debuggable 包 —— 三个写者都已判形态，所以这是**投递滞后**，不是判定缺口。
   线上现读（2026-09-29 05:2x，`GET /releases/tags/apk-latest`）：资产 594507819 `app-debug.apk`（53 254 712 字节，
   digest `sha256:8329235acf2f…`，2026-09-28T04:39:35Z 上传）与 594507888 `version.json` 仍是 latest 的全部内容，
-  即 prune 从没执行过 —— 它的首次真执行要等 build-apk run 36513213633（head `ee1bab3a`）走到 publish 步骤。
+  即 prune 从没执行过。
+- 发布链的包**整套原生能力件缺席**（在册 DS-11，2026-09-29 由本批收口的审计当场抓出）：`build-apk` 从来没有
+  调用过 `scripts/build-native-capabilities.sh`（只有 fast-apk 调），所以它 assembleRelease 出来的 APK 里
+  `lib/arm64-v8a/` 只有 `libc++_shared.so` + `libnode.so`，缺 `liblobosflock/liblobosposix/liblobosptyprobe/libbash/liblobosrg`
+  （PTY 件 `liblobospty.so` 软缺）。run 36513213633（head `ee1bab3a`）05:51:37Z 的审计读数原文：
+  `== APK: …/app-release.apk (45530810 字节, ABI=arm64-v8a) ==` 后逐条 `[error] APK 里缺少 …`、
+  `==> [error] 审计不通过，缺项: …（5 件）` ⇒ 该 run 判红、**没走到 publish**，
+  所以上面那条 prune 的首次真执行仍要等下一次 build-apk 成功跑完（本批已在该链路补上同一份构建步骤）。
+  判据侧的教训：审计收到唯一宿主 `scripts/verify-apk-native.sh` 之前，这条链只查 native-assets 清单、
+  `lib/` 零条目只 echo 不红 —— 「构建成功」与「发出去的东西有没有能力面」之间原来没有门。
 - `fast-apk` 的 release 控件构建**带着稳定签名**（2026-09-29 run 36490042734 读到 `[lobos-signing] 使用稳定签名`），
   但它只用来验形态，不投递；若哪天 fast-apk 撤掉 keystore，同一条会出 `app-release-unsigned.apk`——形态照样读得出，
   只是不是可投递的发布包。可投递的 release 包仍只由 build-apk / release-admin 产，而那两条要人按。
@@ -149,6 +158,9 @@ base64 -w0 keys/release.keystore > /tmp/ks.b64
 ## 12. 发布前自检
 
 - [ ] 形态门禁输出「[lobos-form] [ok] 非 debuggable（release 形态）」
+- [ ] 审计（`scripts/verify-apk-native.sh`）逐件读到自有小件与 $PREFIX 依赖件
+      （`liblobosflock`/`liblobosposix`/`liblobosptyprobe`/`libbash`/`liblobosrg`）——
+      只读到 `libnode.so` + `libc++_shared.so` 的包发出去就是「有能力名、没能力面」（DS-11 的成因）
 - [ ] 签名门禁输出「APK 证书指纹与注入锚点一致」（配了 keystore 时）
 - [ ] `OTA_PRIVATE_KEY_PEM` 已配置，且 `verify-ota-anchor.sh --private` 通过
 - [ ] `keys/release.keystore` + 口令已离线备份
