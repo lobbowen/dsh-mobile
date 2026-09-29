@@ -299,6 +299,9 @@ jobs:
             exit 1
           fi
           CH="program-$PROGRAM_CHANNEL"
+          # 回读锚 = 设备侧 OTA 配置的基址（随 APK 发的 assets/program-feed.json）。
+          # 上传后的回读比对住在 scripts/upload-qiniu.js：没有它就不许打印「已更新」。
+          export QINIU_PUBLIC_BASE="$(node -p "require('./container/app/src/main/assets/program-feed.json').baseUrl")"
           # manifest 短缓存（否则设备永远读到旧 manifest，表现为"发了没更新"）；
           # Program 包长缓存（文件名带版本号，内容不可变）。
           node scripts/upload-qiniu.js release/program-manifest.json "$CH/program-manifest.json" --cache-control=60
