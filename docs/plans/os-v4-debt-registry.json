@@ -1143,7 +1143,7 @@
       "updated": "2026-09-29",
       "note": "本轮（B5-b.2）落地：① 判据收口到 scripts/verify-apk-release-form.sh（读 aapt/aapt2 的 badging，取不到读数一律退 1，另带 --expect-debuggable 对照档）；② build-apk 改 assembleRelease，publish/repack 在上传前判形态，三个写 latest 的口子都 --prune '^app-debug\\.apk$'，资产名统一 app-release.apk；③ fast-apk 每次合并做两侧对照并真构建一次 release 变体（发布路径长期不被执行正是本债成因）；④ 行为+接线+回潮门禁住 container/engine/test/apk-release-form-test.js。判据形态与签名身份是两个事实：build.gradle.kts:119-132 让 debug 档也用 release keystore 签名，所以「稳定签名」与「debug 形态」会同时为真。仍未清：线上 apk-latest 现存的 app-debug.apk 要等这三条链路下一次真跑完才被清掉（投递滞后，非判定缺口）。assembleRelease 在 CI 里的首次真跑读数（fast-apk run 36490042734）：debug 侧对照被真 aapt（build-tools/37.0.0）读成 debuggable 并判绿 —— 这把尺子对着线上工具不是空转；release 侧编译与打包全绿（:app:packageRelease 成功），唯一致命项是 lintVitalRelease 报 ExpiredTargetSdkVersion（Play 要求 targetSdk≥33，1 errors / 0 warnings）—— 本包不走 Play，targetSdk=28 又是 ADR 钉死的能力取值（ADR-0001 D1、ADR-0003「保持不变」），所以只在 container/app/lint.xml 关掉这一条政策检查，lintVital 的其余致命项照常拦 release 构建。走完 build-apk 成功 + latest 资产名回读确认为 app-release.apk 才转 done。",
       "evidenceTier": "online",
-      "evidenceRef": "2026-09-29 00:44–00:52 现读：release v1.1.8 唯一资产 = app-debug-1.1.8+35.apk；release-admin.yml 最近 3 次 run（#21/#20/#19，均 push 触发）completed:failure，最后一次 2026-09-26T18:56:59Z 之后再没跑"
+      "evidenceRef": "2026-09-29 00:44–00:52 现读：release v1.1.8 唯一资产 = app-debug-1.1.8+35.apk；release-admin.yml 最近 3 次 run（#21/#20/#19，均 push 触发）completed:failure，最后一次 2026-09-26T18:56:59Z 之后再没跑 | 2026-09-29 日常链两侧对照真读数（run 36520637830 / job 109252487385，main=b771f88b，日志现取）：04:15:54Z `[lobos-form] android:debuggable = true` → `[ok] 按预期读成 debug 形态（对照组：证明这把尺子的正例不是空转）`；04:17:26Z 同一把尺子读 release 变体 → `[lobos-form] android:debuggable = false` → `[ok] 非 debuggable（release 形态）`。两次读数出自同一个包体身份（package name=lobos.app versionCode=41 versionName=1.1.11），一真一假双向都出数 ⇒ 这条判据不是接上线上就恒绿的摆设。同轮签名面 04:15:37Z `[lobos-signing] [ok] APK 证书指纹与注入锚点一致（release.cert = 2429d2b72ca911f48b62d9514ef02a08bc7e1fb629c89c2e2386f5944f6f3306）`，V2 Signer DN=C=CN, O=DSH, OU=Container, CN=DSH Mobile。**发布面（写 apk-latest 的 build-apk）那条同名门禁的真读数仍未取到**：run 36513213633（head=ee1bab3a）截至 04:32Z 仍停在 7/9 NODE-BUILD（`ci-hb` 分支 commit fa5e713c 心跳 \"hb 152 (7/9 NODE-BUILD (longest, V8 compile))\"）—— 所以本条不判 done"
     },
     {
       "group": "AUDIT-recheck",
@@ -1439,11 +1439,11 @@
       "group": "delivery-surface",
       "id": "DS-3",
       "desc": "C 层件链接农场把「含 `..`」当穿越一律跳过，而 git 件农场第一行正是 `libexec/git-core/git → ../../bin/git`：锚点永不建立，同目录 148 条 `git-* -> git` 全是指向不存在路径的悬空链，件照样落位并计成「就位」",
-      "where": "container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt:146(applyLinkFarm) :175(farmBroken)",
+      "where": "container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt:154(applyLinkFarm) :183(farmBroken)",
       "action": "穿越判据改为按**落点**核（目标 canonical 路径必须仍在件内）而不是按字面禁 `..`；farmBroken 除「是不是链」外还要「链能不能解析」，悬空链计入未建成",
-      "status": "in-progress",
+      "status": "done",
       "evidenceTier": "device",
-      "evidenceRef": "2026-09-29 真机现读（diag:supply 那条 FAIL 落盘于 10:49:25，目录复测在同一场会话里）：`files/usr/lib/toolchain/git/link-farm.txt` 149 行、其中 1 行含 `..`；`libexec/git-core/git: No such file or directory`、`test -e git-add` → ADD_LINK_RESOLVES=no；`diag:supply` FAIL「C 层件链接农场有 1 条没建成 | git」而同轮又记 `supply` OK「就位 4 件」；`git --version` 可用（内置子命令不走 libexec）⇒ 损害面是外部命令与 `git-*` 直接调用，不是 git 整体起不来。件侧实物同一场会话现读（`userland-git-2.55.0-ca2684ce5c38-android-arm64.zip`，24135724 字节）：236 条目含 **151 传真符号链**，`link-farm.txt` 首行 `libexec/git-core/git<TAB>../../bin/git` —— 按字面禁 `..` 就是掐掉这根锚点、把另外 148 条变成悬空链的那只手；12:07 冷启动重放该件后读数复现（FAIL「1 条没建成」+ OK「就位 4 件」）。代码已改，待下一次出包在真机复验（本轮 build-apk run 36513213633 用的是改动前的 main）",
+      "evidenceRef": "改前（旧包，2026-09-29 12:31 现读）：`files/usr/lib/toolchain/git/libexec/git-core/git` **不存在**（连文本文件都没有），`libexec/git-core` 177 条目里 145 条 `[ -e ]` 不可解析，`git merge-one-file` → 「git: ... is not a git command」，而 `diag:supply` 同轮记 FAIL「C 层件链接农场有 1 条没建成 | git」+ OK「就位 4 件」。件侧实物（同场会话）：`userland-git-2.55.0-ca2684ce5c38-android-arm64.zip` 24135724 字节、236 条目含 151 传真符号链、`link-farm.txt` 首行 `libexec/git-core/git<TAB>../../bin/git` —— 按字面禁 `..` 掐掉的正是这根锚点。改后（main=b771f88b 的包 12:56 装机、把 `.git.ok` 写成 64 个 0 强制走放置分支，13:00:10 冷启动）：`diag:supply` 只剩 OK「C 层供给完成：就位 4 件」，**没有任何「没建成」FAIL**；实物 `libexec/git-core/git` = `lrwxrwxrwx ... -> ../../bin/git`、`RESOLVES=yes`、178 条目 `DANGLING=0`、`link-farm.txt` 149 行前三条 `libexec/git-core/git → ../../bin/git`、`libexec/git-core/git-add → git`、`libexec/git-core/git-am → git`；直接执行农场链 `$G/libexec/git-core/git-add` 得到 「fatal: not a git repository」（= 程序真的跑起来了，按 argv[0] 派发成 add），改前同一条命令是「is not a git command」。marker 回读 = 27f88e59c8e5…（清单给什么写什么）。落位判据按**落点**核穿越：见 `SupplyProvisioner.kt:154(applyLinkFarm)` 的 canonical 前缀比对，`farmBroken`（:183）同时判「是不是链」与「链能不能解析」。",
       "workstream": "MAIN",
       "updated": "2026-09-29"
     },
@@ -1451,11 +1451,11 @@
       "group": "delivery-surface",
       "id": "DS-4",
       "desc": "设备侧远端对象键留有代码内默认值（`MANIFEST_NAME`=旧键名）：通道锚读不到或字段缺失时静默回落到旧键，于是「仓内声明已改名 + 线上仍是废止身份」可以同时为真而不报错，设备安静装上陈件",
-      "where": "container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt:69(anchorName) :220(ensure)",
+      "where": "container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt:77(anchorName) :228(ensure 取 manifestName)",
       "action": "anchorName 不给默认值、读不到即返回 null；`manifestName` 缺失就记 FAIL 并 return 0（不供给），`sigName` 仍按 `<manifestName>.sig` 推导。`MANIFEST_NAME` 只留给设备侧落盘副本命名",
       "status": "in-progress",
       "evidenceTier": "device",
-      "evidenceRef": "2026-09-29 10:44 现读：声明键 `userland-canary/userland-manifest-2.json`=404 而旧键 `userland-canary/userland-manifest.json`=200（陈表 2026.09.27.119）——这正是回落会命中的形态；`assets/supply/channel.json:6-7` 才是键的唯一声明处。代码已改并经 CI 编译：run 36516399044（main=94ad4a98）app-tests 于 03:17:24Z 跑 `:app:compileDebugKotlin`、单测执行数 156、container 683 PASS/0 FAIL —— 但这只证明改动能编过、旧单测未破，**「缺 manifestName 就判红不回落」这条行为仍待带改动的 APK 上真机复验**",
+      "evidenceRef": "代码口径已改并在真机吃到：`anchorName()`（现 `SupplyProvisioner.kt:77`）不给任何默认键，`manifestName` 缺失即记 FAIL「C 层供给未启动」＋return 0（:228 起的判红分支）。2026-09-29 13:0x 真机正向对照：装机包（main=b771f88b）本轮消费的清单副本 `files/usr/lib/toolchain/userland-manifest.json` = 6966 字节 / `version=2026.09.29.141` / git `sha256=27f88e59c8e5…`，**不是**旧键的内容 —— 同刻工作侧带 `?t=<ms>` 双键对读：声明键 `userland-canary/userland-manifest-2.json` = 200 / 6498 字节 / `.142`，旧键 `userland-canary/userland-manifest.json` = 200 / **1084 字节** / `.2026.09.27.119`（连 git 条目都没有）。设备读到的既不是旧键的体量也不是它的版本 ⇒ 远端对象键确实由通道锚驱动，回落旧键这条路已经死了。**未收口的还剩一段**：`manifestName` 缺失→判红 这条分支没有可执行的对照面（通道锚在 APK assets 里，`run-as` 改不动、也不该改），要么把它纯函数化成 JVM 单测能吃入的形状，要么在下一次出包时做一个「去掉该字段的对照包」。见 DS-8：本轮设备读到 `.141` 而不是 `.142`，是 CDN 边缘缓存，与回落无关。",
       "workstream": "MAIN",
       "updated": "2026-09-29"
     },
@@ -1465,9 +1465,9 @@
       "desc": "启动链把「已是最新（无更新）」记成 FAIL：Outcome 只有 checked/available/updated 三格，调用方拿 `ota.updated` 当 ok 位，于是取 manifest 失败、验签拒绝与「没什么可做」共用同一个级别，取证面读不出通道状态",
       "where": "container/app/src/main/java/lobos/runtime/InstanceHost.kt:308 + container/app/src/main/java/lobos/ota/ProgramOtaUpdater.kt:70,192",
       "action": "Outcome 增 `upToDate`（只在 OtaPolicy.Verdict.UpToDate 分支置真），级别改为 `ota.updated || ota.upToDate`；其余非装上路径保持 FAIL —— 「有新版本却没装上」与「通道断了」都必须继续可见",
-      "status": "in-progress",
+      "status": "done",
       "evidenceTier": "device",
-      "evidenceRef": "2026-09-29 10:49:20 真机现读：`diag:program-ota` seq432 FAIL「启动内核检查完成（无更新）| 已是最新（本地 0.1.0-android.48，远端 0.1.0-android.48）」，同一轮 `health` OK、`program-commit` 已在 10:47 提交 —— 通道明明是通的，读数却要求人去读 detail 才能反推。改前形态已在现装包上二次复现：11:30:27 force-stop 后重开 SetupActivity，`diag:program-ota` 仍记 FAIL「启动内核检查完成（无更新）」（`at`=1790652627500），同轮 11:30:27.962 `health` OK「内核控制面就绪 (127.0.0.1:36360/status)」——这就是本条的正向对照。代码已改并经 CI 编译（run 36516399044：03:17:24Z `:app:compileDebugKotlin`、单测 156、container 683 PASS/0 FAIL），**「无更新记 OK」这条读数要等带改动的 APK 上真机才算收口**",
+      "evidenceRef": "改前两次真机复现（旧包）：10:49:20 与 force-stop 后 11:30:27，`diag:program-ota` 都记 **FAIL**「启动内核检查完成（无更新）」detail「已是最新（本地 0.1.0-android.48，远端 0.1.0-android.48）」，而同轮 `health` OK「内核控制面就绪 (127.0.0.1:36360/status)」—— 通道明明是通的，级别却在说反话。改后（装机 main=b771f88b 的包，两次冷启动各读一遍）：12:56:17.089 与 13:03:12.103 均为 **[OK]** 同一文案，`program: 内核版本=0.1.0-android.48` 紧随其后。级别口径只在 `ProgramOtaUpdater.kt:70` 的 Outcome 加 `upToDate`、`InstanceHost.kt:308` 取 `ota.updated || ota.upToDate`：其余非装上路径仍按 FAIL（「有新版本却没装上」与「通道断了」继续可见），这一点由 `container/engine/test` 链与 CI app-tests（run 36519630069/36520637832 success）守着，不由本条读数代证。",
       "workstream": "MAIN",
       "updated": "2026-09-29"
     },
@@ -1487,11 +1487,23 @@
       "group": "delivery-surface",
       "id": "DS-7",
       "desc": "C 层件按 sha256 内容寻址：marker 命中就 `okCount++ ; continue`，链接农场完好性只在**放置那一刻**测一次。于是 DS-3 那类「建链代码修好了」对**已就位件永不起效** —— 件的字节没变 ⇒ sha 没变 ⇒ 永不重放，设备带着 148 条悬空链度过一次次出包，而供给每一轮都记「就位 4 件」OK",
-      "where": "container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt:252(marker 命中即跳过)",
+      "where": "container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt:260(marker 命中即跳过)",
       "action": "marker 命中分支里补一次 `farmBroken(root)`：有不可解析链就记 FAIL，只记账不自动重下（自动重下会在「天生建不成农场」的文件系统上每拍拖 24MB，那是伪装正常）；要真重建由人删 `files/usr/lib/toolchain/.<name>.ok`",
+      "status": "done",
+      "evidenceTier": "device",
+      "evidenceRef": "三向对照都在同一台机上取到（装机=main=b771f88b 的包，12:56 装）。① **旧代码 + 农场坏 + marker 命中 = 完全静默**：12:08 写下 marker（27f88e…）之后到 12:56 之前，`libexec/git-core` 实测 145 条不可解析，而 `diag` 里一条 supply 的 FAIL 都没有 —— 这就是本条定罪的那只手（`continue` 前面没有任何完好性判据）。② **新代码 + 农场坏 + marker 命中 = 记账**：12:56:16.890 `[FAIL] supply: C 层已就位件的链接农场有 146 条不可解析 | git`，同一轮 12:56:16.892 仍照常 `[OK] supply: C 层供给完成：就位 4 件`（只记账不自动重下，也不假装没发生）。③ **新代码 + 农场好 + marker 命中 = 不叫**：DS-3 的修复把农场重建之后，13:03:11.732 只有 `[OK] supply: C 层供给完成：就位 4 件`，没有任何 FAIL —— 判据不是常驻红噪。计数口径：`farmBroken` 数的是 `link-farm.txt` 里 149 条声明链中不可解析者（含锚点自身塌下来的整批 `git-* -> git`），与 shell 侧 `libexec/git-core/*` 的 145 不是同一个计数单位，差异来自 glob 不覆盖的路径项。重建开关仍是人删 `files/usr/lib/toolchain/.<name>.ok`（本轮就用 `printf 0000…` 制造不等来强制重放，验证放置分支会自愈）。",
+      "workstream": "MAIN",
+      "updated": "2026-09-29"
+    },
+    {
+      "group": "delivery-surface",
+      "id": "DS-8",
+      "desc": "C 层清单/签名读取不带 cache-buster：清单与 `.sig` 用**裸对象键**去 GET，CDN 边缘会把上一版原样回给设备。于是「线上已换新版」与「设备仍在吃上一版清单」同时为真而**没有任何一行账目体现** —— DS-6 把声明键修到 `-2.json` 只对源站成立，设备要等边缘 TTL 到期才看得见；而那份旧清单里的 `verify` 对象键又指回旧身份，整条供给按废止身份装件",
+      "where": "container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt:237(清单)/:238(签名) —— 现两行都已过 uncached()",
+      "action": "新增 `uncached()`（:56）只给清单与签名加 `?t=<ms>` 回源；件 zip 的名字里带内容哈希，**故意不加** bust，否则 marker 未命中时每次开机重拖 24MB。与 Program 面（`container/app/src/main/java/lobos/ota/ProgramOtaUpdater.kt:52`）和门禁侧（`scripts/delivery-gate.js:86`）的既有口径对齐",
       "status": "in-progress",
       "evidenceTier": "device",
-      "evidenceRef": "2026-09-29 12:07 真机现读：把 `files/usr/lib/toolchain/.git.ok` 写成线上清单里 git 的 sha256（ca2684ce5c38…）后冷启动，供给走的是**放置**分支而非跳过分支（`cat .git.ok` 回读=27f88e59c8e5…、mtime 12:07，且 `diag:supply` 记 FAIL「C 层件链接农场有 1 条没建成 | git」）—— 这直接证明「跑不跑建链核验只由 sha 是否相等决定」。反向就是本条：sha 一旦相等，`SupplyProvisioner.kt:252` 那句 `continue` 前面**没有任何完好性判据**，同一条 FAIL 连一次都不会再出。线上件实物（同机现读 `userland-git-2.55.0-ca2684ce5c38-android-arm64.zip`，24135724 字节、sha256 与清单一致）：236 个条目里 **151 条是真符号链**，`link-farm.txt` 首行 `libexec/git-core/git<TAB>../../bin/git` 正是旧代码按字面禁掉的那条 —— 锚点落成文本文件后，farmBroken 旧判据只数「不是链」的那 1 条，其余 148 条链形式成立却全部悬空。代码已改，待 CI 编译 + 带改动的 APK 上真机复验",
+      "evidenceRef": "2026-09-29 双端对读（同一对象键 `userland-canary/userland-manifest-2.json`）：设备侧 `files/usr/lib/toolchain/userland-manifest.json` 是 `ensure()` 每轮回源后落盘的副本，mtime 12:07、6966 字节，现读 `version=2026.09.29.141`、git `sha256=27f88e59c8e5…`、`url=…/userland-git-2.55.0-27f88e59c8e5-android-arm64.zip`；同一场会话工作侧带 `?t=<ms>` 读同键得 200 / 6498 字节 / `version=2026.09.29.142` / git `sha256=ca2684ce5c38…`。`.142` 由 run 36517202837 的 manifest job 于 03:50:09Z（=本地 11:50）发布，设备 12:07 落盘的仍是 `.141` —— 17 分钟前的发布对设备不可见，而设备侧读取路径（现 :237 改前那两行）没有任何 bust。这条不对称在仓内早有出处却只写在 Program 面：`ProgramOtaUpdater.kt:45-52`「刻意带 cache-buster」+ 2026-09-24 边缘缓存教训、`scripts/delivery-gate.js:86` 的 `ts=`。它同时解释了 DS-7 里「marker 回读 27f88e 却与线上 ca2684 不等」那次分裂：不是 marker 写错，是两侧读的本来就不是同一版清单。代码已改，待 CI 编译 + 带改动的 APK 真机复验（复验判据：改后设备落盘副本的 version 与同刻工作侧带 bust 的读数一致） | 二次复现与三键对读（装机 main=b771f88b，13:0x）：设备 12:56 落盘的副本仍是 6966 字节 / `.141` / git 27f88e…（距 `.142` 发布已 66 分钟）；同刻工作侧带 bust 读**声明键** = 6498 字节 / `.142` / git ca2684…，读**旧键** = 1084 字节 / `.2026.09.27.119`、无 git 条目 —— 设备那份既不是声明键的源站内容、也不是旧键内容，只可能是声明键的**边缘缓存**，这就是 DS-4 回落假设的排除证据（对象键走的是通道锚，缓存层把它钉在了上一版）。",
       "workstream": "MAIN",
       "updated": "2026-09-29"
     }

@@ -48,6 +48,14 @@ object SupplyProvisioner {
         } catch (e: Throwable) { null }
     }
 
+    // 清单与签名的 URL 必须**每次回源**：CDN 边缘会缓存同名对象，而「发了但设备读不到新版」的代价
+    //   是整条供给静默滞后（2026-09-24 Program 面为此踩过一次并写进 ProgramOtaUpdater；
+    //   2026-09-29 真机现读 C 层仍在吃旧清单：同一对象键，工作侧带 cache-buster 读到
+    //   2026.09.29.142，设备 17 分钟前落盘的副本却是 2026.09.29.141、git 的 sha 也随之不同）。
+    // 件 zip 相反 —— 文件名里带内容哈希，可长缓存；给它加 bust 等于每次开机重拖 24MB。
+    private fun uncached(url: String): String =
+        url + (if (url.indexOf('?') >= 0) "&" else "?") + "t=" + System.currentTimeMillis()
+
     private fun httpGet(url: String): ByteArray {
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.connectTimeout = FETCH_TIMEOUT_MS
@@ -226,8 +234,8 @@ object SupplyProvisioner {
                 return 0
             }
             val sigName = anchorName(ctx, "sigName") ?: (manName + ".sig")
-            val manifestBytes = httpGet(base + "/" + manName)
-            val sigBytes = httpGet(base + "/" + sigName).toString(Charsets.UTF_8).trim().let {
+            val manifestBytes = httpGet(uncached(base + "/" + manName))
+            val sigBytes = httpGet(uncached(base + "/" + sigName)).toString(Charsets.UTF_8).trim().let {
                 android.util.Base64.decode(it, android.util.Base64.DEFAULT)
             }
             if (!verifyEd25519(pubPem, manifestBytes, sigBytes)) {
