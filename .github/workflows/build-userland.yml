@@ -1,8 +1,10 @@
 name: Build Userland (C 层工具供给)
 
-# C 层（共享开发环境）里「上游没有 android 变体」的工具：由本仓交叉编译成 **动态链接** 的
-# bionic aarch64 产物，发到对象存储；再由本 workflow 的 manifest 作业汇成 **C 自己的内容清单**
-# （对原始字节签名）发到对象存储。
+# C 层（共享开发环境）的工具：由本仓产出 **动态链接** 的 bionic aarch64 件，发到对象存储；
+# 再由本 workflow 的 manifest 作业汇成 **C 自己的内容清单**（对原始字节签名）发到对象存储。
+# 两类件走同一条出口：上游没有 android 变体的（sqlite3/jq/git/curl）在本仓交叉编译；上游已发
+# android 变体的（pnpm）只取不编 —— 但**都必须经打包投到对象存储**，设备取件的唯一口就是它
+# （目标网络到不了 GitHub 与 npm registry），所以不存在「只在清单里声明上游包名」的供给形状。
 #
 # Program 只持有 **通道锚 + 信任根**，按清单取件并核验 —— 因此**加件/升级只发清单，Program 不动**；
 # 工具随 Program 启动投放上机，**不需要重装 APK**。
@@ -43,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         # C 层工具供给批次：逐件补齐。已供给的追加到这一行即可。
-        tool: [sqlite3, jq, git, curl]
+        tool: [sqlite3, jq, git, curl, pnpm]
     steps:
       - uses: actions/checkout@v4
       - name: 定位 NDK
@@ -54,7 +56,7 @@ jobs:
           TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
           [ -x "$TC/aarch64-linux-android21-clang" ] || { echo "::error title=无 clang::缺 $TC/aarch64-linux-android21-clang"; exit 1; }
           { echo "CC=$TC/aarch64-linux-android21-clang"; echo "LLVM_STRIP=$TC/llvm-strip"; } >> "$GITHUB_ENV"
-      - name: 编译 ${{ matrix.tool }}
+      - name: 产出 ${{ matrix.tool }} 件
         run: bash scripts/build-userland-${{ matrix.tool }}.sh
       - name: 核对产物形态（aarch64 + 动态）
         run: bash scripts/verify-userland-artifact.sh ${{ matrix.tool }}
@@ -91,7 +93,7 @@ jobs:
       # 而 gh-release-upload.sh 在本仓被钉死为「只许五条链路调用」（门禁在册），多一条就是第六个调用方 ——
       # 与其为一个无投递价值的动作去改那条不变量，不如不做。产物由 actions/upload-artifact 留存。
 
-  # C 的**内容清单**：把本次构建的件 + 外部件（npm 投放那类）汇成一份、对**原始字节**签名、
+  # C 的**内容清单**：把本轮构建出的件汇成一份、对**原始字节**签名、
   # 发到对象存储。Program 只持通道锚 + 信任根，于是加件/升级只发清单 —— **Program 不动**。
   manifest:
     needs: build

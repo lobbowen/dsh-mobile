@@ -120,6 +120,20 @@ async function get(url) {
         const v = String(j.version == null ? '' : j.version);
         if (!v) problems.push(t.layer + ' 线上清单读不出 version（通道状态坏了）：' + t.url);
         row.version = v;
+        // C 的件表必须在**线上**就是投得出的：一颗只有声明、没有取件 URL 的件，设备侧供给循环会
+        //   静默跳过它（2026-09-29 定罪 DS-9：清单声明 5 件、机上只 4 件，诊断仍写「就位 4 件」，
+        //   读起来像正常）。这条只读线上正文，不读仓内声明 —— 与整扇门的立身之本一致。
+        //   只查 `tools`（C 的形状）：Program 的 `url` 空串另有消费者（设备按 feed 推导，见下方那条腿），
+        //   把同一把尺子套过去会把一条合法形状判成红。
+        if (Array.isArray(j.tools)) {
+          row.tools = j.tools.length;
+          for (const piece of j.tools) {
+            const nm = String((piece && piece.name) || '(无名)');
+            if (!piece || typeof piece.url !== 'string' || !piece.url) {
+              problems.push(t.layer + ' 线上清单声明的件没有取件 URL（设备永远不会装上它）：' + nm);
+            }
+          }
+        }
         const urls = [...text.matchAll(/https:\/\/[^"'\s]+/g)].map((m) => m[0]);
         // 这条腿只在清单**真写了绝对 URL** 时才查：线上 Program 清单的 `url` 是空串，设备按 feed
         // 自行推导（`ProgramOtaUpdater.kt:202` `ifBlank { cfg.zipUrl(remote) }`）。那条推导是否取得到
@@ -137,7 +151,7 @@ async function get(url) {
     }
     rows.push(row);
   }
-  for (const r of rows) console.log('delivery-gate: [' + r.layer + '] ' + r.status + ' ' + (r.version ? 'version=' + r.version + ' ' : '') + r.url);
+  for (const r of rows) console.log('delivery-gate: [' + r.layer + '] ' + r.status + ' ' + (r.version ? 'version=' + r.version + ' ' : '') + (r.tools != null ? 'tools=' + r.tools + ' ' : '') + r.url);
   if (process.argv.includes('--json')) console.log(JSON.stringify({ rows, problems }));
   if (problems.length) {
     console.error('delivery-gate: FAIL（' + problems.length + ' 项）');
