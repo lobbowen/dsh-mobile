@@ -362,6 +362,7 @@
     "verify-ota-anchor.sh": "cross",
     "pick.sh": "cross",
     "read-release-asset.sh": "cross",
+    "read-archived-shell-version.sh": "L0",
     "check-apk-release-version.sh": "L0",
     "verify-apk-version-gate.sh": "L0",
     "build-program-bundle.js": "cross",

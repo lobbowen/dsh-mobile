@@ -38,7 +38,6 @@ import lobos.native.NativePreparer
 import lobos.native.PrepareReport
 import lobos.os.AppRegistry
 import lobos.os.Journal
-import lobos.os.KillAudit
 import lobos.os.OsInit
 import lobos.os.OsPhase
 import lobos.os.PortBroker

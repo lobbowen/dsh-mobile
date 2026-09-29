@@ -41,8 +41,7 @@ class BootReceiver : BroadcastReceiver() {
             // 单进程后没有"第二进程兜底边"：InstanceHost 是宿主内组件，不是 Service。
             // 进入本接收器 = 进程刚被系统重建：**保护要从第一毫秒生效**（预防），
             // 不是「被杀后再拉起」（自愈）。做两件事：
-            //  · 量一次加固效果（KillAudit）：把系统退出史里的 o-kill 次数与每次的
-            //    description/reason/importance 落盘；
+            //  · 量一次加固效果（KillAudit）：系统退出史逐条落盘，口径唯一在 Journal.Reason；
             //  · 确保保护生效（AccessibilityAnchor）：锚在 = ColorOS 判决停在
             //    importance=accessibility，锚掉 = 判决降级 = 即将被杀（机制见 AnchorPolicy 头注）。
             // 三个 action（开机 / 快速开机 / 覆盖安装）共用这条既有分支，**不新增任何接收面**，

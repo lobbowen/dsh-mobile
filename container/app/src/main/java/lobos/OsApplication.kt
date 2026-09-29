@@ -49,8 +49,8 @@ class OsApplication : Application() {
      *
      * 本设计**不提供死后恢复**：被杀后拉起来的只是空壳，agent 的工作已经断。所以这里只做
      * 两件「活着时才有意义」的事：
-     *  · 量一次加固效果（KillAudit）：把系统退出史里的 o-kill 次数与每次的
-     *    description/reason/importance 落盘，回答「加固到底有没有把判决捂住」；
+     *  · 量一次加固效果（KillAudit）：把系统退出史里每一次退出的 reason/description/importance
+     *    逐条落盘（统计走 os.journal.metrics，不在这里攒计数器），回答「加固到底有没有把判决捂住」；
      *  · 确保保护生效（AccessibilityAnchor.ensureBound）：在
      *    [AnchorPolicy.ACTIVATION_BUDGET_MS] 这个硬上界内把锚挂上，超时即
      *    「保护没能从第一毫秒生效」，记【判决降级告警】。

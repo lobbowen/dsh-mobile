@@ -132,6 +132,8 @@ check('InstanceHost 不再自带端口常量（读 GuestAdapter）',
 //      （聚合的就位数不是对账：声明 5 件、可用 4 件时它仍写 OK）；
 //   g) 让 marker 命中分支重新只 `okCount++` 而不重申真名入口 → 断言 7 红
 //      （件在磁盘上 ≠ 按真名调得到；建链只发生在新落位那趟）。
+//   h) 把别名建成共享本件 entry 的名字表（npx→npm-cli.js）、或让对账只报件名 → ENV-26 那组红
+//      （对照样本 SHARED_ALIAS 就在断言旁边，四把尺子逐条判它红）。
 const HOST_KT = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'lobos', 'lifecycle', 'OsHostService.kt');
 const PREFIX_KT = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'lobos', 'runtime', 'PrefixProvisioner.kt');
 const SUPPLY_KT = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'lobos', 'runtime', 'SupplyProvisioner.kt');
@@ -206,6 +208,34 @@ check('落盘件的可执行位按内容判且两条路径都覆盖（ENV-25：�
   /ExecBits\.apply\(out\)/.test(supplySrc) && /ExecBits\.repair\(root\)/.test(supplySrc),
   'apply=' + /ExecBits\.apply\(out\)/.test(supplySrc) + ' repair=' + /ExecBits\.repair\(root\)/.test(supplySrc));
 
+// ENV-26 的设备那一半：一件可以多颗真名（npm 件同时给 npx），而 npx 的真身不是本件那颗 entry。
+//   把别名做成「共享 entry 的名字表」= 链建得成、跑出来是错的东西（npx 变成 npm），
+//   比缺链更难发现 ⇒ 每一颗别名必须用它自己的件内入口，且不可用时红字点到**那颗名字**。
+const ALIAS_RULER = [
+  // 建链：别名指向 File(root, 各自的 entryRel)，不是共享的 entry
+  /for \(a in aliases\)[\s\S]{0,200}Os\.symlink\(File\(root, a\.entryRel\)\.absolutePath/,
+  // 对账：坏的那一颗真名要能被点名（return name 等于说「npm 这颗件不可用」，把 npx 吞掉）
+  /return a\.name/,
+  // 两条落位路径都带上别名表（新落位兑现的名字集合 = marker 命中重申的集合）
+  /ensureEntry\(ctx, name, root, entryRel, aliases\)/,
+  // 别名格读不出 = 清单与件分叉，这件不算可用，且点名到 journal
+  /shortPieces\.add\(name \+ "（aliases/,
+];
+const aliasOk = (src) => ALIAS_RULER.every((re) => re.test(src));
+check('别名各自带件内入口、逐颗真名对账、形状读不出即点名（ENV-26 设备侧）',
+  aliasOk(supplySrc) && (supplySrc.match(/ensureEntry\(ctx, name, root, entryRel, aliases\)/g) || []).length === 2,
+  ALIAS_RULER.map((re) => re.source + '=' + re.test(supplySrc)).join(' ') +
+    ' 两路调用数=' + (supplySrc.match(/ensureEntry\(ctx, name, root, entryRel, aliases\)/g) || []).length);
+// 对照样本 = 这四处各自的「共享写法」：一条链都不差，但 npx 会跑成 npm。
+const SHARED_ALIAS = [
+  'for (a in aliases) { val la = entryLink(ctx, a.name); la.delete(); Os.symlink(entry.absolutePath, la.absolutePath) }',
+  'for (a in aliases) if (!entryLink(ctx, a.name).isFile) return name',
+  'val broken = ensureEntry(ctx, name, root, entryRel)',
+  'if (aliasErr != null) continue',
+].join('\n');
+check('对照组：共享本件 entry 的别名写法被同一把尺子判红（尺子不是恒真）', !aliasOk(SHARED_ALIAS),
+  ALIAS_RULER.map((re) => re.source + '=' + re.test(SHARED_ALIAS)).join(' '));
+
 // ENV-25 的第三种形状：按**名单**给位（旧 PrefixProvisioner 的 `if (executable) dst.setExecutable(...)`）。
 // 今天对 bash/rg 恰好正确，换一个名单外却可执行的件就静默不可用 —— 裁判只留 ExecBits 一个。
 const KT_ROOT = path.join(ROOT, 'container', 'app', 'src', 'main', 'java');
@@ -261,14 +291,16 @@ check('树根语义只住 RuntimeEnvironment，GuestAdapter 里没有第二份',
 check('PATH 段里有 npm 全局 bin（ENV-4：装完的 CLI 按名字调用得到）',
   /put\(\s*"PATH"[\s\S]{0,300}?NodeProvisioner\.globalBin\(/.test(envSrc));
 
-// 豁免也要以断言表达（§5 I2）：KillAudit 起的是系统件 `sh`+`dumpsys`，不经环境。
-// 它若哪天自己拼一份 env，就是第五份副本；若它改了、要拿共享树根，这条会红，逼人来更新豁免理由。
+// 2026-09-30（债 E11）：KillAudit 不再起子进程 —— 退出史改走 ActivityManager（查自己 UID 的包
+// 不需要任何权限），所以「裸 exec 系统件」的那份**环境豁免撤销**。这条断言现在钉的是反面：
+// 它既不许回到 exec dumpsys 的形状（豁免已不存在，回去就是无人复核地重开），也不许自己拼 env。
 const KILL_KT = path.join(ROOT, 'container', 'app', 'src', 'main', 'java', 'lobos', 'os', 'KillAudit.kt');
 const killSrc = fs.readFileSync(KILL_KT, 'utf8');
-check('KillAudit 的豁免在册（既不自己拼 env，也不取共享树根）',
+check('KillAudit 不起子进程也不拼 env（退出史走 ActivityManager，环境豁免已撤销）',
   !/environment\(\)/.test(killSrc) && !/RuntimeEnvironment\.treeRoot/.test(killSrc) &&
-    /ProcessBuilder\(/.test(killSrc),
-  'environment()=' + /environment\(\)/.test(killSrc) + ' treeRoot=' + /RuntimeEnvironment\.treeRoot/.test(killSrc));
+    !/ProcessBuilder\(/.test(killSrc) && /getHistoricalProcessExitReasons\(/.test(killSrc),
+  'environment()=' + /environment\(\)/.test(killSrc) + ' treeRoot=' + /RuntimeEnvironment\.treeRoot/.test(killSrc) +
+    ' ProcessBuilder=' + /ProcessBuilder\(/.test(killSrc) + ' api=' + /getHistoricalProcessExitReasons\(/.test(killSrc));
 
 finish();
 

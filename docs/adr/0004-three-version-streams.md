@@ -36,6 +36,12 @@
 | Program | `program-ota` 发布前检查 `program-<version>` Release 是否已存在 → 已存在即硬红 | 版本复用导致设备永不更新 |
 | Runtime | 供给清单版本 + 哈希核验 | 运行时换字节而版本不变 |
 
+> OS 流的门禁加了一条 2026-09-30 补的不变量（债 DS-14）：**参照物必须是发起比对的那条链路自己会写的通道**。
+> 判据唯一（`scripts/verify-apk-version-gate.sh`，参照物名由调用方必填传入），取数按通道形状分两处——
+> 发布面读 `apk-latest` 的 `version.json` 资产，日常链读它自己写的 `v<versionName>` 归档族资产名
+> （`scripts/read-archived-shell-version.sh`）。日常链原先拿发布面别名当参照物，而它从不写那条 ⇒ 门每次落
+> 「首次发布」侧放行，从未比过任何一个数。
+
 ---
 
 ## 3. 兼容契约（Program 声明，OS 校验）

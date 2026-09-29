@@ -95,7 +95,11 @@
 |---|---|---|
 | workflow YAML 校验 | `ci.yml` / `fast-apk` / `build-apk` → `scripts/validate-workflow.py` | workflow 写坏（GitHub 表现是"0 个 job"，伪装成"没触发"）；重复 key / `on.push` 互相覆盖 |
 | 跨层版本校验 | `ci.yml` → `scripts/gen-version.js --check` | 事实源缺失/非法；协议号漂移；内核要求协议 > 壳实现协议 |
-| 壳 versionCode 单调 + 同版本通道分叉 | `scripts/verify-apk-version-gate.sh`（取数 `scripts/check-apk-release-version.sh`）；四个发布口各自调用 | 回退；自动通道同号换字节 |
+| 壳 versionCode 单调 + 同版本通道分叉 | `scripts/verify-apk-version-gate.sh`（取数外壳 `scripts/check-apk-release-version.sh`；参照物两种形状：某条 Release 的 `version.json` 资产，或日常链的 `v<versionName>` 归档族资产名 `scripts/read-archived-shell-version.sh`）；四个发布口各自调用，并把**参照物名**传给判据 | 回退；自动通道同号换字节；参照物选成这条链永不写的通道 |
+
+> 参照物必须是**这条链路自己会写的通道**：日常链 `fast-apk` 比对的是它写的 `v<versionName>` 归档族，
+> 不是发布面别名 `apk-latest`（2026-09-30 现读：那条 Release 今天 404，而日常链从不写它 ⇒ 取数每次退「首次发布」、
+> 门一个数都没比过；债 DS-14）。参照物空转的门比没有门更危险 —— 全绿读数会让人以为这一格有人守着。
 | Program 版本前进 | `program-ota` 发布步骤（取数 `scripts/read-release-asset.sh`） | 版本复用 → 设备判"无更新" → 静默不生效 |
 
 > 「不存在」与「取不到」的三态分类只住 `scripts/read-release-asset.sh`
@@ -140,6 +144,11 @@ base64 -w0 keys/release.keystore > /tmp/ks.b64
   线上现读（2026-09-29 05:2x，`GET /releases/tags/apk-latest`）：资产 594507819 `app-debug.apk`（53 254 712 字节，
   digest `sha256:8329235acf2f…`，2026-09-28T04:39:35Z 上传）与 594507888 `version.json` 仍是 latest 的全部内容，
   即 prune 从没执行过。
+  **2026-09-30 更正（现读同一端点）**：`GET /releases/tags/apk-latest` 退 **404**，且 `GET /releases?per_page=100`
+  的 39 条里没有名为 `apk-latest` 的 tag —— 这条 Release 在 09-29~09-30 之间消失，删除动作没有任何在案记录，未查实是谁。
+  于是这条缺口的当前状态是「无载体」（prune 的目标连同 Release 一起没了，下一次写 latest 会重新创建它），
+  而它带出的**更大**问题另有归属：发布面三条链路的版本门禁参照物就是这条别名，今天就绪度=0 ⇒ 它们的门也全落在
+  「首次发布 + 显式放行」那侧（在册 DS-14 的 ③，收口条件是发布面真跑一次 publish 自己把它写回来，不手动创建 Release）。
 - 发布链的包**整套原生能力件缺席**（在册 DS-11，2026-09-29 由本批收口的审计当场抓出）：`build-apk` 从来没有
   调用过 `scripts/build-native-capabilities.sh`（只有 fast-apk 调），所以它 assembleRelease 出来的 APK 里
   `lib/arm64-v8a/` 只有 `libc++_shared.so` + `libnode.so`，缺 `liblobosflock/liblobosposix/liblobosptyprobe/libbash/liblobosrg`
