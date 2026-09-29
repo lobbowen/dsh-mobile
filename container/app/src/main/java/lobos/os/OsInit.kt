@@ -9,14 +9,25 @@ import org.json.JSONObject
 /**
  * OsInit：进程/端口/存储/日志的唯一权威 + 状态机（架构 v4 §10，债 A12）。
  *
- * 对外唯一状态落在 files/os/state.json：那里存的是**完整对外状态**（相位 + 三份实测读数 +
+ * 对外唯一状态落在 files/os/state.json：那里存的是**本世的完整对外状态**（相位 + 三份实测读数 +
  * 待认的中断定罪），通知、控制台首行、快捷磁贴都渲染这一份，不各自取数再拼一句话
  * （三处同源，C1）。**没有 replay 恢复**：重启只把上次中断如实写进 Journal，然后继续 BOOTING → RUNNING。
+ * 「不继承上一世」在这里是结构性的：[beginLife] 在本世第一条通知之前把这份状态归零，
+ * 而中断判决根本不走文件回读（见 [interruptedThisLife]）。
  */
 object OsInit {
 
     private const val DIR = "os"
     private const val FILE = "state.json"
+
+    /**
+     * 本世的中断判决。**唯一来源是显式入参**（[beginLife] / [transition] / [refresh]，
+     * 源头只有 [lobos.lifecycle.ResidencyAudit.interruption] 一处），绝不从 state.json 回读：
+     * 文件里那一格是上一世写下的存档，回读它就是把「上一世对它自己的上一世说的话」
+     * 当成这一世的读数渲染出去（真机 2026-09-30 实测到的 60s 窗口，债 E12）。
+     */
+    @Volatile
+    private var interruptedThisLife: String? = null
 
     private fun file(ctx: Context): File {
         val d = File(ctx.filesDir, DIR)
@@ -31,7 +42,7 @@ object OsInit {
     @Synchronized
     fun snapshot(ctx: Context): OsSnapshot {
         val obj = runCatching { JSONObject(file(ctx).readText()) }.getOrNull()
-            ?: return OsSnapshot(OsPhase.BOOTING, OsFacts())
+            ?: return OsSnapshot(OsPhase.BOOTING, OsFacts(), interruptedThisLife, 0L)
         val phase = OsPhase.values().firstOrNull { it.name == obj.optString("phase") } ?: OsPhase.BOOTING
         val f = obj.optJSONObject("facts")
         val facts = if (f == null) OsFacts() else OsFacts(
@@ -45,7 +56,7 @@ object OsInit {
         return OsSnapshot(
             phase = phase,
             facts = facts,
-            interrupted = obj.optString("interrupted").takeIf { it.isNotBlank() },
+            interrupted = interruptedThisLife,
             atMs = obj.optLong("at", 0L),
         )
     }
@@ -63,17 +74,44 @@ object OsInit {
                 put("channel", snap.facts.channel.name)
                 put("anchor", snap.facts.anchor.name)
             })
+            // 只作本世渲染过的存档：[snapshot] 不读这一格（读了就是把上一世的判决当这一世的现状）。
             snap.interrupted?.let { put("interrupted", it) }
         }
         runCatching { file(ctx).writeText(obj.toString(2)) }
     }
 
-    /** 唯一状态迁移入口（生命周期边）：写盘 + 落 Journal（同一次调用，不允许只做一半）。 */
+    /**
+     * 本世的第一次写：对外状态从「什么都没量」起算，文件里上一世那份相位与读数一份都不继承。
+     *
+     * 必须排在第一条通知之前。跨世残留的形状不止 `interrupted` 那一格：出生后若还读回上一世的
+     * `readingsCollected=true / 锚在位`，第一句状态行就把本世没量过的事说成量过了（债 E12 同族）。
+     * 上世停在哪个相位只进 Journal 当归档文案，不进对外状态。
+     */
     @Synchronized
-    fun transition(ctx: Context, phase: OsPhase, note: String? = null): OsPhase {
+    fun beginLife(ctx: Context, interrupted: String?): OsSnapshot {
+        val stalled = snapshot(ctx).phase
+        interruptedThisLife = interrupted
+        val snap = OsSnapshot(OsPhase.BOOTING, OsFacts(), interrupted, System.currentTimeMillis())
+        write(ctx, snap, OsPhase.BOOTING, null)
+        Journal.append(
+            ctx, "os-phase", null,
+            "宿主出生：本世从 BOOTING 起算（上世停在 " + stalled.name + "，那份读数不继承）",
+        )
+        return snap
+    }
+
+    /**
+     * 唯一状态迁移入口（生命周期边）：写盘 + 落 Journal（同一次调用，不允许只做一半）。
+     *
+     * `note` 与 `interrupted` 都没有默认值：每一次写状态都必须自带判决来源，
+     * 少写一个参数就编译不过 —— 「靠 prev.copy 把上一份判决顺带写下去」正是债 E12 的通路。
+     */
+    @Synchronized
+    fun transition(ctx: Context, phase: OsPhase, note: String?, interrupted: String?): OsPhase {
         val prev = snapshot(ctx)
         val now = System.currentTimeMillis()
-        write(ctx, prev.copy(phase = phase, atMs = now), prev.phase, note)
+        interruptedThisLife = interrupted
+        write(ctx, prev.copy(phase = phase, atMs = now, interrupted = interrupted), prev.phase, note)
         Journal.append(ctx, "os-phase", null, prev.phase.name + " -> " + phase.name + (note?.let { "（" + it + "）" } ?: ""))
         return phase
     }
@@ -91,6 +129,7 @@ object OsInit {
         val prev = snapshot(ctx)
         val next = OsPhaseRule.next(prev.phase, facts)
         val now = System.currentTimeMillis()
+        interruptedThisLife = interrupted
         val snap = prev.copy(
             phase = next ?: prev.phase,
             facts = facts,

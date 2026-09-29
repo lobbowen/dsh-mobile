@@ -304,6 +304,40 @@ rule('R11 「自愈」口径不回潮（词表唯一宿主 + 全壳文案与契�
   return bad;
 });
 
+// R12 出生归零（债 E12）：对外状态不跨世继承，屏幕上的第一句话必须是本世量出来的。
+// 为什么钉源码结构而不是跑起来判：OsInit/OsHostService 要 Context，落盘与首屏不可由 JVM 单测测到
+// （OsPhaseRuleTest 的文件头同口径交代过），而这一格的错法是「编译全绿、真机出生第一行带着上一世
+// 的判决与读数」；真机那一格由 docs/plans/residency-verification-plan.md 的 V-F4 取读数。
+const osInitFiles = appFiles.filter((f) => /\/lobos\/os\/OsInit\.kt$/.test(f));
+const hostFiles = appFiles.filter((f) => /OsHostService\.kt$/.test(f));
+const transCallers = appFiles.filter((f) => f.endsWith('.kt') && /OsInit\.transition\(/.test(read(f)));
+rule('R12 出生归零（判决不回读 + 先归零再上屏 + 第一拍不等节拍）',
+  osInitFiles.length + hostFiles.length + transCallers.length, () => {
+    const bad = [];
+    if (!osInitFiles.length || !hostFiles.length) { bad.push('OsInit/OsHostService 不在了（判据失去对象）'); return bad; }
+    const strip = (s) => s.split(/\r?\n/).filter((l) => !/^\s*(?:\/\/|\*|\/\*)/.test(l)).join('\n');
+    const os = strip(read(osInitFiles[0]));
+    // ① 判决只许写盘存档，不许读回来当本世现状。
+    if (/optString\(\s*"interrupted"/.test(os)) bad.push('OsInit 又从 state.json 回读 interrupted');
+    if (!/put\("interrupted"/.test(os)) bad.push('OsInit 不再落盘 interrupted（渲染过的判决没了存档）');
+    // ② 每一次写状态都必须自带判决来源：默认值 = 允许少写，prev.copy 那条跨世通路就回来了。
+    if (/fun transition\([^)]*interrupted: String\? =/.test(os)) bad.push('transition 的判决参数有了默认值');
+    for (const f of transCallers) {
+      for (const m of strip(read(f)).matchAll(/OsInit\.transition\(([^\n]*)\)/g)) {
+        const n = m[1].split(',').filter((s) => s.trim()).length;
+        if (n < 4) bad.push(rel(f) + ' 的 transition 只传了 ' + n + ' 个参数（判决来源缺席）');
+      }
+    }
+    // ③ 出生次序：归零排在第一条通知之前，第一拍立刻跑（之后才按节拍拍）。
+    const host = strip(read(hostFiles[0]));
+    const born = host.slice(host.indexOf('override fun onStartCommand'), host.indexOf('private fun promoteToForeground'));
+    if (!/OsInit\.beginLife\(/.test(born)) bad.push('宿主出生不再先归零（首句会读回上一世那份 state.json）');
+    else if (born.indexOf('OsInit.beginLife(') > born.indexOf('promoteToForeground()')) bad.push('beginLife 排到了第一条通知之后');
+    if (/postDelayed\(\s*tick,\s*TICK_MS\s*\)/.test(born)) bad.push('出生第一拍又被推迟一个节拍（60s 窗口回来了）');
+    if (!/handler\?\.post\(\s*tick\s*\)/.test(born)) bad.push('出生不再立刻跑第一拍');
+    return bad;
+  });
+
 console.log('capability-single-source-gate (v4)');
 for (const p of passes) console.log('  PASS  ' + p);
 for (const f of fails) console.log('  FAIL  ' + f);
