@@ -640,41 +640,57 @@ if (fs.existsSync(VGATE)) {
     const r = spawnSync('bash', [VGATE, ...args], { encoding: 'utf8' });
     return { rc: r.status === null ? -1 : r.status, out: String(r.stdout || '').trim(), err: String(r.stderr || '') };
   };
-
-  const up = runV([v8, v7, 'auto']);
+  // 参照物名是**必填第 4 格**（DS-14）：红点必须说清真比的是谁。所以下面每条都带标签。
+  const up = runV([v8, v7, 'auto', 'apk-latest']);
   check('版本门禁：前进放行并打出两端的数', up.rc === 0 && up.out.includes('版本前进（7 → 8）'), JSON.stringify(up));
   // 同版本这一格**只按通道分叉**，两侧都跑：只测「显式放行」就等于把自动通道的红写成了装饰。
-  const sameExplicit = runV([vSame, v7, 'explicit']);
+  const sameExplicit = runV([vSame, v7, 'explicit', 'apk-latest']);
   check('版本门禁：同版本 + 显式通道放行（修复投递/重传是正当用途）',
     sameExplicit.rc === 0 && sameExplicit.out.includes('同版本重发'), JSON.stringify(sameExplicit));
-  const sameAuto = runV([vSame, v7, 'auto']);
+  const sameAuto = runV([vSame, v7, 'auto', 'apk-latest']);
   check('版本门禁：同版本 + 自动通道判红（动了 APK 内容就必须 bump）',
     sameAuto.rc === 1 && sameAuto.err.includes('release.md'), JSON.stringify(sameAuto));
-  const backAuto = runV([v6, v7, 'auto']);
-  const backExplicit = runV([v6, v7, 'explicit']);
+  const backAuto = runV([v6, v7, 'auto', 'apk-latest']);
+  const backExplicit = runV([v6, v7, 'explicit', 'apk-latest']);
   check('版本门禁：回退两种通道都判红（不可逆，显式通道也不放过）',
     backAuto.rc === 1 && backExplicit.rc === 1
       && backAuto.err.includes('不可逆') && backExplicit.err.includes('不可逆'),
     JSON.stringify({ auto: backAuto.rc, explicit: backExplicit.rc }));
-  const firstExplicit = runV([v8, '-', 'explicit']);
-  check('版本门禁：线上无清单 + 显式通道放行（首次发布）',
+  const firstExplicit = runV([v8, '-', 'explicit', 'archive']);
+  check('版本门禁：线上无读数 + 显式通道放行（首次发布）',
     firstExplicit.rc === 0 && firstExplicit.out.includes('显式通道放行'), JSON.stringify(firstExplicit));
-  const firstAuto = runV([v8, '-', 'auto']);
-  check('版本门禁：线上无清单 + 自动通道判红（不许把「不知道线上是什么」发成正常）',
+  const firstAuto = runV([v8, '-', 'auto', 'archive']);
+  check('版本门禁：线上无读数 + 自动通道判红（不许把「不知道线上是什么」发成正常）',
     firstAuto.rc === 1, JSON.stringify(firstAuto));
+  // 2026-09-30 定罪的形状：红点里写死「apk-latest」，而实际参照物早已换掉 —— 读数会指着无关的
+  //   通道说话。这一条钉「红点必须复述调用方传的参照物」。
+  check('版本门禁：无线上读数判红时点名**传入的**参照物（不复述成写死的通道名）',
+    firstAuto.rc === 1 && firstAuto.err.includes('archive 上没有版本读数'), JSON.stringify(firstAuto));
+  check('版本门禁：放行读数行也带参照物（否则日志里两条链路的读数长得一样）',
+    runV([v8, v7, 'auto', 'archive']).out.includes('参照物=archive'),
+    JSON.stringify(runV([v8, v7, 'auto', 'archive'])));
+  // 少一个参数必须落回「无从校验」，不许缺省成某个通道名（缺省值就是第二份真相）。
+  check('版本门禁：不传参照物名 → 退 2（第 4 格没有缺省值）',
+    runV([v8, v7, 'auto']).rc === 2 && runV([v8, v7, 'auto']).err.includes('用法'),
+    JSON.stringify(runV([v8, v7, 'auto'])));
   // 退 2 = 「无从校验」，与退 1「判红」分开：调用方两种都不许发，但红点位置不同。
   check('版本门禁：本次清单缺 versionCode → 退 2（无从校验不放行）',
-    runV([vBad, v7, 'auto']).rc === 2, JSON.stringify(runV([vBad, v7, 'auto'])));
+    runV([vBad, v7, 'auto', 'apk-latest']).rc === 2, JSON.stringify(runV([vBad, v7, 'auto', 'apk-latest'])));
   check('版本门禁：versionCode 非整数 → 退 2（字符串比较会把 10 判成小于 9）',
-    runV([vNotInt, v7, 'auto']).rc === 2, JSON.stringify(runV([vNotInt, v7, 'auto'])));
-  check('版本门禁：线上清单坏了 → 退 2（清单丢失不等于首次发布）',
-    runV([v8, vBad, 'explicit']).rc === 2, JSON.stringify(runV([v8, vBad, 'explicit'])));
+    runV([vNotInt, v7, 'auto', 'apk-latest']).rc === 2, JSON.stringify(runV([vNotInt, v7, 'auto', 'apk-latest'])));
+  check('版本门禁：线上清单坏了 → 退 2（读数丢失不等于首次发布）',
+    runV([v8, vBad, 'explicit', 'apk-latest']).rc === 2, JSON.stringify(runV([v8, vBad, 'explicit', 'apk-latest'])));
   check('版本门禁：本次清单文件不存在 → 退 2',
-    runV([path.join(vTmp, 'nope.json'), v7, 'auto']).rc === 2);
+    runV([path.join(vTmp, 'nope.json'), v7, 'auto', 'apk-latest']).rc === 2);
   check('版本门禁：通道词不认 → 退 2（少一个通道就等于自动走放行那侧）',
-    runV([v8, v7, 'sometimes']).rc === 2);
+    runV([v8, v7, 'sometimes', 'apk-latest']).rc === 2);
 
-  // 接线：三条会写 apk-latest 的 workflow 必须都调宿主；且任何一份都不许再自己比较版本号。
+  // ── DS-14 的空转形状必须在源码层就被抓住：判据宿主不许再出现写死的通道名 ──
+  check('版本门禁宿主不再硬编码 apk-latest（剥注释后零命中）',
+    !stripHashComments(fs.readFileSync(VGATE, 'utf8')).includes('apk-latest'),
+    '参照物由调用方传入；判据里复述某个具体通道名 = 换参照物时红点指着无关的地方');
+
+  // 接线：三条会写滚动通道的 workflow 必须都调宿主；且任何一份都不许再自己比较版本号。
   const VG_FILES = ['fast-apk.yml', 'build-apk.yml', 'release-admin.yml'];
   // 只认**命令行形态**的调用（行首可有 `if !`），注释里提一句脚本名不算接线 ——
   // 否则改天谁把调用删掉、只留着那行解释性注释，这条门禁照样绿。
@@ -698,7 +714,156 @@ if (fs.existsSync(VGATE)) {
   check('版本门禁接线断言自证：真调用行（含 if ! 包裹）→ 放行',
     VCALL.test('          bash scripts/check-apk-release-version.sh version.json "$TAG" "$VCHANNEL"')
       && VCALL.test('          if ! bash scripts/check-apk-release-version.sh version.json "$TAG" explicit; then'));
+  // 日常链的两个空转件（③ 定罪的正是这一处）：参照物必须是**这条链自己会写的那一族**，
+  //   通道必须随触发方式变。这里钉的是「传了变量」，因为 `explicit` 字面量与 `apk-latest`
+  //   字面量各自把门的一格焊死在放行侧 —— 两个都是 2026-09-30 实测出来的空转形状。
+  const FAST_SRC = fs.readFileSync(path.join(ROOT, '.github/workflows', 'fast-apk.yml'), 'utf8');
+  const DAILY_CALL = /^[^\S\n]*bash\s+scripts\/check-apk-release-version\.sh\s+version\.json\s+"\$TAG"\s+"\$VCHANNEL"\s*$/m;
+  check('日常链接线：fast-apk 把通道判定结果真传进门禁（不写死 explicit）',
+    DAILY_CALL.test(FAST_SRC), '找不到 … "$TAG" "$VCHANNEL" 的调用行');
+  check('日常链参照物：fast-apk 用它自己会写的归档族（TAG="archive"）',
+    /^[^\S\n]*TAG="archive"\s*$/m.test(FAST_SRC),
+    '参照物必须能被这条链路产出：日常链只写 v<versionName> 归档，从不写 apk-latest（债表 DS-14）');
+  check('日常链门禁断言自证：旧写法（apk-latest + 写死 explicit）→ 判红',
+    !DAILY_CALL.test('          TAG="apk-latest"\n          bash scripts/check-apk-release-version.sh version.json "$TAG" explicit'));
   fs.rmSync(vTmp, { recursive: true, force: true });
+}
+
+// ── 日常链参照物的取数宿主：scripts/read-archived-shell-version.sh（③ / 债表 DS-14）──
+// 为什么必须单独跑它：这道门的**全部**效力都取决于「取回的读数是真的」。2026-09-30 定罪就是
+//   因为参照物选了一条这条链永不写的通道，取数每次落回「首次发布」，门从没比过任何一个数。
+//   所以这里用假 gh 把四种结局逐条判红/判绿，重点钉死两件事：
+//     · 取数失败**不许**降级成「线上什么都没有」（退 2，不是退 10）
+//     · 归档族里有一颗读不出码的资产也判「看不清」—— 无法排除它就是最高的一版
+const RAV = path.join(ROOT, 'scripts', 'read-archived-shell-version.sh');
+check('日常链参照物取数宿主 scripts/read-archived-shell-version.sh 存在', fs.existsSync(RAV));
+if (fs.existsSync(RAV)) {
+  const aTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rav-'));
+  const fakeBinA = path.join(aTmp, 'bin');
+  fs.mkdirSync(fakeBinA, { recursive: true });
+  const FAM = [
+    { tag_name: 'v1.1.11', assets: [{ name: 'app-debug-1.1.11+42.apk' }, { name: 'source.zip' }] },
+    { tag_name: 'v1.1.12', assets: [{ name: 'app-debug-1.1.12+43.apk' }] },
+    { tag_name: 'node-runtime-22.11.0-arm64', assets: [{ name: 'libnode.so' }] },
+  ];
+  let bodySeq = 0;
+  const body = (items) => {
+    const p = path.join(aTmp, 'body-' + (++bodySeq) + '.json');
+    fs.writeFileSync(p, typeof items === 'string' ? items : JSON.stringify(items));
+    return p;
+  };
+  // 假 gh：只认 `gh api repos/<repo>/releases…`，把 RA_BODY 指向的文件原样吐出去；
+  //   RA_FAIL=1 模拟「这次没答上来」（不碰网络、不碰真凭据）。
+  fs.writeFileSync(path.join(fakeBinA, 'gh'), [
+    '#!/usr/bin/env bash',
+    'set -u',
+    'if [ "${RA_FAIL:-}" = 1 ]; then echo "gh: Bad credentials" >&2; exit 1; fi',
+    'cat "${RA_BODY:?假 gh 没给返回体}"',
+    '',
+  ].join('\n'), { mode: 0o755 });
+  let outSeq = 0;
+  // 每次调用**换一个输出目录**：共用一个目录会让「这次没落 version.json」的断言被上一轮留下的
+  //   那文件喂绿（假绿的经典形状）。
+  const rav = (extraEnv) => {
+    const dir = path.join(aTmp, 'out-' + (++outSeq));
+    const r = spawnSync('bash', [RAV, dir], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: fakeBinA + path.delimiter + process.env.PATH,
+        GITHUB_REPOSITORY: 'lobbowen/lobos',
+        ...extraEnv,
+      },
+    });
+    return { rc: r.status === null ? -1 : r.status, out: String(r.stdout || ''), err: String(r.stderr || ''), dir };
+  };
+  const readOut = (r) => JSON.parse(fs.readFileSync(path.join(r.dir, 'version.json'), 'utf8'));
+
+  const hit = rav({ RA_BODY: body(FAM) });
+  const hitJson = readOut(hit);
+  check('归档族取数：取到**整族最高**的 versionCode（不是「第一条」），并落下可复核的形状',
+    hit.rc === 0 && hitJson.shell.versionCode === 43 && hitJson.shell.versionName === '1.1.12'
+      && hitJson.sourceTag === 'v1.1.12' && hitJson.sourceAsset === 'app-debug-1.1.12+43.apk'
+      && hit.out.includes('versionCode=43'), JSON.stringify({ rc: hit.rc, hitJson }));
+  // 顺序不能决定结局：把最高的那颗放在列表末尾再取一次，仍是 43（拿「第一条」当最新的写法在这里会红）。
+  const reordered = rav({ RA_BODY: body([FAM[2], FAM[0], FAM[1]]) });
+  check('归档族取数：与返回顺序无关（按码取最高，不按位置取第一）',
+    reordered.rc === 0 && readOut(reordered).shell.versionCode === 43,
+    JSON.stringify(reordered).slice(0, 200));
+  const noFamily = rav({
+    RA_BODY: body([
+      { tag_name: 'pin-node-2026-09-27', assets: [{ name: 'libnode.so' }] },
+      { tag_name: 'vtest', assets: [] },
+    ]),
+  });
+  check('归档族取数：一个 v<数字> 归档都没有 → 退 10（首次发布是合法状态）',
+    noFamily.rc === 10 && !fs.existsSync(path.join(noFamily.dir, 'version.json')),
+    JSON.stringify(noFamily).slice(0, 250));
+  const transport = rav({ RA_BODY: body([]), RA_FAIL: '1' });
+  check('归档族取数：gh 调用失败 → 退 2 并打 ::error（旧空转的形状：取不到被当成「线上什么都没有」）',
+    transport.rc === 2 && transport.err.includes('::error') && !transport.err.includes('首次发布'),
+    JSON.stringify(transport).slice(0, 250));
+  const notArr = rav({ RA_BODY: body('{"message":"Not Found"}') });
+  check('归档族取数：返回体不是数组 → 退 2（形状不认识就不判）',
+    notArr.rc === 2 && notArr.err.includes('不是数组'), JSON.stringify(notArr).slice(0, 250));
+  const manyItems = Array.from({ length: 100 }, (_, i) => ({
+    tag_name: 'v9.9.' + i,
+    assets: [{ name: 'app-debug-9.9.' + i + '+' + (i + 1) + '.apk' }],
+  }));
+  const many = rav({ RA_BODY: body(manyItems) });
+  check('归档族取数：一页取满 100 条 → 退 2（静默截断会漏掉更高归档，表现为「一切正常」）',
+    many.rc === 2 && many.err.includes('翻页'), JSON.stringify(many).slice(0, 250));
+  const ambiguous = rav({
+    RA_BODY: body([
+      { tag_name: 'v1.2.0', assets: [{ name: 'app-debug-1.2.0+44.apk' }] },
+      { tag_name: 'v1.3.0', assets: [{ name: 'lobos-unversioned.apk' }] },
+    ]),
+  });
+  check('归档族取数：族里有读不出码的资产 → 退 2 并点名那一颗（无法排除它是最高的一版）',
+    ambiguous.rc === 2 && ambiguous.err.includes('v1.3.0') && ambiguous.err.includes('读不出 versionCode'),
+    JSON.stringify(ambiguous).slice(0, 300));
+  const noApk = rav({ RA_BODY: body([{ tag_name: 'v1.1.9', assets: [] }]) });
+  check('归档族取数：有归档族但整族没有一颗带码的 APK → 退 2（不判成首次发布）',
+    noApk.rc === 2 && !fs.existsSync(path.join(noApk.dir, 'version.json')), JSON.stringify(noApk).slice(0, 250));
+  const noRepo = spawnSync('bash', [RAV, path.join(aTmp, 'norepo')], {
+    encoding: 'utf8', env: { ...process.env, PATH: fakeBinA + path.delimiter + process.env.PATH, GITHUB_REPOSITORY: '' },
+  });
+  check('归档族取数：没有 GITHUB_REPOSITORY → 退 2（不许把仓库猜成默认值）',
+    noRepo.status === 2 && String(noRepo.stderr || '').includes('GITHUB_REPOSITORY'), String(noRepo.stderr || '').slice(0, 200));
+  const noOutdir = spawnSync('bash', [RAV], {
+    encoding: 'utf8', env: { ...process.env, GITHUB_REPOSITORY: 'lobbowen/lobos' },
+  });
+  check('归档族取数：不传输出目录 → 退 2 并打用法',
+    noOutdir.status === 2 && String(noOutdir.stderr || '').includes('用法'), String(noOutdir.stderr || '').slice(0, 200));
+
+  // 复写清零：整族枚举 + 资产名解析只能住这一处；取数外壳不许再抄一份，
+  //   这一处也不许抄 read-release-asset.sh 的「不存在 vs 取不到」文本分类（分工见两份的头）。
+  const ENUM = /per_page|tag_name|releases\?/;
+  for (const rel of ['scripts/check-apk-release-version.sh', '.github/workflows/fast-apk.yml']) {
+    check(`归档族取数复写清零：${rel} 不自己枚举 Release 族`,
+      !ENUM.test(stripHashComments(fs.readFileSync(path.join(ROOT, rel), 'utf8'))),
+      '整族枚举唯一宿主是 scripts/read-archived-shell-version.sh');
+  }
+  check('归档族取数断言自证：违规样本（自己列 releases）确实会红',
+    ENUM.test('gh api "repos/$REPO/releases?per_page=100" --jq .tag_name'));
+  const RRA_TEXT = /HTTP 404|no assets|matching pattern/;
+  check('归档族取数不抄 read-release-asset 的资产级分类（分工不糊）',
+    !RRA_TEXT.test(stripHashComments(fs.readFileSync(RAV, 'utf8'))),
+    '这里没有「某个资产不存在」这一态：整族为空才是首次发布');
+  // 接线：外壳必须真的按退码分派三种结局（0 比 / 10 首次发布 / 其它禁止发布）。
+  const CHK_SRC = stripHashComments(fs.readFileSync(path.join(ROOT, 'scripts/check-apk-release-version.sh'), 'utf8'));
+  const RAVCALL = /bash "\$\(dirname "\$0"\)\/read-archived-shell-version\.sh" "\$DIR"/;
+  check('取数外壳接线：archive 参照物真的调 read-archived-shell-version.sh',
+    RAVCALL.test(CHK_SRC), '找不到 bash "$(dirname "$0")/read-archived-shell-version.sh" "$DIR"');
+  check('取数外壳三态分派齐备（0 比 / 10 首次发布 / 其余退 2）',
+    /0\) OLD="\$DIR\/version\.json"/.test(CHK_SRC)
+      && /10\) echo "\[version\][^\n]*首次发布/.test(CHK_SRC)
+      && /exit 2 ;;/.test(CHK_SRC),
+    '少一格就会把「看不清」咽成「首次发布」—— 正是 ③ 定罪的成因');
+  check('取数外壳把参照物名传到判据（第 4 格不是装饰）',
+    /verify-apk-version-gate\.sh" "\$SRC" "\$OLD" "\$CHANNEL" "\$TAG"/.test(CHK_SRC),
+    '判据的红点要说清真比的是谁');
+  fs.rmSync(aTmp, { recursive: true, force: true });
 }
 
 // ── 线上资产读取的三态分类：scripts/read-release-asset.sh（APK 与内核两条发布链共用）──
@@ -1165,6 +1330,176 @@ check('APK 原生件审计宿主 scripts/verify-apk-native.sh 存在', fs.exists
   check('审计宿主被 fast-apk/build-apk/release-admin 三链同调（gate×2 + report×1）',
     JSON.stringify(vanCallers) === JSON.stringify(['build-apk.yml', 'fast-apk.yml', 'release-admin.yml']),
     vanCallers.join(','));
+}
+
+// ── 一件多颗可执行面（ENV-26）：别名表由**件自己**声明，发布器读它、形状门禁判它、设备按它建链 ──
+//
+// 为什么这一格值得单独一门：npm 那颗件同时提供 npm 与 npx，而 npx 的真身是 `bin/npx-cli.js`
+//   （它把 argv 改写成 `npm exec …`）—— 不是 `bin/npm-cli.js`。任何「别名共享本件入口」的写法
+//   都会把 npx 链到 npm-cli.js：链建得成、`--version` 打印逐字相同、跑出来是错的东西，
+//   比缺链更难发现（2026-09-30 本机现读 2921 vs 54 字节定罪的正是这一格）。
+// 所以三处都必须按「每一颗面各自一条」的形式兑现，且**读的是件内那张表**而不是仓里抄的名单：
+//   发布器 `aliasesOf` → 清单 `tools[].aliases` → 设备 `linkEntry`；形状判据只在
+//   `verify-userland-artifact.sh` 一处宿主里对每一颗各判一遍。
+//
+// 能红的证明（每条都配反向对照）：
+//   a) 夹具改一颗 bin 映射的名字 ⇒ 读出跟着变（读自件内，不是名单）；
+//   b) 「别名入口 = 本件入口」这种共享写法 ⇒ 设备侧断言红；
+//   c) 别名指向件内不存在的文件 / 绝对路径 / 与声明入口分叉 ⇒ 发布器抛；
+//   d) 别名那颗形状坏（#!/system/bin/sh）⇒ 形状门禁退 1 且点名「别名 npx」；
+//   e) 只看 `--version` 的旧判据 ⇒ 判据在册断言红（分辨不了错链）。
+const PUB_JS = path.join(ROOT, 'scripts', 'publish-userland-manifest.js');
+check('别名推导宿主 scripts/publish-userland-manifest.js 存在', fs.existsSync(PUB_JS));
+if (fs.existsSync(PUB_JS)) {
+  // 去注释：判据里不许出现具体件名的字面量名单（注释里写 npx 是说明，不是判据）。
+  const stripJsComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:"'\\])\/\/[^\n]*/g, '$1');
+  const pubSrc = fs.readFileSync(PUB_JS, 'utf8');
+  check('发布器不抄件名名单：去注释后 "npx" 零命中（别名表只从件内读）',
+    !pubSrc.includes('npx') || !stripJsComments(pubSrc).includes('npx'),
+    '去注释命中=' + stripJsComments(pubSrc).includes('npx'));
+  // bash 的注释是整行 `#`（含 shebang）；判据里的字面量才是名单，注释里的 npx 只是说明。
+  const stripShellComments = (src) => src.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  check('形状门禁不抄件名名单：去注释后 "npx" 零命中（同一件事不留第二宿主）',
+    !stripShellComments(fs.readFileSync(path.join(ROOT, 'scripts', 'verify-userland-artifact.sh'), 'utf8'))
+      .includes('npx'));
+
+  const { aliasesOf, assertNameUniqueness } = require(PUB_JS);
+  const aTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'env26-'));
+  /** 造一件的真 zip：files 落进目录后 zip 起来（aliasesOf 走 unzip，必须是真归档）。 */
+  const mkPiece = (label, files) => {
+    const dir = path.join(aTmp, label + '-d');
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [rel, body] of Object.entries(files)) {
+      const p = path.join(dir, rel);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, body);
+    }
+    const zip = path.join(aTmp, label + '.zip');
+    execFileSync('zip', ['-q', '-r', '-X', zip, '.'], { cwd: dir });
+    return zip;
+  };
+  const NPM_PKG = (bin) => JSON.stringify({ name: 'npm', version: '11.19.0', bin });
+  const npmZip = mkPiece('npm', {
+    'package.json': NPM_PKG({ npm: 'bin/npm-cli.js', npx: 'bin/npx-cli.js' }),
+    'bin/npm-cli.js': '#!/usr/bin/env node\n',
+    'bin/npx-cli.js': '#!/usr/bin/env node\n',
+  });
+  const npmAliases = aliasesOf('npm', npmZip, 'bin/npm-cli.js');
+  check('npm 形夹具：别名读出 npx→bin/npx-cli.js（各自带件内入口，不共享本件 entry）',
+    JSON.stringify(npmAliases) === JSON.stringify([{ name: 'npx', entry: 'bin/npx-cli.js' }]),
+    JSON.stringify(npmAliases));
+  // 反向对照 a：改件内那张表 ⇒ 读出跟着变。这条抓的是「把表抄在仓里」的失效形态。
+  const renamedZip = mkPiece('renamed', {
+    'package.json': NPM_PKG({ npm: 'bin/npm-cli.js', nx: 'bin/nx-cli.js' }),
+    'bin/npm-cli.js': '#!/usr/bin/env node\n',
+    'bin/nx-cli.js': '#!/usr/bin/env node\n',
+  });
+  check('别名表读自件内：夹具改名后读出跟着变（不是仓里那份名单）',
+    JSON.stringify(aliasesOf('npm', renamedZip, 'bin/npm-cli.js'))
+      === JSON.stringify([{ name: 'nx', entry: 'bin/nx-cli.js' }]),
+    JSON.stringify(aliasesOf('npm', renamedZip, 'bin/npm-cli.js')));
+  const throws = (fn) => { try { fn(); return null; } catch (e) { return String(e && e.message); } };
+  check('没有第二颗面的形状读出零别名（git/jq/curl/sqlite3/pnpm 无根 package.json，不是缺项）',
+    JSON.stringify(aliasesOf('git', mkPiece('native', { 'bin/git': '\u007fELF' }), 'bin/git')) === '[]' &&
+      JSON.stringify(aliasesOf('npm', mkPiece('strbin', {
+        'package.json': JSON.stringify({ bin: 'bin/npm-cli.js' }), 'bin/npm-cli.js': '#!/usr/bin/env node\n',
+      }), 'bin/npm-cli.js')) === '[]');
+  check('入口分叉判红：件内 bin 映射与仓内声明的 entry 不一致 ⇒ 抛（入口只能有一个真相）',
+    /分叉/.test(throws(() => aliasesOf('npm', npmZip, 'bin/npm.js')) || ''),
+    throws(() => aliasesOf('npm', npmZip, 'bin/npm.js')));
+  check('入口分叉判红（字符串形态 bin 也一样红，不给它留第二条缝）',
+    /分叉/.test(throws(() => aliasesOf('npm', mkPiece('strfork', {
+      'package.json': JSON.stringify({ bin: 'bin/npm-cli.js' }), 'bin/npm-cli.js': '#!/usr/bin/env node\n',
+    }), 'bin/other.js')) || ''));
+  check('别名指向件内不存在的文件判红（安静跳过等于把 npx 又当成没有）',
+    /不存在/.test(throws(() => aliasesOf('npm', mkPiece('ghost', {
+      'package.json': NPM_PKG({ npm: 'bin/npm-cli.js', npx: 'bin/npx-cli.js' }),
+      'bin/npm-cli.js': '#!/usr/bin/env node\n',
+    }), 'bin/npm-cli.js')) || ''));
+  check('别名入口不合规（绝对路径 / 越出件根）判红',
+    /相对路径|合规/.test(throws(() => aliasesOf('npm', mkPiece('abs', {
+      'package.json': NPM_PKG({ npm: 'bin/npm-cli.js', npx: '/usr/local/bin/npx' }),
+      'bin/npm-cli.js': '#!/usr/bin/env node\n',
+    }), 'bin/npm-cli.js')) || ''));
+  check('根 package.json 坏了不静默放行（读不出即清单与件分叉，点名）',
+    /读不出/.test(throws(() => aliasesOf('npm', mkPiece('badjson', {
+      'package.json': '{name:', 'bin/npm-cli.js': '#!/usr/bin/env node\n',
+    }), 'bin/npm-cli.js')) || ''));
+
+  // 名字表全局唯一：一件多真名后，别名与本名同占 `$PREFIX/bin` 的一张表。
+  const t = (name, aliases) => Object.assign({ name, version: '1.0.0', sha256: 'x'.repeat(64) },
+    aliases ? { aliases } : {});
+  const A_NPX = [{ name: 'npx', entry: 'bin/npx-cli.js' }];
+  check('撞名判定：不撞的表放行（含一件多真名）',
+    throws(() => assertNameUniqueness([t('npm', A_NPX), t('git')])) === null,
+    throws(() => assertNameUniqueness([t('npm', A_NPX), t('git')])));
+  check('撞名判定：两件本名相同判红', /名字冲突/.test(throws(() => assertNameUniqueness([t('npm'), t('npm')])) || ''));
+  check('撞名判定：一件的别名撞另一件的本名判红（本名与别名同表，别从两个集合的缝里掉出去）',
+    /名字冲突/.test(throws(() => assertNameUniqueness([t('npm', [{ name: 'git', entry: 'bin/g' }]), t('git')])) || ''));
+  check('撞名判定：两颗件各自声明同一个别名也判红（后落位会覆盖前一颗，签名不证不该撞）',
+    /名字冲突/.test(throws(() => assertNameUniqueness([t('npm', A_NPX), t('pnpm', A_NPX)])) || ''));
+
+  // 形状门禁：件内声明到的每一颗都判，判形宿主唯一。
+  const VUA = path.join(ROOT, 'scripts', 'verify-userland-artifact.sh');
+  const vTmp = path.join(aTmp, 'vua-root');
+  fs.mkdirSync(path.join(vTmp, 'scripts'), { recursive: true });
+  for (const rel of ['verify-userland-artifact.sh', 'read-userland-entry.sh', 'userland-verify.json']) {
+    fs.copyFileSync(path.join(ROOT, 'scripts', rel), path.join(vTmp, 'scripts', rel));
+  }
+  const mkDist = (npxBody) => {
+    fs.rmSync(path.join(vTmp, 'dist'), { recursive: true, force: true });
+    const d = path.join(vTmp, 'dist');
+    fs.mkdirSync(path.join(d, 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'package.json'), NPM_PKG({ npm: 'bin/npm-cli.js', npx: 'bin/npx-cli.js' }));
+    fs.writeFileSync(path.join(d, 'bin/npm-cli.js'), '#!/usr/bin/env node\n');
+    fs.writeFileSync(path.join(d, 'bin/npx-cli.js'), npxBody);
+  };
+  const runVua = () => {
+    const r = spawnSync('bash', [path.join(vTmp, 'scripts', 'verify-userland-artifact.sh'), 'npm'], { encoding: 'utf8' });
+    return { rc: r.status === null ? -1 : r.status, out: String(r.stdout || ''), err: String(r.stderr || '') };
+  };
+  mkDist('#!/usr/bin/env node\n');
+  const both = runVua();
+  check('形状门禁把件内每一颗面各判一遍（入口 + 别名两行 ok）',
+    both.rc === 0 && /\[ok\] npm 入口 \d+ 字节 形状=shebang 入口=bin\/npm-cli\.js/.test(both.out)
+      && /\[ok\] npm 别名 npx \d+ 字节 形状=shebang 入口=bin\/npx-cli\.js/.test(both.out),
+    JSON.stringify({ rc: both.rc, out: both.out.trim().split('\n').join(' | ') }));
+  mkDist('#!/system/bin/sh\n');
+  const badAlias = runVua();
+  check('别名那颗形状坏 ⇒ 判红且点名「别名 npx」（逐颗判形不是装饰）',
+    badAlias.rc === 1 && badAlias.out.includes('别名 npx') && badAlias.out.includes('不在兑现范围'),
+    JSON.stringify({ rc: badAlias.rc, out: badAlias.out.slice(-200) }));
+  mkDist('ELFNOTAARCH64');
+  const elfAlias = runVua();
+  check('别名那颗形状不认识（既非 ELF 也非 shebang）⇒ 判红且点名，两种形状对每一颗同等成立',
+    elfAlias.rc === 1 && elfAlias.out.includes('别名 npx') && elfAlias.out.includes('形状不认识'),
+    JSON.stringify({ rc: elfAlias.rc, out: elfAlias.out.slice(-200) }));
+  fs.rmSync(path.join(vTmp, 'dist', 'package.json'));
+  const noFaces = runVua();
+  check('件内没声明第二颗 ⇒ 只判入口一颗且放行（「无别名」不是错误）',
+    noFaces.rc === 0 && (noFaces.out.match(/\[ok\]/g) || []).length === 1,
+    JSON.stringify({ rc: noFaces.rc, out: noFaces.out.trim() }));
+
+  // 判据在册：只看版本号分辨不了错链，所以 npm 的判据必须含 npx 真名 + exec 语义的判别串。
+  const critNpm = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts', 'userland-verify.json'), 'utf8')).criteria.npm;
+  check('npm 能力判据覆盖第二颗真名（npx 裸名可跑）',
+    /spawnSync\(\s*'npx'/.test(critNpm.node), 'node 判据长度=' + critNpm.node.length);
+  check('npm 判据带分辨错链的语义判别（--version 两边逐字相同，只有 exec 语义能分）',
+    critNpm.node.includes('Run a command from a local or remote npm package')
+      && critNpm.criterion.includes('逐字相同'));
+  const OLD_NPM_CRITERION = critNpm.node
+    .replace(/const x = cp\.spawnSync\('npx'[\s\S]*?LOBOS_PROBE_PASS npm=' \+ v \+ ' prefix=' \+ prefix/,
+      "process.stdout.write('LOBOS_PROBE_PASS npm=' + v + ' prefix=' + prefix");
+  check('对照组：只判 npm 一颗的旧判据被同一把尺子判红（尺子不是恒真）',
+    !/spawnSync\(\s*'npx'/.test(OLD_NPM_CRITERION) && OLD_NPM_CRITERION !== critNpm.node,
+    '替换生效=' + (OLD_NPM_CRITERION !== critNpm.node));
+
+  // 跨语言：JS 写出的那一格必须正是 Kotlin 读的那一格（键名分叉 = 设备永远读不到别名）。
+  const supplySrc = fs.readFileSync(path.join(ROOT, 'container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt'), 'utf8');
+  check('清单别名格两侧同名：JS 写 aliases[].entry，Kotlin 读 optJSONArray("aliases")/optString("entry")',
+    /out\.push\(\{ name: alias, entry: rel \}\)/.test(pubSrc) &&
+      /optJSONArray\("aliases"\)/.test(supplySrc) && /optString\("entry"/.test(supplySrc));
+  fs.rmSync(aTmp, { recursive: true, force: true });
 }
 
 const METHODS_JS = path.join(ROOT, 'container/engine/src/bridge/methods.js');

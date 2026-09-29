@@ -13,7 +13,7 @@
 ### A. 背景结论（为什么动这一刀）
 本机 4 次被杀：**3× `bgLimit_level_thermal_10`（subreason 1030）+ 1× `o-kill(4008)`（subreason 6008 = lowmem）**；整 UID 成组清、前台服务不豁免。
 结论：根因不在"内存/温度"单一因子，而在**形态**（把 OS 内部实现暴露成 Android 管理对象）。
-取证入口：`kill-audit.json`、`dumpsys activity exit-info`、`oplus-services.jar` 反编译。
+取证入口：`kill-audit.json`、`dumpsys activity exit-info`、`oplus-services.jar` 反编译。**域要说清（2026-09-30，债 E11）**：`dumpsys activity exit-info` 只有 **adb / shell 域**跑得动（它要 `android.permission.DUMP`）—— app uid 里 exec 它稳定回 `Permission Denial`，所以壳内的退出史自采必须走 `ActivityManager.getHistoricalProcessExitReasons`（查自己 UID 的包无需权限），不是把这句 dumpsys 搬进 App。
 
 ### B. 产品与边界（架构源：`os-architecture-v4.md`）
 | 决策 | 位置 |

@@ -64,3 +64,13 @@ NODE_PATH双段且第二段是npm全局前缀的node_modules
 快照字段与缺件表同源
 探针模式不追加无人创建的NODE_PATH段
 环境里不存在任何npm申报键
+# 2026-09-30（债 E11：常驻中断的死因此前是一句常量）—— 判据住在 Journal.Reason.fromExitInfo
+#   与 KillAudit.attribute、ResidencyAudit.interruptionText（纯函数，见 ExitReasonRuleTest
+#   与 ResidencyInterruptionTextTest）。这六条一旦改名或整条删掉，
+#   「未取证」就会被重新写成一句听起来正确的猜测。
+真机口径逐条归因_不共用一句猜测
+归因只认主进程_兄弟进程的死不算常驻断了
+早于本次心跳的记录不冒充这次中断
+取不到就说不取证_绝不退成没被杀
+设备重启那一支不补死因
+被打断那一支把取到的归因原样带出_取不到也不补猜测

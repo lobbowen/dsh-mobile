@@ -195,10 +195,34 @@ object SupplyProvisioner {
         return broken
     }
 
-    private fun aliasesOf(t: JSONObject): List<String> {
-        val out = mutableListOf<String>()
-        val ja = t.optJSONArray("aliases")
-        if (ja != null) { var k = 0; while (k < ja.length()) { out.add(ja.getString(k)); k++ } }
+    /** 一件的一个真名：`$PREFIX/bin/<name>` 与它在**件内**的可执行面（一件多入口时各自不同）。 */
+    private class TrueName(val name: String, val entryRel: String)
+
+    /**
+     * 清单里这件的**其它真名**（一件多入口，如 npm 件同时提供 npx）。
+     *
+     * 别名各自带件内入口，不共享本件的 `entry`：npx 的真身是 `bin/npx-cli.js`（它把 argv 改写成
+     *   `npm exec …`），按共享写法会把 npx 链到 npm-cli.js —— 链建得成、跑出来是错的东西，
+     *   比缺链更难发现（ENV-26 的实读结论，先前那句「设备侧零改动」正是没读这一格才写得出的）。
+     * 形状读不出（不是对象 / 缺 name / 入口不是件内相对路径）就抛给调用方点名：这一格由发布器
+     *   从件内现读写出，读不出即清单与件分叉，安静跳过等于把 npx 又当成没有。
+     */
+    private fun aliasesOf(t: JSONObject, toolName: String): List<TrueName> {
+        val ja = t.optJSONArray("aliases") ?: return emptyList()
+        val out = mutableListOf<TrueName>()
+        var k = 0
+        while (k < ja.length()) {
+            val o = ja.optJSONObject(k)
+            k++
+            if (o == null) throw IllegalArgumentException("aliases[" + (k - 1) + "] 不是对象（清单形状坏了）")
+            val a = o.optString("name", "")
+            val rel = o.optString("entry", "")
+            if (a.isEmpty() || rel.isEmpty()) throw IllegalArgumentException("aliases[" + (k - 1) + "] 缺 name 或 entry")
+            if (rel.startsWith("/") || rel.indexOf("..") >= 0 || !rel.contains("/")) {
+                throw IllegalArgumentException("别名 " + a + " 的入口不是件内相对路径: " + rel)
+            }
+            if (a != toolName) out.add(TrueName(a, rel))
+        }
         return out
     }
 
@@ -206,22 +230,32 @@ object SupplyProvisioner {
     // 建链过去只发生在新落位那一趟，marker 命中就整段跳过 —— 于是 bin 目录被清过、
     //   或建链代码晚于已就位件的设备，会永久表现为「件装着，名字调不到」（ENV-3 的另一半）。
     // 每次对账都重申一次：symlink 是幂等的本地操作，不是重试兜底。
-    private fun ensureEntry(ctx: Context, name: String, entry: File, aliases: List<String>): Boolean {
-        if (!linkEntry(ctx, name, entry, aliases)) return false
+    // 返回**调不通的那颗真名**（null = 这件的每个名字都可用）：一件多真名时红字必须点到具体名字，
+    //   否则「npm 那颗件可用」会把「npx 根本调不到」吞掉（对账数的是件，不是名字）。
+    private fun ensureEntry(
+        ctx: Context,
+        name: String,
+        root: File,
+        entryRel: String,
+        aliases: List<TrueName>,
+    ): String? {
+        if (!linkEntry(ctx, name, root, entryRel, aliases)) return name
         // isFile 跟随符号链接：链悬空（入口被删/目标写错）时返回假，正是「看不见但调不通」的那种坏法。
-        return entryLink(ctx, name).isFile
+        if (!entryLink(ctx, name).isFile) return name
+        for (a in aliases) if (!entryLink(ctx, a.name).isFile) return a.name
+        return null
     }
 
-    private fun linkEntry(ctx: Context, name: String, entry: File, aliases: List<String>): Boolean {
+    private fun linkEntry(ctx: Context, name: String, root: File, entryRel: String, aliases: List<TrueName>): Boolean {
         return try {
+            val entry = File(root, entryRel)
             val link = entryLink(ctx, name)
             link.delete()
             Os.symlink(entry.absolutePath, link.absolutePath)
             for (a in aliases) {
-                if (a.isEmpty() || a == name) continue
-                val la = entryLink(ctx, a)
+                val la = entryLink(ctx, a.name)
                 la.delete()
-                Os.symlink(entry.absolutePath, la.absolutePath)
+                Os.symlink(File(root, a.entryRel).absolutePath, la.absolutePath)
             }
             true
         } catch (e: Throwable) { false }
@@ -297,6 +331,19 @@ object SupplyProvisioner {
                 }
                 val marker = File(tc, "." + name + ".ok")
                 val root = File(tc, name)
+                // 别名这一格先读通再谈落位：读不出就是清单与件分叉，这件不能算可用（点名，不静默）。
+                var aliases: List<TrueName> = emptyList()
+                var aliasErr: String? = null
+                try {
+                    aliases = aliasesOf(t, name)
+                } catch (e: Throwable) {
+                    aliasErr = e.message ?: e.javaClass.simpleName
+                }
+                if (aliasErr != null) {
+                    RuntimeDiagnostics.append(ctx, "supply", false, "C 层清单里这件的 aliases 格读不出：" + name, aliasErr)
+                    shortPieces.add(name + "（aliases 格坏）")
+                    continue
+                }
                 if (marker.isFile && marker.readText().trim() == want && File(root, entryRel).isFile) {
                     // marker 命中**不等于件还能用**：农场完好性必须在这里复验一次。
                     //   件按 sha256 内容寻址，同一个 sha 只会落位一次 —— 不在这里读，
@@ -312,9 +359,10 @@ object SupplyProvisioner {
                     // 同一条理由也管执行位：件按 sha 命中就永不重解，给位的规则后来才改成按内容判 ——
                     //   不在这里补一次，旧件带着「libexec 里的真二进制没有 x」永远活着（ENV-25）。
                     ExecBits.repair(root)
-                    if (!ensureEntry(ctx, name, File(root, entryRel), aliasesOf(t))) {
-                        RuntimeDiagnostics.append(ctx, "supply", false, "C 层已就位件按真名调不到（\$PREFIX/bin 入口不可用）", name)
-                        shortPieces.add(name + "（真名入口不可用）")
+                    val broken = ensureEntry(ctx, name, root, entryRel, aliases)
+                    if (broken != null) {
+                        RuntimeDiagnostics.append(ctx, "supply", false, "C 层已就位件按真名调不到（\$PREFIX/bin 入口不可用）", name + " → " + broken)
+                        shortPieces.add(name + "（真名 " + broken + " 不可用）")
                         continue
                     }
                     available++
@@ -362,9 +410,10 @@ object SupplyProvisioner {
                         shortPieces.add(name + "（农场 " + brokenLinks + " 条没建成）")
                         continue
                     }
-                    if (!ensureEntry(ctx, name, File(root, entryRel), aliasesOf(t))) {
-                        RuntimeDiagnostics.append(ctx, "supply", false, "C 层件按真名调不到（\$PREFIX/bin 入口没建成）", name + " → " + entryRel)
-                        shortPieces.add(name + "（真名入口不可用）")
+                    val brokenFresh = ensureEntry(ctx, name, root, entryRel, aliases)
+                    if (brokenFresh != null) {
+                        RuntimeDiagnostics.append(ctx, "supply", false, "C 层件按真名调不到（\$PREFIX/bin 入口没建成）", name + " → " + brokenFresh)
+                        shortPieces.add(name + "（真名 " + brokenFresh + " 不可用）")
                         continue
                     }
                     available++

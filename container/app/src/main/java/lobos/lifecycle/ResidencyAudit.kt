@@ -10,8 +10,9 @@ import java.util.Locale
 import kotlin.math.abs
 
 /**
- * 常驻中断的**判决降级告警边**。锚掉 = ColorOS 判决掉出 importance=accessibility = 即将被杀
- * （真机 2026-09-27 实证）；一旦被杀，唯一诚实的动作是把它显示出来。
+ * 常驻中断的**取证与告警边**。一旦被杀，唯一诚实的动作是把它显示出来 —— 显示成**查到的事实**，
+ * 不是显示成一句推测的机制（2026-09-30 定罪，债 E11：这里过去写死「锚掉=判决降级=即将被杀」，
+ * 于是用户强停、覆盖安装、热档清理在通知里长得一模一样，而那三个东西的处置完全不同）。
  *
  * 本设计**不提供死后恢复**：复活只把壳点回来 —— 内核重启时一律把 running/pending 判成 failed
  * （console 的 `tasks.js` `_load`），agent 的工作在进程死的那一刻就断了，
@@ -23,8 +24,9 @@ import kotlin.math.abs
  * 文件里同时存开机基准（wall − elapsedRealtime）：本次算出的基准对不上，说明那条记录属于
  * 上一次开机，设备重启不该被定罪成「App 被杀」。
  *
- * 「是谁杀的、被杀过几次」不由本对象猜：系统退出史（[KillAudit] 度量）给出事实，本对象只负责把
- * 它接进告警文案 —— 常驻通知首行与诊断页因此都能看到 o-kill，而不是笼统的「被打断」。
+ * 「是谁杀的」不由本对象判，也不由文案猜：[KillAudit] 从系统退出记录里取回那一次的读数，
+ * 取不到就写「未取证」。判决（锚在位/掉线）另有观测边在告警（`OsHostService.observeAnchorTransition`
+ * 与 `OsApplication.ensureProtectionActive`），那是**当场观测**，不需要也不许在这里事后归因。
  */
 object ResidencyAudit {
 
@@ -33,13 +35,17 @@ object ResidencyAudit {
     private const val STATE_CLEAN = "clean"
     /** 判定「换了一次开机」的基准容差：时钟同步本身的抖动留余量。 */
     private const val BOOT_BASIS_TOLERANCE_MS = 60_000L
-    /** 「被打断」告警的固定前缀：interruption() 靠它判断该不该补机制与度量。 */
+    /** 「被打断」告警的固定前缀：首行与诊断页都读它。 */
     private const val INTERRUPTION_PREFIX = "常驻被打断"
-    /** 这次中断的机制：锚掉 = 判决掉出 accessibility = 即将被杀。 */
-    private const val VERDICT_DEGRADED_NOTE = "锚掉=判决降级=即将被杀"
+
+    /**
+     * 翻出来的旧账。[lastAliveMs] 同时是归因的**时间下界**：早于它的退出记录属于上一次中断，
+     * 拿它归因就是把旧账冒充这一次。
+     */
+    private data class Debt(val lastAliveMs: Long, val gapMs: Long, val deviceReboot: Boolean)
 
     @Volatile
-    private var interruptionLine: String? = null
+    private var debt: Debt? = null
 
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.US)
 
@@ -51,7 +57,7 @@ object ResidencyAudit {
     /** 进程一起来就翻旧账（幂等：只有第一次读会留下结论）。没有旧账 = 首次安装，无罪可定。 */
     @Synchronized
     fun auditPreviousExit(ctx: Context) {
-        if (interruptionLine != null) return
+        if (debt != null) return
         val lines = try {
             file(ctx).readText().trim().split("\n")
         } catch (_: Throwable) {
@@ -61,12 +67,11 @@ object ResidencyAudit {
         val lastAliveMs = lines[0].toLongOrNull() ?: return
         val priorBasisMs = lines[1].toLongOrNull() ?: return
         if (lines[2] == STATE_CLEAN) return
-        interruptionLine = if (abs(priorBasisMs - bootBasisMs()) > BOOT_BASIS_TOLERANCE_MS) {
-            "上次常驻结束于设备重启（${timeFmt.format(Date(lastAliveMs))}），不是 App 被回收"
-        } else {
-            val gapMs = System.currentTimeMillis() - lastAliveMs
-            "$INTERRUPTION_PREFIX：上次存活到 ${timeFmt.format(Date(lastAliveMs))}，中断 ${humanGap(gapMs)}"
-        }
+        debt = Debt(
+            lastAliveMs = lastAliveMs,
+            gapMs = System.currentTimeMillis() - lastAliveMs,
+            deviceReboot = abs(priorBasisMs - bootBasisMs()) > BOOT_BASIS_TOLERANCE_MS,
+        )
     }
 
     /** 活着时每拍盖戳（与状态通知同频，见 OsHostService.refreshStatusNotice）。 */
@@ -80,19 +85,34 @@ object ResidencyAudit {
     /**
      * 结论的唯一文案源：常驻通知首行与首页「最近动作」都读它，不许两处各说各话。
      *
-     * 文案必须同时说清三件事：机制（锚掉=判决降级=即将被杀）、被杀度量（[KillAudit] 的
-     * o-kill 次数与真凶）、以及本设计不提供死后恢复。度量是后台一次性采的，可能比本对象的
-     * 定罪晚一拍就绪，所以这里**每次读都现取**，而不是在 auditPreviousExit 时固化成终稿 ——
-     * 那份固化正是「通知第一行永远只有『被打断』、用户看不到根因」的来源。
-     * 设备重启那一支不补机制与度量：重启时的退出记录不代表 App 被杀。
+     * 三件事缺一不可：中断了什么（存活到几点、断了多久）、**这一世查到的死因**、以及本设计不提供
+     * 死后恢复。死因那句必须现取（[KillAudit.attribution]）而不是在翻旧账时固化成终稿 ——
+     * 退出史是后台一次性读的，可能比本对象的定罪晚一拍就绪；那份固化正是「通知第一行永远只有
+     * 『被打断』、用户看不到根因」的来源。取不到时它自己会说「未取证」，这里不替它编。
+     * 设备重启那一支不归因：重启时的退出记录不代表 App 被杀。
      */
+    @Synchronized
     fun interruption(): String? {
-        val base = interruptionLine ?: return null
-        if (!base.startsWith(INTERRUPTION_PREFIX)) return base
-        val measured = KillAudit.killMeasurement()
-        val tail = if (measured == null) VERDICT_DEGRADED_NOTE else "$VERDICT_DEGRADED_NOTE；$measured"
-        return "$base（$tail；本设计不提供死后恢复）"
+        val d = debt ?: return null
+        return interruptionText(
+            lastAliveAt = timeFmt.format(Date(d.lastAliveMs)),
+            gapText = humanGap(d.gapMs),
+            deviceReboot = d.deviceReboot,
+            attribution = KillAudit.attribution(d.lastAliveMs),
+        )
     }
+
+    /**
+     * 纯函数版文案判据（与 `KillAudit.attribute`、`OsPhaseRule` 同构的纪律：判据不许长在
+     * Android 细节里，否则「这一支到底可不可达」只能靠真机撞）。
+     * 拆出来的直接理由：债 E11 定罪的正是**这一句**里的归因段被写成常量。
+     */
+    fun interruptionText(lastAliveAt: String, gapText: String, deviceReboot: Boolean, attribution: String): String =
+        if (deviceReboot) {
+            "上次常驻结束于设备重启（$lastAliveAt），不是 App 被回收"
+        } else {
+            "$INTERRUPTION_PREFIX：上次存活到 $lastAliveAt，中断 $gapText；$attribution；本设计不提供死后恢复"
+        }
 
     private fun write(ctx: Context, state: String) {
         val text = "${System.currentTimeMillis()}\n${bootBasisMs()}\n$state"
