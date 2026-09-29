@@ -38,3 +38,16 @@ CapStatus每一档都有实测生产者
 成功判据只有RUNNING一条
 无内核包时循环停手_拉不起来才退避重试
 非READY绝不承诺回落探针
+# 2026-09-29（债表 ENV-2/ENV-4/ENV-5 关账 · S2 语义搬家）新增五条：搬家后「环境只有一份」是
+# OS 的事实，但静态门（boot-env-contract）只能判形状——「有没有第二处拼 env」；每个键的**真值相等**
+# 只有 CI 的 testDebugUnitTest 能判。这五条一旦被改名或整条删掉，形状可以照抄、语义却退回
+# 「各树根各拼一份最小 env、谁都拿不到 LD_PRELOAD 与信任根」的旧破口，所以必须钉在执行清单里。
+PATH以PREFIX_bin最前且nodeBinDir只出现一次
+PATH含npm全局bin且按此序排在继承段之前
+探针模式的PATH与内核模式同源
+HOME_TMPDIR_LD_LIBRARY_PATH_NODE_BIN_单源正确
+NODE_PATH双段且第二段是npm全局前缀的node_modules
+# 同批（S1）：Snapshot.complete 的判据是「能力件齐 + npm 在 $PREFIX 有真名」。它若被放宽成
+# 「node 在就算齐」，npm 真名兑现会静默退回只在环境里申报一个键 —— 与本轮裁定的判据 D 相反。
+齐件且npm有真名才算完整
+npm没有PREFIX真名就不完整
