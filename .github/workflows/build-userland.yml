@@ -33,6 +33,12 @@ on:
       - 'scripts/build-userland-*.sh'
       - 'scripts/verify-userland-artifact.sh'
       - 'scripts/package-userland.sh'
+      # 清单发布器与它读的那格入口（2026-09-30 定罪 ENV-26）：aliases 的读写代码合进了 main，
+      #   但这两个文件不在 paths 里 ⇒ **没有任何 job 会因为「声明怎么算」变了而动**，线上清单停在
+      #   旧格上、CI 全绿、设备上 npx 调不到。改发布器必须重跑，配合下面的 drift 才算真能红。
+      - 'scripts/publish-userland-manifest.js'
+      - 'scripts/read-userland-entry.sh'
+      - 'scripts/check-userland-manifest-drift.js'
       # 这份声明同时决定**入口路径**（形状门禁判哪颗）与随件下发的能力判据：改它却不重跑构建，
       #   就是「仓内声明」与「线上件」再次分家的入口（与下面 channel.json 同一条教训）。
       - 'scripts/userland-verify.json'
@@ -150,3 +156,26 @@ jobs:
           node scripts/upload-qiniu.js release/userland-manifest.json "$CH/$MAN" --cache-control=60
           node scripts/upload-qiniu.js release/userland-manifest.json.sig "$CH/$SIG" --cache-control=60
           echo "[qiniu] $CH 已更新（两个键都已从 $QINIU_PUBLIC_BASE 回读并逐字节比对）"
+
+  # 线上清单 vs 本轮构建算出的声明，逐格对账（不需要任何凭据 —— 只读线上、只比内容格）。
+  # 为什么排在这里：manifest 在 push 触发的 run 里是 skipped，`needs: [build, manifest]` 会把本 job
+  # 一起带走 ⇒ 门禁空转。用 always() 把 skipped 放回来：publish=true 时它在发布之后跑（应一致），
+  # push（publish=false）时 manifest 没跑，本 job 就是「改了声明却没发」的那道红。
+  drift:
+    needs: [build, manifest]
+    if: ${{ always() && needs.build.result == 'success' && (needs.manifest.result == 'success' || needs.manifest.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: 算出本代码声明的 tools 投影（--project 不签名、不读私钥）
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          node scripts/publish-userland-manifest.js dist --project > work/declared.json
+          node -p "'[declared] ' + require('./work/declared.json').map(t => t.name + '@' + t.version + ' 入口 ' + t.entry + ' 别名 ' + (t.aliases||[]).map(a=>a.name).join('+')).join(' | ')"
+      - name: 与线上清单逐格对账（缺一格就红）
+        run: node scripts/check-userland-manifest-drift.js work/declared.json "${{ github.event.inputs.channel || 'canary' }}"

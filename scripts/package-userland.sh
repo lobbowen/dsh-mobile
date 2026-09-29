@@ -4,7 +4,10 @@
 # 为什么是 zip 而不是 tar.gz：消费方是**安卓原生**（容器 Kotlin 用 ZipInputStream 解包）——
 #   已放到 APK 层的东西不该再借运行时的解包能力（用户 2026-09-29 复核）。
 # 为什么是整棵树：git 这类件运行期要 libexec/git-core 与 share/git-core/templates（只打 bin/ 会「装上了但 clone 跑不起来」）。
-# 为什么内容寻址：件在对象存储上是长缓存，而压缩包不是逐字节可复现的 —— 重编即新名，长缓存才安全。
+# 为什么内容寻址：件在对象存储上是长缓存，按内容命名才能安全长缓存。
+#   名字钉的是 sha，所以**同名必须逐字节同物**：mtime 归一（下面那步）之后，同一棵树重打两颗包
+#   字节一致；不归一时装脚本的时间进入 zip 条目头 ⇒ 同名版本重建 6 颗 sha 全变、设备全体重下、
+#   对象存储旧键越堆越多（2026-09-30 真机对账定罪）。
 set -euo pipefail
 
 HERE=$(dirname "$0")
@@ -19,6 +22,10 @@ ENTRY=$(bash "$ROOT_DIR/scripts/read-userland-entry.sh" "$TOOL")
 STAGE=$(mktemp -d)
 cp -a dist/. "$STAGE/"
 rm -f "$STAGE"/*.version "$STAGE"/SHA256SUMS $(find "$STAGE" -maxdepth 1 -name '*.zip') 2>/dev/null || true
+# zip 把每个条目的 mtime 写进本地头 ⇒ 不归一就是「同一棵树、两颗 sha」。DOS 时间戳的下界是
+# 1980-01-01，取它作固定基准（取 1970 会被 zip 夹紧，夹法不保证跨版本一致）。
+# -h 是必须的：链接农场里的符号链接也各自带 mtime，不跟着归一，git 那颗仍然是逐字节不可复现。
+find "$STAGE" -exec touch -h -t 198001010000.00 {} +
 echo "[package] 打包（zip）：bin + 其它 prefix 目录"
 # ⚠ 必须 -y（存链接，不跟随）：zip 默认**跟随符号链接**，而 git 的链接农场有上百个指向同一
 #   多兆字节二进制的链接 ⇒ 包体会暴涨（tar 默认只存链接，所以从前 23 MB 传得动）。
