@@ -163,16 +163,17 @@ jobs:
           node-version: ${{ steps.device-node.outputs.version }}
 
       - name: 把 npm 钉到设备上那份
-        # 设备上跑的 npm 是 APK 投放的那一份（scripts/stage-npm-assets.sh 钉版本+sha512）。
-        # runner 自带的 npm 10 会**静默忽略** --os/--cpu，实测两份计划各 575 项、两侧差集皆空；
-        # 设备侧 npm 版本的唯一锚点 = container/app/src/main/assets/node-versions.json 的 npm 字段
-        # （复检 AUD-G27：原锚点随 assembler 删除，现已重建；路径按**仓根**读，
-        #   因为本 job 默认工作目录是 programs/console）。
+        # 设备上的 npm 与 runner 上跑探针的 npm 必须同源，否则「装出来的计划」是两个宇宙的：
+        # npm 的 engines 检查吃 process.version，而 runner 自带 npm 10 会**静默忽略** --os/--cpu
+        # （实测两份计划各 575 项、两侧差集皆空 —— 静默 ≠ 正确）。
+        # 版本事实源唯一：assets/node-versions.json 的 npm 字段，读取口唯一：
+        # scripts/read-node-versions.sh（build-userland-npm.sh 出 C 层那颗时读的就是同一格）。
+        # 路径按**仓根**读，因为本 job 默认工作目录是 programs/console。
         working-directory: .
         run: |
           set -euo pipefail
           echo "runner 自带 npm: $(npm --version)"
-          NPMV="$(node -p "require('./container/app/src/main/assets/node-versions.json').npm")"
+          NPMV="$(bash scripts/read-node-versions.sh npm)"
           npm install -g "npm@$NPMV"
           echo "探针用 npm: $(npm --version)"
 

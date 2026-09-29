@@ -46,10 +46,15 @@ check('runtime schema.const 与引擎 SCHEMA 常量一致',
 
 const sample = {
   schema: runtimeContract.SCHEMA, nodePath: '/d/libnode.so', nodeBinDir: '/d',
-  npmPath: '/d/libnode.so', minNode: 'v24.12.0', writtenBy: 'lobos-os',
+  minNode: 'v24.12.0', writtenBy: 'lobos-os',
 };
 const se = validate(sample, rSchema, 'runtime');
 check('runtime 样本符合 schema', se.length === 0, se.join('; '));
+// npm 归口 C 清单后，契约里不许再有 npm 键（required 或 properties 任一侧）：
+// 按名字可达由 PATH 兑现，「npm 住在哪」不是容器对内核的事实申报。
+check('runtime schema 无 npm 键',
+  !Object.keys(rSchema.properties).concat(rSchema.required).some((k) => /npm/i.test(k)),
+  Object.keys(rSchema.properties).join(','));
 
 const kj = buildKernelJson({ version: '1.2.3' });
 kj.signature = 'sig';

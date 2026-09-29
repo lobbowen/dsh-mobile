@@ -4,7 +4,7 @@ import android.content.Context
 import java.io.File
 
 /**
- * 把 asset 侧数据文件（探针脚本 / adb-client / npm）复制到 filesDir 的入口。
+ * 把 asset 侧数据文件（探针脚本 / adb-client）复制到 filesDir 的入口。
  *
  * 约定见 docs/adr/0001-android-execution-domain.md：libnode.so 经 jniLibs 解压到
  * nativeLibraryDir 执行；原生资产的登记与验证在 NativeAssetRegistry / NativePreparer，
@@ -83,56 +83,6 @@ object NodeProvisioner {
     }
 
     /**
-     * 把内置 npm 解到 `files/npm/<version>/`，返回 `bin/npm-cli.js` 的绝对路径；
-     * 失败返回 null（**不阻断启动**：没有 npm 内核照常跑，只是"面板装 Agent"不可用）。
-     *
-     * 为什么 npm 放 assets 而不是 jniLibs：npm 是纯 JS，**调用形态永远是 node 代跑**
-     * （`libnode.so <npm-cli.js 绝对路径> install ...`），不存在"把它当二进制 exec"的
-     * 通路，所以放哪都无所谓；jniLibs 只留给真需要被 exec 的 ELF。
-     *
-     * 为什么"版本目录 + .ready 标记"：npm 解包后约 1900 个文件，覆盖安装 APK 时
-     * 版本没变就不该重解；版本变了自然落到新目录，无需处理半旧半新的混叠。
-     */
-    fun ensureNpm(context: Context): File? {
-        return try {
-            val version = context.assets.open("npm/version.txt").bufferedReader().use { it.readText().trim() }
-            require(version.isNotEmpty()) { "npm/version.txt 为空" }
-            val dest = File(context.filesDir, "npm/$version")
-            val npmCli = File(dest, "bin/npm-cli.js")
-            if (npmCli.isFile && File(dest, ".ready").exists()) return npmCli
-
-            dest.parentFile?.mkdirs()
-            dest.deleteRecursively()   // 重来：宁可全量重解，不留半包
-            dest.mkdirs()
-            context.assets.open("npm/npm.zip").use { input ->
-                java.util.zip.ZipInputStream(input).use { zis ->
-                    val root = dest.canonicalFile
-                    var entry = zis.nextEntry
-                    while (entry != null) {
-                        val out = File(dest, entry.name).canonicalFile
-                        if (!out.path.startsWith(root.path + File.separator) && out.path != root.path) {
-                            throw IllegalStateException("npm 包条目路径越界: ${entry.name}")
-                        }
-                        if (entry.isDirectory) out.mkdirs()
-                        else {
-                            out.parentFile?.mkdirs()
-                            out.outputStream().use { os -> zis.copyTo(os) }
-                        }
-                        zis.closeEntry()
-                        entry = zis.nextEntry
-                    }
-                }
-            }
-            if (!npmCli.isFile) throw IllegalStateException("解包后仍缺 bin/npm-cli.js: ${npmCli.absolutePath}")
-            File(dest, ".ready").writeText(version)
-            npmCli
-        } catch (e: Throwable) {
-            android.util.Log.w("NodeProvisioner", "npm 解包失败（不阻断启动）", e)
-            null
-        }
-    }
-
-    /**
      * 让内核包校验器（`assets/node/program-verify.js`）就位。
      *
      * 为什么由 Kotlin 复制而不是直接从 assets 读：Node **读不了 APK 内的
@@ -163,13 +113,6 @@ object NodeProvisioner {
     }
 
     /**
-     * 把 assets 里的文件复制到 filesDir，**内容一致则跳过**。
-     *
-     * 用字节比对而非 mtime/size：mtime 在 APK 更新后会变（即使内容没变），
-     * 而 size 相同不代表内容相同。字节比对是这个场景下唯一可靠的判据，
-     * 且这些文件都很小（KB 级），开销可忽略。
-     */
-    /**
      * D1：让安卓语义垫片（`assets/node/android-env-shim.cjs`）就位 —— 全局预载。
      *
      * 为什么需要它：Android/SELinux 取不到 cpu 信息，`os.cpus()` 返回 0 长数组，
@@ -187,6 +130,16 @@ object NodeProvisioner {
         }
     }
 
+    /**
+     * 把 assets 里的文件复制到 filesDir，**内容一致则跳过**。
+     *
+     * 用字节比对而非 mtime/size：mtime 在 APK 更新后会变（即使内容没变），
+     * 而 size 相同不代表内容相同。字节比对是这个场景下唯一可靠的判据，
+     * 且这些文件都很小（KB 级），开销可忽略。
+     *
+     * 这里**不补可执行位**（ENV-25 不管这段）：落下来的每一个文件都是交给 node 的**参数**，
+     * 不是被 execve 的目标 —— 按内容判给位的规则对它们没有意义。
+     */
     private fun ensureAssetCopied(context: Context, assetPath: String, dest: File): File {
         val assetBytes = context.assets.open(assetPath).use { it.readBytes() }
         if (dest.exists() && dest.length() == assetBytes.size.toLong()) {

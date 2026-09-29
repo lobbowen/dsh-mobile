@@ -90,7 +90,7 @@ class OsHostService : Service() {
                 this, "host", true, "Lob OS 宿主就位（单进程 / 单前台服务）",
                 "组件：InstanceHost + CapabilityBroker + ScreenCaptureController；节拍 " + TICK_MS + "ms",
             )
-            // 运行环境挂在「宿主就位」这条边上装配（债表 ENV-1）：$PREFIX 真名、随包 npm、
+            // 运行环境挂在「宿主就位」这条边上装配（债表 ENV-1）：$PREFIX 真名、
             // 信任根重播与 C 层供给都不该等某颗 Program 被启动才发生。
             // 必须投递到 lobos-host 线程：provision 是实打实的复制（bash/rg/libc++），
             // 在 onStartCommand 的主线程上做就是 ANR 风险。

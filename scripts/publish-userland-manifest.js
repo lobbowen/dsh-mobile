@@ -23,6 +23,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const cp = require('node:child_process');
 const crypto = require('node:crypto');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -34,6 +35,15 @@ const BASE = (process.env.USERLAND_BASE_URL || 'https://hubcdn.zll.ink').replace
 const PUBKEY = path.join(ROOT, 'container', 'app', 'src', 'main', 'assets', 'ota-public.pem');
 const VERIFY = path.join(__dirname, 'userland-verify.json');
 const TTL_MS = 30 * 86400_000;
+
+/** 件的可执行面在件内的路径。**唯一出口是 scripts/read-userland-entry.sh，这里不推导。**
+ *  先前这里无条件写 `bin/<name>`，等于把设备契约里已有的 tools[].entry 一格覆盖成猜的：npm 撞上的
+ *  正是它 —— 包里与真名同名的 `bin/npm` 是 Windows 安装器用的 bash shim（按 node 二进制的同级目录
+ *  找真身，我们的布局里必挂），真正能被解释器接住的是它自己 package.json 的 bin 映射指着一颗
+ *  `bin/npm-cli.js`。没声明入口 = 读不到 = 直接抛，与「件没有能力判据就不许发布」同一条纪律。 */
+function entryOf(name) {
+  return cp.execFileSync('bash', [path.join(ROOT, 'scripts', 'read-userland-entry.sh'), name], { encoding: 'utf8' }).trim();
+}
 
 /** 本轮构建出的件（zip 命名即契约：userland-<name>-<ver>-<sha12>-android-arm64.zip）。 */
 function toolsFromDist() {
@@ -51,10 +61,10 @@ function toolsFromDist() {
     const real = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 12);
     if (real !== claimed) throw new Error('文件名里的内容哈希与实际不符: ' + f + '（名 ' + claimed + ' vs 实 ' + real + '）');
     out.push({
-      name, provider: 'zip', version: ver, kind: 'native',
+      name, provider: 'zip', version: ver,
       url: BASE + '/userland/' + f,
       sha256: crypto.createHash('sha256').update(buf).digest('hex'),
-      entry: 'bin/' + name,
+      entry: entryOf(name),
     });
   }
   return out;

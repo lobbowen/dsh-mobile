@@ -91,21 +91,19 @@ process.on('SIGINT', () => { clearInterval(keep); server.close(() => process.exi
 
   // 4) 真实拉起内核（bootKernel spawn 真 node 进程）
   const nodeBin = process.execPath;
-  const npmEntryAbs = path.join(filesDir, 'npm', '11.19.0', 'bin', 'npm-cli.js'); // 容器投放 npm 的形态（路径存在性由容器另证，此处锁透传）
   const { child, programDir } = bootKernel({
     sandboxHome: filesDir,
     programVersion: version,
     nodeBin,
     nodeBinDir: path.dirname(nodeBin),
-    npmPath: process.execPath,
-    npmEntry: npmEntryAbs,
     extraEnv: { LOBOS_STATUS_PORT: String(STATUS_PORT) },
   });
   check('内核进程已 spawn', !!child && child.pid > 0);
   const rt = JSON.parse(fs.readFileSync(path.join(filesDir, 'supervisor', 'runtime.json'), 'utf8'));
   check('runtime.json 已写入（schema 2）', rt.schema === 2);
-  // boot 必须把 npmEntry 透传进契约 —— 内核拿不到它就只有 ambient npm（安卓必挂）。
-  check('runtime.json 含透传的 npmEntry', rt.npmEntry === npmEntryAbs, String(rt.npmEntry));
+  // npm 不进这份契约：它与 git/curl 同级走 C 清单，落位后由 PATH 按裸名兑现。
+  // 这一格钉的是**删除**——把 npmEntry 透传回来（宿主代跑形状）就是红。
+  check('runtime.json 不含 npm 键', !Object.keys(rt).some((k) => /npm/i.test(k)), Object.keys(rt).join(','));
 
   // 5) 健康检查
   const healthy = await pollHealth({ host: '127.0.0.1', port: STATUS_PORT, healthPath: '/status', timeoutMs: 8000 });

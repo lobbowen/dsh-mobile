@@ -7,7 +7,7 @@
 # 为什么由 CI 取而不是设备上 `npm i -g pnpm`：设备所在网络取不到 registry.npmjs.org（GitHub 也不可达），
 #   设备唯一的取件口是对象存储 ⇒ 投放动作只能住在发布面，件仍按 C 的清单形状（zip + 内容寻址名 + sha256）落 `$PREFIX/bin/pnpm`。
 #
-# 双钉的理由：registry 内容不可假设不变（与 stage-npm-assets.sh 同一条纪律）。
+# 双钉的理由：registry 内容不可假设不变（与 build-userland-npm.sh 同一条纪律）。
 #   · tarball 的 sha512 = 上游 packument 的 `dist.integrity`；
 #   · **件内 ELF 的 sha256** —— 清单/真机钉的是 zip，而 zip 每次重打包字节都不同，
 #     所以「取回的还是不是那颗件」只能钉在 ELF 自身上。

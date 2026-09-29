@@ -15,7 +15,13 @@ const SKIP_DIRS = new Set(['.git', 'node_modules', '_backup', '_tools', 'build',
 // 扫进来等于门禁判自己。
 const SKIP_FILES = new Set([
   path.resolve(__dirname, 'dead-path-gate-test.js'),
+  // 三颗根报告同一条理由：它们是**别的门禁的输出**，按设计把命中原文抄回来
+  //   （doc-gate 会抄 ADR-0002 里被否决的 `ContainerRoot.kt`、debt-gate 会抄在册残留的
+  //   已删文件名）。三颗都在 .gitignore 里，扫进来就是门禁判自己、并且让
+  //   「先跑 doc-gate 再跑本门」与「不跑」给出两种答案。
   path.resolve(ROOT, 'brand-scan-report.txt'),
+  path.resolve(ROOT, 'doc-gate-report.txt'),
+  path.resolve(ROOT, 'debt-gate-report.txt'),
   path.resolve(ROOT, '.github', 'gate-policy.json'),
 ]);
 

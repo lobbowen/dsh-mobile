@@ -342,7 +342,7 @@
     "external": [
       {
         "file": "npm-cli.js",
-        "why": "npm 自带入口，住在设备上投放的那份 npm 包里（runtime.json 的 npmEntry 键），不在本仓源码树内"
+        "why": "npm 自带入口，住在 C 层投放的那份 npm 包里（清单 tools[] 的 entry 指向 bin/npm-cli.js），不在本仓源码树内"
       }
     ]
   },

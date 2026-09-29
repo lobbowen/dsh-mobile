@@ -327,12 +327,9 @@ jobs:
         #          node-pty 走上游配方，软失败（终端降级，不陪葬其它能力）。
         run: bash scripts/build-native-capabilities.sh
 
-      - name: Stage pinned npm into APK assets
-        # npm 是**基础环境**的一部分（与 Node 版本锁死、几乎不变）⇒ 进 APK 而非 Program 包。
-        # 版本/sha512 双钉与理由见 scripts/stage-npm-assets.sh 头部注释。
-        run: |
-          set -euo pipefail
-          ./scripts/stage-npm-assets.sh
+      # 这里**不再有** npm 资产投放步骤：npm 与 git/curl/pnpm 同级，由 build-userland.yml 的
+      # 构建口产出、经签名清单投放，APK 里留一份就是「谁生效取决于取件顺序」的第二事实源
+      # （随包那份永远不随清单更新）。残留回潮由 scripts/verify-apk-native.sh 的第 6 格判红。
 
       # ADR-0005：Program**不随 APK 分发**。这里刻意**什么都不做** —— 曾经这一步会现场拉 Program 源码、
       # 签名、把 baseline.zip 塞进 APK，后果是"Program 一改就要重出 APK"。现在 Program 只从 OTA 源安装

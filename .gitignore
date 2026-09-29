@@ -6,18 +6,19 @@ local.properties
 *.iml
 .idea/
 
-# 编译出的 Node 二进制（体积大，按需本地生成，不入库）
-container/app/src/main/assets/node-bin/
+# 交叉编译出的原生二进制（libnode.so 与 liblobos*.so，体积大、CI 每次现编，绝不入库）。
+# 先前这条写的是 `assets/node-bin/` —— 那个目录从来不存在（`build-node-android.sh:58` 的 OUT_DIR
+# 一直是 jniLibs/arm64-v8a），于是它既挡不住真产物、又把一个死路径装成"已处理"。
+container/app/src/main/jniLibs/
 
 # 内核**不再随 APK 分发**（ADR-0005）：APK 内不允许出现内核资产。
 #
 # 所以这里**不再忽略任何Program 包** —— 目的是让"有人把内核塞回 assets/program/"
 # 这件事**可见**：CI 的 APK 审计会因为"发现内核资产"直接报错，而不是被 ignore 静默吞掉。
 # （历史上这个文件曾让一个 1.2MB 的 baseline.zip 签进过仓库，正是 ignore 掩盖的结果。）
-
-# 内嵌 npm 资产（scripts/stage-npm-assets.sh 从 registry 拉取官方 tarball 生成；
-# 版本+sha512 双钉在脚本里，可重建、不必入库）
-container/app/src/main/assets/npm/
+#
+# 同理**不再忽略 assets/npm/**：npm 归口 C 层清单后，随包那份是第二事实源。留着 ignore
+# 只会让"有人把它塞回 APK"变成不可见 —— 判它的门在 scripts/verify-apk-native.sh 第 6 格。
 
 # OTA 发布包
 release/

@@ -378,10 +378,10 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
             // 归因文本已在 1c 的 program 那条落盘，这里不重复写结论。
             if (!res.ok) return SupervisorPolicy.BootOutcome.NO_PROGRAM
 
-            // ---- 4) 环境装配（$PREFIX 真名 / npm / 垫片 / 前缀 / C 层供给） ----
+            // ---- 4) 环境装配（$PREFIX 真名 / 垫片 / 前缀 / C 层供给） ----
             // 装配本体在 `lobos/os/RuntimeEnvironment`：它的触发点已不只在这条启动链上
             // （宿主就位即装配，债表 ENV-1），这里只是它的另一个调用方。
-            // 缺件不阻断启动：npm/垫片缺 = 相应能力缺，读数已在那件里上屏。
+            // 缺件不阻断启动：垫片缺 = 相应能力缺，读数已在那件里上屏。
             val env = lobos.os.RuntimeEnvironment.ensure(this)
 
             // ---- 5) 写 runtime.json（schema 2，容器写内核读） ----
@@ -389,8 +389,6 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
             writeRuntimeJson(
                 nodePath = nodeBin.absolutePath,
                 nodeBinDir = nodeBin.parentFile!!.absolutePath,
-                npmPath = nodeBin.absolutePath,
-                npmEntry = env.npmEntry?.absolutePath,
                 prefix = PrefixProvisioner.root(this).absolutePath,
                 minNode = version
             )
@@ -419,7 +417,6 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
                     programEntry = kernelEntry,
                     uiDir = File(kernelDir, "ui/dist"),
                     flockNative = File(nativeDir, NativeAssetRegistry.libNameOf("flock")),
-                    npmEntry = env.npmEntry,
                 ),
                 getenv("PATH"),
             )
@@ -887,18 +884,20 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
 
     private fun getenv(k: String): String? = System.getenv(k)
 
-    private fun writeRuntimeJson(nodePath: String, nodeBinDir: String, npmPath: String, npmEntry: String?, prefix: String, minNode: String) {
+    private fun writeRuntimeJson(nodePath: String, nodeBinDir: String, prefix: String, minNode: String) {
         val dir = File(filesDir, "supervisor")
         dir.mkdirs()
         val obj = JSONObject().apply {
+            // 保持 schema=2 是刻意的：OTA 下来的内核读到未知字段会忽略，
+            // 而 bump schema 会让它们直接拒读契约（新 APK + 旧内核是常态）。
             put("schema", 2)
             put("nodePath", nodePath)
             put("nodeBinDir", nodeBinDir)
-            put("npmPath", npmPath)
-            // npmEntry：npm-cli.js 的绝对路径，内核以 [nodePath, npmEntry, ...args] 形态代跑。
-            // 保持 schema=2 是刻意的：OTA 下来的旧内核读到未知字段会忽略，
-            // 而 bump schema 会让它们直接拒读契约（新 APK + 旧内核是常态）。
-            if (npmEntry != null) put("npmEntry", npmEntry)
+            // 这里**不再有 npm 键**：`npmPath` 先前写的就是 nodePath 的字面值（libnode.so），
+            // 而 `npmEntry` 是宿主把 npm-cli.js 绝对路径喂给内核「代跑」的形状 —— 两者都不成立
+            // （真机 2026-09-30 现读装机 Program `files/programs/console/0.1.0-android.48`：
+            // `npmPath`/`npmEntry`/`runtime.json` 全文零命中）。npm 与 git/curl 同级走 C 清单，
+            // 落位后按裸名从 PATH 兑现，与 `$PREFIX/bin` 里其余真名同一形状。
             // prefix：$PREFIX 根（能力件的家，bin/{bash,rg,node} · lib/pty.node）。恒为
             // PrefixProvisioner.root 的路径，只**声明位置**、不保证此刻已 provision。
             // 内核投放单元曾以容器环境变量找它 —— 本服务从未导出过那个键，rg/pty 因此

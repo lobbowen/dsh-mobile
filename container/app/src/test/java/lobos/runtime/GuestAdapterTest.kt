@@ -46,7 +46,6 @@ class GuestAdapterTest {
 
     private fun programInputs(
         bashBin: File? = File("/prefix/bin/bash"),
-        npmEntry: File? = null,
         envShim: File? = null,
     ) = GuestAdapter.ProgramInputs(
         root = root.copy(bashBin = bashBin, envShim = envShim),
@@ -54,7 +53,6 @@ class GuestAdapterTest {
         programEntry = programEntry,
         uiDir = File(programDir, "ui/dist"),
         flockNative = File(nativeLibDir, "liblobosflock.so"),
-        npmEntry = npmEntry,
     )
 
     // ── 命令形态 ──
@@ -108,6 +106,12 @@ class GuestAdapterTest {
         )
     }
 
+    @Test fun 探针模式不追加无人创建的NODE_PATH段() {
+        // ENV-5 的同一形状扫查：旧实现给探针补 `filesDir/node_modules`，而全仓没有这个目录的创建者
+        //   —— 指向不存在处的路径段不是「保守装配」，是假事实。
+        assertFalse(GuestAdapter.probePlan(bareRoot, File("/s.js"), null).env.containsKey("NODE_PATH"))
+    }
+
     // ── 树根共享环境（内核/探针/一次性进程同一份语义）──
 
     @Test fun HOME_TMPDIR_LD_LIBRARY_PATH_NODE_BIN_单源正确() {
@@ -158,13 +162,12 @@ class GuestAdapterTest {
         )
     }
 
-    @Test fun LOBOS_NPM_ENTRY只在提供npmEntry时出现() {
-        assertFalse(GuestAdapter.programPlan(programInputs(npmEntry = null), null).env.containsKey("LOBOS_NPM_ENTRY"))
-        val npm = File("/prefix/lib/node_modules/npm/bin/npm-cli.js")
-        assertEquals(
-            npm.absolutePath,
-            GuestAdapter.programPlan(programInputs(npmEntry = npm), null).env.getValue("LOBOS_NPM_ENTRY"),
-        )
+    /** npm 不再由自造键承载（判据 D）：它与 git/curl 同级走 C 层清单、落 `$PREFIX/bin` 真名。
+     *  自定义 `LOBOS_*` 会被载荷子进程剥掉 ⇒ 这个键从来不构成可用性判据，留着只是第二个入口。 */
+    @Test fun 环境里不存在任何npm申报键() {
+        val npmKeys = GuestAdapter.programPlan(programInputs(), null).env.keys
+            .filter { it.contains("NPM", ignoreCase = true) }
+        assertEquals("环境里出现 npm 申报键", emptyList<String>(), npmKeys)
     }
 
     @Test fun NODE_OPTIONS只在提供envShim时出现() {

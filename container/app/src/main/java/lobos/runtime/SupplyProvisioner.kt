@@ -142,7 +142,7 @@ object SupplyProvisioner {
                 } else {
                     out.parentFile?.mkdirs()
                     out.outputStream().use { zin.copyTo(it) }
-                    if (name.startsWith("bin/")) out.setExecutable(true, false)
+                    ExecBits.apply(out)
                 }
                 zin.closeEntry()
                 e = zin.nextEntry
@@ -195,6 +195,23 @@ object SupplyProvisioner {
         return broken
     }
 
+    private fun aliasesOf(t: JSONObject): List<String> {
+        val out = mutableListOf<String>()
+        val ja = t.optJSONArray("aliases")
+        if (ja != null) { var k = 0; while (k < ja.length()) { out.add(ja.getString(k)); k++ } }
+        return out
+    }
+
+    // 「件在磁盘上」不等于「按真名调得到」：真名的判据是 `$PREFIX/bin/<name>` 这条链。
+    // 建链过去只发生在新落位那一趟，marker 命中就整段跳过 —— 于是 bin 目录被清过、
+    //   或建链代码晚于已就位件的设备，会永久表现为「件装着，名字调不到」（ENV-3 的另一半）。
+    // 每次对账都重申一次：symlink 是幂等的本地操作，不是重试兜底。
+    private fun ensureEntry(ctx: Context, name: String, entry: File, aliases: List<String>): Boolean {
+        if (!linkEntry(ctx, name, entry, aliases)) return false
+        // isFile 跟随符号链接：链悬空（入口被删/目标写错）时返回假，正是「看不见但调不通」的那种坏法。
+        return entryLink(ctx, name).isFile
+    }
+
     private fun linkEntry(ctx: Context, name: String, entry: File, aliases: List<String>): Boolean {
         return try {
             val link = entryLink(ctx, name)
@@ -210,7 +227,8 @@ object SupplyProvisioner {
         } catch (e: Throwable) { false }
     }
 
-    // 跑一轮供给：返回成功就位的件数；任何异常都只记账不抛出（不阻塞启动）。
+    // 跑一轮供给：返回「按真名可用」的件数，并把「清单声明数 vs 可用数」的对账写进 journal。
+    // 任何异常都只记账不抛出（不阻塞启动）；单件中断只跳过这件，其余继续尝试。
     fun ensure(ctx: Context): Int {
         val base = manifestDir(ctx) ?: run {
             RuntimeDiagnostics.append(ctx, "supply", false, "C 层供给未启动", "assets/" + CHANNEL_ASSET + " 读不到通道锚")
@@ -244,8 +262,16 @@ object SupplyProvisioner {
             }
             File(tc, MANIFEST_NAME).writeBytes(manifestBytes)
             val manifest = JSONObject(manifestBytes.toString(Charsets.UTF_8))
-            val tools = manifest.optJSONArray("tools") ?: return 0
-            var okCount = 0
+            val tools = manifest.optJSONArray("tools")
+            if (tools == null) {
+                RuntimeDiagnostics.append(ctx, "supply", false, "C 层清单没有 tools 数组（一件都没声明）", base)
+                return 0
+            }
+            val declared = tools.length()
+            // 每一件不可用都要留下「件名 + 为什么」：收尾按「声明 vs 可用」对账并点名，
+            //   否则一句聚合的「就位 N 件」会把「声明 5 件、设备只装到 4 件」记成 OK（DS-9 设备那半）。
+            val shortPieces = mutableListOf<String>()
+            var available = 0
             var i = 0
             while (i < tools.length()) {
                 val t = tools.getJSONObject(i)
@@ -254,7 +280,21 @@ object SupplyProvisioner {
                 val url = t.optString("url", "")
                 val want = t.optString("sha256", "")
                 val entryRel = t.optString("entry", "bin/" + name)
-                if (name.isEmpty() || url.isEmpty() || want.isEmpty()) continue
+                if (name.isEmpty() || url.isEmpty() || want.isEmpty()) {
+                    // 缺件必须点名（DS-9 的设备那半）：这颗以前被一句裸 `continue` 吃掉，于是
+                    //   「清单声明 5 件」与「设备只装到 4 件」同时为真，而 journal 里只有 `就位 4 件` 这行 OK。
+                    val who = if (name.isEmpty()) "(无名)" else name
+                    val miss = mutableListOf<String>()
+                    if (url.isEmpty()) miss.add("url")
+                    if (want.isEmpty()) miss.add("sha256")
+                    val why = if (miss.isEmpty()) "字段缺失" else "缺 " + miss.joinToString("+")
+                    RuntimeDiagnostics.append(
+                        ctx, "supply", false,
+                        "C 层清单里这件取不到（设备装不上）：" + who, why
+                    )
+                    shortPieces.add(who + "（" + why + "）")
+                    continue
+                }
                 val marker = File(tc, "." + name + ".ok")
                 val root = File(tc, name)
                 if (marker.isFile && marker.readText().trim() == want && File(root, entryRel).isFile) {
@@ -266,47 +306,85 @@ object SupplyProvisioner {
                     val brokenLinks = farmBroken(root)
                     if (brokenLinks > 0) {
                         RuntimeDiagnostics.append(ctx, "supply", false, "C 层已就位件的链接农场有 " + brokenLinks + " 条不可解析", name)
+                        shortPieces.add(name + "（农场 " + brokenLinks + " 条不可解析）")
+                        continue
                     }
-                    okCount++
-                    continue
-                }
-                val bytes = httpGet(url)
-                val got = sha256Hex(bytes)
-                if (got != want) {
-                    RuntimeDiagnostics.append(ctx, "supply", false, "C 层件 sha256 不符（已丢弃，不落位）", name + " " + got.take(12) + " != " + want.take(12))
+                    // 同一条理由也管执行位：件按 sha 命中就永不重解，给位的规则后来才改成按内容判 ——
+                    //   不在这里补一次，旧件带着「libexec 里的真二进制没有 x」永远活着（ENV-25）。
+                    ExecBits.repair(root)
+                    if (!ensureEntry(ctx, name, File(root, entryRel), aliasesOf(t))) {
+                        RuntimeDiagnostics.append(ctx, "supply", false, "C 层已就位件按真名调不到（\$PREFIX/bin 入口不可用）", name)
+                        shortPieces.add(name + "（真名入口不可用）")
+                        continue
+                    }
+                    available++
                     continue
                 }
                 val staging = File(tc, "." + name + ".staging")
-                staging.deleteRecursively()
-                unzipInto(bytes, staging)
-                val stagedEntry = File(staging, entryRel)
-                if (!stagedEntry.isFile) {
-                    RuntimeDiagnostics.append(ctx, "supply", false, "C 层件缺入口（已丢弃）", name + " " + entryRel)
+                // 单件的网络/解包故障不许带走整轮供给：先前 httpGet 抛到外层 catch，于是
+                //   「第 2 件超时」之后 3~5 件根本不会被尝试，日志只剩一句「供给异常」——
+                //   既报不出哪件缺，也报不出「声明 5 / 落地 1」。
+                try {
+                    val bytes = httpGet(url)
+                    val got = sha256Hex(bytes)
+                    if (got != want) {
+                        RuntimeDiagnostics.append(ctx, "supply", false, "C 层件 sha256 不符（已丢弃，不落位）", name + " " + got.take(12) + " != " + want.take(12))
+                        shortPieces.add(name + "（sha256 不符）")
+                        continue
+                    }
                     staging.deleteRecursively()
-                    continue
-                }
-                applyLinkFarm(staging)
-                // 包内存的是链接**目标文本**（打包用 zip -y 不跟随），所以这里核验链接真的建成了 ——
-                //   没建成即记账，不静默（否则设备上会得到一堆装着路径文本的小文件，表现为「git 装上了但子命令全废」）。
-                val brokenLinks = farmBroken(staging)
-                if (brokenLinks > 0) {
-                    RuntimeDiagnostics.append(ctx, "supply", false, "C 层件链接农场有 " + brokenLinks + " 条没建成", name)
-                }
-                root.deleteRecursively()
-                if (!staging.renameTo(root)) {
-                    RuntimeDiagnostics.append(ctx, "supply", false, "C 层件落位失败", name)
+                    unzipInto(bytes, staging)
+                    val stagedEntry = File(staging, entryRel)
+                    if (!stagedEntry.isFile) {
+                        RuntimeDiagnostics.append(ctx, "supply", false, "C 层件缺入口（已丢弃）", name + " " + entryRel)
+                        staging.deleteRecursively()
+                        shortPieces.add(name + "（缺入口 " + entryRel + "）")
+                        continue
+                    }
+                    applyLinkFarm(staging)
+                    // 包内存的是链接**目标文本**（打包用 zip -y 不跟随），所以这里核验链接真的建成了 ——
+                    //   没建成即记账，不静默（否则设备上会得到一堆装着路径文本的小文件，表现为「git 装上了但子命令全废」）。
+                    val brokenLinks = farmBroken(staging)
+                    if (brokenLinks > 0) {
+                        RuntimeDiagnostics.append(ctx, "supply", false, "C 层件链接农场有 " + brokenLinks + " 条没建成", name)
+                    }
+                    root.deleteRecursively()
+                    if (!staging.renameTo(root)) {
+                        RuntimeDiagnostics.append(ctx, "supply", false, "C 层件落位失败", name)
+                        staging.deleteRecursively()
+                        shortPieces.add(name + "（落位失败）")
+                        continue
+                    }
+                    // marker 照写：件已按内容落盘，农场天生建不成时不该每次开机重拖 24MB。
+                    //   但它不算「可用」—— 不可用由对账那行红字说出，不靠重下伪装成正常。
+                    marker.writeText(want)
+                    if (brokenLinks > 0) {
+                        shortPieces.add(name + "（农场 " + brokenLinks + " 条没建成）")
+                        continue
+                    }
+                    if (!ensureEntry(ctx, name, File(root, entryRel), aliasesOf(t))) {
+                        RuntimeDiagnostics.append(ctx, "supply", false, "C 层件按真名调不到（\$PREFIX/bin 入口没建成）", name + " → " + entryRel)
+                        shortPieces.add(name + "（真名入口不可用）")
+                        continue
+                    }
+                    available++
+                } catch (e: Throwable) {
                     staging.deleteRecursively()
-                    continue
+                    val why = e.message ?: e.javaClass.simpleName
+                    RuntimeDiagnostics.append(ctx, "supply", false, "C 层供给这件中断：" + name, why)
+                    shortPieces.add(name + "（" + why + "）")
                 }
-                val aliases = mutableListOf<String>()
-                val ja = t.optJSONArray("aliases")
-                if (ja != null) { var k = 0; while (k < ja.length()) { aliases.add(ja.getString(k)); k++ } }
-                linkEntry(ctx, name, File(root, entryRel), aliases)
-                marker.writeText(want)
-                okCount++
             }
-            RuntimeDiagnostics.append(ctx, "supply", true, "C 层供给完成：就位 " + okCount + " 件", base)
-            return okCount
+            // 收尾只认「声明数 == 可用数」，不再报聚合的就位数：判据看的是清单声明了几件，
+            //   不是这次运气装上了几件 —— 不平必须红，且逐件说清为什么缺（DS-9 收口）。
+            val balanced = shortPieces.isEmpty()
+            RuntimeDiagnostics.append(
+                ctx, "supply", balanced,
+                if (balanced) "C 层供给对账：声明 " + declared + " 件，全部按真名可用"
+                else "C 层供给对账不平：声明 " + declared + " 件，可用 " + available + " 件",
+                (if (balanced) "" else "缺：" + shortPieces.joinToString("；") + " ← ") + base
+            )
+            return available
         } catch (e: Throwable) {
             RuntimeDiagnostics.append(ctx, "supply", false, "C 层供给异常", e.message ?: e.javaClass.simpleName)
             return 0

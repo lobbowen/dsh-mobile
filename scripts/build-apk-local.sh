@@ -34,8 +34,7 @@ if [ ! -x gradlew ]; then
   gradle wrapper --gradle-version 8.9
   chmod +x gradlew
 fi
-# npm 基础环境进 assets（与 CI 同一份脚本；缺了它面板装不了 Agent）
-./scripts/stage-npm-assets.sh
+# npm 不在这里投放：它与 git/curl 同级由 build-userland.yml + 签名清单供给（APK 里不留第二事实源）。
 ./gradlew assembleDebug
 
 echo "==> [3/3] 完成"
