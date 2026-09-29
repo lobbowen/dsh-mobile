@@ -112,7 +112,7 @@ on: { workflow_dispatch: {} }          # push 触发已移除
 | 类别 | 路径 |
 |---|---|
 | 构建产物 | `container/app/build/`、`.gradle/`、`container/engine/node_modules/`、`programs/console/ui/dist/`、`programs/console/ui/node_modules/` |
-| 运行时资产 | `container/app/src/main/assets/node-bin/`、`container/app/src/main/assets/npm/` |
+| 原生件（构建现编） | `container/app/src/main/jniLibs/` —— `libnode.so`（`scripts/build-node-android.sh:58`）与 `liblobos{pty,posix,flock,…}.so`（`scripts/build-native-capabilities.sh:74`）都落这里，CI 每次现编 |
 | Program 投递产物 | `release/`、`feed/` |
 | 秘密 | `keys/`（白名单保留 README）、`*.keystore`、`keystore.properties`、`.secrets/` |
 | 日志 | `*.log` |

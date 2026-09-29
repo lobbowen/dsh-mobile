@@ -22,16 +22,27 @@
 > **判断准则**：这个改动会不会改变 `libnode.so` 这一个字节？
 > 不会 → 走 fast-apk（或 ci.yml）。会 → 手动跑 build-apk 重编，编完 pin-node 固化。
 
-### 设备内 spawn 的硬边界（改内核必读）
+### 设备内 spawn 的边界（改内核必读）
 
-W^X 下 `filesDir` 里的一切**不可 execve**：`npm`/`dsh` 的 bin shim 是脚本，直接 spawn 必失败。
-内核里**一切** npm / dsh 子进程只许经统一解析入口拿调用形态：
+**能 exec 的是真名，不是宿主喂进来的路径。** 本产品刻意钉 `targetSdk=28` 换 app home 可 execve
+（[ADR-0001](../adr/0001-android-execution-domain.md)）：`$PREFIX/bin` 下每一个真名 —— APK 播的
+`{bash,rg,node}` 与 C 层签名清单播的 `{npm,pnpm,git,jq,curl,sqlite3}` —— 都按裸名可解析，脚本入口的
+shebang 由原生兼容件按**调用方 PATH** 兑现（`container/native/d1/exec-path.c:11-13`），PATH 组装唯一
+见 `container/app/src/main/java/lobos/os/RuntimeEnvironment.kt:83-91`。本节先前写的「W^X 下 `filesDir`
+里的一切**不可 execve**」是 targetSdk≥29 的规矩，与钉 28 的理由直接矛盾（同口径见
+`InstanceHost.kt:423-427`），已按事实改正。
 
-- npm：`runtimeContract.npmInvocation()` → 恒 `{bin, args}`；环境一律 `npmEnv()`。
-- dsh 子命令：`NativeManager.dshCliInvocation()`（插件域经 `resolveDshCli` 注入）。
-- 装机成功后 `config.command` 会被写回并落盘 —— 新增消费方读它，不要再猜路径。
+**不要为「拿调用形态」再建一层代跑。** 旧本节指名的 `runtimeContract.npmInvocation()`、`npmEnv()`、
+`NativeManager.dshCliInvocation()`、`resolveDshCli`、`config.command` 在仓内**零命中**（`runtimeContract`
+只是 `container/engine/test/contract-schema-test.js:7` 里的局部变量名），属契约空指，与债表
+ENV-19/ENV-20 同一形状；而它想换来的那个形状正是 `container/native/d1/exec-path.c:8-9` 已定罪的
+「中间多了一层」。
 
-行为门禁：`container/engine/test/test-chain-completeness-test.js`。
+**今天内核侧还有一道门挡着**：`programs/console/test/console-not-init-test.js:38` 对内核全 src 禁
+`child_process` ⇒ 「应用直接调环境里的 git/npm」在内核侧尚未打开，定罪与动作在册债表 ENV-21。
+环境形状的行为门禁宿主是 `container/engine/test/boot-env-contract-test.js`（真名=符号链接、APK 侧不留
+npm 面、C 层供给对账），不是 `container/engine/test/test-chain-completeness-test.js` —— 后者只管
+engine 测试脚本必须入 `test:logic` 链，共 33 行、npm 零命中（ENV-19 定过这条空指）。
 
 ---
 
