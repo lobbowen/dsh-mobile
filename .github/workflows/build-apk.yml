@@ -515,7 +515,7 @@ jobs:
         # 不等于 'success'，故不会重复保存，符合预期。
         if: steps.restorenode.outputs.cache-hit != 'yes' && steps.nodebuild.outcome == 'success'
         run: |
-          set -uo pipefail
+          set -euo pipefail
           echo "=== 保存 Node 产物到缓存目录 ==="
           mkdir -p /tmp/lobos-node-cache
           # 取数位置 = build-node-android.sh:917 的唯一落点：
@@ -543,7 +543,11 @@ jobs:
           # 真机表现为 cannot locate symbol，见恢复段的详细说明。
           #
           # 清单来源：.github/native-assets.txt（NativeAssetRegistry 的投影）
-          ASSETS="$(grep -v '^[[:space:]]*#' .github/native-assets.txt | grep -v '^[[:space:]]*$' | tr -d '\r')"
+          # `{ … || true; }` 的兜底不是装饰：本步骤开了 pipefail，裸的 `grep|grep|tr` 管道
+          # 一旦取空就会在下一行判空之前把整个 step 掐死、不打任何诊断（同一形态在
+          # native-assets 套件里被钉成门禁，本轮 06:06:53Z 的 FAIL 正是我加 pipefail 时撞上的）。
+          # 真取空了会走下面的 `[warn] $SRC 不存在` 分支，看得见而不是静默中止。
+          ASSETS="$({ grep -v '^[[:space:]]*#' .github/native-assets.txt | grep -v '^[[:space:]]*$' || true; } | tr -d '\r')"
           for a in $ASSETS; do
             SRC="container/app/src/main/jniLibs/arm64-v8a/$a"
             if [ "$a" = "libnode.so" ]; then
