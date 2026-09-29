@@ -515,14 +515,27 @@ jobs:
         # 不等于 'success'，故不会重复保存，符合预期。
         if: steps.restorenode.outputs.cache-hit != 'yes' && steps.nodebuild.outcome == 'success'
         run: |
+          set -uo pipefail
           echo "=== 保存 Node 产物到缓存目录 ==="
           mkdir -p /tmp/lobos-node-cache
-          if [ ! -f out/Release/node ]; then
-            echo "[warn] out/Release/node 不存在，跳过缓存保存。"
-            exit 0
+          # 取数位置 = build-node-android.sh:917 的唯一落点：
+          #   cp out/Release/node "$OUT_DIR/$OUT_NAME"，OUT_DIR=container/app/src/main/jniLibs/arm64-v8a
+          # 原来这里判的是裸相对路径 `out/Release/node` —— 那是构建脚本自己 cwd（node 源码树）里的
+          # 路径，而本步骤的 cwd 是仓根，所以它【从来没存在过】。2026-09-29 run 36513213633 05:49:39Z
+          # 实测原文：`=== 保存 Node 产物到缓存目录 ===` 后紧跟 `[warn] out/Release/node 不存在，跳过缓存保存。`
+          # 再 exit 0 ⇒ 这一步每轮都绿、缓存每轮都是空的，下一轮照样 cache miss，
+          # 于是「省 3~4 小时」的整段优化从没生效过：02:35:36Z `make -C out BUILDTYPE=Release`
+          # 到 05:49:39Z 才进 pre-gradle Gate = 本链路连两轮（09-26 与 09-29）各烧 3 小时 14 分编同一份 node。
+          # warn + 退 0 的形态本身就是要收口的：一个「保存缓存」的步骤保存了个空气，比红更糟。
+          NODE_SO="container/app/src/main/jniLibs/arm64-v8a/libnode.so"
+          if [ ! -f "$NODE_SO" ]; then
+            echo "[error] $NODE_SO 不在 —— Node 编译没有可复用的产物，缓存不写。"
+            echo "        下游 pre-gradle Gate 对同一个文件也会判红；在这里先红是为了让根因落在编译步。"
+            exit 1
           fi
-          cp -f out/Release/node /tmp/lobos-node-cache/node
+          cp -f "$NODE_SO" /tmp/lobos-node-cache/node
           chmod +x /tmp/lobos-node-cache/node
+          echo "[ok] 已存入缓存目录：/tmp/lobos-node-cache/node（源 $NODE_SO $(stat -c%s "$NODE_SO") 字节）"
 
           # 连带保存全部随包依赖（清单驱动）。
           # 它们是 node 的运行期动态依赖、且不在 Android 系统里，必须随包提供。
