@@ -1298,7 +1298,7 @@
       "action": "E3.1 用 program-ota.yml workflow_dispatch(publish=true) 把 Program 清单投到声明的键上，同 PR 把本门接进 ci.yml 的 gate job（输入=线上读数，不是仓内镜像）",
       "status": "done",
       "evidenceTier": "online",
-      "evidenceRef": "2026-09-29 10:44 红（C 层两声明键线上 404 ⇒ exit 1，2 项）→ build-userland run 36512850769 发布完成后复跑绿（三键全 200 ⇒ exit 0）→ 接入声明面一致检查后、改判据字面前又红 2 项（两把尺子指同一处，见 DS-6）→ 改字面后复绿：同一把尺子双向都红过，不是接到线上就恒绿的摆设。本门已接进 `.github/workflows/ci.yml` 的 gate job（debt-gate 之后），输入=线上读数。",
+      "evidenceRef": "2026-09-29 10:44 红（C 层两声明键线上 404 ⇒ exit 1，2 项）→ build-userland run 36512850769 发布完成后复跑绿（三键全 200 ⇒ exit 0）→ 接入声明面一致检查后、改判据字面前又红 2 项（两把尺子指同一处，见 DS-6）→ 改字面后复绿：同一把尺子双向都红过，不是接到线上就恒绿的摆设。本门已接进 `.github/workflows/ci.yml` 的 gate job（debt-gate 之后），输入=线上读数；CI 里第一次真跑（run 36516399044，main=94ad4a98）的 step 日志现读：gate job 于 03:16:27Z 执行 `node scripts/delivery-gate.js`，03:16:40Z 记 `[C（工具链清单）] 200 version=2026.09.29.141`、`.sig 200`、`[Program（可热更新件清单）] 200 version=0.1.0-android.48` 并以「声明键全部在线且身份干净」收 0 —— 五个 job 全出数（gate/container/console/app-tests success、console-release 按 tag 条件 skipped）",
       "workstream": "MAIN",
       "note": "门禁先于绿存在这条已兑现：它 10:44 就能红（真实读数），发布完成后才接进 CI。",
       "updated": "2026-09-29"
@@ -1455,7 +1455,7 @@
       "action": "anchorName 不给默认值、读不到即返回 null；`manifestName` 缺失就记 FAIL 并 return 0（不供给），`sigName` 仍按 `<manifestName>.sig` 推导。`MANIFEST_NAME` 只留给设备侧落盘副本命名",
       "status": "in-progress",
       "evidenceTier": "device",
-      "evidenceRef": "2026-09-29 10:44 现读：声明键 `userland-canary/userland-manifest-2.json`=404 而旧键 `userland-canary/userland-manifest.json`=200（陈表 2026.09.27.119）——这正是回落会命中的形态；`assets/supply/channel.json:6-7` 才是键的唯一声明处。代码已改，待 CI 编译 + 出包复验",
+      "evidenceRef": "2026-09-29 10:44 现读：声明键 `userland-canary/userland-manifest-2.json`=404 而旧键 `userland-canary/userland-manifest.json`=200（陈表 2026.09.27.119）——这正是回落会命中的形态；`assets/supply/channel.json:6-7` 才是键的唯一声明处。代码已改并经 CI 编译：run 36516399044（main=94ad4a98）app-tests 于 03:17:24Z 跑 `:app:compileDebugKotlin`、单测执行数 156、container 683 PASS/0 FAIL —— 但这只证明改动能编过、旧单测未破，**「缺 manifestName 就判红不回落」这条行为仍待带改动的 APK 上真机复验**",
       "workstream": "MAIN",
       "updated": "2026-09-29"
     },
@@ -1467,7 +1467,7 @@
       "action": "Outcome 增 `upToDate`（只在 OtaPolicy.Verdict.UpToDate 分支置真），级别改为 `ota.updated || ota.upToDate`；其余非装上路径保持 FAIL —— 「有新版本却没装上」与「通道断了」都必须继续可见",
       "status": "in-progress",
       "evidenceTier": "device",
-      "evidenceRef": "2026-09-29 10:49:20 真机现读：`diag:program-ota` seq432 FAIL「启动内核检查完成（无更新）| 已是最新（本地 0.1.0-android.48，远端 0.1.0-android.48）」，同一轮 `health` OK、`program-commit` 已在 10:47 提交 —— 通道明明是通的，读数却要求人去读 detail 才能反推。代码已改，待 CI 编译 + 出包复验",
+      "evidenceRef": "2026-09-29 10:49:20 真机现读：`diag:program-ota` seq432 FAIL「启动内核检查完成（无更新）| 已是最新（本地 0.1.0-android.48，远端 0.1.0-android.48）」，同一轮 `health` OK、`program-commit` 已在 10:47 提交 —— 通道明明是通的，读数却要求人去读 detail 才能反推。改前形态已在现装包上二次复现：11:30:27 force-stop 后重开 SetupActivity，`diag:program-ota` 仍记 FAIL「启动内核检查完成（无更新）」（`at`=1790652627500），同轮 11:30:27.962 `health` OK「内核控制面就绪 (127.0.0.1:36360/status)」——这就是本条的正向对照。代码已改并经 CI 编译（run 36516399044：03:17:24Z `:app:compileDebugKotlin`、单测 156、container 683 PASS/0 FAIL），**「无更新记 OK」这条读数要等带改动的 APK 上真机才算收口**",
       "workstream": "MAIN",
       "updated": "2026-09-29"
     },
@@ -1478,8 +1478,8 @@
       "where": "scripts/userland-verify.json(git/curl 两条 node 判据)",
       "action": "判据字面改到通道锚声明的键；`scripts/delivery-gate.js` 增一条声明面内部一致检查：判据里出现的 `userland-<channel>/<file>` 必须等于通道锚的 manifestName，否则判红",
       "status": "done",
-      "evidenceTier": "static",
-      "evidenceRef": "2026-09-29 本机现读对照：改字面前 `node scripts/delivery-gate.js` FAIL 2 项（两把尺子都指出同一处），改后 exit 0；`scripts/userland-verify.json` 内旧键字面剩余 0 处、JSON 仍可解析。线上清单要等下一次 build-userland 发布才带上新判据",
+      "evidenceTier": "online",
+      "evidenceRef": "2026-09-29 本机现读对照：改字面前 `node scripts/delivery-gate.js` FAIL 2 项（两把尺子都指出同一处），改后 exit 0；`scripts/userland-verify.json` 内旧键字面剩余 0 处、JSON 仍可解析。线上闭环（同日 11:50 后）：dispatch run 36517202837（main=94ad4a98，publish=true）manifest job 于 03:50:09Z success，随后现读 `https://hubcdn.zll.ink/userland-canary/userland-manifest-2.json?t=<ms>`=200、version=2026.09.29.142、tools=curl,git,jq,pnpm,sqlite3，其中 curl 与 git 两条 `verify.node` 的对象键字面均为 `userland-canary/userland-manifest-2.json`（发布前同一读数是 version=2026.09.29.141、两条都是旧键 `userland-canary/userland-manifest.json`）；`node scripts/delivery-gate.js` 复读 exit 0",
       "workstream": "MAIN",
       "updated": "2026-09-29"
     }
