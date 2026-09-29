@@ -51,8 +51,11 @@
    见 [ADR-0006 §2.4](../adr/0006-background-lifecycle-keepalive.md)）。旧版本按「能静默办就不打扰」
    把它们推到 F4，正是那条循环依赖的成因。本版用两条边规避它，而不是靠开屏抢问：
    ① **同前台会话立即跑** —— 配对期间 `PairingProbeService` 的前台服务还活着，进程不可能
-   已经被冻，那条静默通道当场就通；② **常驻链低频监护** —— `OsHostService` 周期性看护，
-   锚掉线由 `AccessibilityAnchor` 无感自愈（先摘后写逼 AMS 重绑 + 总开关置 1），不必让用户再点系统页。
+   已经被冻，那条静默通道当场就通；② **常驻链低频监护 = 只观测** —— `OsHostService` 每拍读一次锚状态，
+   掉线当场把「判决降级告警」上屏；**挂锚动作只发生在进程出生的第一毫秒**（`OsApplication` / `BootReceiver`
+   戳 `AccessibilityAnchor.ensureBound`：名单合并 + 总开关置 1 + 先摘后写逼 AMS 重绑），监护层不写系统设置。
+   本产品没有任何死后恢复：锚掉了就是掉了，进程一死底下全死，下一世出生才重挂 —— 所以这里不存在
+   「不必让用户再点系统页」的承诺，掉线是要人看见的，不是要被悄悄抹掉的。
 3. **检测先于引导，引导先于操作**：任何步骤在要求用户动手之前，必须已经**读过**该项的当前状态；
    已满足就直接跳过，不许让用户白走一趟设置页。用户点「配对」那一下尤其如此：
    那一刻现场重采一次，按缺项把用户送到**能修那个缺项**的那一页（§2.1 F1 的 `PairingGate`），
@@ -190,7 +193,7 @@ F1/F3 之所以在通知权限被回收后仍算成立，靠的是判据层的**
 | 页面不可见 | 停轮询、冲刺不再抛新系统页；缓存读数不得靠 TTL 续绿（过期即降级，见 §4） | `ui/setup/SetupActivity.kt:123-138`（`onResume` / `onPause`）+ `capability/AdbChannelProbe.kt:34-38` | ✅ |
 | `Settings.Global.adb_wifi_enabled` / `development_settings_enabled` 变化 | 用户从设置页回来即判定 | 靠 `onResume` 立即重采 + 可见期 2s 轮询 + 动作后 800ms 补采承担；**未注册 `ContentObserver`** | ⚠ 已知取舍 |
 | 解锁 / 亮屏 | 常驻链被重新戳一次（运行时与桥随之回来），界面不必在场 | `OsApplication.kt:41` → `:113-124`（`registerWakeupEdges` 动态注册 `ACTION_USER_PRESENT` / `ACTION_SCREEN_ON`）→ `OsHostService.ensureRunning` | ✅ |
-| 进程被整体杀掉 | **不复活，只定罪**：被杀之后把壳点回来没有意义（内核重启即把 running/pending 判 failed，`lobos.os.Journal`），且复活后的「运行时在线」是假信息。要做的是让打断**一定看得见** | `lifecycle/ResidencyAudit.kt`（每拍心跳落盘 / 只有 onDestroy 留 clean 戳 / 开机基准区分设备重启）→ 结论单一文案源，消费方 `OsHostService.statusLine()`、`SetupActivity.recentActions()`、导出报告 | ✅ |
+| 进程被整体杀掉 | **不复活，只定罪**：被杀之后把壳点回来没有意义（内核重启即把 running/pending 判 failed，`lobos.os.Journal`），且之后的「运行时在线」是假信息。要做的是让打断**一定看得见** | `lifecycle/ResidencyAudit.kt`（每拍心跳落盘 / 开机基准区分设备重启）→ 结论单一文案源，消费方 `OsHostService.statusLine()`、`SetupActivity.recentActions()`、导出报告 | ✅ |
 
 > 最后一条是**明写的取舍**，不是遗漏：`ContentObserver` 需要跨生命周期注册/注销与 Handler 配对，
 > 而本仓唯一编译器在 CI（`docs/standards/testing.md` §2），未在本仓出现过、未经真机验证的
@@ -295,7 +298,7 @@ F1/F3 之所以在通知权限被回收后仍算成立，靠的是判据层的**
    - 冲刺清单由登记表推导（手写第二张锚清单 / 把锚从 `ORDER` 里摘掉 → `PermissionSprintTest.保活锚从登记表推导_不是手写第二张清单` 红）；
    - 深链 action 与 mDNS 服务类型串只许住一处（`capability/CapabilityNavigation.kt`、`bridge/MdnsWatcher.kt`）；
    - 编造端点 `"127.0.0.1"` 零容忍（`FORBIDDEN`，且该规则自带样本自证，正则写坏就红）；
-   - 运行时的「重启」动作不得回到开场界面（`ACTION_RESTART` 归属规则）；常驻链的边（Application 戳监督者 / 解锁广播 / `startForeground` / 定罪的 `auditPreviousExit`+`heartbeat`+`markCleanStop`+`interruption` 上屏）与 manifest `specialUse` 必须同时在场（`KEEP_ALIVE_EDGES`，缺一条即红）；**被用户否决的进程外复活边词汇（`SelfHeal` / `JobScheduler` / `JobService` / `setPeriodic` / `BIND_JOB_SERVICE`）列入 DEAD，连注释再出现即红**；通知 id 全仓唯一（撞号即红，真机案底：1002 曾被两处抢）。
+   - 运行时的「重启」动作不得回到开场界面（`ACTION_RESTART` 归属规则）；常驻链的边（Application 戳监督者 / 解锁广播 / `startForeground` / 定罪的 `auditPreviousExit`+`heartbeat`+`interruption` 上屏）与 manifest `specialUse` 必须同时在场，由门禁 `container/engine/test/capability-single-source-gate-test.js` 的 R7（生命周期完整性）/R10（锚激活点）逐条实名钉，缺一条即红；**被用户否决的进程外复活边与"事后悄悄修好"那一类口径列入 DEAD，连注释再出现即红；防回潮词表的唯一宿主是同一门禁的 R11，本文不复述词表**（两处各写一份必然漂移，2026-09-30 债 E13 定罪的正是这种漂移：契约与代码各说一套而门禁只钉一个文件；被禁的原话留在债表案卷里）；通知 id 全仓唯一（撞号即红，真机案底：1002 曾被两处抢）。
 7. **主行动唯一性**：任意读数下 `OnboardingFlow.stages()` 至多一行带 `action`；
    `extra` **恒为 null**（F4 已不是阶段行，欠账折叠成不可点的文案）；F1 若给动作，它必是 `USER_CODE`（点了必然起探针）。
 8. **运行时是常驻底座（真机可判红，§1 总则 8）**：全新安装后**不进任何界面**、只解锁屏幕，
@@ -310,6 +313,9 @@ F1/F3 之所以在通知权限被回收后仍算成立，靠的是判据层的**
     不得被自动抛进下一个授权页；到期后冲刺自动续走（无需任何人解锁）。
 11. **打断必须可见（§2.3 最后一行，ADR-0006 §2.1「不做复活」）**：设置里「强行停止」后重开
     → 常驻通知首行、首页第一块、导出报告三处都写同一句定罪文案（同源
-    `ResidencyAudit.interruption()`）；`am stop-service` 之后重开**不该**出现该句
-    （`markCleanStop` 的 clean 戳生效）；整机重启后首启文案是"结束于设备重启"而不是"被回收"。
+    `ResidencyAudit.interruption()`）；**整机重启**后首启文案是"结束于设备重启"而不是"被回收"。
+    反向对照组只有重启这一档可用：本机没有任何一路能正常收尾宿主（真机现读
+    `adb shell am stopservice lobos.app/lobos.lifecycle.OsHostService` → `Error stopping service`），
+    旧判据把「`am stop-service` 后不该出现该句」当成对照组，是拿一条走不通的路当反向证据（债 E14，
+    该死边的 clean 戳判据已随本轮删除）。
     本条存在的理由：复活边已被否决，若被杀还静默显示「运行时在线」，判据层就自己在造假绿。

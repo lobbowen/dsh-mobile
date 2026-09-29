@@ -19,8 +19,9 @@ import kotlin.math.abs
  * 而复活之后的通知还会写「运行时在线」，等于把打断伪装成没打断。唯一路径是**不被杀**
  * （单链路，类音乐播放器的系统服务）：让锚一直在位，判决就一直停在 accessibility。
  *
- * 判据：活着时每拍盖一个「我还在」的时间戳并写明未干净收尾；只有服务 `onDestroy` 才补 clean 戳。
- * 下一次进程一起来就翻旧账 —— 没有 clean 戳 = 上次不是正常退出（强杀/划掉/osense 都走不到 onDestroy）。
+ * 判据：活着时每拍盖一个「我还在」的时间戳。下一次进程一起来就翻旧账 —— 只要留下过记录，
+ * 上一次就一定是被打断的（本仓没有任何一路能正常收尾宿主：`am stopservice` 在真机直接
+ * `Error stopping service`，系统强杀/划掉/osense 更走不到 `onDestroy`）。
  * 文件里同时存开机基准（wall − elapsedRealtime）：本次算出的基准对不上，说明那条记录属于
  * 上一次开机，设备重启不该被定罪成「App 被杀」。
  *
@@ -31,8 +32,6 @@ import kotlin.math.abs
 object ResidencyAudit {
 
     private const val FILE = "residency.txt"
-    private const val STATE_ALIVE = "alive"
-    private const val STATE_CLEAN = "clean"
     /** 判定「换了一次开机」的基准容差：时钟同步本身的抖动留余量。 */
     private const val BOOT_BASIS_TOLERANCE_MS = 60_000L
     /** 「被打断」告警的固定前缀：首行与诊断页都读它。 */
@@ -63,10 +62,9 @@ object ResidencyAudit {
         } catch (_: Throwable) {
             return
         }
-        if (lines.size < 3) return
+        if (lines.size < 2) return
         val lastAliveMs = lines[0].toLongOrNull() ?: return
         val priorBasisMs = lines[1].toLongOrNull() ?: return
-        if (lines[2] == STATE_CLEAN) return
         debt = Debt(
             lastAliveMs = lastAliveMs,
             gapMs = System.currentTimeMillis() - lastAliveMs,
@@ -74,13 +72,15 @@ object ResidencyAudit {
         )
     }
 
-    /** 活着时每拍盖戳（与状态通知同频，见 OsHostService.refreshStatusNotice）。 */
+    /**
+     * 活着时每拍盖戳（与状态通知同频，见 OsHostService.refreshStatusNotice）：
+     * 落盘的就是「这一刻进程还活着 + 属于哪一次开机」。
+     */
     @Synchronized
-    fun heartbeat(ctx: Context) = write(ctx, STATE_ALIVE)
-
-    /** 正常收尾才留这个戳。系统强杀走不到这里，于是下次启动必然定罪 —— 这正是本边的用途。 */
-    @Synchronized
-    fun markCleanStop(ctx: Context) = write(ctx, STATE_CLEAN)
+    fun heartbeat(ctx: Context) {
+        val text = "${System.currentTimeMillis()}\n${bootBasisMs()}"
+        runCatching { file(ctx).writeText(text) }
+    }
 
     /**
      * 结论的唯一文案源：常驻通知首行与首页「最近动作」都读它，不许两处各说各话。
@@ -113,11 +113,6 @@ object ResidencyAudit {
         } else {
             "$INTERRUPTION_PREFIX：上次存活到 $lastAliveAt，中断 $gapText；$attribution；本设计不提供死后恢复"
         }
-
-    private fun write(ctx: Context, state: String) {
-        val text = "${System.currentTimeMillis()}\n${bootBasisMs()}\n$state"
-        runCatching { file(ctx).writeText(text) }
-    }
 
     private fun humanGap(gapMs: Long): String = when {
         gapMs < 0 -> "时长不明（期间改过系统时间）"

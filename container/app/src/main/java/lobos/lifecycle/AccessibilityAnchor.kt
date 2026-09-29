@@ -15,34 +15,35 @@ import lobos.permissions.PermissionCatalog
 enum class AnchorState { BOUND, UNBOUND, UNKNOWN }
 
 /**
- * 一次 ensureBound 的结果。
- * state   动作之后实测到的锚状态
- * healed 是否已达 BOUND
+ * 一次挂锚动作的结果。
+ * state  动作之后实测到的锚状态
+ * bound  是否已达 BOUND
  * issued 是否真的往系统写过（本地 secure 写 / ADB 通道任一成功下发）—— 静默实测账的「下发过没有」
  *        只看这一位：没下发过就绝不能记账成「adb 办不成」
  * detail 用了哪条下发路径（名单 / 总开关），失败时含原因
  */
-data class HealOutcome(
+data class BindOutcome(
     val state: AnchorState,
-    val healed: Boolean,
+    val bound: Boolean,
     val issued: Boolean,
     val detail: String,
 )
 
 /**
- * 常驻锚（OsAccessibilityService）的唯一操作面：状态判定 + 幂等自愈。
+ * 常驻锚（OsAccessibilityService）的唯一操作面：状态判定 + 挂锚动作。
  *
  * 真机实证（2026-09-27 07:08）：锚在位 <=> OplusHansManager 打
  * "cannot transition from R to M, importance=accessibility"；锚掉 <=> importance=traffic -> 随后 o-kill。
  * 锚层是五层保活组合里唯一被 ROM 显式承认的判决锚；本对象只做两件事：如实报状态、
- * 在掉线时把它挂回去（先摘后写，逼 AMS 重绑）。
+ * 把锚挂上去（名单不在就补，在而没绑就先摘后写逼 AMS 重绑）。
  *
  * **写名单只是半条路**：同一批实证里，总开关 `accessibility_enabled` 为 0 时系统根本不绑定服务
  * （名单在、绑定无、还进 Crashed services），置 1 才立刻重绑。所以本对象把「名单 + 总开关」
  * 当作**一次**动作发，缺一个键就是半截实现 —— 全仓只有这里写这两个键。
  *
- * 本产品不提供死后恢复：这里只做"被杀之前"的预防性自愈（进程出生的第一毫秒，由
- * OsApplication/BootReceiver 戳；监护层只观测，不重复自愈，见 OsHostService）。
+ * 本产品**没有任何死后恢复**（进程死了就是死了，底下的工作一起死，把它拉回来没有意义）：
+ * 本对象只在进程出生的第一毫秒被调用一次（OsApplication / BootReceiver / 能力采集执行器），
+ * 监护层（OsHostService）只读状态、不碰这里。
  */
 object AccessibilityAnchor {
 
@@ -92,19 +93,19 @@ object AccessibilityAnchor {
     fun isBound(ctx: Context): Boolean = state(ctx) == AnchorState.BOUND
 
     /**
-     * 幂等自愈：已在位直接返回；否则把本服务补进 enabled_accessibility_services（总开关不为 1 时
+     * 挂锚：已在位直接返回；否则把本服务补进 enabled_accessibility_services（总开关不为 1 时
      * 一并置 1）并回读验证。下发优先级：① 本地写 secure 设置（需 WRITE_SECURE_SETTINGS，置备期经
      * adb 授予）；② 退到 ADB 通道（AdbClientRunner.shell）。两条都不通时如实返回失败，绝不伪造成功。
      *
      * [timeoutMs] 是**整次动作**的硬上界（= [AnchorPolicy.ACTIVATION_BUDGET_MS]）：ADB 通道按剩余
      * 预算下发，预算用尽就不再发起 —— 上界要真的封顶，才配叫「保护激活预算」。
      */
-    fun ensureBound(ctx: Context, timeoutMs: Long): HealOutcome {
-        if (isBound(ctx)) return HealOutcome(AnchorState.BOUND, true, false, "锚在位，无需动作")
+    fun ensureBound(ctx: Context, timeoutMs: Long): BindOutcome {
+        if (isBound(ctx)) return BindOutcome(AnchorState.BOUND, true, false, "锚在位，无需动作")
 
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
         val c = component(ctx)
-            ?: return HealOutcome(AnchorState.UNKNOWN, false, false, "组件名解析不出，不能下发")
+            ?: return BindOutcome(AnchorState.UNKNOWN, false, false, "组件名解析不出，不能下发")
         val flat = c.flattenToString()
         val cur = enabledList(ctx)
         val without = cur.filter { it != flat }.joinToString(":")
@@ -150,13 +151,13 @@ object AccessibilityAnchor {
         }
 
         val st = state(ctx)
-        val healed = st == AnchorState.BOUND
+        val bound = st == AnchorState.BOUND
         RuntimeDiagnostics.append(
-            ctx, "accessibility", healed,
-            if (healed) "锚已恢复（闸门重开）" else "锚自愈未成：" + st,
+            ctx, "accessibility", bound,
+            if (bound) "锚已挂上（闸门开着）" else "挂锚未成：" + st,
             how + "；timeout=" + timeoutMs + "ms",
         )
-        return HealOutcome(st, healed, issued, how + "；state=" + st)
+        return BindOutcome(st, bound, issued, how + "；state=" + st)
     }
 
     /** 在剩余激活预算内发一条 secure 写；预算已尽返回 null（不越过硬上界去等一条不会回来的命令）。 */

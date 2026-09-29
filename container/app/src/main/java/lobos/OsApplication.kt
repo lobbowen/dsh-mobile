@@ -36,19 +36,19 @@ class OsApplication : Application() {
         super.onCreate()
         createChannels()
         OsHostService.ensureRunning(this)
-        // 保护必须在进程存在的第一毫秒生效（预防，不是自愈）：Application.onCreate 是进程
+        // 保护必须在进程存在的第一毫秒生效：Application.onCreate 是进程
         // 每一次被创建（开机 / 覆盖安装 / 重启）都必经的钩子。机制见 AnchorPolicy 头注。
         ensureProtectionActive()
         registerWakeupEdges()
     }
 
     /**
-     * **预防，不是自愈**：进程存在的第一毫秒就把锚挂上，让 ColorOS 的判决停在
+     * **保护激活**：进程存在的第一毫秒就把锚挂上，让 ColorOS 的判决停在
      * importance=accessibility（锚在 ⟺ 保护档；锚掉 = 判决降级 = 即将被杀，机制见
      * AnchorPolicy 头注）。
      *
-     * 本设计**不提供死后恢复**：被杀后拉起来的只是空壳，agent 的工作已经断。所以这里只做
-     * 两件「活着时才有意义」的事：
+     * 本设计没有任何死后恢复：进程死了就是死了，底下跑的任务一起死，把壳点回来不救回任何东西。
+     * 所以这里只做两件「活着时才有意义」的事：
      *  · 量一次加固效果（KillAudit）：把系统退出史里每一次退出的 reason/description/importance
      *    逐条落盘（统计走 os.journal.metrics，不在这里攒计数器），回答「加固到底有没有把判决捂住」；
      *  · 确保保护生效（AccessibilityAnchor.ensureBound）：在
@@ -79,12 +79,12 @@ class OsApplication : Application() {
                     when (AnchorPolicy.verdict(outcome?.state ?: AnchorState.UNKNOWN)) {
                         AnchorVerdict.PROTECTED -> RuntimeDiagnostics.append(
                             appCtx, "anchor", true, "保护生效：锚在位",
-                            "state=${outcome?.state} healed=${outcome?.healed} 耗时=${elapsedMs}ms —— " +
+                            "state=${outcome?.state} bound=${outcome?.bound} 耗时=${elapsedMs}ms —— " +
                                 "ColorOS 判决停在 importance=accessibility"
                         )
                         AnchorVerdict.DEGRADED -> RuntimeDiagnostics.append(
                             appCtx, "anchor", false, "判决降级告警：锚未生效",
-                            "state=${outcome?.state} healed=${outcome?.healed} 耗时=${elapsedMs}ms" +
+                            "state=${outcome?.state} bound=${outcome?.bound} 耗时=${elapsedMs}ms" +
                                 "（保护激活上界 ${AnchorPolicy.ACTIVATION_BUDGET_MS}ms）—— " +
                                 "锚不在位则 ColorOS 判决停在 importance=traffic，随后会被 o-kill；" +
                                 "本设计不提供死后恢复"

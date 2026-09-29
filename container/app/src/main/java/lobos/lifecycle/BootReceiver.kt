@@ -39,8 +39,8 @@ class BootReceiver : BroadcastReceiver() {
             // 普通 startService 即可 —— 开机窗口用 startForegroundService 反而可能被 ROM 拒。
             startQuietly(context, Intent(context, OsHostService::class.java), bootSafe = false)
             // 单进程后没有"第二进程兜底边"：InstanceHost 是宿主内组件，不是 Service。
-            // 进入本接收器 = 进程刚被系统重建：**保护要从第一毫秒生效**（预防），
-            // 不是「被杀后再拉起」（自愈）。做两件事：
+            // 进入本接收器 = 进程刚被系统重建：**保护要从第一毫秒生效**（挂锚只有这一档时机）。
+            // 做两件事：
             //  · 量一次加固效果（KillAudit）：系统退出史逐条落盘，口径唯一在 Journal.Reason；
             //  · 确保保护生效（AccessibilityAnchor）：锚在 = ColorOS 判决停在
             //    importance=accessibility，锚掉 = 判决降级 = 即将被杀（机制见 AnchorPolicy 头注）。

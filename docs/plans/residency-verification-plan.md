@@ -41,7 +41,7 @@
 |---|---|---|
 | V-A1 服务在册且已绑定 | `settings get secure enabled_accessibility_services`；`dumpsys accessibility | grep -i -A3 lobos` | 我们的服务在册且 `Bound services` 非空 |
 | V-A2 判决档位（本机 ROM） | `logcat -d | grep -i 'importance=accessibility'` | 观察窗内出现 ≥1 次 |
-| V-A3 锚掉线**可见**（不承诺重绑） | 解绑（**先记录原值**，可回滚）后：`settings get secure enabled_accessibility_services`、`dumpsys accessibility`、通知/首页状态行、`run-as lobos.app cat files/os/journal/events.jsonl`（`category=accessibility`） | 判据是翻转必须看得见：掉线后状态行不再显示在位，journal 里多出「判决降级告警：锚掉线」。**不设「≤60s 回到 bound」**——锚层自愈重试环 2026-09-28 已删（`OsHostService` 锚层监护「只观测，不复活」），下一次挂锚只发生在进程出生的第一毫秒 |
+| V-A3 锚掉线**可见**（不承诺重绑） | 解绑（**先记录原值**，可回滚）后：`settings get secure enabled_accessibility_services`、`dumpsys accessibility`、通知/首页状态行、`run-as lobos.app cat files/os/journal/events.jsonl`（`category=accessibility`） | 判据是翻转必须看得见：掉线后状态行不再显示在位，journal 里多出「判决降级告警：锚掉线」。**不设「≤60s 回到 bound」**——`OsHostService` 的锚层监护「只观测，不动手」（2026-09-28 拍板），挂锚只发生在进程出生的第一毫秒 |
 
 ### V-B 载体（前台服务）
 | 项 | 命令 | 判据 |

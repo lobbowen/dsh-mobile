@@ -39,7 +39,7 @@ object CapabilityAcquisitionRunner {
         timeoutMs: Long = DEFAULT_TIMEOUT_MS,
     ): AcquisitionResult = when (executor) {
         CapabilityCatalog.EXEC_NOTIFICATION_LISTENER -> enableNotificationListener(ctx, timeoutMs)
-        CapabilityCatalog.EXEC_ACCESSIBILITY -> healAccessibilityAnchor(ctx, timeoutMs)
+        CapabilityCatalog.EXEC_ACCESSIBILITY -> bindAccessibilityAnchor(ctx, timeoutMs)
         CapabilityCatalog.EXEC_BATTERY_WHITELIST -> whitelistBattery(ctx, timeoutMs)
         CapabilityCatalog.EXEC_APPOPS_ALLOW -> setAppOps(ctx, capId, timeoutMs)
         CapabilityCatalog.EXEC_PM_GRANT -> grantRuntimePerm(ctx, capId, timeoutMs)
@@ -143,16 +143,16 @@ object CapabilityAcquisitionRunner {
 
     /**
      * 无障碍锚：**不自建实现**，只调 [AccessibilityAnchor.ensureBound]（契约冻结）。
-     * 三级自愈（名单合并 / 总开关置 1 / 先摘后写逼重绑）全在锚对象里，本层只做结果翻译。
+     * 三步动作（名单合并 / 总开关置 1 / 先摘后写逼重绑）全在锚对象里，本层只做结果翻译。
      */
-    private fun healAccessibilityAnchor(ctx: Context, timeoutMs: Long): AcquisitionResult {
+    private fun bindAccessibilityAnchor(ctx: Context, timeoutMs: Long): AcquisitionResult {
         val outcome = AccessibilityAnchor.ensureBound(ctx, timeoutMs)
         // 「名单在、绑定无」是这一项唯一会骗人的形态（真机实证：总开关为 0 时就是这个形状）。
         // 不点破，下一轮还照同一条命令重放；点破了，人才知道该去系统页拨一次总开关。
-        val listedNotBound = !outcome.healed && PermissionCenter(ctx).accessibilityEnabledInSettings()
+        val listedNotBound = !outcome.bound && PermissionCenter(ctx).accessibilityEnabledInSettings()
         return AcquisitionResult(
             ok = outcome.issued,
-            verified = outcome.healed,
+            verified = outcome.bound,
             detail = "锚 " + outcome.state + "：" + outcome.detail +
                 (if (listedNotBound) "（名单已登记，系统未绑定服务实例）" else ""),
         )
