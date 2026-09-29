@@ -8,8 +8,12 @@
 //   ① 用 AK/SK 对上传策略做 HMAC-SHA1，拼出 uploadToken
 //   ② multipart/form-data POST 到 up.qiniup.com
 //
-// 用法：QINIU_AK=… QINIU_SK=… QINIU_BUCKET=… \
+// 用法：QINIU_AK=… QINIU_SK=… QINIU_BUCKET=… QINIU_PUBLIC_BASE=https://<设备读的域名> \
 //        node scripts/upload-qiniu.js <本地文件> <远端 key> [--cache-control=60]
+//
+// QINIU_PUBLIC_BASE 不是可选项：上传应答只证明**七牛收了**，不证明**设备读得到**。
+// 判「投放生效」的唯一办法是回读设备会用的那个 URL 并逐字节比对，所以它住在本脚本里，
+// 每个投放口都躲不过（写进 workflow 的教训见文件末尾）。
 // ============================================================================
 
 const fs = require('node:fs');
@@ -57,12 +61,21 @@ async function main() {
   const SK = process.env.QINIU_SK;
   const BUCKET = process.env.QINIU_BUCKET;
   const HOST = process.env.QINIU_UPLOAD_HOST || 'https://up.qiniup.com';
+  const PUBLIC_BASE = (process.env.QINIU_PUBLIC_BASE || '').replace(/\/+$/, '');
+  // 回读次数：CDN 传播有抖动，默认 5 次退避。测试把它压到 1 次，为了验「取不到就判红」这条
+  // 而不是花 50 秒等退避 —— 判据本身不变。
+  const READBACK_ATTEMPTS = Math.max(1, Number(process.env.QINIU_READBACK_ATTEMPTS) || 5);
   if (!local || !key) { console.error('用法: upload-qiniu.js <本地文件> <远端 key>'); process.exit(2); }
   if (!AK || !SK || !BUCKET) { console.error('[qiniu] 缺少 QINIU_AK / QINIU_SK / QINIU_BUCKET'); process.exit(2); }
+  if (!PUBLIC_BASE) { console.error('[qiniu] 缺少 QINIU_PUBLIC_BASE —— 没有回读锚就不许声称投放生效'); process.exit(2); }
   if (!fs.existsSync(local)) { console.error('[qiniu] 文件不存在: ' + local); process.exit(2); }
 
   const buf = fs.readFileSync(local);
   const B64URLSTR = (s) => B64URL(Buffer.from(s, 'utf8'));
+  // 必须在使用者之前声明：post() 读 PER_ATTEMPT_MS，而 88192be4 把它留在大件路径的 return 之后 ——
+  // 于是分片上传从第一块起就撞 TDZ，并被自己的重试循环报成「网络失败」。
+  const ATTEMPTS = 3;
+  const PER_ATTEMPT_MS = 900000;
 
   async function post(url, body, token) {
     const r = await fetch(url, {
@@ -76,9 +89,12 @@ async function main() {
     try { return JSON.parse(text); } catch (e) { throw new Error('响应不是 JSON: ' + text.slice(0, 120)); }
   }
 
-  /** 分片上传：每片独立重试。大件必须走这条 —— 整块 POST 在实测带宽下会被连接层切断。
+  /** 分片上传：每块独立重试。大件必须走这条 —— 整块 POST 在实测带宽下会被连接层切断。
    *  实测（2026-09-29）：60 KB/s、连接约 7~8 分钟被切断，而 git 件树允许到 60 MiB ⇒ 整块必然失败；
-   *  4 MB 一片约 70 秒一片，每片自带重试，连接抖动只影响一片。 */
+   *  4 MB 一块约 70 秒一块，每块自带重试，连接抖动只影响一块。
+   *
+   *  协议按七牛《分片上传 v1》：块 ≤ 4 MB，一个资源由一到多个块组成，mkfile 按顺序组装**块**的 ctx。
+   *  所以每块一次 mkblk、ctx 每块一个；bput 是「同一块内续片」用的，这里一块就是 4 MB，用不上。 */
   async function uploadResumable() {
     const BLOCK = 4 * 1024 * 1024;
     let host = HOST;
@@ -86,7 +102,7 @@ async function main() {
     const ctxs = [];
     while (offset < buf.length) {
       const chunk = buf.subarray(offset, Math.min(offset + BLOCK, buf.length));
-      const url = offset === 0 ? host + '/mkblk/' + chunk.length : host + '/bput/' + ctxs[ctxs.length - 1] + '/' + offset;
+      const url = host + '/mkblk/' + chunk.length;
       let got = null, lastErr = null;
       for (let a = 1; a <= 3 && !got; a++) {
         try {
@@ -96,14 +112,14 @@ async function main() {
           got = r;
         } catch (e) {
           lastErr = e;
-          if (a < 3) { const w = 2000 * a; console.error('[qiniu] 分片 ' + offset + ' 第 ' + a + '/3 次失败（' + e.message + '），' + w + 'ms 后重试'); await new Promise((res) => setTimeout(res, w)); }
+          if (a < 3) { const w = 2000 * a; console.error('[qiniu] 块 ' + offset + ' 第 ' + a + '/3 次失败（' + e.message + '），' + w + 'ms 后重试'); await new Promise((res) => setTimeout(res, w)); }
         }
       }
-      if (!got) throw new Error('分片 ' + offset + ' 三次失败: ' + (lastErr && lastErr.message));
+      if (!got) throw new Error('块 ' + offset + ' 三次失败: ' + (lastErr && lastErr.message));
       ctxs.push(got.ctx);
       if (got.host) host = 'https://' + String(got.host).replace(/^https?:\/\//, '');
       offset += chunk.length;
-      console.log('[qiniu] 分片 ' + ctxs.length + ' 完成（' + offset + '/' + buf.length + ' 字节）');
+      console.log('[qiniu] 块 ' + ctxs.length + ' 完成（' + offset + '/' + buf.length + ' 字节）');
     }
     const cc = (cacheSec !== null && Number.isFinite(cacheSec)) ? '/x:Cache-Control/' + B64URLSTR('max-age=' + cacheSec) : '';
     const mk = host + '/mkfile/' + buf.length + '/key/' + B64URLSTR(key) + cc;
@@ -115,33 +131,71 @@ async function main() {
       } catch (e) { lastErr2 = e; if (a < 3) await new Promise((res) => setTimeout(res, 2000 * a)); }
     }
     if (!done) throw new Error('mkfile 三次失败: ' + (lastErr2 && lastErr2.message));
-    console.log('[qiniu] 已上传（分片）' + key + '（' + buf.length + ' 字节，' + ctxs.length + ' 片）服务端: ' + JSON.stringify(done).slice(0, 200));
-  }
-
-  if (buf.length > 8 * 1024 * 1024) {
-    await uploadResumable();
-    return;
+    console.log('[qiniu] 已上传（分片）' + key + '（' + buf.length + ' 字节，' + ctxs.length + ' 块）服务端: ' + JSON.stringify(done).slice(0, 200));
   }
 
   // 小件走表单（已验证可用；单次限时按实测带宽给足）
-  const ATTEMPTS = 3;
-  const PER_ATTEMPT_MS = 900000;
-  let lastErr = null;
-  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
-    const token = uploadToken(AK, SK, BUCKET, key, 3600);
-    const fields = { key: key, token: token };
-    if (cacheSec !== null && Number.isFinite(cacheSec)) fields['x:Cache-Control'] = 'max-age=' + cacheSec;
-    const mp = multipart(fields, 'file', path.basename(local), buf);
-    const t0 = Date.now();
-    try {
-      const r = await fetch(HOST, { method: 'POST', headers: { 'Content-Type': mp.contentType }, body: mp.body, signal: AbortSignal.timeout(PER_ATTEMPT_MS) });
-      const text = await r.text();
-      if (r.status === 200) { console.log('[qiniu] 已上传 ' + key + '（' + buf.length + ' 字节，' + (Date.now() - t0) + 'ms，第 ' + attempt + ' 次尝试）服务端: ' + text.slice(0, 200)); return; }
-      if (r.status >= 400 && r.status < 500) { console.error('[qiniu] 上传失败（4xx 不重试）key=' + key + ' status=' + r.status + ' body=' + text.slice(0, 300)); process.exit(1); }
-      lastErr = new Error('status=' + r.status + ' body=' + text.slice(0, 200));
-    } catch (e) { lastErr = e; }
-    if (attempt < ATTEMPTS) { const wait = 3000 * Math.pow(2, attempt - 1); console.error('[qiniu] 第 ' + attempt + '/' + ATTEMPTS + ' 次失败（' + (lastErr && lastErr.message) + '），' + wait + 'ms 后重试'); await new Promise((res) => setTimeout(res, wait)); }
+  async function uploadForm() {
+    let lastErr = null;
+    for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+      const token = uploadToken(AK, SK, BUCKET, key, 3600);
+      const fields = { key: key, token: token };
+      if (cacheSec !== null && Number.isFinite(cacheSec)) fields['x:Cache-Control'] = 'max-age=' + cacheSec;
+      const mp = multipart(fields, 'file', path.basename(local), buf);
+      const t0 = Date.now();
+      try {
+        const r = await fetch(HOST, { method: 'POST', headers: { 'Content-Type': mp.contentType }, body: mp.body, signal: AbortSignal.timeout(PER_ATTEMPT_MS) });
+        const text = await r.text();
+        if (r.status === 200) { console.log('[qiniu] 已上传 ' + key + '（' + buf.length + ' 字节，' + (Date.now() - t0) + 'ms，第 ' + attempt + ' 次尝试）服务端: ' + text.slice(0, 200)); return; }
+        if (r.status >= 400 && r.status < 500) { console.error('[qiniu] 上传失败（4xx 不重试）key=' + key + ' status=' + r.status + ' body=' + text.slice(0, 300)); process.exit(1); }
+        lastErr = new Error('status=' + r.status + ' body=' + text.slice(0, 200));
+      } catch (e) { lastErr = e; }
+      if (attempt < ATTEMPTS) { const wait = 3000 * Math.pow(2, attempt - 1); console.error('[qiniu] 第 ' + attempt + '/' + ATTEMPTS + ' 次失败（' + (lastErr && lastErr.message) + '），' + wait + 'ms 后重试'); await new Promise((res) => setTimeout(res, wait)); }
+    }
+    console.error('[qiniu] 连续 ' + ATTEMPTS + ' 次失败：key=' + key + ' last=' + (lastErr && lastErr.message));
+    process.exit(1);
   }
-  console.error('[qiniu] 连续 ' + ATTEMPTS + ' 次失败：key=' + key + ' last=' + (lastErr && lastErr.message));
-  process.exit(1);
+
+  // 回读**设备真正会命中的那个 URL**并逐字节比对 —— 「投放生效」的唯一证据。
+  // 只在这一个地方做，两条上传路径都汇到这里；少一次回读调用不可能靠某个 workflow 记得做来保证。
+  async function verifyPublic() {
+    const url = PUBLIC_BASE + '/' + key.split('/').map(encodeURIComponent).join('/');
+    const want = crypto.createHash('sha256').update(buf).digest('hex');
+    let last = null;
+    for (let a = 1; a <= READBACK_ATTEMPTS; a++) {
+      let got = null;
+      last = null;
+      try {
+        const res = await fetch(url + '?t=' + Date.now(), {
+          headers: { 'cache-control': 'no-cache' }, redirect: 'follow',
+          signal: AbortSignal.timeout(180000),
+        });
+        if (res.status === 200) got = Buffer.from(await res.arrayBuffer());
+        else last = new Error('HTTP ' + res.status + ' ' + (await res.text()).slice(0, 120));
+      } catch (e) { last = e; }
+      if (got) {
+        const have = crypto.createHash('sha256').update(got).digest('hex');
+        if (have === want) { console.log('[qiniu] 回读 [ok] ' + url + ' bytes=' + got.length + ' sha256=' + have.slice(0, 12) + '…'); return; }
+        // 取到了但对不上：这是内容事故，不是抖动，重试没有意义。
+        last = new Error('内容不符 bytes=' + got.length + '/' + buf.length + ' sha256=' + have.slice(0, 12) + '…/' + want.slice(0, 12) + '…');
+        break;
+      }
+      if (a < READBACK_ATTEMPTS) { const w = 5000 * a; console.error('[qiniu] 回读 ' + url + ' 第 ' + a + '/' + READBACK_ATTEMPTS + ' 次未取到（' + (last && last.message) + '），' + w + 'ms 后重试'); await new Promise((res) => setTimeout(res, w)); }
+    }
+    console.error('::error title=投放未生效::' + key + ' 回读失败：' + (last && last.message) + ' —— 上传应答只证明七牛收了，不证明设备读得到。');
+    process.exit(1);
+  }
+
+  if (buf.length > 8 * 1024 * 1024) await uploadResumable();
+  else await uploadForm();
+  await verifyPublic();
 }
+
+// ---------------------------------------------------------------------------
+//  入口。别再把这一行删掉：commit 88192be4（2026-09-28 大件改分片）删了它之后，脚本被
+//  调用时【什么都不做还退 0】—— program-ota / build-userland 的五个投放口每次照旧打印
+//  「通道已更新」且 CI 全绿，而线上一件都没换：今天回读 userland-canary 的清单仍停在
+//  2026.09.27.119，新键 userland-manifest-2.json 直接 404，设备永远装不上新内核。
+//  「有没有真的跑」这条判据住在 container/engine/test/upload-qiniu-test.js。
+// ---------------------------------------------------------------------------
+main().catch((e) => { console.error('[qiniu] FATAL ' + (e && e.message)); process.exit(1); });
