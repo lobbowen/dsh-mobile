@@ -72,7 +72,6 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
     @Volatile private var keepRunning = true
     /** 设备事实类探针（预置体检/写路径/PTY）每进程只跑一次。 */
     @Volatile private var probesDone = false
-    @Volatile private var supplyStarted = false
 
     /** 暂存清扫的每进程一次闸门：boot 可以重试，重复扫只会把同一件事写进诊断好几遍。 */
     @Volatile private var stagingSwept = false
@@ -232,16 +231,6 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
             // 但必须**先于**任何 spawn 上屏 —— 内核起不来时屏幕要能回答"设备缺哪环"。
             // （docs/runbook/provisioning.md §4；真机报告「全盘不可写 EACCES」的定位探针；
             //   PTY 判定实验见 docs/components/native.md。）
-            // C 层共享供给：**容器执行、Android 原生**（机制随 APK 走；内核只检测/触发）。
-            //   异步、不阻塞启动：供给要下载几十 MB；体检照旧先跑，下一拍看到已就位的真相。
-            if (!supplyStarted) {
-                supplyStarted = true
-                Thread {
-                    try { SupplyProvisioner.ensure(this) } catch (e: Throwable) {
-                        RuntimeDiagnostics.append(this, "supply", false, "C 层供给线程异常", e.message ?: "")
-                    }
-                }.start()
-            }
 
             if (!probesDone) {
                 probesDone = true
@@ -389,22 +378,11 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
             // 归因文本已在 1c 的 program 那条落盘，这里不重复写结论。
             if (!res.ok) return SupervisorPolicy.BootOutcome.NO_PROGRAM
 
-            // ---- 4) npm + 安卓语义垫片就位 ----
-            // npm 基础环境（纯 JS，由 libnode.so 代跑；失败不阻断启动 ——
-            // 只影响内核侧 Agent 安装能力，LOBOS_NPM_ENTRY 不注入即可）。
-            val npmCli = NodeProvisioner.ensureNpm(this)
-            RuntimeDiagnostics.append(
-                this, "npm", npmCli != null,
-                if (npmCli != null) "npm 就位（面板可安装 Agent）" else "npm 未就位 —— 仅影响 Agent 安装，内核照常运行",
-                npmCli?.absolutePath ?: "assets/npm 解包失败，详见 logcat"
-            )
-            // D1 安卓语义垫片（os.cpus 等）：全局预载。缺件不阻断 —— 只是那项语义仍缺。
-            val envShim = NodeProvisioner.ensureEnvShim(this)
-            RuntimeDiagnostics.append(
-                this, "env-shim", envShim != null,
-                if (envShim != null) "安卓语义垫片就位（os.cpus 等）" else "安卓语义垫片未就位（不阻断；os.cpus() 仍返回 0）",
-                envShim?.absolutePath ?: "assets/node/android-env-shim.cjs 落地失败"
-            )
+            // ---- 4) 环境装配（$PREFIX 真名 / npm / 垫片 / 前缀 / C 层供给） ----
+            // 装配本体在 `lobos/os/RuntimeEnvironment`：它的触发点已不只在这条启动链上
+            // （宿主就位即装配，债表 ENV-1），这里只是它的另一个调用方。
+            // 缺件不阻断启动：npm/垫片缺 = 相应能力缺，读数已在那件里上屏。
+            val env = lobos.os.RuntimeEnvironment.ensure(this)
 
             // ---- 5) 写 runtime.json（schema 2，容器写内核读） ----
             // minNode 单源：就是随包清单里的 Node 版本（上方 version），不再手写字面量。
@@ -412,27 +390,16 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
                 nodePath = nodeBin.absolutePath,
                 nodeBinDir = nodeBin.parentFile!!.absolutePath,
                 npmPath = nodeBin.absolutePath,
-                npmEntry = npmCli?.absolutePath,
+                npmEntry = env.npmEntry?.absolutePath,
                 prefix = PrefixProvisioner.root(this).absolutePath,
                 minNode = version
             )
             RuntimeDiagnostics.append(this, "runtime", true, "runtime.json 已写入（schema 2）", "home=${filesDir.absolutePath}")
-            // npm 的可写全局前缀：npm 的默认 prefix 指向 node 安装目录
-            // （这里是只读的 /data/app/…/lib），guest 里载荷自己跑 `npm install -g` 必
-            // EACCES/EROFS。宿主 spawn 的 npm 靠 npm_config_prefix 撑着，载荷自起的没有
-            // 那份 env —— 只有 $HOME/.npmrc 能覆盖它（HOME=filesDir 由 GuestAdapter 定）。
-            // 已存在则**不动**：用户改过 .npmrc（换 registry/代理）不该每次开机被抹平。
-            val npmrc = NodeProvisioner.ensureNpmPrefixRc(this)
-            RuntimeDiagnostics.append(
-                this, "npmrc", npmrc != null,
-                if (npmrc != null) ".npmrc 前缀在册" else ".npmrc 未能写入（guest 侧 npm -g 会失败）",
-                npmrc?.absolutePath ?: "写入失败（无路径可报）"
-            )
 
-            // ---- 6) 装配并 spawn（L-C/L-D 的唯一装配点 = GuestAdapter） ----
+            // ---- 6) 装配并 spawn（环境语义 = RuntimeEnvironment.treeRootEnv，申报 = GuestAdapter） ----
             //
             // 到这里**只有一条路**：跑到场的内核入口（控制面 36360）。无内核的分支已在第 3 步
-            // 如实收口，探针不再出现在启动链上（D15）。环境变量**一项都不许在这外面组装** ——
+            // 如实收口，探针不再出现在启动链上（D15）。这里**一项环境变量都不组装** ——
             // 旧实现把 L-D 旋钮夹在 ProcessBuilder 的 .apply{} 表达式里，PATH 被写
             // 两次互相覆盖、provision 副作用藏在 map 中间，与 boot.js 孪生管线漂移。
             //
@@ -440,16 +407,6 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
             // 存活时，新进程 acquireLock 失败即 exit(1) —— 不回收就是必死重启循环。
             reapOrphanKernel()
 
-            // $PREFIX 复制是**副作用**：必须先于装配执行（plan 只声明、不生产）。
-            // 缺件必须上屏 —— 真机 2026-09-26 报告 §五 就是「$PREFIX 里到底有没有
-            // node/rg/bash」无人可查，guest 侧只会得到「command not found」。
-            val prefixReady = PrefixProvisioner.provision(this, nodeBin)
-            val prefixMissing = PrefixProvisioner.expected - prefixReady.toSet()
-            RuntimeDiagnostics.append(
-                this, "prefix", prefixMissing.isEmpty(),
-                if (prefixMissing.isEmpty()) "\$PREFIX 能力件全就位" else "\$PREFIX 缺件：${prefixMissing.joinToString()}",
-                PrefixProvisioner.root(this).absolutePath + " 已有=" + prefixReady.joinToString()
-            )
             // programDir/entry 非空是第 3 步的 res.ok 兑现的（READY 才可能走到这里），
             // 不在此重言一遍"再判一次空"——那等于承认 ok 不是唯一施工判据。
             val kernelDir = programDir!!
@@ -457,23 +414,15 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
             val nativeDir = nodeBin.parentFile!!
             val plan = GuestAdapter.programPlan(
                 GuestAdapter.ProgramInputs(
-                    base = GuestAdapter.BaseInputs(
-                        filesDir = filesDir, cacheDir = cacheDir, nodeBin = nodeBin, nativeLibDir = libSearchPath
-                    ),
+                    root = lobos.os.RuntimeEnvironment.treeRootFor(this, env),
                     programDir = kernelDir,
                     programEntry = kernelEntry,
                     uiDir = File(kernelDir, "ui/dist"),
                     flockNative = File(nativeDir, NativeAssetRegistry.libNameOf("flock")),
-                    posixShim = File(nativeDir, NativeAssetRegistry.libNameOf("posix")),
-                    prefixRoot = PrefixProvisioner.root(this),
-                    prefixBin = PrefixProvisioner.binDir(this),
-                    bashBin = PrefixProvisioner.bashBin(this),
-                    npmEntry = npmCli,
-                    envShim = envShim,
+                    npmEntry = env.npmEntry,
                 ),
                 getenv("PATH"),
             )
-            //
             // command[0] 恒为 nodeBin，entry 是**脚本参数**、不是被 exec 的目标。
             // 本行旧版把这条理由写成「filesDir 被 W^X 禁止 execve」——那是 targetSdk≥29 的规矩，
             // 而本产品刻意钉 targetSdk=28 换的就是 app home 可 exec（ADR-0001 (b)/D1），
@@ -898,10 +847,9 @@ class InstanceHost(private val host: Service) : ContextWrapper(host) {
             return
         }
         val script = NodeProvisioner.ensureServerScript(this)
+        // 探针读裸 node：树根里那两片垫片刻意剥掉（理由见 RuntimeEnvironment.TreeRoot）。
         val plan = GuestAdapter.probePlan(
-            GuestAdapter.BaseInputs(
-                filesDir = filesDir, cacheDir = cacheDir, nodeBin = nodeBin, nativeLibDir = libSearchPath
-            ),
+            lobos.os.RuntimeEnvironment.treeRootFor(this).copy(posixShim = null, envShim = null),
             script, getenv("PATH"),
         )
         RuntimeDiagnostics.append(

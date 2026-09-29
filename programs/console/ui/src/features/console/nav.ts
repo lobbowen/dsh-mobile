@@ -1,5 +1,5 @@
 /**
- * console 功能域导航 — 5 域（Android 面板保留域）
+ * console 功能域导航 — 4 域（Android 面板保留域，与 ConsoleViewKey 同数）
  *
  * ⚠ 已删除的域（勿回潮）：实例管理（沙箱 instances）、远程控制（lan / relay / frpc）、
  *   桌面壳（Tauri shell）—— 对应端点与页面已整体删除，见 docs/components/os-architecture-v4.md §4。

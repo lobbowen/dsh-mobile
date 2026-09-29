@@ -1,9 +1,10 @@
 /**
  * 运行状态面板（Overview 右侧栏）：
- * 服务端口运行状态 —— 由 /ports 端口注册表反映各服务（Lob OS 主干/管家 API/路由 daemon/登录回调）
+ * 服务端口运行状态 —— 由 /ports 端口注册表反映各服务（Lob OS 主干/管家 API/登录回调）
  *       真实监听状态。
  * 归属语义着色：system(核心服务) / managed(守护进程) / oauth(登录回调)。
  * ⚠ 已删除的端口段（勿回潮）：沙箱实例 inst / 局域网守护 lan —— 对应域已整体移除。
+ *   router-daemon 不记作「已删除」：它是 v4 落地时整域消失、无人接住的事故（债表 EXEC-G2），能不能删归那格裁定。
  */
 import { useMemo } from "react";
 import { CircleDot } from "lucide-react";
@@ -23,7 +24,6 @@ function roleLabel(r: PortRecord): string {
     oauthCallback: "登录回调",
     proxyInstance: "反代实例",
     providerApi: "供应商 API",
-    "managed:router-daemon": "智能路由",
     dynamic: "动态端口",
   };
   const m = /^managed:(.+)$/.exec(r.role);
@@ -38,7 +38,6 @@ function resolveOwner(r: PortRecord): string {
   if (o.startsWith("dynamic:")) return "动态";
   if (o.startsWith("providerApi:")) return "供应商";
   if (o.startsWith("oauth:")) return "登录回调";
-  if (o === "router-daemon" || r.role === "managed:router-daemon") return "智能路由";
   if (r.role === "oauthCallback") return "登录回调";
   return r.role;
 }

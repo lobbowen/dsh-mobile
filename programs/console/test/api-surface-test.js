@@ -49,7 +49,7 @@ check('清单中所有前缀路由均存在于源码', phantomPrefix.length === 
 
 console.log('== 已删除的系统级端点不得复活 ==');
 const srcAll = fs.readdirSync(API_DIR).filter((x) => x.endsWith('.js')).map((f) => fs.readFileSync(path.join(API_DIR, f), 'utf8')).join('\n');
-for (const gone of ['/self-update/', '/autostart', '/settings/close-action', '/router/', '/logs/events-tail']) {
+for (const gone of ['/self-update/', '/autostart', '/settings/close-action', '/logs/events-tail']) {
   check('已删除端点不得复活: ' + gone, srcAll.indexOf(gone) < 0, 'clean');
 }
 

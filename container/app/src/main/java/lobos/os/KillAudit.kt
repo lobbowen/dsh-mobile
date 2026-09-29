@@ -22,6 +22,9 @@ object KillAudit {
     fun auditOnce(ctx: Context) {
         val pkg = ctx.packageName
         val raw = runCatching {
+            // 豁免（§5 I2 的另一半）：exec 的是**系统件** `sh`+`dumpsys`，不经环境、不跑载荷，
+            // 取共享树根只会让每分钟巡检 tick 反复触发装配上屏。豁免以断言表达：
+            // boot-env-contract 判 5 断言本文件不自己拼环境、也不取共享树根。
             val p = ProcessBuilder("sh", "-c", CMD + " " + pkg)
                 .redirectErrorStream(true)
                 .start()

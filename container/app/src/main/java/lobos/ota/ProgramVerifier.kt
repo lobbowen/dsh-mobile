@@ -1,9 +1,10 @@
 package lobos.ota
 
 import android.content.Context
+import android.system.Os
 import lobos.BuildConfig
 import lobos.native.NativeAssetRegistry
-import lobos.native.NativePreparer
+import lobos.os.RuntimeEnvironment
 import lobos.runtime.NodeProvisioner
 import java.io.File
 import org.json.JSONObject
@@ -96,13 +97,9 @@ object ProgramVerifier {
             val pb = ProcessBuilder(args)
                 .directory(context.filesDir)
                 .redirectErrorStream(true)
-            pb.environment().apply {
-                put("HOME", context.filesDir.absolutePath)
-                put("TMPDIR", context.cacheDir.absolutePath)
-                // 本进程派生的后续子进程（$PREFIX 里的工具）无 RUNPATH，靠继承这个变量找库。
-                // NativePreparer.probe 刻意不设 —— 那才是 run_code 的真实形态。
-                put("LD_LIBRARY_PATH", NativePreparer.libSearchPath(context))
-            }
+            pb.environment().putAll(
+                RuntimeEnvironment.treeRootEnv(RuntimeEnvironment.treeRootFor(context), Os.getenv("PATH"))
+            )
             val proc = pb.start()
             val out = StringBuilder()
             // 读线程与 waitFor 并行 —— 单线程 waitFor 后读管道会死锁（管道写满）。

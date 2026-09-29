@@ -24,11 +24,10 @@ src/
     utils.ts                  cn（clsx+tailwind-merge）
     format.ts                 formatSize（文件大小格式化）
   features/console/        业务页面（只依赖 framework + services/console）
-    ConsoleApp.tsx         壳：AppSidebar(5 域) + Toolbar + ContentArea + StatusBar
+    ConsoleApp.tsx         壳：AppSidebar(4 域) + Toolbar + ContentArea + StatusBar
     nav.ts                    导航配置 + 阶段/任务/事件元数据（阶段 tone、友好文案）
     widgets.tsx               标准展示基件（ToneDot/Pill/Card/CardTitle/Metric/QuotaBox/MonoEllipsis）
     OverviewPage.tsx          控制面板（状态/版本/升级/事件日志）
-    RouterPage.tsx            智能路由（路由启停/用量/供应商/账号额度/激活）
     TasksPage.tsx             任务中心（统一安装/升级/卸载/更新任务历史）
     PluginsPage.tsx           插件商店（市场浏览/搜索/已装管理/启停/卸载）
     SettingsPage.tsx          设置（访问控制/版本环境/镜像源/关于）
@@ -40,7 +39,7 @@ src/
   services/console/        数据层（唯一直接 fetch 的模块）
     types.ts                  全量领域类型（对齐 HTTP API 实契约）
     client.ts                 同源 HTTP 客户端（GET/POST 全端点）
-    polling.ts                运行态轮询中心（2s 快照：/status /router/status /router/providers /ports + /events 增量）
+    polling.ts                运行态轮询中心（2s 快照：/status /ports + /events 增量）
     index.ts                  useConsoleData hook（useSyncExternalStore）
 ```
 
@@ -52,7 +51,7 @@ src/
 
 - **服务端**：console 的 `src/api/index.js` 同源托管面板产物（HTML 由 `ui/dist` 提供，开发期即此目录）；API 同源，**零 CORS**。
 - **单一通路**：面板只走同源 `fetch`（BASE=""），无 Tauri/壳分支、无 `api_proxy` 转发——所有宿主统一为「内核同源 WebView」。
-- **前端轮询**：`polling.ts` 每 2s 并行拉运行态（`/status` `/router/status` `/router/providers` `/ports`）+ 增量事件（`/events`，after=seq），写入不可变快照并广播；页面经 `useConsoleData()` 订阅渲染；写操作经 `consoleApi.*` → `store.refresh()` 立即同步。
+- **前端轮询**：`polling.ts` 每 2s 并行拉运行态（`/status` `/ports`）+ 增量事件（`/events`，after=seq），写入不可变快照并广播；页面经 `useConsoleData()` 订阅渲染；写操作经 `consoleApi.*` → `store.refresh()` 立即同步。
 - **UI 文案**：硬编码中文（单一语言产品）。设计令牌定义浅/深主题，暗色经 `next-themes` 跟随系统切换。
 
 ## 3. 令牌与规范要点（详见 src/framework/theme/tokens.css）
@@ -66,11 +65,11 @@ src/
 ## 4. 工程治理
 
 ### 4.1 代码分包（P1）
-- 5 个功能页面（Overview/Router/Tasks/Plugins/Settings）经 React.lazy 按需分包（ConsoleApp.tsx），配 Suspense（PageFallback）+ PageErrorBoundary（chunk 加载失败/页面异常白屏兜底，提供刷新入口）。
+- 4 个功能页面（Overview/Plugins/Tasks/Settings）经 React.lazy 按需分包（ConsoleApp.tsx），配 Suspense（PageFallback）+ PageErrorBoundary（chunk 加载失败/页面异常白屏兜底，提供刷新入口）。智能路由页（RouterPage.tsx）已不在仓内——随 v4 落地整域消失、无人接住，能力面现状与取证见债表 `EXEC-G2`（在册未清，面板暂无该页）。
 - 构建效果：主 vendor+entry 拆双 chunk，各页面独立 chunk，首屏不再含全部页面代码。
 
 ### 4.2 UI 基件（U1）
-- Select（radix-ui 令牌化，barrel 已导出），PluginsPage / RouterPage 的裸 `<select>` 已迁移；
+- Select（radix-ui 令牌化，barrel 已导出），PluginsPage 的裸 `<select>` 已迁移；
 - 原生 confirm() 保留（同步确认语义在单 WebView 场景可接受）。
 
 ### 4.3 质量门禁

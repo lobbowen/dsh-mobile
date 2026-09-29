@@ -1,22 +1,24 @@
 package lobos.runtime
 
 import java.io.File
+import lobos.os.RuntimeEnvironment
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * L-C/L-D 装配契约（GuestAdapter）的 golden 向量。
+ * console 启动计划（GuestAdapter）+ 共享树根语义（RuntimeEnvironment.treeRootEnv）的 golden 向量。
  *
  * 钉住的历史缺陷（架构收敛 C，真机侧只在此处可复现）：
  *   · 环境组装曾散在 ProcessBuilder 内联块里，PATH 被写两次、后写覆盖先写
  *     —— $PREFIX/bin 是否生效全凭运气；
  *   · TMPDIR / LOBOS_BRIDGE_SOCKET 与 engine 侧孪生管线各写各的，漂移成
  *     "只在真机复现"的静默断链；
- *   · NODE_PATH 两侧各只有一段，内核自带模块与 npm 共享模块永远缺一侧。
+ *   · NODE_PATH 两侧各只有一段，且第二段与 `npm -g` 的前缀指向不同目录
+ *     —— 全局安装的共享模块永远 import 不到（债表 ENV-5）。
  *
- * 生产权威判定见 engine/test/boot-env-contract-test.js（跨语言解析本文件）；
+ * 生产权威判定见 engine/test/boot-env-contract-test.js（跨语言解析这两个文件）；
  * 本测试负责另一半：装配**结果**逐键逐值正确。
  */
 class GuestAdapterTest {
@@ -28,27 +30,31 @@ class GuestAdapterTest {
     private val nativeLibDir = "/data/app/~~xx/pkg/lib/arm64-v8a"
     private val programDir = File(filesDir, "programs/console/1.2.3")
     private val programEntry = File(programDir, "bin/panel")
+    private val prefixRoot = File("/prefix")
+    private val prefixBin = File("/prefix/bin")
+    private val globalBin = NodeProvisioner.globalBin(filesDir)
 
-    private val base = GuestAdapter.BaseInputs(
-        filesDir = filesDir, cacheDir = cacheDir, nodeBin = nodeBin, nativeLibDir = nativeLibDir,
+    /** 启动链树根：带 LD_PRELOAD 垫片、不带 NODE_OPTIONS 垫片（后者按用例单独给）。 */
+    private val root = RuntimeEnvironment.TreeRoot(
+        home = filesDir, tmpDir = cacheDir, nodeBin = nodeBin, nativeLibDir = nativeLibDir,
+        prefixRoot = prefixRoot, prefixBin = prefixBin, bashBin = File("/prefix/bin/bash"),
+        posixShim = File(nativeLibDir, "liblobosposix.so"),
     )
+
+    /** 探针树根：生产同款 —— 两片垫片都剥掉。 */
+    private val bareRoot = root.copy(posixShim = null)
 
     private fun programInputs(
         bashBin: File? = File("/prefix/bin/bash"),
         npmEntry: File? = null,
         envShim: File? = null,
     ) = GuestAdapter.ProgramInputs(
-        base = base,
+        root = root.copy(bashBin = bashBin, envShim = envShim),
         programDir = programDir,
         programEntry = programEntry,
         uiDir = File(programDir, "ui/dist"),
         flockNative = File(nativeLibDir, "liblobosflock.so"),
-        posixShim = File(nativeLibDir, "liblobosposix.so"),
-        prefixRoot = File("/prefix"),
-        prefixBin = File("/prefix/bin"),
-        bashBin = bashBin,
         npmEntry = npmEntry,
-        envShim = envShim,
     )
 
     // ── 命令形态 ──
@@ -64,7 +70,7 @@ class GuestAdapterTest {
 
     @Test fun 探针模式命令带_3080_端口且cwd是filesDir() {
         val script = File("/data/local/tmp/server.js")
-        val plan = GuestAdapter.probePlan(base, script, "inherit")
+        val plan = GuestAdapter.probePlan(bareRoot, script, "inherit")
         assertEquals(
             listOf(nodeBin.absolutePath, script.absolutePath, "--port", "3080"),
             plan.command,
@@ -79,24 +85,35 @@ class GuestAdapterTest {
         val inherited = "/system/bin:$nodeBinDir"
         val plan = GuestAdapter.programPlan(programInputs(), inherited)
         val parts = plan.env.getValue("PATH").split(File.pathSeparator)
-        assertEquals("/prefix/bin", parts.first())
+        assertEquals(prefixBin.absolutePath, parts.first())
         assertEquals("nodeBinDir 在 PATH 中出现次数", 1, parts.count { it == nodeBinDir })
         assertEquals("/system/bin", parts.last())
     }
 
-    @Test fun PATH在探针模式下以nodeBinDir开头() {
-        val plan = GuestAdapter.probePlan(base, File("/s.js"), "/system/bin")
-        val parts = plan.env.getValue("PATH").split(File.pathSeparator)
-        assertEquals(nodeBinDir, parts.first())
-        assertEquals(listOf(nodeBinDir, "/system/bin"), parts)
+    @Test fun PATH含npm全局bin且按此序排在继承段之前() {
+        val parts = GuestAdapter.programPlan(programInputs(), "/system/bin").env.getValue("PATH")
+            .split(File.pathSeparator)
+        // ENV-4：`npm -g` 装完的 CLI 要在 PATH 里找得回 —— 缺这段装上了也用不了。
+        assertEquals(
+            listOf(prefixBin.absolutePath, nodeBinDir, globalBin.absolutePath, "/system/bin"),
+            parts,
+        )
     }
 
-    // ── L-C 基础环境（两种模式共享）──
+    @Test fun 探针模式的PATH与内核模式同源() {
+        val plan = GuestAdapter.probePlan(bareRoot, File("/s.js"), "/system/bin")
+        assertEquals(
+            GuestAdapter.programPlan(programInputs(), "/system/bin").env.getValue("PATH"),
+            plan.env.getValue("PATH"),
+        )
+    }
+
+    // ── 树根共享环境（内核/探针/一次性进程同一份语义）──
 
     @Test fun HOME_TMPDIR_LD_LIBRARY_PATH_NODE_BIN_单源正确() {
         for (plan in listOf(
             GuestAdapter.programPlan(programInputs(), null),
-            GuestAdapter.probePlan(base, File("/s.js"), null),
+            GuestAdapter.probePlan(bareRoot, File("/s.js"), null),
         )) {
             assertEquals(filesDir.absolutePath, plan.env.getValue("HOME"))
             // TMPDIR 必须 = cacheDir：boot.js 曾用 os.tmpdir() 独走过。
@@ -106,7 +123,7 @@ class GuestAdapterTest {
         }
     }
 
-    // ── L-D 生态适配（仅内核模式）──
+    // ── console 专属申报 ──
 
     @Test fun LOBOS键全量注入且socket名与默认值逐字钉住() {
         val env = GuestAdapter.programPlan(programInputs(), null).env
@@ -122,11 +139,13 @@ class GuestAdapterTest {
         assertEquals(File(nativeLibDir, "liblobosposix.so").absolutePath, env.getValue("LD_PRELOAD"))
     }
 
-    @Test fun NODE_PATH双段且内核自带在前() {
+    @Test fun NODE_PATH双段且第二段是npm全局前缀的node_modules() {
         val env = GuestAdapter.programPlan(programInputs(), null).env
         assertEquals(
-            listOf(File(programDir, "node_modules"), File(filesDir, "node_modules"))
-                .joinToString(File.pathSeparator) { it.absolutePath },
+            listOf(
+                File(programDir, "node_modules"),
+                NodeProvisioner.globalNodeModules(filesDir),
+            ).joinToString(File.pathSeparator) { it.absolutePath },
             env.getValue("NODE_PATH"),
         )
     }
@@ -157,17 +176,26 @@ class GuestAdapterTest {
         )
     }
 
-    @Test fun 探针模式绝不注入LOBOS键() {
-        // 探针先于内核存在：它若带上 LOBOS_*，就分不清是环境层还是适配层在起作用。
-        val env = GuestAdapter.probePlan(base, File("/s.js"), null).env
+    @Test fun 探针模式绝不注入LOBOS键与垫片() {
+        // 探针先于内核存在：它若带上 LOBOS_* 或垫片，就分不清是环境层还是适配层在起作用。
+        val env = GuestAdapter.probePlan(bareRoot, File("/s.js"), null).env
         assertTrue("探针 env 出现了 LOBOS_*: " + env.keys.filter { it.startsWith("LOBOS_") },
             env.keys.none { it.startsWith("LOBOS_") })
-        assertEquals(setOf("HOME", "TMPDIR", "LANG", "LD_LIBRARY_PATH", "NODE_BIN", "PATH", "NODE_PATH"), env.keys)
+        assertFalse(env.containsKey("LD_PRELOAD"))
+        assertFalse(env.containsKey("NODE_OPTIONS"))
+        // 夹具机器上 CA 目录/bundle 不在场 ⇒ 信任根三键不入集合（真机读数在 V-0c）。
+        assertEquals(
+            setOf("HOME", "TMPDIR", "LANG", "LD_LIBRARY_PATH", "NODE_BIN", "PATH", "SHELL", "NODE_PATH"),
+            env.keys,
+        )
     }
 
     @Test fun 继承路径为空时PATH不发散() {
         val env = GuestAdapter.programPlan(programInputs(), null).env
-        assertEquals(listOf("/prefix/bin", nodeBinDir), env.getValue("PATH").split(File.pathSeparator))
+        assertEquals(
+            listOf(prefixBin.absolutePath, nodeBinDir, globalBin.absolutePath),
+            env.getValue("PATH").split(File.pathSeparator),
+        )
         // 空串也算"无继承"：joinPath 过滤空段，不能留下 "::" 尾巴。
         val env2 = GuestAdapter.programPlan(programInputs(), "").env
         assertEquals(env.getValue("PATH"), env2.getValue("PATH"))

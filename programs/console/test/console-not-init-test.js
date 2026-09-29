@@ -6,7 +6,7 @@
 //
 // 锁定：
 //   N-1  不存在 console.js（系统职责已下沉；D9）
-//   N-2  不存在 guard/ assembler/ d2/ domains/dist/ domains/router/（系统级职责目录）
+//   N-2  不存在 guard/ assembler/ d2/ domains/dist/（系统级职责目录）
 //   N-3  bin/panel 不拉起/监督系统组件：无 child_process.spawn/fork、无锁文件、
 //        无 daemon 自拉起、无 checkpoint/replay 续跑（A16）
 //   N-4  manifest.json role=system、entry=bin/panel；package.json name=lobos-console-panel、bin.panel
@@ -23,7 +23,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 
 // N-1 / N-2
 check('N-1 无 console.js（D9 整体删除）', !fs.existsSync(path.join(ROOT, 'src', 'console.js')));
-for (const d of ['guard', path.join('assembler'), 'd2', path.join('domains', 'dist'), path.join('domains', 'router')]) {
+for (const d of ['guard', path.join('assembler'), 'd2', path.join('domains', 'dist')]) {
   check('N-2 无系统级目录 src/' + d, !fs.existsSync(path.join(ROOT, 'src', d)));
 }
 

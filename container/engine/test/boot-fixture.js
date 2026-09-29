@@ -4,14 +4,16 @@
 // ⚠ 测试夹具，不是生产链路（ADR-0006 / 架构收敛 C）。
 //
 // 真机上「装配环境 → spawn 内核」的**唯一权威**在 Kotlin 侧：
-//   container/app/.../runtime/GuestAdapter.kt（装配契约）+ InstanceHost.kt（执行）。
+//   lobos/os/RuntimeEnvironment.kt（树根环境语义）+ runtime/GuestAdapter.kt（console 申报 +
+//   command/cwd）+ runtime/InstanceHost.kt（执行）。
 // 本文件曾是它的孪生实现，两侧靠注释互指、实际各写各的 —— TMPDIR/BRIDGE_SOCKET/
 // PATH 都漂移过（漂移的后果是"只在真机复现"的静默断链）。
 //
 // 现在本文件只服务一个消费者：test/e2e-mock-program-test.js（桌面 CI 里用假 node
 // 走通「OTA→切指针→spawn→健康检查」链路的集成测试）。键集与语义被
-// test/boot-env-contract-test.js 逐条钉在 GuestAdapter 上：**这里新增任何
-// GuestAdapter 没有的环境键 = CI 红**。要加键，先加到 GuestAdapter。
+// test/boot-env-contract-test.js 逐条钉在生产装配件（GuestAdapter ∪ RuntimeEnvironment）上：
+// **这里新增任何生产没有的环境键 = CI 红**。要加键，先判断它属于树根环境还是 console 申报，
+// 再加进对应的那个生产文件。
 // ============================================================================
 // 内核启动接线（测试夹具侧）。
 // 读 CURRENT 指针 → 写 runtime.json → 注入 Android 环境 → spawn `node <程序目录>/bin/panel daemon`
@@ -34,7 +36,7 @@ const { writeRuntimeJson } = require('../src/runtime-json');
  *  - npmEntry?: npm-cli.js 绝对路径（容器内嵌 npm 时投放，内核代跑）
  *  - uiDir?: 面板产物目录（默认 <program>/ui/dist）
  *  - cacheDir?: TMPDIR（生产恒 = cacheDir；桌面夹具缺省回落 os.tmpdir()，
- *               但键必须存在 —— 与 GuestAdapter.baseEnv 同构）
+ *               但键必须存在 —— 与 RuntimeEnvironment.treeRootEnv 同构）
  *  - bridgeSocket?: HostBridge 抽象命名空间 socket 名（默认 lobos_hostbridge）
  *  - extraEnv?: 额外环境变量（= 生产侧的 L-D 垫片注入，夹具里由用例给）
  */
@@ -60,15 +62,17 @@ function bootKernel(o) {
     // 与 GuestAdapter.BRIDGE_SOCKET / CapabilityBroker.SOCKET_NAME 同一事实，
     // 由 boot-env-contract-test 钉死字面量）。
     LOBOS_BRIDGE_SOCKET: o.bridgeSocket || 'lobos_hostbridge',
-    // PATH 组装次序与 GuestAdapter.programPlan 对齐：工具目录在前、node 目录其次、
-    // 继承环境垫后（生产还有最前的 $PREFIX/bin，夹具里经 extraEnv 覆盖）。
+    // PATH 组装次序与生产树根装配件（RuntimeEnvironment.treeRootEnv）对齐：工具目录在前、
+    // node 目录其次、继承环境垫后（生产最前还有 $PREFIX/bin，夹具里经 extraEnv 覆盖）。
     PATH: [o.nodeBinDir, process.env.PATH].filter(Boolean).join(path.delimiter),
-    // NODE_PATH 双段（内核自带模块在前、共享安装目录其次）——同 GuestAdapter。
+    // NODE_PATH 双段（内核自带模块在前、共享安装目录其次）——生产的第二段是
+    // `npm -g` 的前缀目录（NodeProvisioner.globalNodeModules）；夹具的 sandboxHome 就当作
+    // 全局前缀根，段数与次序由 boot-env-contract-test 钉住，具体目录名不比对。
     NODE_PATH: [path.join(programDir, 'node_modules'), path.join(o.sandboxHome, 'node_modules')]
       .join(path.delimiter),
     HOME: o.sandboxHome,
     TMPDIR: o.cacheDir || os.tmpdir(),
-    // D1 Linux 语义：与 GuestAdapter.baseEnv 同构（bionic 只认 C.UTF-8）。
+    // D1 Linux 语义：与生产树根装配件同构（bionic 只认 C.UTF-8）。
     LANG: 'C.UTF-8',
   }, o.npmEntry ? { LOBOS_NPM_ENTRY: o.npmEntry } : {}, o.extraEnv || {});
 
