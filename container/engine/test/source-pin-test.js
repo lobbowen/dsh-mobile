@@ -613,4 +613,61 @@ const PIECES = Object.keys(JSON.parse(fs.readFileSync(VERIFY, 'utf8')).criteria)
     vt.status !== 0 && /不早于现在/.test(String(vt.stdout) + String(vt.stderr)), String(vt.stdout) + String(vt.stderr));
 }
 
+// ---------------------------------------------------------------------------
+//  ⑪ 交叉编译器（NDK）这一格也必须由仓内声明决定，且判点真的读了 runner 那一侧
+// ---------------------------------------------------------------------------
+// 债表 ENV-30：件的字节身份 = 源码批次 × 构建时刻 × 工具链。前两格由 ④/⑦/⑩ 钉住；第三格原先写的是
+// 「取 ANDROID_NDK_LATEST_HOME，目录不在就红」—— 那只在判「有没有」，没有任何声明可比，
+// 于是 runner 镜像换一版 NDK 就是六颗件 sha 全变而 CI 全绿（与 ENV-26「声明改了没人重发」同一形状）。
+// 这一格判的是**两侧都读了并比过**：只把值写进表 = 恒绿的申报；只在日志里打出实测 = 没人比的读数。
+{
+  const wfText = fs.readFileSync(WF, 'utf8');
+
+  // 纯函数：判「定位 NDK」这一步的正文。抽出来是为了能造对照组（整份 workflow 里别处的字样都不算这一格）。
+  function ndkJudge(stepText) {
+    const body = stripComments(stepText);
+    const out = [];
+    if (!/fetch-pinned\.sh["']?\s+--ndk\b/.test(body)) out.push('没从钉值表读工具链声明（表的读者必须只有 scripts/fetch-pinned.sh，⑦ 那条）');
+    if (!/source\.properties/.test(body)) out.push('没读 runner 那一侧的版本（source.properties 的 Pkg.Revision 才是权威读数，目录名只是它的容器）');
+    if (!/\[\s*"[^"]*ACTUAL[^"]*"\s*=\s*"[^"]*PIN[^"]*"\s*\]/.test(body)) out.push('没有把两侧读数比在一起的判点（各打各的是读数，不是判据）');
+    if (!/::error[^\n]*NDK/.test(body)) out.push('不等时没有 ::error（退 1 而不说清差在哪，等于逼下一个人去翻整步日志）');
+    if (/userland-sources\.json/.test(body)) out.push('这一步自己解析钉值表（第二个读者=两个结论）');
+    return out;
+  }
+
+  const stepMatch = /^ {6}- name: 定位 NDK\n([\s\S]*?)^ {6}- /m.exec(wfText);
+  const findings = stepMatch ? ndkJudge(stepMatch[1]) : ['workflow 里找不到「定位 NDK」这一步（判据没有宿主）'];
+  check('⑪ 「定位 NDK」把钉值与实测各读一次并比，不等就 ::error（工具链这一格从此不由镜像决定）',
+    findings.length === 0, findings.join(' ;; '));
+
+  check('⑪ 表里声明的 NDK 版本是 x.y.z 形态（读到空或怪形状=这一格从没被声明过）',
+    /^\d+\.\d+\.\d+$/.test(String(REAL_TABLE.ndkVersion || '')), '读到=' + JSON.stringify(REAL_TABLE.ndkVersion));
+
+  // 版本号只能有一处：写进 workflow 或构建口就是第二个事实源（版本升了、声明还是旧的那种分家）。
+  const declHosts = [];
+  for (const dir of ['scripts', path.join('.github', 'workflows')]) {
+    for (const n of fs.readdirSync(path.join(ROOT, dir))) {
+      if (!/\.(sh|js|yml|yaml)$/.test(n)) continue;
+      const txt = stripComments(fs.readFileSync(path.join(ROOT, dir, n), 'utf8'));
+      if (txt.includes(String(REAL_TABLE.ndkVersion))) declHosts.push(dir + '/' + n);
+    }
+  }
+  check('⑪ 工具链版本号只在钉值表里出现一次（别处再写一遍=两处各说一个版本）',
+    declHosts.length === 0, '还写着这个号的文件：' + declHosts.join(', '));
+
+  const cStep = '"$ROOT_DIR/scripts/fetch-pinned.sh" --ndk\n'
+    + 'ACTUAL_NDK=$(awk -F= \'/^Pkg\\.Revision/ {print $2}\' "$NDK/source.properties")\n'
+    + '[ "$ACTUAL_NDK" = "$PIN_NDK" ] || { echo "::error title=NDK 与钉值不符::"; exit 1; }\n';
+  check('⑪ 对照组：三格齐全的写法不误伤（上一条不是恒真）', ndkJudge(cStep).length === 0, ndkJudge(cStep).join(' ;; '));
+  check('⑪ 对照组：删掉比较那一行就抓得到',
+    /没有把两侧读数比在一起/.test(ndkJudge(cStep.replace(/^\[ "\$ACTUAL.*$/m, '')).join('')));
+  check('⑪ 对照组：只读表、不读 runner 那一侧就抓得到',
+    /没读 runner 那一侧/.test(ndkJudge(cStep.replace(/source\.properties/g, 'x.properties')).join('')));
+  check('⑪ 对照组：只在注释里提一句 --ndk 不算读过（判据钉执行面，不钉文件名）',
+    ndkJudge('# 这里跑 fetch-pinned.sh --ndk\nACTUAL_NDK=1\n[ "$ACTUAL_NDK" = "$PIN_NDK" ] || { echo "::error title=NDK::"; exit 1; }\n')
+      .some((f) => /没从钉值表读工具链声明/.test(f)));
+  check('⑪ 对照组：workflow 里自己 cat 那张表 → 抓到第二个读者',
+    /第二个读者/.test(ndkJudge(cStep + 'cat "$ROOT_DIR/scripts/userland-sources.json"\n').join('')));
+}
+
 finish();

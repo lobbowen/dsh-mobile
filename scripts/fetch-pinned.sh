@@ -17,6 +17,9 @@
 #
 # 用法: bash scripts/fetch-pinned.sh --pin <键> <落点> [--version-file <件版本格>]
 #       bash scripts/fetch-pinned.sh <落点> <期望 sha256> <url> [url...]   ← 自测/离线用的裸档
+#       bash scripts/fetch-pinned.sh --time-base| --ndk    ← 只读表里的构建基准／工具链版本（不下载）
+#   这两档存在的原因：件的字节不只由源码决定（还由构建时刻与交叉编译器决定），而这些定值必须
+#   和源码钉值住在**同一张表、同一个读者**里 —— 让第二个脚本去解析这张表就是两个结论的入口。
 # 退出: 0 = 取到且逐字节等于钉值
 #       2 = 一条都不合（下载失败或校验不匹配都算）—— 一律判红，绝不「校验失败也用它」，
 #           也不把「取不到」降成 warning 后继续编译（那等于把没有身份来源的字节投给设备）。
@@ -85,13 +88,29 @@ elif [ "${1:-}" = "--time-base" ]; then
   fi
   echo "$TB"
   exit 0
+elif [ "${1:-}" = "--ndk" ]; then
+  # 交叉编译用的 NDK 版本也住这张表，表的读者仍然只有本脚本（⑦ 那条判据）。
+  # 这里**只取不判**：NDK 不是下载来的源码，「实际用的那版等不等于钉值」由 build-userland 的
+  # 「定位 NDK」步在 runner 上判（那里才有两侧读数可比）。
+  if ! ND="$(node -e '
+    const path = require("node:path");
+    let tab;
+    try { tab = require(path.resolve(process.argv[1])); } catch (e) { console.error("钉值表读不出: " + e.message); process.exit(1); }
+    const v = tab.ndkVersion;
+    if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(String(v))) { console.error("ndkVersion 不是 x.y.z 形态（读到 " + JSON.stringify(v) + "）"); process.exit(1); }
+    process.stdout.write(String(v));
+  ' "$TABLE")"; then
+    die "钉值表的 ndkVersion 这一格读不通"
+  fi
+  echo "$ND"
+  exit 0
 elif [ $# -ge 3 ]; then
   OUT="${1:-}"
   WANT="${2:-}"
   shift 2
   URLS=("$@")
 else
-  die "用法: $0 --pin <键> <落点>  或  $0 --time-base  或  $0 <落点> <期望 sha256> <url> [url...]（参数少一个都不算数）"
+  die "用法: $0 --pin <键> <落点>  或  $0 --time-base  或  $0 --ndk  或  $0 <落点> <期望 sha256> <url> [url...]（参数少一个都不算数）"
 fi
 
 [ -n "$OUT" ] && [ -n "$WANT" ] && [ "${#URLS[@]}" -gt 0 ] \

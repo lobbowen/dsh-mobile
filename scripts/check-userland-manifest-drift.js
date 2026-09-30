@@ -24,9 +24,10 @@
 //      -android-arm64.zip），换字节不会盖掉旧对象，设备侧的 marker 也按 sha 命中与否自己会重下；
 //      破的是**口径**：同一个版本号在两份清单里指向两批源码，凡按号说话的证据（债表、真机读数）
 //      从此失去所指 —— 这正是 ENV-26 那类「声明与线上分家」的号版形状。
-//      这一格只对**带正整数 revision 的线上基线**生效：没有这一格的历史清单是本方案之前的形状，
-//      它那一代的件在源码没钉值时编出来、字节无法重造，因此不构成「旧一批字节」的凭据。
-//      豁免只取到一次：发布器不带 revision 就抛错，之后线上每一份都带这一格。
+//      这一格只对**可复现世代投出的线上基线**生效（`REPRODUCIBLE_BASELINE_REVISION`）：更早的那些件
+//      在源码没钉值、构建墙钟又被编进字节的年代造出来，**同一批字节造不出第二次**，拿它当凭据就等于
+//      要求本轮去重造一批物理上不可重造的字节 —— 那把尺子只会恒红，而恒红的门禁最后一定被人关掉。
+//      这条豁免取到一次就自退：第 ① 格钉着线上 revision 严格单调，线上每一份都不早于这一格。
 // 线上还没有清单（首次投放该通道）是**确实没有**，不是看不清：当作空表放行并打印这条读数。
 //
 //   env USERLAND_ONLINE_FILE：读本地文件当线上（CI 的自测走这条，不碰网）
@@ -42,6 +43,14 @@ const IMMUTABLE = argv[0] === '--immutable';
 if (IMMUTABLE) argv.shift();
 const LOCAL = argv[0];
 const CHANNEL = argv[1] || 'canary';
+
+// 可复现世代的起点 revision（债表 ENV-29 / ENV-30 / ENV-32 落地的读数所指的那一次发布）。
+// 线上那份要能成为「同一版本号的旧一批字节」的凭据，它那一轮必须满足：上游源码按 sha256 钉值取、
+// 归档条目 mtime 归一、构建时间基准钉成定值（openssl 的 `built on:` 此前把墙钟编进 curl/git 的件）。
+// 早于这一格的线上基线里，至少 curl/git 两颗的字节**物理上重造不出来**（那一次构建的时刻已经过去了），
+// 所以第 ② 格对它们不判 —— 判了就是恒红，而恒红的门禁会被当成噪声关掉，那才是真的失守。
+// 这一格只生效一次：第 ① 格钉住线上 revision 严格单调，投出本世代之后再也没有基线早于它。
+const REPRODUCIBLE_BASELINE_REVISION = 6;
 
 /** 一件在两张表里该比的那几格；别名按 name 排序后压成一行，比较与打印同一份形状。 */
 function project(t) {
@@ -128,10 +137,11 @@ function gate(online, onlineRevisionRaw, firstPublish) {
   // 旧清单（本方案之前的形状）没有 revision 格、或这条键上根本还没有清单：取严的下界都记作 0，
   // 并把这条读数**打出来**，不静默当通过 —— 首次按 tag 发布必须能过，而过了以后线上每份都带这一格。
   const onlineRevision = Number.isInteger(onlineRevisionRaw) ? onlineRevisionRaw : 0;
-  // 线上那份要能成为「旧字节」的凭据，必须自己带正整数 revision：
-  // 发布器没有这一格就抛错（scripts/publish-userland-manifest.js 的 revisionForManifest），
-  // 所以**这条豁免只能被本方案之前的那一份历史清单取到一次**，往后每份都严格生效 —— 它不是开关。
-  const baselineCredentialed = Number.isInteger(onlineRevisionRaw) && onlineRevisionRaw > 0;
+  // 线上那份要能成为「旧字节」的凭据，必须自己带 revision，而且不能早于可复现世代：
+  // 发布器没有 revision 格就抛错（scripts/publish-userland-manifest.js 的 revisionForManifest），
+  // 而 revision 严格单调由上面第 ① 格钉住 ⇒ **这条豁免每类基线只取到一次，它不是开关。**
+  const baselineCredentialed = Number.isInteger(onlineRevisionRaw)
+    && onlineRevisionRaw >= REPRODUCIBLE_BASELINE_REVISION;
   console.log('[gate] revision 线上=' + onlineRevision + ' 本次=' + localRevision
     + '，件 线上 ' + online.length + ' 颗 / 本次 ' + localTools.length + ' 颗（取自 ' + onlineFrom + '）');
   if (firstPublish) console.log('[gate] 这条键上还没有清单 —— 本次是该通道按新发布连投的第一份');
@@ -158,8 +168,9 @@ function gate(online, onlineRevisionRaw, firstPublish) {
       }
     }
   } else {
-    console.log('[gate] 线上基线不带 revision 凭据 —— 那一代的件是**源码没钉值时**编出来的，字节无法重造，'
-      + '它不是「同一版本号的旧一批字节」的凭据，第 ② 格对它不判；本次投出的这份带 revision，从下一份起这一格严格生效');
+    console.log('[gate] 线上基线 revision=' + onlineRevision + ' 早于可复现世代 ' + REPRODUCIBLE_BASELINE_REVISION
+      + ' —— 那一代的件带着**重造不出的字节**（源码批次未钉 / 构建墙钟被编进件里），'
+      + '它不是「同一版本号的旧一批字节」的凭据，第 ② 格对它不判；本次投出的这一份起，这一格严格生效');
   }
   if (reds.length) {
     for (const r of reds) console.log('[gate] ' + r);

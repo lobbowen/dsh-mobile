@@ -121,13 +121,43 @@ check('⑧ revision 倒退 → 判红', gBack.status === 1 && /线上已经是 5
 // ⑧-3 同 name@version 换字节：件的字节身份从此没有凭据 —— 清单上那 12 位指纹与实际投出去的对象
 // 对不上，而**线上清单**与**仓内声明**指向两批源码（设备按 marker 里的 sha 比对，只会重下一颗
 // 来路不明的件）。这一格判的是「同一版本号只许一批字节」，它成立的前提是两边都有字节凭据。
-const gSha = runGate(write('g-sha.json', man(6, [tool({ sha256: 'c'.repeat(64) })])), write('g-online5.json', man(5, [tool()])));
-check('⑧ 同版本换 sha256 → 判红并点名那颗件',
+// 基线取 revision=6（可复现世代）：源码钉值 + 归档 mtime + 构建时间基准 + NDK 四格都在仓内声明过，
+// 那一代的字节**能被重造**，所以它才有资格当「旧一批字节」的凭据。
+const gSha = runGate(write('g-sha.json', man(7, [tool({ sha256: 'c'.repeat(64) })])), write('g-online6.json', man(6, [tool()])));
+check('⑧ 可复现世代基线上同版本换 sha256 → 判红并点名那颗件',
   gSha.status === 1 && /npm@11\.19\.0 换了字节/.test(gateOut(gSha)), gateOut(gSha).slice(-260));
 // 对照组：换了 version 就是**另一颗件**（URL 按版本号命名，不会盖旧对象）—— 不许误伤正常提升。
-const gBump = runGate(write('g-bump.json', man(6, [tool({ version: '11.19.1', sha256: 'c'.repeat(64) })])), write('g-online5.json', man(5, [tool()])));
+const gBump = runGate(write('g-bump.json', man(7, [tool({ version: '11.19.1', sha256: 'c'.repeat(64) })])), write('g-online6.json', man(6, [tool()])));
 check('⑧ 对照组：件自己提升版本并换字节 → 放行（否则正常的升级会被这道闸拦死）',
   gBump.status === 0, gateOut(gBump).slice(-220));
+// 对照组：同一颗件同 sha 在可复现世代基线上不误伤（第 ② 格不是「凡是重发都拦」）。
+const gKeep = runGate(write('g-keep.json', man(7, [tool()])), write('g-online6.json', man(6, [tool()])));
+check('⑧ 对照组：可复现世代基线上同版本同字节 → 放行', gKeep.status === 0, gateOut(gKeep).slice(-220));
+
+// ⑧-3c 早于可复现世代的线上基线（ENV-32 之前的那一代：openssl 把构建墙钟编进 curl/git 的字节，
+// 那一次构建的时刻已经过去，同一批字节**物理上重造不出**）不构成凭据，第 ② 格对它不判。
+// 这一档是本次 rev 6 那一次发布要走的通道；它必须自带读数，且必须只生效一次。
+const gShaPre = runGate(write('g-sha-pre.json', man(6, [tool({ sha256: 'c'.repeat(64) })])), write('g-online5.json', man(5, [tool()])));
+check('⑧ 早于可复现世代的基线 + 同版本换 sha → 放行并把「早于哪一格、为什么」打出来',
+  gShaPre.status === 0 && /早于可复现世代 6/.test(gateOut(gShaPre)) && /这一格本次未比/.test(gateOut(gShaPre)),
+  gateOut(gShaPre).slice(-300));
+// 双向：两侧输入只差**线上那一格 revision**（5 vs 6），就必须从绿翻红 —— 证明这条豁免是一条
+// 有刻度的界，不是一把关掉的尺子；也证明刻度读的是线上而不是本次。
+check('⑧ 对照组：只差线上 revision 从 5 到 6 就必须翻红（否则第 ② 格等于被整体关掉）',
+  gShaPre.status === 0 && gSha.status === 1, JSON.stringify({ 线上5: gShaPre.status, 线上6: gSha.status }));
+// 刻度自退：本世代投出去之后，线上永远是 >=6 ⇒ 这一档不再有基线可用。界只能有一处定义。
+const SCRIPT_TEXT = fs.readFileSync(CHECKER, 'utf8');
+const revLines = stripComments(SCRIPT_TEXT).split(String.fromCharCode(10))
+  .filter((l) => /^\s*const REPRODUCIBLE_BASELINE_REVISION\s*=/.test(l));
+check('⑧ 可复现世代的界在脚本里只有一处定义（两处定义=两个结论，与 ref 解析同一条教训）',
+  revLines.length === 1, revLines.length + ' 处：' + revLines.join(' ;; '));
+const threshold = Number((revLines[0].split('=')[1] || '').replace(/[;,].*$/, '').trim());
+check('⑧ 界必须是正整数（读到 NaN 就是那条判据在空转）',
+  Number.isInteger(threshold) && threshold > 0, '读到=' + revLines[0]);
+check('⑧ 界两侧都判到：线上=界 时严格生效（翻红），线上=界-1 时豁免（绿）—— 界不是个开口的口子',
+  runGate(write('g-sha-at.json', man(threshold + 1, [tool({ sha256: 'c'.repeat(64) })])),
+    write('g-online-at.json', man(threshold, [tool()]))).status === 1
+  && gShaPre.status === 0, 'threshold=' + threshold);
 
 // ⑧-3b 线上基线**不带 revision 凭据**（源码还没钉值那一代编出来的字节，无法重造也无法追责）时
 // 第 ② 格对它不判 —— 这是本次之后每份都必须带 revision 的理由，不是一把永久关掉的尺子。
