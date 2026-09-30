@@ -95,15 +95,26 @@
 |---|---|---|
 | workflow YAML 校验 | `ci.yml` / `fast-apk` / `build-apk` → `scripts/validate-workflow.py` | workflow 写坏（GitHub 表现是"0 个 job"，伪装成"没触发"）；重复 key / `on.push` 互相覆盖 |
 | 跨层版本校验 | `ci.yml` → `scripts/gen-version.js --check` | 事实源缺失/非法；协议号漂移；内核要求协议 > 壳实现协议 |
-| 壳 versionCode 单调 + 同版本通道分叉 | `scripts/verify-apk-version-gate.sh`（取数外壳 `scripts/check-apk-release-version.sh`；参照物两种形状：某条 Release 的 `version.json` 资产，或日常链的 `v<versionName>` 归档族资产名 `scripts/read-archived-shell-version.sh`）；四个发布口各自调用，并把**参照物名**传给判据 | 回退；自动通道同号换字节；参照物选成这条链永不写的通道 |
+| 壳 versionCode 单调 + 同版本通道分叉 + 两格取严 | `scripts/verify-apk-version-gate.sh`（判据唯一宿主，0 放行 / 1 判红 / 2 无从校验）；取数外壳 `scripts/check-apk-release-version.sh` **每次取两格**：线上那格按参照物形状取（某条 Release 的 `version.json` 资产，或日常链的 `v<versionName>` 归档族资产名，宿主 `scripts/read-archived-shell-version.sh`），账本那格取 `scripts/read-apk-receipts.sh`（`ci-receipts` 分支上的 `apk-receipts.log`，写入唯一入口 `scripts/append-apk-receipt.sh`，四个发布口各自记账）；**两格取严**（按高的那格比），并把**参照物名**传给判据 | 回退；自动通道同号换字节；参照物选成这条链永不写的通道；**线上那一格被删小**（归档族可以被删，账本给出一条够不到的下界 —— 债 DS-16） |
+| Program 版本前进 | `program-ota` 发布步骤（取数 `scripts/read-release-asset.sh`） | 版本复用 → 设备判"无更新" → 静默不生效 |
 
 > 参照物必须是**这条链路自己会写的通道**：日常链 `fast-apk` 比对的是它写的 `v<versionName>` 归档族，
 > 不是发布面别名 `apk-latest`（2026-09-30 现读：那条 Release 今天 404，而日常链从不写它 ⇒ 取数每次退「首次发布」、
 > 门一个数都没比过；债 DS-14）。参照物空转的门比没有门更危险 —— 全绿读数会让人以为这一格有人守着。
-| Program 版本前进 | `program-ota` 发布步骤（取数 `scripts/read-release-asset.sh`） | 版本复用 → 设备判"无更新" → 静默不生效 |
-
-> 「不存在」与「取不到」的三态分类只住 `scripts/read-release-asset.sh`
-> （退 0=取到 / 退 10=确实没有 / 退 2=看不清）。退 2 一律**禁止发布**。
+>
+> 但「这条链路自己会写的通道」仍然是一份**可以被删的线上状态**：2026-09-30 同日实测归档族从 44 条掉到 34 条，
+> 6 个 `v<数字>` Release 消失，而门禁照绿 —— 所以线上那一格不再是完整的下界，回执账本才是
+> （账本住在独立分支的只追加日志上，`append-apk-receipt.sh` **永不** `--force`，推送被拒就红着让人重跑）。
+>
+> 账本这格的两条纪律：「未起账」与「看不清」都不许咽成「线上什么都没有」。未起账时**自动通道判红**，
+> 只有显式通道（`fast-*` tag / `workflow_dispatch`）放行并把第一笔记下 ⇒ **起账必须人工用显式通道做一次**；
+> 若要**播种**账本（直接写首笔而不是等一次发布），起始 versionCode 必须等于线上现存的最高码，
+> 从更低的码起账会让下一次自动发布判「有一次发布没记账」（这是设计，不是 bug）。
+> 「不存在」与「取不到」的三态分类按**所读对象**分三处宿主，退码约定同一条（0=取到 / 10=确实没有 / 2=看不清，
+> 退 2 一律**禁止发布**）：某个 Release 的**资产**住 `scripts/read-release-asset.sh`（内核 OTA 那条链共用这一处），
+> 日常链的**整族归档**住 `scripts/read-archived-shell-version.sh`（它没有「某个资产不存在」这一态，整族为空才是首次发布），
+> **回执账本文件**住 `scripts/read-apk-receipts.sh`（404=未起账，其它失败=看不清；把 gh 失败降成「账本还没有」
+> 就是拿更弱的参照物放行 —— 那是最危险的一侧被放行）。
 
 ## 7. 设备端"我是谁"
 

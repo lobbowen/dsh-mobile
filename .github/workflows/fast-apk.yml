@@ -448,8 +448,16 @@ jobs:
           VTAG="v$VN"
           bash scripts/gh-release-upload.sh "$VTAG" \
             --title "Lob OS $VN" \
-            --notes "版本化归档：versionName=$VN，versionCode=$VC。日常链不写滚动别名；发布面滚动别名仍是 apk-latest。" \
-            "$VDIR/$VAPK"
+            --notes "版本化归档：versionName=$VN，versionCode=$VC。日常链不写滚动别名；发布面滚动别名仍是 apk-latest。" "$VDIR/$VAPK"
+
+          # ── 发布回执记账（VERSION-GATE 记账口 1/4）───────────────────────────────
+          # 排在投递成功之后：账要记的是「已经发出去了」这件事，先记账再上传就会留下
+          # 「账上有而线上没有」的反向缺口。取严参照物靠这一行活着（债表 DS-16）。
+          # 判红就让它红：账没记上必须在这轮 CI 上看见，不许把「下一轮拿更小的下界比」
+          # 当成正常（同一门禁不许有第二份写入路径，所以这里只有宿主这一处调用）。
+          bash scripts/append-apk-receipt.sh fast-apk "$VCHANNEL" version.json \
+            "$VDIR/$VAPK" \
+            "https://github.com/${{ github.repository }}/releases/download/$VTAG/${VAPK}"
 
           rm -rf "$VDIR"
           echo

@@ -365,6 +365,8 @@
     "read-archived-shell-version.sh": "L0",
     "check-apk-release-version.sh": "L0",
     "verify-apk-version-gate.sh": "L0",
+    "read-apk-receipts.sh": "L0",
+    "append-apk-receipt.sh": "L0",
     "build-program-bundle.js": "cross",
     "gate-scan.js": "cross",
     "delivery-gate.js": "cross",
