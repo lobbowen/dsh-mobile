@@ -15,9 +15,15 @@
 
 ## 2. 版本协商
 
-- 连接建立后，内核发送 `handshake`，携 `protocol` 版本与 `requires` 能力清单。
+- 连接建立后，Program 侧发送 `bridge.handshake`，携 `protocol` 版本、`program` 身份与 `requires` 能力清单。
+  `program` 是本 Program 的身份 = 源清单 `id`（打包后成为包清单 `name`）；两侧实现都读它：
+  壳 `lobos/bridge/CapabilityBroker.kt` 的 `handshake()`、容器参考服务端 `container/engine/src/bridge/server.js`。
+- **按 Program 授权**（复检 AUD-G35）：授权表读**已安装包清单** `program-manifest.json` 的 `requires`。
+  握手未声明 `program`，或声明得与包清单 `name` 不符 → **只有 base**（授权组为空集），
+  此后每一次组内方法调用都返回 `-32001`。Program 侧因此必须把身份与自己清单的 `requires` 发出来，
+  且清单的 `requires` 要覆盖代码里真实调用的方法所属组（判据在 `programs/console/test/host-bridge-test.js` H-7）。
 - HostBridge 回 `capabilities`：设备当前**已开启**的能力集合（取决于无障碍 / 电池白名单 / 通知使用权 / ADB 配对 / 特殊权限状态）。
-- 内核 `requires` 超出 `capabilities` → 桥拒绝对应方法调用，其余正常。
+- 放行要过两道：该方法所属组在**本 Program 的授权表**里，且该组的设备能力已具备；任一不满足 → 桥拒绝该方法，其余正常。
 
 ## 3. 能力分组与方法表（第一版）
 

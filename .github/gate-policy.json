@@ -355,6 +355,22 @@
   ],
   "allowFiles": [
     {
+      "file": "programs/console/src/platform/agent-defaults.json",
+      "terms": [
+        "A-dsh",
+        "A-deep",
+        "A-deep2"
+      ]
+    },
+    {
+      "file": "programs/console/src/assembler/supply-table.json",
+      "terms": [
+        "A-dsh",
+        "A-deep",
+        "A-deep2"
+      ]
+    },
+    {
       "file": "container/engine/test/capability-single-source-gate-test.js",
       "terms": [
         "B-node",

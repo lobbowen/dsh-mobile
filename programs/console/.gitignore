@@ -1,7 +1,23 @@
 # Lob OS 控制面板 Program
+
+# 依赖：设备端由内核按 supply-table 现装，仓内不留
 node_modules/
+
+# 面板前端的构建产物。program-ota.yml 打包前现场 `npm run build` 产出它，
+# 再由 container/engine/src/program-bundle.js 收进包里 —— 入库等于把某一次构建的结果钉成源码。
 ui/dist/
+
+# *.version / 旧 C 层与 sea 打包的输出目录（可重建）
+dist/release/
+dist/sea/
+dist/npm/
+
+# 不要把 `dist` 写成一条通配。本目录树里的 `src/domains/dist/` 是**活源码**
+# （被 src/supervisor.js、src/assembler/manager.js、src/api/index.js 直接 require），
+# 随 Program 包一起投出去；`.47` 那版忽略表里的一行 `**/dist/` 把它整个吞掉过，
+# 结果是内核测试链在 require('../dist/index') 处断裂、交接包里缺件。
+# 构建产物只有上面点名的这三处，按名字点，不按目录名一网打尽。
+
 *.log
 *.tmp
 .cache/
-

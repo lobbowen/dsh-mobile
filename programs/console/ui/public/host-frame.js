@@ -1,14 +1,14 @@
 /**
- * 容器宿主帧逻辑（面板同源托管于 /__host；外链以满足 CSP script-src 'self'）。
+ * 容器宿主帧逻辑（内核同源托管于 /__host；外链以满足 CSP script-src 'self'）。
  *
- * 职责（单写入者契约下，宿主只「应答」，不提供任何面板写端点）：
- *   1. 接收面板 iframe 经 postMessage 发来的 `lobos:panel-update-request`；
+ * 职责（单写入者契约下，宿主只「应答」，不提供任何内核写端点）：
+ *   1. 接收内核面板 iframe 经 postMessage 发来的 `lobos:panel-update-request`；
  *   2. 转交安卓原生层（WebView 注入的 `window.LobosNative.onRequest`）——
- *      由容器 OTA 执行真正的面板包安装（唯一写入者）；
+ *      由容器 OTA 执行真正的内核包安装（唯一写入者）；
  *   3. 原生处理完经 `lobosDeliverResult(json)` 回灌，宿主把
  *      `lobos:panel-update-result` 投递回面板 iframe。
  *
- * 协议版本须与面板 `ui/src/services/console/panelUpdateBridge.ts` 的
+ * 协议版本须与内核 `ui/src/services/supervisor/panelUpdateBridge.ts` 的
  * `BRIDGE_PROTOCOL_VERSION` 一致（当前 = 1）。字段：
  *   request : { v, type:"lobos:panel-update-request", requestId }
  *   result  : { v, type:"lobos:panel-update-result", requestId, ok,
@@ -20,8 +20,8 @@
   var PROTOCOL_VERSION = 1;
   var REQUEST = 'lobos:panel-update-request';
 
-  function panelFrame() {
-    return document.getElementById('panel');
+  function programFrame() {
+    return document.getElementById('program');
   }
 
   // 面板 → 宿主：转发更新请求给原生层。
@@ -29,8 +29,8 @@
     var d = e.data;
     if (!d || typeof d !== 'object') return;
     if (d.type !== REQUEST) return;
-    // 仅接受来自面板 iframe 的消息（同源，宿主只嵌一个帧）。
-    var f = panelFrame();
+    // 仅接受来自内核面板 iframe 的消息（同源，宿主只嵌一个帧）。
+    var f = programFrame();
     if (f && e.source && e.source !== f.contentWindow) return;
     try {
       if (window.LobosNative && typeof window.LobosNative.onRequest === 'function') {
@@ -48,7 +48,7 @@
   window.lobosDeliverResult = function (json) {
     try {
       var msg = typeof json === 'string' ? JSON.parse(json) : json;
-      var f = panelFrame();
+      var f = programFrame();
       if (f && f.contentWindow) f.contentWindow.postMessage(msg, '*');
     } catch (err) { /* 忽略解析错误 */ }
   };

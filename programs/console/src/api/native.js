@@ -1,69 +1,77 @@
 'use strict';
 
-// 域：Program 原生管理（OS AppManager / InstanceManager）。
-//
-// 面板只做「编排与展示」；下载/校验/落位/版本指针/卸载/启停的执行体在 OS 原生。
-// 本域把旧「单一载荷专用」入口泛化为 Program 描述（id/spec/version），不再写死任何名称。
-
-const { call } = require('./_os');
-
+// 域：原生 LOBOS 生命周期 API（唯一通道）。
 function owns(pathname) {
   return pathname.startsWith('/native/');
 }
 
 function handle(ctx) {
-  const { panel, req, res, pathname, identity, send, collectBody, originAllowed } = ctx;
+  const { sup, req, res, pathname, identity, send, collectBody, originAllowed, tokOf } = ctx;
 
-  if (req.method === 'GET' && pathname === '/native/status') {
-    return call(send, panel, 'os.programs.overview', {}, { offlineBody: { installed: false, programs: [], versionInfo: null, upgrade: null } });
-  }
-  // 随包原生件/能力件的**上一轮核验结论**（读落盘，不重跑探针）。
-  // 桥不可用就 503 OS_OFFLINE：这里没有可以代答的本地事实，把「读不到」写成
-  // 「都就位」就是 ADR-0001 那条「投放≠能力却零痕迹」的复发（债 D12）。
-  if (req.method === 'GET' && pathname === '/native/capabilities') {
-    return call(send, panel, 'os.nativeAssets.status', {});
-  }
-  if (req.method === 'POST' && pathname === '/native/check-update') {
-    if (!originAllowed(req, panel.config.apiPort)) { req.resume(); return send(403, { ok: false, error: 'cross-origin request rejected' }); }
-    req.resume();
-    return call(send, panel, 'os.appmgr.checkUpdate', {});
-  }
-  if (req.method === 'POST' && (pathname === '/native/install' || pathname === '/native/upgrade')) {
-    if (!originAllowed(req, panel.config.apiPort)) { req.resume(); return send(403, { ok: false, error: 'cross-origin request rejected' }); }
-    const method = pathname === '/native/install' ? 'os.appmgr.install' : 'os.appmgr.upgrade';
-    return collectBody(req, res, 4096, (body) => {
-      let j = {};
-      try { j = body ? JSON.parse(body) : {}; } catch {}
-      const params = {};
-      if (typeof j.id === 'string' && j.id) params.id = j.id;
-      if (typeof j.version === 'string' && j.version) params.version = j.version;
-      call(send, panel, method, params);
-    });
-  }
-  if (req.method === 'POST' && pathname === '/native/uninstall') {
-    if (!originAllowed(req, panel.config.apiPort)) { req.resume(); return send(403, { ok: false, error: 'cross-origin request rejected' }); }
-    req.resume();
-    return call(send, panel, 'os.appmgr.uninstall', {});
-  }
-  if (req.method === 'POST' && pathname === '/native/settings') {
-    if (!originAllowed(req, panel.config.apiPort)) { req.resume(); return send(403, { ok: false, error: 'cross-origin request rejected' }); }
-    return collectBody(req, res, 4096, (body) => {
-      let j = {};
-      try { j = body ? JSON.parse(body) : {}; } catch {}
-      call(send, panel, 'os.programs.settings', j);
-    });
-  }
-  // 带令牌的 Program Web 直连 URL：令牌是会话凭据 → 只认回环来源。
-  if (req.method === 'GET' && pathname === '/native/access') {
-    if (!identity.loopback) return send(403, { ok: false, error: 'Program 访问令牌仅对本机回环下发' });
-    const u = new URL(req.url, 'http://localhost');
-    void u;
-    return send(501, { ok: false, error: 'not_supported_in_v4', note: '面板由 OS 直接承载；OS 不签发 Web 令牌' });
-  }
-
+    // 原生 LOBOS 生命周期（唯一通道）：状态(含版本) / 检测更新 / 安装 / 升级 / 卸载
+    if (req.method === 'GET' && pathname === '/native/status') {
+      return send(200, {
+        ...(sup.nativeManager ? sup.nativeManager.status() : { installed: false }),
+        versionInfo: sup.nativeManager ? sup.nativeManager.versionInfo() : null,
+        upgrade: sup.nativeManager ? sup.nativeManager.upgradeStatus() : null,
+      });
+    }
+    if (req.method === 'POST' && pathname === '/native/check-update') {
+      if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, { ok: false, error: 'cross-origin request rejected' }); }
+      sup.nativeManager.checkUpdate().then((r) => send(200, { ok: true, ...r })).catch((e) => send(500, { ok: false, error: e.message }));
+      return;
+    }
+    if (req.method === 'POST' && pathname === '/native/install') {
+      if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, { ok: false, error: 'cross-origin request rejected' }); }
+      collectBody(req, res, 1024, (body) => {
+        let version = null;
+        try { const j = body ? JSON.parse(body) : {}; if (typeof j.version === 'string' && j.version) version = j.version; } catch {}
+        // 异步任务模式：同步前置检查拒绝 → 400；通过 → 202，进度经 /native/status 轮询（前端不再真空）
+        const r = sup.nativeManager.startInstall(version);
+        if (r && r.ok === false) return send(400, r);
+        return send(202, { ok: true, accepted: true, state: 'installing' });
+      });
+      return;
+    }
+    if (req.method === 'POST' && pathname === '/native/upgrade') {
+      if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, { ok: false, error: 'cross-origin request rejected' }); }
+      collectBody(req, res, 4096, (body) => {
+        let requested = null;
+        try { const j = body ? JSON.parse(body) : {}; if (j && typeof j.version === 'string' && j.version) requested = j.version; } catch {}
+        if (sup.nativeManager.busy()) {
+          return send(409, { error: 'upgrade already in progress', state: sup.nativeManager.upgradeState });
+        }
+        sup.nativeManager.upgrade(requested).catch(() => {}); // 异步升级，前端轮询 /native/status.upgrade
+        send(202, { ok: true, accepted: true });
+      });
+      return;
+    }
+    if (req.method === 'POST' && pathname === '/native/uninstall') {
+      if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, { ok: false, error: 'cross-origin request rejected' }); }
+      // 异步任务模式：同步前置检查拒绝 → 400；通过 → 202，进度经 /native/status 轮询
+      const r = sup.nativeManager.startUninstall();
+      if (r && r.ok === false) return send(400, r);
+      return send(202, { ok: true, accepted: true, state: 'uninstalling' });
+    }
+    // ── 原生主干(main)设置（概念清分 2026-09-06）：main 的设置不再经 /instances（沙箱域）；
+    //    统一走本主干入口。白名单：guardian(守护自动拉起) / remoteEnabled(远程控制) / frp。
+    if (req.method === 'POST' && pathname === '/native/settings') {
+      if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, { ok: false, error: 'cross-origin request rejected' }); }
+      collectBody(req, res, 4096, (body) => {
+        try {
+          const j = body ? JSON.parse(body) : {};
+          if (sup.patchLobosMain && typeof sup.patchLobosMain === 'function') {
+            const r = sup.patchLobosMain(j);
+            return send(r && r.ok === false ? 400 : 200, r);
+          }
+          return send(500, { ok: false, error: '守卫未实现 patchLobosMain' });
+        } catch (e) { return send(400, { ok: false, error: e.message }); }
+      });
+      return;
+    }
+  // 域内未匹配(方法/子路径) → 全局兜底语义(与单文件时代一致)
   if (req.method === 'GET' || req.method === 'POST') return send(404, { error: 'not found', path: pathname });
   return send(405, { error: 'method not allowed' });
 }
 
 module.exports = { owns, handle };
-

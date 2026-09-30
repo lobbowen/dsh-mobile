@@ -38,8 +38,10 @@ shebang 由原生兼容件按**调用方 PATH** 兑现（`container/native/d1/ex
 ENV-19/ENV-20 同一形状；而它想换来的那个形状正是 `container/native/d1/exec-path.c:8-9` 已定罪的
 「中间多了一层」。
 
-**今天内核侧还有一道门挡着**：`programs/console/test/console-not-init-test.js:38` 对内核全 src 禁
-`child_process` ⇒ 「应用直接调环境里的 git/npm」在内核侧尚未打开，定罪与动作在册债表 ENV-21。
+**这道门今天不在仓内**：钉「面板全 src 禁 `child_process`」的那道门禁属 .48 世代代码，
+2026-10-01 面板回到 .47 世代时随那一代一并移除；它的替换判据（判据对象换成「不得自持常驻权威」，
+配能红的双向夹具）尚未落地 —— 所以「应用直接调环境里的 git/npm」现在是**门没了、判据也没补上**的状态，
+定罪与动作仍册在债表 ENV-21。
 环境形状的行为门禁宿主是 `container/engine/test/boot-env-contract-test.js`（真名=符号链接、APK 侧不留
 npm 面、C 层供给对账），不是 `container/engine/test/test-chain-completeness-test.js` —— 后者只管
 engine 测试脚本必须入 `test:logic` 链，共 33 行、npm 零命中（ENV-19 定过这条空指）。
