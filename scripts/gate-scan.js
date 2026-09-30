@@ -47,10 +47,16 @@ function isTextFile(p) {
 }
 const hits = [];   // {file, term, count, samples:[]}
 const liveSurface = new Map(); // termId → 该规则真正覆盖到的文件数（0 = 死规则）
+// `dist` 只有长在包根上才是构建产物。`src/**/dist` 是**随产物上传的活源码**，
+// 按目录名一律放行等于给它开了一个不进门禁的门（2026-10-01 定罪）。
+function skips(dir, name) {
+  if (!ignoreSeg.has(name)) return false;
+  return !(name === 'dist' && !fs.existsSync(path.join(dir, 'package.json')));
+}
 function walk(dir) {
   let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
   for (const e of ents) {
-    if (ignoreSeg.has(e.name)) continue;
+    if (skips(dir, e.name)) continue;
     const p = path.join(dir, e.name);
     if (e.isDirectory()) { walk(p); continue; }
     if (!e.isFile() || !isTextFile(p)) continue;

@@ -157,10 +157,14 @@ console 停止/卸载后，OS 必须仍满足：
 3. OS 仍可被管理（原生最小管理面：state/journal/appmgr 不依赖 console）；
 4. 常驻通知 / 前台服务不因 console 退出而消失。
 
-console 侧可验证判据见 `programs/console/test/console-not-init-test.js`：
-- 源码不存在锁文件/daemon 自拉起/子进程监督（无 `child_process` spawn 系统组件、无 `guard/`、无 `console.js`）；
-- `manifest.json` `role=system`、`entry=bin/panel`，且 `package.json` `bin.panel`；
-- 面板 API 在桥不可用时返回显式 `OS_OFFLINE`，并不声称 OS 在线。
+console 侧这三格今天的实际状态（2026-10-01 面板回到 .47 世代后逐条核过）：
+- `manifest.json` `role=system`、`entry=bin/panel`，且 `package.json` `bin.panel` —— 成立；
+- 桥不可用时 `call()` 返回 null 且**不抛**、`handshake()` 返回 null —— 由 `programs/console/test/host-bridge-test.js` 的 H-3 判；
+- 「源码不存在锁文件/daemon 自拉起/子进程监督」整条判据原先住 `programs/console/test/console-not-init-test.js`，
+  该文件属 .48 世代、随面板回归移除；替换判据（从「不许出现某个词」改判「不得自持常驻权威」＋双向夹具）
+  尚未落地，欠账在册债表 **ENV-21**；
+- 面板 API 在桥不可用时**不返回显式 `OS_OFFLINE`**（.47 代码里没有这个词，逐 src 核过），它只按上面那条降级成
+  null。要把「不声称 OS 在线」做成可见语义，是 W1 侧要补的一格，不是 console 已完成的事实。
 
 ## 4. W1 落地顺序建议（解除阻塞）
 

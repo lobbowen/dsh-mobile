@@ -120,14 +120,17 @@ npm test   # 见 package.json 的测试链
 | 门禁 | 作用 |
 |---|---|
 | `test/_preload.js` | 测试运行器/夹具（不单独入链） |
-| `test/console-not-init-test.js` | 「console 不是 init / 可停可换」硬不变量（A10/A11/A12/D9/A16） |
 | `test/api-surface-test.js` | 契约面双向一致 + **已删端点不得复活** |
-| `test/host-bridge-test.js` | 桥传输（`lobos_hostbridge` UDS）与降级不变量 |
-| `test/market-test.js` | 市场泛化（ProgramMarket，无载荷名写死） |
-| `test/panel-smoke-test.js` | 桥不可用时面板降级且不伪造 OS 状态 |
+| `test/host-bridge-test.js` | 桥传输（`lobos_hostbridge` UDS）与降级不变量（H-3：桥不可用时不抛、不伪造） |
+| `test/program-update-single-writer-test.js` | 面板「零自更新面」：单写入者是容器 OTA |
+| `test/sigterm-desired-test.js` | 守卫被停时不改期望状态（面板可停可换的那一侧） |
+| `test/test-port-discipline-test.js` | 测试端口纪律（不自持端口权威） |
+
+「console 不是 init」这条硬不变量原先由 `test/console-not-init-test.js` 判，该文件属 .48 世代、随 2026-10-01 的
+.47 面板回归移除；它的替换判据（改判「不得自持常驻权威」＋双向夹具）尚未落地，在册债表 ENV-21。
+其余链上判据见 [console-tests.md](console-tests.md)。
 
 **接口契约（console 卸载的系统级职责 → OS 原生）**：见 [console-system-api.md](console-system-api.md)（W2↔W1 的 `os.*` 方法清单）。
-**已移除测试清单（D7）**：见 [console-tests.md](console-tests.md)。
 
 ---
 
