@@ -9,12 +9,12 @@
   },
   "entry": "bin/panel",
   "args": [
-    "serve"
+    "daemon"
   ],
   "ports": {
     "http": {
       "env": "PANEL_PORT",
-      "health": "/"
+      "health": "/status"
     }
   },
   "requires": [
@@ -38,7 +38,7 @@
   },
   "ui": {
     "kind": "http",
-    "path": "/__panel"
+    "path": "/__host"
   },
   "_note": "控制面板 Program（临时过渡）：状态监控 / 安装管理编排 / 小组件。不是系统层，可停可换。"
 }

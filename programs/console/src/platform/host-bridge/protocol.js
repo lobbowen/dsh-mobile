@@ -1,14 +1,14 @@
 'use strict';
 
-// OS 能力桥协议常量与编解码（Program 侧）。
+// HostBridge 协议常量与编解码（内核侧）。
 //
-// 本文件是 OS 侧 `container/engine/src/bridge/protocol.js` 的**Program 镜像**：
-// 协议必须逐字节一致（PROTOCOL_VERSION / 错误码 / 帧字段）。任一侧语义变更须同步递增
-// PROTOCOL_VERSION。
+// 本文件是容器侧 `container/engine/src/bridge/protocol.js` 的**内核镜像**（单仓布局）：
+// 但协议必须逐字节一致（PROTOCOL_VERSION / 错误码 / 帧字段）。任一侧语义变更须同步递增
+// PROTOCOL_VERSION（与 ui/src/services/supervisor/panelUpdateBridge.ts 的 BRIDGE_PROTOCOL_VERSION 同源）。
 
 const PROTOCOL_VERSION = 1;
 
-// 错误码（OS 能力桥 §5）：标准 JSON-RPC 区间 + 桥自定义区间（-32000 起）。
+// 错误码（BRIDGE_PROTOCOL §5）：标准 JSON-RPC 区间 + 桥自定义区间（-32000 起）。
 const ERROR_CODES = {
   PARSE_ERROR: -32700,
   INVALID_REQUEST: -32600,
@@ -35,18 +35,12 @@ function notification(method, params) {
   return { jsonrpc: '2.0', method, params: params || {} };
 }
 
-/** 握手：Program 连接后主动发 bridge.handshake{ protocol, program, requires }。
- *  program 是本 Program 的身份（包清单 name），OS 据此查授权表（契约 §0）。
- */
-function handshakeRequest(id, requires, program) {
-  return request(id, 'bridge.handshake', {
-    protocol: PROTOCOL_VERSION,
-    program: program || null,
-    requires: requires || [],
-  });
+/** 握手：内核连接后主动发 bridge.handshake{ protocol, requires }。 */
+function handshakeRequest(id, requires) {
+  return request(id, 'bridge.handshake', { protocol: PROTOCOL_VERSION, requires: requires || [] });
 }
 
-/** 协商能力：requires（bridge:* 组令牌）与 OS 实际可用分组的交集/差集。 */
+/** 协商能力：requires（bridge:* 组令牌）与容器实际可用分组的交集/差集。 */
 function negotiateGroups(requires, availableGroups) {
   const granted = (requires || []).filter((r) => availableGroups.includes(r));
   const missing = (requires || []).filter((r) => !availableGroups.includes(r));
@@ -63,4 +57,3 @@ module.exports = {
   handshakeRequest,
   negotiateGroups,
 };
-

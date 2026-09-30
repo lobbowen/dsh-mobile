@@ -1,0 +1,54 @@
+{
+  "$comment": "D2 平台件库（唯一处）：每件的**身份 + 上游按什么名字/位置找它 + 版本/哈希**。本体的制造与投递（B 种子 / C 内容 / npm 树）不由本表负责；落位规则与能力判据归 E（../assembler/supply-table.json）。version/sha256 为 null = 尚未固化（由 .github/native-capabilities-pin.json 的指纹固化机制填写）。",
+  "schemaVersion": 1,
+  "pieces": [
+    {
+      "id": "rg",
+      "libName": "liblobosrg.so",
+      "upstream": "可执行名 rg（Agent 的 glob/grep 直接 exec 它）",
+      "delivery": "apk-seed",
+      "placedAt": "prefix-bin",
+      "name": "rg",
+      "version": null,
+      "sha256": null
+    },
+    {
+      "id": "pty",
+      "libName": "liblobosptyprobe.so",
+      "upstream": "node-pty 的 prebuilds/android-arm64/pty.node（两种落点：$PREFIX/lib 与产品树）",
+      "delivery": "apk-seed",
+      "placedAt": "prefix-lib",
+      "name": "pty.node",
+      "version": null,
+      "sha256": null
+    },
+    {
+      "id": "flock-native",
+      "libName": "liblobosflock.so",
+      "upstream": "无上游名：以环境变量 LOBOS_FLOCK_NATIVE 指向的原生库",
+      "delivery": "native-lib",
+      "placedAt": "env",
+      "env": "LOBOS_FLOCK_NATIVE",
+      "version": null,
+      "sha256": null
+    },
+    {
+      "id": "sharp-wasm32",
+      "libName": null,
+      "upstream": "npm 包 @img/sharp-wasm32 的 wasm32 绑定（sharp 取它的绑定，不是取 native）",
+      "delivery": "npm-tree",
+      "placedAt": "product-node-modules",
+      "version": null,
+      "sha256": null
+    },
+    {
+      "id": "narb",
+      "libName": null,
+      "upstream": "require('node-addon-require-builtin') 的 JS 垫片源（narb 垫片）",
+      "delivery": "npm-tree",
+      "placedAt": "product-node-modules",
+      "version": null,
+      "sha256": null
+    }
+  ]
+}
