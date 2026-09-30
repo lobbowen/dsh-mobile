@@ -11,3 +11,13 @@ apk     : app-debug-1.1.12+45.apk
 apk_sha : d43ac32866a10155a526360a444f31de733d0e3346f67e20a496ae1763e72fc8
 run     : 36691930091
 url     : https://github.com/lobbowen/dsh-mobile/releases/download/v1.1.12/app-debug-1.1.12+45.apk
+RECEIPT
+time    : 2026-09-30 09:14:10 UTC
+chain   : fast-apk
+channel : explicit
+shell   : 1.1.12+45
+sha     : 2ae6791f5e0db37b7e4b800034da83f2fc9f2893
+apk     : app-debug-1.1.12+45.apk
+apk_sha : d43ac32866a10155a526360a444f31de733d0e3346f67e20a496ae1763e72fc8
+run     : 36694566702
+url     : https://github.com/lobbowen/dsh-mobile/releases/download/v1.1.12/app-debug-1.1.12+45.apk
