@@ -1,8 +1,8 @@
 {
   "$comment": "OS（APK）分发身份的单一事实源。三版本流（OS/Runtime/Program）见 docs/adr/0004-three-version-streams.md（三流：OS / Runtime / Program）。",
   "shell": {
-    "versionName": "1.1.12",
-    "versionCode": 45,
+    "versionName": "1.1.13",
+    "versionCode": 46,
     "bridgeProtocol": 1
   }
 }
