@@ -30,51 +30,64 @@
 - `scope`：`app` · `engine` · `native` · `console` · `ci` · `docs`
 - **一次提交只做一件事**；"目录搬迁"与"逻辑修改"必须分开提交。
 
-## 4. Tag 规范（按实际 workflow 校正）
+## 4. Tag 规范（2026-09-30 按发布连归一后的实际 workflow 校正）
 
-| Tag | 触发方 | 产物 / 作用 |
+**一条版本流一个发布 tag，发哪一版写在 ref 名里**（全仓拓扑见
+[../adr/0011-one-release-chain-per-stream.md](../adr/0011-one-release-chain-per-stream.md)）。
+
+| Tag | 消费方 | 产物 / 作用 |
 |---|---|---|
-| `v<versionName>` | fast-apk / ci | 壳的**版本化归档**（`app-debug-<VN>+<VC>.apk`，debug 形态，取证用）；`v*` 也触发 ci.yml |
-| `apk-latest` | build-apk / release-admin(publish·repack) | 滚动通道（`app-release.apk` + `version.json`），设备真正去读的那个地址；写入前必过形态+签名门禁 |
-| `node-runtime-<version>-<abi>` | build-apk 的 pin job | 预编译 Node 运行时（如 `node-runtime-24.21.0-arm64-v8a`） |
-| `program-<version>` | program-ota | Program 版本化归档（`program-<v>.zip` + manifest） |
-| `program-<channel>` | program-ota | 内核通道滚动归档（canary / stable） |
-| `program-ota-*` | 人 | **触发** program-ota 构建 |
-| `fast-*` | 人 | **触发** fast-apk 构建 |
-| `pin-node-*` | 人 | 触发固化最近一次成功的 Node 构建产物 |
-| `admin-*` | 人 | 管理命令（status / logs / release / cancel / cancelall） |
-| `publish-*` · `repack-*` | 人 | 触发 release-admin 的 publish / repack |
+| `os-release-<versionName>-<versionCode>` | fast-apk | **发布这一版壳**。tag 名那两个数必须与 `version.json` 逐字相等才投递，落到版本化归档 `v<versionName>`（资产 `app-debug-<VN>+<VC>.apk`）并记一笔回执 |
+| `runtime-release-<node 版本>-<abi>` | build-apk | **固化这一版运行时**：跑完整交叉编译后发不可变 Release `node-runtime-<版本>-<abi>`（如 `node-runtime-24.21.0-arm64-v8a`） |
+| `userland-<canary\|stable>-<revision>` | build-userland | **发 C 层清单/件**到对象存储；`revision` 是正整数、闸门要求严格单调 |
+| `program-ota-<channel>-<version>` | program-ota | **发这一版 Program**：`program-<version>` 版本归档 + `program-<channel>` 通道指针 |
+| `v<versionName>` | fast-apk 写、ci 读 | 壳的版本化归档 Release 名（不是触发器；`v*` 也在 ci.yml 的 tags 里，跑门禁） |
+| `program-<version>` / `program-<channel>` | program-ota | Program 版本化归档 / 通道滚动归档 |
+| `native-cap-<指纹>-<abi>` | pin-capabilities | 小件原生能力件的不可变固化（身份是内容指纹，不是序号） |
 
-> 已废弃：`container-v<semver>`、`kernel-v<semver>`（曾在本规范出现，workflow 从未消费）。
+> 已废止（2026-09-30 发布连归一时整条删除，删除理由与实测账在 ADR-0011 §3；此处保留名字是因为
+> 历史取证与债表按这些名字引用它们）：`fast-*`、`admin-*`、`publish-*`、`repack-*`、`pin-node-*`、
+> `apk-latest`（滚动别名，设备上没有任何东西读它），以及更早的 `container-v<semver>`、`kernel-v<semver>`
+> （曾在本规范出现，workflow 从未消费）。
 
 ## 5. CI 触发（按实际 workflow 校正）
 
 ```yaml
-# ci.yml —— 统一门禁（骨干）
+# ci.yml —— 统一门禁（骨干，不投递任何东西）
 on:
   push:  { branches: [main, master], tags: ['v*'],
-           paths: ['container/**','programs/console/**','docs/contracts/**','scripts/**',
-                   '.github/native-assets.txt','.github/workflows/**'] }
-  pull_request: { paths: [同上] }
+           paths: ['container/**','programs/**','docs/**','scripts/**','version.json',
+                   '.github/gate-policy.json','.github/native-assets.txt','.github/workflows/**', …] }
+  pull_request: { paths: [与 push 侧逐字对称] }
 
-# fast-apk.yml —— 日常出包
+# fast-apk.yml —— OS 版本流（唯一壳 APK 投递口）
 on:
-  push: { branches: [main, master],
+  push: { branches: [main, master],      # → 只构建校验，不投递
           paths: ['container/app/**','container/native/**','gradle/**','build.gradle.kts',
                   'settings.gradle.kts','gradle.properties','gradlew','gradlew.bat',
-                  '.github/native-assets.txt'],
-          tags: ['fast-*'] }
+                  '.github/native-assets.txt','version.json'],
+          tags: ['os-release-*'] }       # → 发布这一版
+  workflow_dispatch:                      # → 只构建校验
 
-# program-ota.yml —— Program OTA
-on:
-  workflow_dispatch: { ... }
-  push: { tags: ['program-ota-*'] }     # 确实有 push 触发，勿删
+# build-apk.yml —— Runtime 版本流
+on: { workflow_dispatch: {}, push: { tags: ['runtime-release-*'] } }   # 不监听分支
 
-# build-apk.yml —— 全量 Node 交叉编译，仅手动
-on: { workflow_dispatch: {} }          # push 触发已移除
+# build-userland.yml —— C 层版本流
+on: { push: { branches: [main], paths: [供给声明与发布器], tags: ['userland-*'] },
+      workflow_dispatch: {} }
+
+# program-ota.yml —— Program 版本流
+on: { workflow_dispatch: { inputs: … }, push: { tags: ['program-ota-*'] } }
+
+# pin-capabilities.yml —— 能力件固化（唯一刻意保留的 dispatch-only 链，理由见 ADR-0011 §5）
+on: { workflow_dispatch: {} }
 ```
 
-目的：**内核改动不触发 APK 重编；容器改动不自动发Program 包。**
+**⚠️ 一个 workflow 的 `on.push` 只能出现一次**：写成两个 `push:` 块时，YAML 里后一个会覆盖前一个
+（重复 key），触发条件变得不可预期 —— fast-apk 真踩过这条坑。分支条件与 tag 条件必须合进同一个块。
+**⚠️ Path filters 对 tag 推送不做判定**（官方语义），所以上面 `paths` 只约束分支推送轮，tag 轮恒跑。
+
+目的：**内核改动不触发 APK 重编；Program 改动不自动发壳。**
 注意 fast-apk **不**监听 `container/engine/**` 与 `programs/console/**`。
 
 ## 6. 凭据规范

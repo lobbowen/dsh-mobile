@@ -25,8 +25,8 @@ OS（`container/`）是**冻结的安卓 APK**：原生 Kotlin 容器 + 随包 R
 
 | 场景 | 走哪条 | 耗时 |
 |---|---|---|
-| 改 Kotlin / res / assets / gradle | `fast-apk.yml` | 分钟级 |
-| 改 `scripts/build-node-android.sh` / 升级 Node | `build-apk.yml`（手动）+ pin | 2~3 小时 |
+| 改 Kotlin / res / assets / gradle | `fast-apk.yml`（推 `os-release-*` tag 才投递） | 分钟级 |
+| 改 `scripts/build-node-android.sh` / 升级 Node | `build-apk.yml`（推 `runtime-release-*` tag 同轮固化） | 2~3 小时 |
 | 改 `container/engine/**` | `ci.yml` 的 container job | 分钟级 |
 
 硬约束（W^X / `DT_RUNPATH` / Ed25519）见 [../architecture.md](../architecture.md)。

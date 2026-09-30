@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 #
 # APK 形态门禁 —— 「这个包是不是 debuggable」的唯一实现。
-# 调用点：写 apk-latest 的三条链路（build-apk / release-admin publish / repack）判**非** debuggable；
-# fast-apk 的双档对照（debug 档必须被读成 debuggable）自证这把尺子两端都能红。
+# 调用点：fast-apk 一条（docs/adr/0011 之后全仓只剩它投壳 APK），两侧对照各调一次 ——
+# debug 档（当前投递的那颗）必须被读成 debuggable，release 档必须被判**非** debuggable，
+# 这一对同时为真才证明这把尺子两端都能红。
+# 以前「写 apk-latest 的三条链路（build-apk / release-admin publish / repack）」也调它判非
+# debuggable，随那三条投递口一起废除。
 #
 # 为什么必须有（债 AUD-G33）：发布面从建立起只跑过 assembleDebug，而签名门禁查的是「谁签的」。
 # 这两件事会同时为真 —— AGP 在仓内有 release keystore 时，连 debug 档都用它签名，
@@ -104,7 +107,7 @@ if [ "$EXPECT" = debug ]; then
 fi
 
 if [ "$DEBUGGABLE" = 1 ]; then
-  echo "::error title=发布包是 debug 形态::android:debuggable=true 的包会投进 apk-latest（存量设备的更新通道）—— 设备私有目录对任意 adb shell 敞开、可被调试器附加。发布链路应跑 assembleRelease。"
+  echo "::error title=发布包是 debug 形态::android:debuggable=true 的包进了版本化归档就是存量设备的更新内容 —— 设备私有目录对任意 adb shell 敞开、可被调试器附加。投递前应跑 assembleRelease。"
   exit 1
 fi
 echo "[lobos-form] [ok] 非 debuggable（release 形态）"

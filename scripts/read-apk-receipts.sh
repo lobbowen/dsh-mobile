@@ -45,13 +45,13 @@ mkdir -p "$OUTDIR"
 ERR="$OUTDIR/.read-err"
 RAW="$OUTDIR/.$LOG"
 
-# 「不存在」与「取不到」分开判（与 scripts/read-release-asset.sh 同一条措辞表）：
+# 「不存在」与「取不到」分开判（词表唯一宿主 scripts/gh-absence.sh，与 read-release-asset.sh 同源）：
 #   把 gh 失败降成「账本还没有」，门禁就会拿更弱的参照物放行 —— 那是最危险的一侧被放行。
-absent() { grep -qiE 'HTTP 404|Not Found|no ref found|does not exist|not found' "$1"; }
+source "$(dirname "$0")/gh-absence.sh"
 
 if ! gh api -H 'Accept: application/vnd.github.raw+json' \
      "repos/$REPO/contents/$LOG?ref=$REF" >"$RAW" 2>"$ERR"; then
-  if absent "$ERR"; then
+  if gh_absent "$(cat "$ERR")"; then
     echo "[read:receipts] 账本 $REF/$LOG 还不存在 —— 尚未记账（调用方不得据此判「线上没有发布过」）"
     exit 10
   fi

@@ -28,11 +28,13 @@ const { spawnSync } = require('child_process');
 const makeRunner = require('./harness');
 
 const { check, finish } = makeRunner('apk-signing-gate');
+const strip = makeRunner.stripComments;
 
 const ROOT = path.resolve(__dirname, '..', '..', '..');
 const INJECT = path.join(ROOT, 'scripts/inject-apk-keystore.sh');
 const VERIFY = path.join(ROOT, 'scripts/verify-apk-signing.sh');
 const WF_DIR = path.join(ROOT, '.github/workflows');
+const SCRIPTS_DIR = path.join(ROOT, 'scripts');
 
 const FP = '4f2a9c00112233445566778899aabbccddeeff00112233445566778899aabbcc';
 const FP_OTHER = 'ff2a9c00112233445566778899aabbccddeeff00112233445566778899aabbcc';
@@ -355,20 +357,48 @@ for (const [label, body, wantRc] of [
   check('workflow 无 /tmp/signing-state 残留（标记文件零读取点，写方已全部删除）',
     markers.length === 0, markers.join(','));
 
+  // 发布连归一（docs/adr/0011）之后，全仓只有一条链会构建并投递壳 APK：fast-apk。
+  // 名单从「三链同调」改成「唯一投递口一调」—— 少的是**口**不是判据；这里若多出一条
+  // 调用点，就等于又多了一条能把包发进设备更新通道的链路，而那正是归一要删的东西。
+  // 反向扫描把 scripts/ 也算进来：调用方藏在某个脚本里，比藏在 workflow 里更难发现。
   const injCallers = wfs.filter(([, t]) => /scripts\/inject-apk-keystore\.sh/.test(t)).map(([f]) => f).sort();
-  check('注入宿主被 fast-apk / build-apk / release-admin 三链同调（一处策略、一份实现）',
-    JSON.stringify(injCallers) === JSON.stringify(['build-apk.yml', 'fast-apk.yml', 'release-admin.yml']),
-    injCallers.join(','));
+  check('注入宿主只被唯一投递口 fast-apk 调用（多一个调用点 = 多一条投递口）',
+    JSON.stringify(injCallers) === JSON.stringify(['fast-apk.yml']), injCallers.join(','));
   const verCallers = wfs.filter(([, t]) => /scripts\/verify-apk-signing\.sh/.test(t)).map(([f]) => f).sort();
-  check('签名身份门禁被同三条链路调用',
-    JSON.stringify(verCallers) === JSON.stringify(['build-apk.yml', 'fast-apk.yml', 'release-admin.yml']),
-    verCallers.join(','));
+  check('签名身份门禁只被唯一投递口 fast-apk 调用',
+    JSON.stringify(verCallers) === JSON.stringify(['fast-apk.yml']), verCallers.join(','));
+  const HOSTS = ['inject-apk-keystore.sh', 'verify-apk-signing.sh'];
+  const scriptCallers = fs.readdirSync(SCRIPTS_DIR)
+    .filter((f) => /\.(sh|js)$/.test(f) && !HOSTS.includes(f))
+    .filter((f) => strip(fs.readFileSync(path.join(SCRIPTS_DIR, f), 'utf8'))
+      .match(new RegExp('bash\\s+"?\\S*(' + HOSTS.join('|') + ')', 'g')))
+    .map((f) => 'scripts/' + f);
+  check('scripts/ 里没有第三个调用方（宿主的接入路径只有 workflow 那一条）',
+    scriptCallers.length === 0, scriptCallers.join(','));
+
   const byName = Object.fromEntries(wfs);
-  check('发布面两条链（build-apk / repack）都带 --require-stable；日常链不带',
-    /verify-apk-signing\.sh[\s\S]{0,400}?--require-stable/.test(byName['build-apk.yml'])
-      && /verify-apk-signing\.sh[\s\S]{0,400}?--require-stable/.test(byName['release-admin.yml'])
-      && !/verify-apk-signing\.sh[^\n]*--require-stable/.test(byName['fast-apk.yml']),
-    '发布档与日常档的区分丢了');
+  // 档位区分不再跨链路，而在**同一条链内部按 ref 分**：构建校验轮（push/dispatch）允许
+  // debug 签名档，发布轮（os-release-* tag）必须稳定签名。三种坏形状都要能红：
+  //   · 追加被删 → 发布轮不再要求稳定签名（设备身份换掉且不可逆）；
+  //   · 改成无条件追加 → 构建校验轮没密钥就发不出验证包，把取证轮一起拦死；
+  //   · 追加了却没交给调用行 → 门禁空跑（写了没人读，与 /tmp/signing-state 同一种病）。
+  // 开关 = 「--require-stable 那一行的条件就是发布 ref」。先自证这把尺子两侧都有效。
+  const strictGate = (line) =>
+    /--require-stable/.test(line) && /os-release-\*\)\s*ARGS\+=/.test(line);
+  check('档位判据自证：无条件追加、以及只在条件里 echo 不提参数的写法都不算开关',
+    !strictGate('ARGS+=(--require-stable)')
+      && !strictGate('case "${GITHUB_REF:-}" in refs/tags/os-release-*) echo 发布档 ;; esac'),
+    '判据形状与要防的坏写法脱节了');
+  const faCode = strip(byName['fast-apk.yml']);
+  const mentions = faCode.match(/^[^\n]*--require-stable[^\n]*$/gm) || [];
+  check('发布档在唯一投递口里只有一处（出现两次以上 = 又有第二条分档逻辑）',
+    mentions.length === 1, JSON.stringify(mentions));
+  check('发布档的条件就是「这一轮是 os-release-* tag」',
+    mentions.length === 1 && strictGate(mentions[0]), JSON.stringify(mentions));
+  const callLines = faCode.match(/bash\s+scripts\/verify-apk-signing\.sh[^\n]*/g) || [];
+  check('开关真的交到了门禁那一行（调用行传的是那个数组，不是写死的常量档）',
+    callLines.length === 1 && /\$\{ARGS\[@]\}/.test(callLines[0]),
+    JSON.stringify(callLines));
   check('发布门禁调用点里锚点走 shell 变量（写成 ${{ LOBOS_APK_CERT_FILE }} 会被展开成空串）',
     !/\$\{\{\s*LOBOS_APK_CERT_FILE\s*\}\}/.test(wfs.map(([, t]) => t).join('\n')),
     '出现会被 Actions 吃掉的写法');

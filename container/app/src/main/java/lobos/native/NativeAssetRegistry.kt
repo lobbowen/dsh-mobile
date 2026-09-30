@@ -114,8 +114,8 @@ object NativeAssetRegistry {
         ),
     )
     // ← 未来加资产在这里加一行即可，例如：
-    // val APKREPACK = NativeExecutable(
-    // id = "apkrepack", libName = "libapkrepack.so", humanName = "APK 重打包器",
+    // val NEWTOOL = NativeExecutable(
+    // id = "newtool", libName = "libnewtool.so", humanName = "示例能力件",
     // probeArgs = listOf("--version"), probeExpect = null,
     // requiredDeps = listOf("libc++_shared.so"), required = false, ...)
 

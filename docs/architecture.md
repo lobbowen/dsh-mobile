@@ -221,7 +221,10 @@ val NODE = NativeExecutable(
 | 4. libc | `DT_NEEDED` 只能是 bionic / 随包库 | **不能** |
 
 第 2/3/4 关在装机后无法补救，所以必须在**打包期**用 readelf 校验。
-`release-admin.yml` 的 `pin` job 已经做了这三项校验；这也是「A 全内置工具链」方案
+这三项校验的唯一实现是 `scripts/verify-runtime-elf.sh`（固化期由 `scripts/build-node-android.sh` 调、
+投递前由 `fast-apk` 与 `build-apk` 各调一次，出口集合由 `verify-runtime-elf-test.js` ⑩ 钉住；
+旧的第四位读者 `release-admin.yml` 的 `pin` job 随发布连归一删除，见 ADR-0011 §3）；
+这也是「A 全内置工具链」方案
 （aapt2 等 x86-64 + glibc 的 Google 官方产物）被判定不可行的直接原因 ——
 它在第 2/3/4 关全部失败，只剩 QEMU user-mode + 随包 amd64 glibc 一条路，
 而那在 SELinux 受限的 `untrusted_app` 域里没有公开成功先例。
@@ -251,7 +254,8 @@ val NODE = NativeExecutable(
 
 #### 五处清单，一个源头
 
-「哪些 `.so` 随包」这件事在仓库里以 5 种形态存在。① 是权威源，②–⑤ 是投影：
+「哪些 `.so` 随包」这件事在仓库里以 5 种形态存在。① 是权威源，②–⑤ 是投影
+（编号与 `container/engine/test/native-assets-test.js` 头部那张表逐字对齐）：
 
 | # | 位置 | 作用 |
 |---|---|---|
@@ -259,9 +263,12 @@ val NODE = NativeExecutable(
 | ② | `app/build.gradle.kts` `keepDebugSymbols` | 防 strip 破坏 |
 | ③ | `.github/native-assets.txt` | CI 下载校验 + APK 审计 |
 | ④ | `scripts/native-deps.txt` | 构建期 NEEDED 闭环自检（系统库白名单） |
-| ⑤ | `scripts/inject-libcxx-into-apk.py` | 注入锚点 |
+| ⑤ | `scripts/build-node-android.sh` | 构建期按 ④ 核产物、并注入 RUNPATH |
 
 ② 直接读 ③（`nativeAssetNames`），所以实际只需同步 ③④⑤。
+曾有第 6 种形态 `scripts/inject-libcxx-into-apk.py`（往 APK 里注入 `libc++_shared.so` 的注入锚点），
+它唯一的调用方是 release-admin 的 repack，随发布连归一整体删除（ADR-0011 §3）—— 留着它就等于留着
+第二条「产出与门禁读数不同字节」的路；这一格现在由 `native-assets-test.js` 反向钉成「文件必须不存在」。
 **一致性由 `container/engine/test/native-assets-test.js` 双向守护**
 （正向：注册表每项下游都有；反向：下游没有注册表未声明的项）。
 已用变异测试验证：改注册表名、删清单项、加幽灵项、在别处重新硬编码 ——
@@ -483,7 +490,7 @@ Android linker 查找依赖库的目录**只有三个**：
 |---|---|
 | 链接期 | `scripts/build-node-android.sh` 以 make 命令行变量注入 `LDFLAGS.target=-Wl,--enable-new-dtags -Wl,-rpath,'$$ORIGIN'`。两层 `$$` 是 bash→make→sh 三段展开的必然写法；注入点必须是**命令行变量**而不是 `export LDFLAGS_target` —— gyp 的 make 生成器只把裸 `$(LDFLAGS)` 落到 `LDFLAGS.target`（宿主侧才认 `_host` 后缀），那个环境变量没有任何规则引用它，run 36216072106 实测 92715 行展开里 `-rpath` 出现 0 次 |
 | 构建期 | 同脚本用 `make -n`（带同一串命令行变量）断言展开结果：`-rpath` 必须出现在 **node 本体那次链接**的配方行里，找不到该配方即判红；三层 `$` 转义错了会静默变成 `RIGIN`。编完再调 `verify-runtime-elf.sh` 验产物 |
-| 固化期 / 打包期 / 重打包期 | `scripts/verify-runtime-elf.sh`（同一份判据）有五个出口（含 `build-node-android.sh` 构建脚本自身）：`fast-apk.yml` 的 Gate、`build-apk.yml` 的 pre-gradle Gate、`release-admin.yml` 的 pin 校验与 repack 校验；缺 `readelf` 时退出码 2，宁红不猜。`build-apk.yml` 那一次是必需的：命中 node 缓存时构建脚本整步 skipped，只有它覆盖「复用二进制再出包」这条路。`repack` 那一次也是必需的：它只换签名与注入库，libnode 本体来自任意一次历史构建 —— 不查就会把修复前的包重签成"最新可安装包" |
+| 产物期（三个出口） | `scripts/verify-runtime-elf.sh` 是这五项判据的唯一实现，出口集合由 `verify-runtime-elf-test.js` ⑩ 钉住：`scripts/build-node-android.sh:988`（刚编出来的产物）、`fast-apk.yml:316`（从 `node-runtime-*` 下载后、放进 jniLibs 之前）、`build-apk.yml:518`（gradle 之前）。缺 `readelf` 时先经 `scripts/ensure-tool.sh` 装，装不上退 2 —— 「工具没装」与「产物不合格」是两回事，宁红不猜。后两处各自必需：命中 node 缓存时构建脚本整步 skipped，而**固化 Release 写的就是那些字节**，坏形态会被复制进每一个后续 APK；`fast-apk` 那处覆盖的是「不重编、直接取现成件出包」这条路。（曾有第四、第五个出口 `release-admin.yml` 的 pin 与 repack —— 它们判的是「从别的 run 回取历史产物再固化/重签」，那条路整随发布连归一删除，ADR-0011 §3。） |
 | 运行期 | `NativePreparer.probe` 在**清空环境**下 exec 探针 —— 与 `run_code` 同形，跑绿才是真绿 |
 
 `$ORIGIN` 的可靠性不是引来的说法，是 2026-09-26 在自己设备上验的：自造
@@ -656,22 +663,27 @@ aarch64）在 GitHub 免费 runner 上要 **2~3 小时**。
 | 改动内容 | 走哪条 workflow | 耗时 |
 |---|---|---|
 | `assets/**`（server.js）、`**/*.kt`、布局、`build.gradle.kts` | **`fast-apk.yml`** | 分钟级 |
-| `scripts/build-node-android.sh`、Node 版本变更 | `build-apk.yml`（只有 `workflow_dispatch`） | 2~3 小时 |
-| 只想把已有产物发到 Release | `release-admin.yml`（`mode: publish`） | 几分钟 |
+| `scripts/build-node-android.sh`、Node 版本变更 | `build-apk.yml`（`workflow_dispatch` 只校验；推 `runtime-release-*` 才固化投递） | 2~3 小时 |
 
 `fast-apk.yml` 不编译 Node —— 它从固定的 Release
 （`node-runtime-<version>-<abi>`）下载预编译的 `libnode.so` +
 `libc++_shared.so`，校验 sha256，放进 `jniLibs/`，然后直接跑 gradle。
 
+> 旧表里第三行「只想把已有产物发到 Release → `release-admin.yml`（`mode: publish`）」已删。
+> 它的语义是「从别的 run 回取产物、覆盖当前投递位置」，那正是同号换字节得以发生的形状
+> （ADR-0011 §2 第 5、7 条）。现在**发出去的每一版都由它自己那一轮构建产出**：没有"回取"这一步，
+> 也就没有"回取错了/取不到"这类事故（历史上真实断过一次：artifact 改名 ⇒ pin 链路取不到件）。
+
 ### 预编译产物是怎么来的
 
-`release-admin.yml` 的 `pin` job 负责**固化**（触发方式：推 `pin-node-<run_id>` /
-`pin-node-latest` tag，或 `workflow_dispatch` 选 `mode: pin`）：从某次成功的
-`build-apk` 运行里取出两个 `.so`，逐项校验后发布为不可变 Release。
+`build-apk.yml` 在 `runtime-release-<node 版本>-<abi>` 那一轮里**同一轮完成构建与固化**
+（tag 名里的版本号与 `assets/node-versions.json` 现算的那一个逐字相符才动手）：产物两个 `.so`
+就地逐项校验后发布为不可变 Release `node-runtime-<版本>-<abi>`。
 
 校验项（任一不过即失败，绝不放行坏产物）。**判据只住 `scripts/verify-runtime-elf.sh`
-一份**，五个出口（构建脚本、`fast-apk` Gate、`build-apk` pre-gradle Gate、这里的 pin、
-同文件的 repack）同调；2026-09-27 之前 pin 里内联抄了 1–4、构建脚本对同样的 2/3 只打
+一份**，三个出口（构建脚本 `build-node-android.sh:988`、`fast-apk.yml:316` 下载后、
+`build-apk.yml:518` pre-gradle）同调，出口表由 `verify-runtime-elf-test.js` ⑩ 双向钉住
+（表外的 workflow 或 scripts 脚本接上宿主即红）；2026-09-27 之前 pin 里内联抄了 1–4、构建脚本对同样的 2/3 只打
 `[info]`/`[warn]`，同一事实两种结论 = 构建期说没事、固化期判有罪，而固化期已是最后还能
 拦住的地方。可执行夹具（不需要 NDK、不需要真产物）在
 `container/engine/test/verify-runtime-elf-test.js` 里逐条证伪这五项 —— 门禁必须能红。
@@ -783,42 +795,37 @@ aarch64）在 GitHub 免费 runner 上要 **2~3 小时**。
 
 ### 查看 CI 状态与日志
 
-维护环境（沙箱）无法访问 `api.github.com`，所有 API 操作通过 **tag 触发
-`release-admin.yml` 的 `admin` job** 完成，结果写到 `ci-admin` 分支：
+直接读 GitHub API —— **没有中间层**（不推 tag 让 CI 把结果写进某个分支，也不经网页）。
+本机的可达性坑是 DNS 被污染 + 代理对 `api.github.com` 的 TLS 断连，正解是用 DoH 查出 IP 后
+以 node 带 SNI 直连；这条路 2026-09-28 起实测可用，所以「沙箱点不了网页 ⇒ 需要一条 CI 侧运维通道」
+这个前提已经不成立（它曾支持着 `release-admin.yml` 的 `admin` job，ADR-0011 §3 记着这次证伪）：
 
-```bash
-# 查 run 状态 + artifact
-git push origin refs/tags/admin-status-<run_id>
-
-# 拉失败日志（--log-failed）
-git push origin refs/tags/admin-logs-<run_id>
-
-# 查 Release 附件指纹
-git push origin refs/tags/admin-release
-
-# 取消 run / 取消全部
-git push origin refs/tags/admin-cancel-<run_id>
-git push origin refs/tags/admin-cancelall
+```
+GET /repos/<owner>/<repo>/actions/runs?per_page=…          # 哪一轮在跑
+GET /repos/<owner>/<repo>/actions/runs/<run_id>/jobs       # 每个 job 的结论
+GET /repos/<owner>/<repo>/actions/jobs/<job_id>/logs       # 失败正文（门禁读数在这里）
+GET /repos/<owner>/<repo>/releases/tags/<tag>              # 线上这一版真有什么资产
 ```
 
-构建期间进度写到 `ci-hb` 分支（心跳，含 stage / 内存 / OOM 计数），
-终态写到 `ci-last`，成功发布信息写到 `ci-ok`。
+**判绿之前先等 job 齐备**，并读日志正文里的读数行；`skipped` 不等于红，也不等于绿。
+
+> 曾经同时存在的另一套写法（构建期把心跳写进 `ci-hb`、终态写进 `ci-last`、成功发布写进 `ci-ok`、
+> 运维结果写进 `ci-admin`）**已废止**：那四个分支每轮都被 force-push 覆盖，那里读不出序列，
+> 也不构成任何判据 —— 同一形状在债表 DS-16 被判死。现在只剩 `ci-receipts` 这一个由 CI 写的分支，
+> 而它是**只追加**的发布回执账本（唯一写入口 `scripts/append-apk-receipt.sh`，永不 `--force`）。
 
 ---
 
 ## 10. 冷启动清单（换机器/重新开始时）
 
-1. **确认有可用的预编译运行时**：
-   ```
-   git push origin refs/tags/pin-node-latest        # 或 pin-node-<run_id>
-   ```
-   （等价于在 Actions 里对 `release-admin.yml` 选 `mode: pin`；沙箱环境点不了网页，
-   所以 tag 是唯一可用的触发手段。`run_id` 留空/latest = 自动取最近一次成功运行。）
-   产物落在 Release `node-runtime-<version>-arm64-v8a`。
+1. **确认有可用的预编译运行时**：读 Release `node-runtime-<version>-arm64-v8a` 在不在
+   （`GET /repos/<repo>/releases/tags/node-runtime-…`）。不在就说明这一版运行时还没固化过 ——
+   推 `runtime-release-<版本>-<abi>` 让 `build-apk.yml` 跑完整交叉编译并就地固化（2~3 小时），
+   **不是**去别的 run 里捞历史产物。产物落在同一个地方：Release `node-runtime-<version>-arm64-v8a`。
 
-2. **日常出包**：推 `container/app/**` 的改动即可，`fast-apk.yml` 自动跑。
+2. **日常构建校验**：推 `container/app/**` 的改动即可，`fast-apk.yml` 自动跑（分钟级，**不投递**）。
+   要发版才推 `os-release-<versionName>-<versionCode>`。
 
-3. **只有当 `build-node-android.sh` 或 Node 版本变了**，才需要跑
-   `build-apk.yml`（2~3 小时，只有手动触发），跑完再 `pin-node` 一次把新产物固化。
+3. **只有当 `build-node-android.sh` 或 Node 版本变了**，才需要走第 1 步那条链。
 
 4. **首次在任何新设备上验证时**，先看诊断面板的 `exec-probe` 与 `port`。

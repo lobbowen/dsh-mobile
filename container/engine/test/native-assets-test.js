@@ -11,7 +11,11 @@
 //   ② 打包豁免 app/build.gradle.kts keepDebugSymbols
 //   ③ CI 清单  .github/native-assets.txt          （下载校验 + APK 审计）
 //   ④ 系统白名单 scripts/native-deps.txt          （构建期 NEEDED 闭环自检）
-//   ⑤ 注入脚本 scripts/inject-libcxx-into-apk.py   （anchor 名字）
+//   ⑤ 构建脚本 scripts/build-node-android.sh       （构建期 NEEDED 闭环 + RUNPATH）
+//
+// （曾有第 6 种形态 `scripts/inject-libcxx-into-apk.py`：拿 libnode 当 anchor 往 APK 里
+//  补 libc++_shared.so。它唯一的调用方是 release-admin 的 repack，随发布连归一一起删除 ——
+//  这里不留 existsSync 守卫的核对块：目标文件不存在时那批断言永不执行，是空转门禁。）
 //
 // 历史上这 5 处是**各自硬编码**的，加第三个二进制要同时改 8 个位置，漏一处
 // 就在真机上炸 —— 而且往往不是立刻炸，而是「命中缓存后才炸」这种间歇形态。
@@ -254,7 +258,7 @@ if (sysDeps) {
 }
 
 // ---------------------------------------------------------------------------
-// ① → ⑤  scripts/build-node-android.sh / inject-libcxx-into-apk.py
+// ① → ⑤  scripts/build-node-android.sh（构建期那一处：读白名单、核清单、带 RUNPATH）
 // ---------------------------------------------------------------------------
 
 /**
@@ -348,13 +352,17 @@ const VALIDATOR_SH = path.join(ROOT, 'scripts/verify-runtime-elf.sh');
 check('⑤ 共用校验器 scripts/verify-runtime-elf.sh 存在', fs.existsSync(VALIDATOR_SH));
 
 // 每一个能把原生产物放进可分发东西的入口，都必须接上同一判据。
-// 期望次数写在表里：release-admin 有两个各自独立的出口（pin 固化运行时 / repack 重打包发 APK），
-// 只接一个就留一个口子 —— 断言次数而不是断言「出现过」，否则第二个出口被人删掉也不会红。
+// 断言**次数**而不是断言「出现过」，否则第二个出口被人删掉也不会红。
+// 出口为什么是这两个（2026-09-30 发布连归一，docs/adr/0011）：
+//   · fast-apk —— 打包期：下载固化件放进 APK 之前判一次；
+//   · build-apk —— 构建期：Node 交叉编译产出 jniLibs 之后判一次，而**固化 Release 写的就是
+//     这批已被判过的字节**（同一个 run、同一个目录），所以它不需要第二个出口。
+// release-admin 的 pin / repack 两个出口随该链废除：它们判的是「从别的 run 回取 artifact 再固化」
+// 与「给历史 APK 换签名」，而这两个来源本身已经不存在了 —— 出口跟着没，不是判据变松。
 // 构建期那一处在 build-node-android.sh 里（上面的 ⑤ 已断言）。
 const VALIDATOR_CALLERS = [
   ['.github/workflows/fast-apk.yml', 1],
   ['.github/workflows/build-apk.yml', 1],
-  ['.github/workflows/release-admin.yml', 2],
 ];
 for (const [wf, want] of VALIDATOR_CALLERS) {
   const p = path.join(ROOT, wf);
@@ -618,10 +626,14 @@ if (fs.existsSync(PICK_SH)) {
     flagFirst.rc === 0 && flagFirst.out.includes('35.0.1'), JSON.stringify(flagFirst));
 }
 
-// ── apk-latest 的版本门禁：判据只住 scripts/verify-apk-version-gate.sh，四个发布口共用 ──
-// 为什么要在 CI 里跑它：写 apk-latest 的四条链路（fast-apk / build-apk / release-admin 的
-// publish 与 repack）里，只有 fast-apk 会在每次合并后被真实触发，其余三条要么几十分钟起步、
-// 要么按需才跑。把「比较版本号」留在各条 workflow 里 = 只有被触发过的那份才是真的在判。
+  // ── 壳 APK 的版本门禁：判据只住 scripts/verify-apk-version-gate.sh ──
+  // 为什么要在 CI 里跑它：这条判据的效力全在「比较的那两个数是线上真的数」。它曾经有四个调用点
+  // （fast-apk / build-apk / release-admin 的 publish 与 repack），其中只有每次合并都会被触发的
+  // fast-apk 那份真在跑 —— 其余三份「写了但没跑」，正是 2026-09-30 定罪的空转形状。
+  // 发布连归一（docs/adr/0011）后调用点只剩一个，但**判据留在宿主**：把它搬回 workflow 里就等于
+  // 回到「谁发东西谁自己写一遍比较」，那是同一条缺陷的下一次发作。
+  // 下面的夹具故意把参照物名传成 `apk-latest`（一个已经不存在、也没有任何链路再写的名字）：
+  //   这一组要钉的是「红点必须复述**传进来的**那格」，宿主里写死任何具体通道名都会在这里红。
 const VGATE = path.join(ROOT, 'scripts', 'verify-apk-version-gate.sh');
 check('版本门禁宿主脚本存在', fs.existsSync(VGATE));
 if (fs.existsSync(VGATE)) {
@@ -749,8 +761,9 @@ if (fs.existsSync(VGATE)) {
     !stripHashComments(fs.readFileSync(VGATE, 'utf8')).includes('apk-latest'),
     '参照物由调用方传入；判据里复述某个具体通道名 = 换参照物时红点指着无关的地方');
 
-  // 接线：三条会写滚动通道的 workflow 必须都调宿主；且任何一份都不许再自己比较版本号。
-  const VG_FILES = ['fast-apk.yml', 'build-apk.yml', 'release-admin.yml'];
+  // 接线：投壳 APK 的**那一条**标准链必须调宿主（docs/adr/0011 之后只剩 fast-apk），
+  // 且它自己不许再比较版本号 —— 曾经这里是三条链，其中两条从没被真实触发过。
+  const VG_FILES = ['fast-apk.yml'];
   // 只认**命令行形态**的调用（行首可有 `if !`），注释里提一句脚本名不算接线 ——
   // 否则改天谁把调用删掉、只留着那行解释性注释，这条门禁照样绿。
   const VCALL = /^[^\S\n]*(?:if\s+!\s+)?bash\s+scripts\/check-apk-release-version\.sh\s+.*"\$TAG"/m;
@@ -766,6 +779,34 @@ if (fs.existsSync(VGATE)) {
       !src.includes('contents/version.json?ref='),
       '取数应走 scripts/check-apk-release-version.sh 的 VG_SRC_DIR 出口');
   }
+  // 调用点清单**自己不许落后于仓内**：上面那份表是白名单，光有它的话，新增一条链偷偷接上宿主
+  // 而没进表，这条门禁不会红 —— 那正是 2026-09-26「四个出口只有一个真在跑」的同一种形状。
+  // 所以反向也数一遍：全仓真调这个宿主的 workflow 必须**恰好**等于表里那些。
+  const vgCallers = fs.readdirSync(path.join(ROOT, '.github/workflows')).filter((f) => {
+    try {
+      return /bash\s+scripts\/check-apk-release-version\.sh/.test(
+        stripHashComments(fs.readFileSync(path.join(ROOT, '.github/workflows', f), 'utf8')));
+    } catch { return false; }
+  }).sort();
+  check('版本门禁的调用点恰好等于表里那些（多一个口就是多一条发布链，必须先记账再进来）',
+    JSON.stringify(vgCallers) === JSON.stringify(VG_FILES), '实际调用点: ' + JSON.stringify(vgCallers));
+  // 归一后的形状是**唯一口 + 恒 auto**：没有任何一条链能把壳版本门禁接到 explicit（放行）那一侧。
+  // 这是政策而不是巧合，所以要能红 —— 谁把显式通道接回来，这里就红（docs/adr/0011）。
+  const explicitDoors = fs.readdirSync(path.join(ROOT, '.github/workflows')).filter((f) => {
+    try {
+      return /(?:check-apk-release-version\.sh|verify-apk-version-gate\.sh)[^\n]*\bexplicit\b/.test(
+        stripHashComments(fs.readFileSync(path.join(ROOT, '.github/workflows', f), 'utf8')));
+    } catch { return false; }
+  });
+  check('没有任何链路把壳版本门禁接到 explicit 那一侧（同版本重发不再有口）',
+    explicitDoors.length === 0, '出现显式通道的链: ' + explicitDoors.join(', '));
+  // 双向对照组：上面两条都是「扫出来为空」的形状，扫不到东西就会永远绿。
+  check('explicit 扫描自证：真把显式通道写回链路 → 判红',
+    /(?:check-apk-release-version\.sh|verify-apk-version-gate\.sh)[^\n]*\bexplicit\b/
+      .test('          bash scripts/check-apk-release-version.sh version.json "$TAG" explicit'));
+  check('explicit 扫描自证：现行 auto 写法 → 不误红',
+    !/(?:check-apk-release-version\.sh|verify-apk-version-gate\.sh)[^\n]*\bexplicit\b/
+      .test('          bash scripts/check-apk-release-version.sh version.json "$TAG" auto'));
   // 对照组自证：把注释里的脚本名当成接线，正是这条门禁要抓的失效形态 —— 拿一份「只有注释、
   // 没有调用」的样本验它会红，再拿真调用验它不会误红。
   check('版本门禁接线断言自证：只有注释提及 → 判红',
@@ -773,13 +814,15 @@ if (fs.existsSync(VGATE)) {
   check('版本门禁接线断言自证：真调用行（含 if ! 包裹）→ 放行',
     VCALL.test('          bash scripts/check-apk-release-version.sh version.json "$TAG" "$VCHANNEL"')
       && VCALL.test('          if ! bash scripts/check-apk-release-version.sh version.json "$TAG" explicit; then'));
-  // 日常链的两个空转件（③ 定罪的正是这一处）：参照物必须是**这条链自己会写的那一族**，
-  //   通道必须随触发方式变。这里钉的是「传了变量」，因为 `explicit` 字面量与 `apk-latest`
-  //   字面量各自把门的一格焊死在放行侧 —— 两个都是 2026-09-30 实测出来的空转形状。
+  // 日常链的两个空转件（③ 定罪的正是这一处）：参照物必须是**这条链自己会写的那一族**。
+  // 通道那一格随发布连归一变严了：旧的写法是「按触发方式算出 VCHANNEL」，因为当时确有
+  //   两种触发（push 自动出包 / 人显式重发）。现在只剩一条链、且它每次都带版本号，
+  //   所以正确形状就是**字面量 auto** —— 显式那一侧没有对应的场景，留着变量反而随时可能
+  //   被人接回「dispatch 时走放行」那条老路（docs/adr/0011）。
   const FAST_SRC = fs.readFileSync(path.join(ROOT, '.github/workflows', 'fast-apk.yml'), 'utf8');
-  const DAILY_CALL = /^[^\S\n]*bash\s+scripts\/check-apk-release-version\.sh\s+version\.json\s+"\$TAG"\s+"\$VCHANNEL"\s*$/m;
-  check('日常链接线：fast-apk 把通道判定结果真传进门禁（不写死 explicit）',
-    DAILY_CALL.test(FAST_SRC), '找不到 … "$TAG" "$VCHANNEL" 的调用行');
+  const DAILY_CALL = /^[^\S\n]*bash\s+scripts\/check-apk-release-version\.sh\s+version\.json\s+"\$TAG"\s+auto\s*$/m;
+  check('日常链接线：fast-apk 以 auto 通道调用门禁（不给任何放行侧留变量入口）',
+    DAILY_CALL.test(FAST_SRC), '找不到 … "$TAG" auto 的调用行');
   check('日常链参照物：fast-apk 用它自己会写的归档族（TAG="archive"）',
     /^[^\S\n]*TAG="archive"\s*$/m.test(FAST_SRC),
     '参照物必须能被这条链路产出：日常链只写 v<versionName> 归档，从不写 apk-latest（债表 DS-14）');
@@ -876,7 +919,7 @@ if (fs.existsSync(LEDREAD) && fs.existsSync(LEDWRITE)) {
     '# APK 发布回执账本 —— 只追加',
     rec('fast-apk', '1.1.11', 43, '111'),
     rec('build-apk', '1.1.12', 45, '222'),
-    rec('release-admin-publish', '1.1.12', 44, '333'),
+    rec('fast-apk', '1.1.12', 44, '333'),
   ].join('\n') + '\n');
   const lhit = lread({ LR_BODY: three });
   const lhitJson = JSON.parse(fs.readFileSync(path.join(lhit.dir, 'version.json'), 'utf8'));
@@ -953,12 +996,14 @@ if (fs.existsSync(LEDREAD) && fs.existsSync(LEDWRITE)) {
   check('账本写入：少给网址 → 退 2（无网址的回执答不了「装到机器上那个包是哪次发布」）',
     runW(['fast-apk', 'auto', vj, apk], {}).rc === 2);
 
-  // ── 接线：四条会投 APK 的链路必须都记账，且除它们之外不许有第二个写入口 ──
-  // 为什么钉「恰好这四个链点名」：少一条 = 那条链发的码永远进不了下界（DS-16 的原始破损形状）；
-  //   多一条（比如给 Program 包或固化件记账）= 拿没有 shell.versionCode 的产物写同一条账，
-  //   取数会读不出数而判「看不清」，把整道门拖成红。两类都是当场能判的。
-  const WFILES = { 'fast-apk.yml': 'fast-apk', 'build-apk.yml': 'build-apk', 'release-admin.yml': '' };
-  const ACALL = /^[^\S\n]*(?:if\s+!\s+)?bash\s+scripts\/append-apk-receipt\.sh\s+\S+\s+(?:"\$VCHANNEL"|explicit)\s+\S+/m;
+  // ── 接线：投壳 APK 的那一条标准链必须记账；除它之外不许有第二个写入口 ──
+  // 归一发布连之前这里是四个链点名（fast-apk / build-apk / release-admin 的 publish 与 repack），
+  //   因为当时确有四条链路投 APK；那三条随发布连一起废除（docs/adr/0011），表就只剩这一个。
+  //   「少一条」的形状因此不会再回来，但**多一条**仍是当场能判的破损：给 Program 包或固化件记账
+  //   就是拿没有 shell.versionCode 的产物写同一条账，取数读不出数而判「看不清」，把整道门拖成红。
+  const WFILES = { 'fast-apk.yml': 'fast-apk' };
+  // 通道那一格现在是字面量 auto（唯一口的形状，见上面版本门禁接线那段）。
+  const ACALL = /^[^\S\n]*(?:if\s+!\s+)?bash\s+scripts\/append-apk-receipt\.sh\s+\S+\s+(?:auto|"\$VCHANNEL")\s+\S+/m;
   for (const [f, chainName] of Object.entries(WFILES)) {
     const src = fs.readFileSync(path.join(ROOT, '.github/workflows', f), 'utf8');
     check(`记账接线：${f} 真的调用记账宿主`, ACALL.test(src), '找不到 bash scripts/append-apk-receipt.sh 的调用行');
@@ -967,25 +1012,21 @@ if (fs.existsSync(LEDREAD) && fs.existsSync(LEDWRITE)) {
         new RegExp('append-apk-receipt\\.sh\\s+' + chainName + '\\b').test(src));
     }
   }
-  check('记账接线：release-admin 的 publish 与 repack 两条 job 各自记账（不是一条覆盖两条）',
-    (fs.readFileSync(path.join(ROOT, '.github/workflows/release-admin.yml'), 'utf8').match(/append-apk-receipt\.sh/g) || []).length === 2
-      && /append-apk-receipt\.sh\s+release-admin-publish/.test(fs.readFileSync(path.join(ROOT, '.github/workflows/release-admin.yml'), 'utf8'))
-      && /append-apk-receipt\.sh\s+release-admin-repack/.test(fs.readFileSync(path.join(ROOT, '.github/workflows/release-admin.yml'), 'utf8')));
-  // 其它发布链路（Program 包 / 固化运行时 / 能力件）没有 shell.versionCode 这一格，不许往这条账里写。
+  // 其它发布链路（Program 包 / 固化运行时 / 能力件 / C 层清单）没有 shell.versionCode 这一格，不许往这条账里写。
   const otherWfs = fs.readdirSync(path.join(ROOT, '.github/workflows'))
     .filter((f) => !Object.keys(WFILES).includes(f));
   const outsiders = otherWfs.filter((f) => {
     try { return fs.readFileSync(path.join(ROOT, '.github/workflows', f), 'utf8').includes('append-apk-receipt.sh'); }
     catch { return false; }
   });
-  check('记账入口只这四个链路点（非壳 APK 的发布链路不写这条账）',
+  check('记账入口只有壳 APK 的那一个链路点（非壳 APK 的发布链路不写这条账）',
     outsiders.length === 0, '多出来的写入口: ' + outsiders.join(', '));
   // 对照组自证：「只有注释提到宿主」不算接线 —— 这正是接线门禁不空转的前提。
   check('记账接线断言自证：只有注释提及 → 判红',
     !ACALL.test('  # 记账 scripts/append-apk-receipt.sh fast-apk "$VCHANNEL" version.json\n'));
-  check('记账接线断言自证：真调用行（显式通道字面量与变量两种写法）→ 放行',
-    ACALL.test('          bash scripts/append-apk-receipt.sh build-apk explicit version.json "$STAGE/app-release.apk" "$URL"')
-      && ACALL.test('          bash scripts/append-apk-receipt.sh fast-apk "$VCHANNEL" version.json "$VDIR/x.apk" "$URL"'));
+  check('记账接线断言自证：真调用行（auto 与显式变量两种写法）→ 放行',
+    ACALL.test('          bash scripts/append-apk-receipt.sh fast-apk auto version.json "$VDIR/x.apk" "$URL"')
+      && ACALL.test('          if ! bash scripts/append-apk-receipt.sh fast-apk "$VCHANNEL" version.json "$APK" "$URL"; then'));
   fs.rmSync(rTmp, { recursive: true, force: true });
 }
 
@@ -1224,25 +1265,70 @@ if (fs.existsSync(RRA)) {
     shortArgs.rc === 2 && shortArgs.err.includes('用法'), JSON.stringify(shortArgs));
 
   // 分类只准住一处：调用方再写一遍「404 / no assets」就等于两个真相。
-  const CLASSIFIER = /no assets|matching pattern|HTTP 404/i;
-  const scanned = ['.github/workflows/fast-apk.yml', '.github/workflows/build-apk.yml',
-    '.github/workflows/release-admin.yml', '.github/workflows/program-ota.yml',
-    'scripts/check-apk-release-version.sh'];
+  // 扫的是**全部** workflow 与 scripts 下的全部脚本，而不是一份白名单：白名单会跟着链路增删而失效，
+  //   而这条判据要防的正是「新加的那一处自己抄了一份分类」。
+  // 这一格原先只扫 workflows + 一个外壳，而抄分类的三处**全在 scripts/ 里**（read-release-asset、
+  //   read-apk-receipts、gh-release-upload 各一张词表，upload 那张比两个 reader 多两个词，
+  //   同一句报错在投递口算「不存在」、在取数口算「看不清」）—— 2026-09-30 收口进
+  //   scripts/gh-absence.sh，判据的扫描集也随之补全：扫错总体的门比没有门更安心。
+  const CLASSIFIER = /no assets|matching pattern|HTTP 404|no ref found|could not locate/i;
+  const ABSENCE_HOST = 'scripts/gh-absence.sh';
+  // 注释里提这件事是允许的（前科与分工要写出来才有人看懂）；判据只看剥掉注释后的代码。
+  const stripCode = (rel, src) => src.split('\n')
+    .filter((l) => !(/^\s*#/.test(l) || (/\.js$/.test(rel) && /^\s*\/\//.test(l))))
+    .join('\n');
+  const scanned = fs.readdirSync(path.join(ROOT, '.github/workflows'))
+    .map((f) => '.github/workflows/' + f)
+    .concat(fs.readdirSync(path.join(ROOT, 'scripts'))
+      .filter((f) => /\.(sh|js)$/.test(f))
+      .map((f) => 'scripts/' + f))
+    .filter((rel) => rel !== ABSENCE_HOST);
   for (const rel of scanned) {
     check(`取数分类复写清零：${rel} 不再自己判「不存在 vs 取不到」`,
-      !CLASSIFIER.test(stripHashComments(fs.readFileSync(path.join(ROOT, rel), 'utf8'))),
-      '该分类唯一宿主是 scripts/read-release-asset.sh（退 10 = 不存在，退 2 = 看不清）');
+      !CLASSIFIER.test(stripCode(rel, fs.readFileSync(path.join(ROOT, rel), 'utf8'))),
+      '该分类唯一宿主是 ' + ABSENCE_HOST + '（退 10 = 不存在，退 2 = 看不清）');
   }
   check('取数分类断言自证：违规样本确实会红',
     CLASSIFIER.test('if grep -qiE "HTTP 404|no assets" "$DIR/err"; then'));
+  // 对照组第二条：收口前投递口那张**更宽**的表（case 写法、含 could not locate）也必被抓 ——
+  // 只钉 grep 那一形会让 case 那一形悄悄回来。
+  check('取数分类断言自证：投递口收口前那张 case 表确实会红',
+    CLASSIFIER.test('    *"could not find"*|*"could not locate"*|*"http 404"*) CREATE_NEEDED=1 ;;'));
+  // 宿主自己：词表只此一份，且三处按文本分类 gh 报错的取数口都必须真的 source 它。
+  const absHostPath = path.join(ROOT, ABSENCE_HOST);
+  check('不存在/看不清 的词表有唯一宿主 ' + ABSENCE_HOST, fs.existsSync(absHostPath));
+  const ABS_HOST = fs.existsSync(absHostPath) ? fs.readFileSync(absHostPath, 'utf8') : '';
+  check('分类宿主只定义一处 gh_absent（两处定义 = 两个真相，后一个悄悄覆盖前一个）',
+    (ABS_HOST.match(/^gh_absent\(\)\s*\{/gm) || []).length === 1,
+    '实际 ' + (ABS_HOST.match(/^gh_absent\(\)\s*\{/gm) || []).length + ' 处');
+  check('分类宿主把鉴权/配置类报错留在「看不清」那侧（could not find 不许进表）',
+    !/^\s*\*.*could not (?:find|locate)/m.test(ABS_HOST),
+    '收进来等于让取数口把 gh 自身的故障读成「线上没有」，投递口则会重建被删掉的载体');
+  const SRC_CALL = /^[^\S\n]*source\s+"\$\(dirname "\$0"\)\/gh-absence\.sh"/m;
+  for (const rel of ['scripts/read-release-asset.sh', 'scripts/read-apk-receipts.sh', 'scripts/gh-release-upload.sh']) {
+    check(`分类宿主接线：${rel} 真的 source 它`,
+      SRC_CALL.test(stripCode(rel, fs.readFileSync(path.join(ROOT, rel), 'utf8'))),
+      '找不到 source "$(dirname "$0")/gh-absence.sh" —— 自己抄一份词表就是第二个真相');
+  }
+  check('分类宿主接线断言自证：只有注释提及 → 判红',
+    !SRC_CALL.test('  # source "$(dirname "$0")/gh-absence.sh"\n'));
   // 接线：调用点必须真有一行命令式调用。只扫「文件里出现过脚本名」= 把注释当成接线，
   // 谁哪天删掉调用、留着那行解释，门禁照样绿（VCALL 那条钉过的同一失效形态）。
+  // 名单是**扫出来的**而不是抄来的：壳 APK 侧随发布连归一退到了 read-archived-shell-version.sh
+  //   （归档族资产名），Release 资产这一格的读者只剩 Program/能力件两条 —— 表要跟着真相较，
+  //   而「多出/少了一个读者」都必须在这里显式红，别让它悄悄漂。
   const RRACALL = /^[^\S\n]*bash\s+"?(?:scripts|\$\(dirname "\$0"\))\/read-release-asset\.sh/m;
-  for (const rel of ['.github/workflows/program-ota.yml', 'scripts/check-apk-release-version.sh']) {
-    check(`取数宿主接线：${rel} 真的调用 read-release-asset.sh`,
-      RRACALL.test(stripHashComments(fs.readFileSync(path.join(ROOT, rel), 'utf8'))),
-      '找不到 bash …/read-release-asset.sh 的调用行');
-  }
+  const rraReaders = fs.readdirSync(path.join(ROOT, '.github/workflows'))
+    .map((f) => '.github/workflows/' + f)
+    .concat(fs.readdirSync(path.join(ROOT, 'scripts')).map((f) => 'scripts/' + f))
+    .filter((rel) => rel !== 'scripts/read-release-asset.sh')
+    .filter((rel) => {
+      try { return RRACALL.test(stripHashComments(fs.readFileSync(path.join(ROOT, rel), 'utf8'))); }
+      catch { return false; }
+    }).sort();
+  check('取数宿主 read-release-asset.sh 的读者恰好是这两个（Program / 能力件固化）',
+    JSON.stringify(rraReaders) === JSON.stringify(['.github/workflows/pin-capabilities.yml', '.github/workflows/program-ota.yml']),
+    rraReaders.join(','));
   check('取数宿主接线断言自证：只有注释提及 → 判红',
     !RRACALL.test('  # 分类住 scripts/read-release-asset.sh\n  # bash scripts/read-release-asset.sh k "$R" m.json "$T"\n'));
   check('唯一宿主里三种结局都还在（退 10 与退 2 少一个就退化成旧缺陷）',
@@ -1265,28 +1351,8 @@ if (fs.existsSync(PREPARER_KT)) {
 }
 
 const INJECT_PY = path.join(ROOT, 'scripts/inject-libcxx-into-apk.py');
-if (fs.existsSync(INJECT_PY)) {
-  const py = fs.readFileSync(INJECT_PY, 'utf8');
-  // anchor 必须指向注册表里真实存在的资产（当前是 libnode.so）
-  const anchorMatch = /anchor\s*=\s*\(?'lib\/%s\/([^']+)'/.exec(py);
-  check('⑤ inject 脚本的 anchor 可解析', anchorMatch !== null);
-  if (anchorMatch) {
-    check(
-      '⑤ inject 脚本 anchor 指向注册表内资产',
-      REGISTRY_LIBNAMES.includes(anchorMatch[1]),
-      `anchor=${anchorMatch[1]}，注册表=${REGISTRY_LIBNAMES.join(', ')}`
-    );
-  }
-  const target = /new_name\s*=\s*\(?'lib\/%s\/([^']+)'/.exec(py);
-  check('⑤ inject 脚本的注入目标可解析', target !== null);
-  if (target) {
-    check(
-      '⑤ inject 脚本注入目标在注册表 requiredDeps 内（它是依赖而非本体）',
-      REGISTRY_DEPS.includes(target[1]),
-      `注入 ${target[1]}，requiredDeps=${REGISTRY_DEPS.join(', ')}`
-    );
-  }
-}
+check('⑤ libc++ 注入脚本确实已删（它的唯一调用方 release-admin repack 随发布连归一废除，留着=第二条改 APK 字节的路）',
+  !fs.existsSync(INJECT_PY), INJECT_PY);
 
 // ---------------------------------------------------------------------------
 // ① → Kotlin 侧：硬编码文件名应已清除
@@ -1611,8 +1677,11 @@ check('APK 原生件审计宿主 scripts/verify-apk-native.sh 存在', fs.exists
   const vanCallers = fs.readdirSync(wfDir).filter((f) => f.endsWith('.yml'))
     .filter((f) => /scripts\/verify-apk-native\.sh/.test(fs.readFileSync(path.join(wfDir, f), 'utf8')))
     .sort();
-  check('审计宿主被 fast-apk/build-apk/release-admin 三链同调（gate×2 + report×1）',
-    JSON.stringify(vanCallers) === JSON.stringify(['build-apk.yml', 'fast-apk.yml', 'release-admin.yml']),
+  // 审计宿主被两条真出 APK 的链同调：build-apk（构建后审计验证载体）与 fast-apk（打包后审计发布载体）。
+  // release-admin 那一处随该链废除（docs/adr/0011）—— 它审计的是「从别的 run 回取的历史 APK」，
+  // 那个来源本身已经不存在，所以这里少的是**口**，不是判据。
+  check('审计宿主被 fast-apk / build-apk 两条出 APK 的链同调',
+    JSON.stringify(vanCallers) === JSON.stringify(['build-apk.yml', 'fast-apk.yml']),
     vanCallers.join(','));
 }
 

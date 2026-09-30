@@ -18,7 +18,11 @@
 //   verify-ota-anchor.sh 同一条纪律（发一个设备验不过的清单 = 假装发布成功）。
 //
 // 用法：node scripts/publish-userland-manifest.js <dist目录> <输出目录> <私钥> [channel] [--project]
-//   env: USERLAND_BASE_URL（缺省 https://hubcdn.zll.ink）、GITHUB_RUN_NUMBER（进版本号）
+//   env: USERLAND_BASE_URL（缺省 https://hubcdn.zll.ink）、GITHUB_RUN_NUMBER（进 version 那一格的溯源后缀）
+//   env: LOBOS_USERLAND_REVISION —— 发布轮的**清单版本号**，必填且必须是正整数。
+//     它来自 tag 名（`userland-<channel>-<revision>`，见 docs/adr/0011）：发布决定要能被追溯到一个
+//     人写下的版本号，而不是「这次 run 恰好是当天第几轮」。version 那一格是溯源标签（日期.run），
+//     单调判据只看 revision —— 两者分开，日期变化不该被当成升版，反之升版也不该依赖跑在哪天。
 //   --project：只打 tools 投影到 stdout（不签名、不读私钥），供漂移对照用
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -174,6 +178,16 @@ function versionString() {
   return d + '.' + run;
 }
 
+/** 清单版本号：只认发布轮**显式给**的那一个（来自 tag 名），且必须是正整数。
+ *  不给缺省：缺省成日期或 0 就等于「不写版本号也能发」，而这一格是 C 层唯一的单调判据。 */
+function revisionForManifest() {
+  const raw = process.env.LOBOS_USERLAND_REVISION || '';
+  if (!/^[1-9][0-9]*$/.test(raw)) {
+    throw new Error('LOBOS_USERLAND_REVISION 必须是正整数（它来自发布 tag `userland-<channel>-<revision>`），读到: ' + (raw || '空'));
+  }
+  return Number(raw);
+}
+
 /** 各件的能力判据（随件下发）。缺判据即硬失败：设备拿不到判定依据的件等于不可核验。 */
 function criteria() {
   const j = JSON.parse(fs.readFileSync(VERIFY, 'utf8'));
@@ -203,6 +217,7 @@ function main() {
   const man = {
     schema: 1,
     channel: CHANNEL,
+    revision: revisionForManifest(),
     version: versionString(),
     sequence: Math.floor(Date.now() / 1000),
     expiresEpochMs: Date.now() + TTL_MS,
@@ -217,7 +232,7 @@ function main() {
   fs.mkdirSync(OUT, { recursive: true });
   fs.writeFileSync(path.join(OUT, 'userland-manifest.json'), body);
   fs.writeFileSync(path.join(OUT, 'userland-manifest.json.sig'), sig + '\n');
-  console.log('[userland] channel=' + CHANNEL + ' version=' + man.version + ' sequence=' + man.sequence + ' tools=' + tools.length);
+  console.log('[userland] channel=' + CHANNEL + ' revision=' + man.revision + ' version=' + man.version + ' sequence=' + man.sequence + ' tools=' + tools.length);
   for (const t of tools) {
     const als = t.aliases.length ? ' 别名 ' + t.aliases.map((a) => a.name + '→' + a.entry).join(',') : '';
     console.log('  - ' + t.name + '@' + t.version + ' ' + t.provider + ' ' + t.sha256.slice(0, 12) + '… 判据 ' + t.verify.node.length + ' 字 入口 ' + t.entry + als);

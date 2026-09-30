@@ -10,17 +10,17 @@
 
 | 你改了什么 | 走哪条 | 耗时 | 说明 |
 |---|---|---|---|
-| `container/app/**`（Kotlin / assets / res / gradle） | `fast-apk.yml` | 分钟级 | 推 `main` 或 `fast-*` tag 触发 |
+| `container/app/**`（Kotlin / assets / res / gradle） | `fast-apk.yml` | 分钟级 | 推 `main` 只做构建校验；**发布靠推 `os-release-*` tag**，见 §4 |
 | `container/native/**` | `fast-apk.yml` | 分钟级 | 原生桥源码 |
 | `container/engine/**` | `ci.yml` 的 container job | 分钟级 | **不触发** fast-apk（不出 APK） |
-| `programs/**`（console Program + 面板 UI） | `ci.yml` 的 console job | 分钟级 | **不重编 APK**；Program 经 OTA 分发 |
+| `programs/**`（console Program + 面板 UI） | `ci.yml` 的 console job | 分钟级 | **不重编 APK**；发 Program 推 `program-ota-<channel>-<version>` tag |
 | `scripts/build-node-android.sh` | `build-apk.yml`（**手动**，push 不触发） | **2~3 小时** | 只有真要重编 Node 才走 |
-| 升级 Node 版本 | `build-apk.yml`（手动）+ release-admin 的 pin job | **2~3 小时** | 编完必须固化，见 §3 |
-| `docs/**`、`*.md` | 不触发构建 | — | 纯文档 |
+| 升级 Node 版本 | `build-apk.yml`（推 `runtime-release-*` tag） | **2~3 小时** | 同一条链自己固化，见 §3 |
+| `docs/**`、`*.md` | `ci.yml`（`docs/**` 在 paths 里） | 分钟级 | 只跑门禁（doc-gate / debt-gate），不出产物 |
 | `.github/workflows/**`、`scripts/**`、`docs/contracts/**` | `ci.yml` | 分钟级 | 走统一门禁 |
 
 > **判断准则**：这个改动会不会改变 `libnode.so` 这一个字节？
-> 不会 → 走 fast-apk（或 ci.yml）。会 → 手动跑 build-apk 重编，编完 pin-node 固化。
+> 不会 → 走 fast-apk（或 ci.yml）。会 → 推 `runtime-release-*` 重编，同一条链编完即固化。
 
 ### 设备内 spawn 的边界（改内核必读）
 
@@ -70,48 +70,58 @@ engine 测试脚本必须入 `test:logic` 链，共 33 行、npm 零命中（ENV
 # ① 改默认版本
 vim container/app/src/main/assets/node-versions.json   # 改 default 字段
 
-# ② 手动触发重编（2~3 小时；push 不会自动触发）
-#    Actions → "Build Android Node Container APK" → Run workflow
-
-# ③ 编完【必须固化】，否则 fast-apk 找不到对应运行时
-#    方式一：推 tag  pin-node-latest（或 pin-node-<run_id>）
-#    方式二：Actions → "Admin (cancel / status)" → mode=pin
-#    （没有名为 "Pin Node runtime" 的独立 workflow）
+# ② 推固化 tag —— 同一条链跑完整交叉编译（2~3 小时），编完即投递
+git push origin refs/tags/runtime-release-<node 版本>-<abi>
+#    例：runtime-release-24.21.0-arm64-v8a
 ```
 
-固化产物落在 Release：`node-runtime-<version>-<abi>`，如 **`node-runtime-24.21.0-arm64-v8a`**。
+固化产物落在**不可变** Release：`node-runtime-<version>-<abi>`，如 **`node-runtime-24.21.0-arm64-v8a`**。
 `fast-apk` 按这个名字去找；不固化会报"找不到 Release"并给出指引。
+
+**tag 名里的版本号与 `node-versions.json` 现算出来的那一个逐字相符才动手**（判据在 build-apk 的
+Resolve 步骤）—— 旧的「先编、再从别的 run 里按 run-id 回取产物固化」（`pin-node-*` /
+release-admin 的 pin 模式）已整条删除：跨 run 回取真实断过一次（artifact 改名 ⇒ 取不到件，债 AUD-G33
+有取证记录），而「找到的那份是哪一份」由那次 run 的运气决定，不是由判据决定。
 
 ---
 
-## 4. 触发 CI 的方式（tag 通道）
+## 4. 发布与出包：tag 通道（全仓只有这四条投递口）
 
 ```bash
-# ---- 出包 ----
-git push origin refs/tags/fast-verify-1        # 手动跑一次 fast-apk
+# ---- 发这一版壳（OS 版本流；tag 里两个数必须与 version.json 逐字相等）----
+git push origin refs/tags/os-release-<versionName>-<versionCode>
 
-# ---- 固化运行时 ----
-git push origin refs/tags/pin-node-latest      # 固化最近一次成功的 build-apk 产物
-git push origin refs/tags/pin-node-<run_id>    # 固化指定 run 的产物
+# ---- 固化这一版运行时（Runtime 版本流，见 §3）----
+git push origin refs/tags/runtime-release-24.21.0-arm64-v8a
 
-# ---- 管理（release-admin.yml 的 admin job）----
-git push origin refs/tags/admin-status-<run_id>   # 查 run 状态 + artifact
-git push origin refs/tags/admin-logs-<run_id>     # 拉失败日志
-git push origin refs/tags/admin-release           # 查 Release 附件指纹
-git push origin refs/tags/admin-cancel-<run_id>   # 取消 run
-git push origin refs/tags/admin-cancelall         # 取消所有在跑的
+# ---- 发 C 层工具件 + 清单（revision 是正整数、严格单调）----
+git push origin refs/tags/userland-canary-<revision>
+
+# ---- 发这一版 Program（channel 与 version 都写在 tag 名里）----
+git push origin refs/tags/program-ota-canary-0.1.0-android.49
+
+# ---- 小件原生能力件：只有这一条是 workflow_dispatch（身份是内容指纹，人无法预先打 tag）----
+#      见 ../adr/0011-one-release-chain-per-stream.md §5；它不写 main
 ```
 
-结果写到这几个分支，用 `git fetch` + `git show` 读：
+**除了这四条 tag（加能力件那一个 dispatch），仓里没有任何一条链会投递。**
+推 `main`、点 `workflow_dispatch`、打任意别的 tag —— 一律只构建校验。
+旧形状（`fast-*` / `admin-*` / `publish-*` / `repack-*` / `pin-node-*`、合并即出包、
+滚动别名 `apk-latest`）已随发布连归一废止，理由与实测账在
+[../adr/0011-one-release-chain-per-stream.md](../adr/0011-one-release-chain-per-stream.md)。
 
-| 分支 | 内容 |
-|---|---|
-| `ci-admin` | admin 命令的结果 |
-| `ci-hb` | 构建期心跳（stage / 内存 / OOM 计数） |
-| `ci-last` | 构建终态报告（含失败步骤与日志尾部） |
-| `ci-ok` | 成功发布信息（含 sha256） |
+**读 CI 结果不再走「push 一个 tag 让 CI 把读数写到某个分支」**：那五个分支
+（`ci-hb` / `ci-ping` / `ci-ok` / `ci-last` / `ci-diag`）的写者每轮把上一份读数原地换掉，
+从读数里看不出序列 —— 同一形状在债表 DS-16 被判死。现在直接用 PAT 读 API：
 
-> **`admin-logs` 是排查 CI 失败的唯一手段。** 不要猜，猜一轮就是几十分钟到几小时。
+```
+GET /repos/<owner>/<repo>/actions/runs?per_page=…        # 哪一轮在跑、跑到哪
+GET /repos/<owner>/<repo>/actions/runs/<run_id>/jobs     # 每个 job 的结论
+GET /repos/<owner>/<repo>/actions/jobs/<job_id>/logs     # 失败正文（判据读数在这里）
+GET /repos/<owner>/<repo>/releases/tags/<tag>            # 线上这一版真有什么资产
+```
+
+凭据位置与用法见 [git.md](git.md) §6 与 [release.md](release.md) §9。
 
 ---
 
@@ -142,20 +152,22 @@ git push origin refs/tags/admin-cancelall         # 取消所有在跑的
 # ❌ 错：两个 push，后者覆盖前者
 on:
   push: { branches: [main], paths: ['container/app/**'] }
-  push: { tags: ['fast-*'] }
+  push: { tags: ['os-release-*'] }
 
 # ✅ 对：合并成一个
 on:
   push:
     branches: [main]
     paths: ['container/app/**']
-    tags: ['fast-*']
+    tags: ['os-release-*']
 ```
 
 **触发条件的选择**：
 
-- **高频路径**（日常出包）用 `paths` **白名单**：语义是"不匹配就不跑"。
+- **高频路径**（日常构建校验）用 `paths` **白名单**：语义是"不匹配就不跑"。
 - **低频路径**（Node 编译）用 `paths-ignore` **黑名单**：万一漏配最多白跑一次。
+- **`paths` 不管 tag 推送**（官方语义：Path filters are not evaluated for pushes of tags），
+  所以「同一个块里既有分支白名单又有 tags」是自洽的：分支轮按 paths 过滤，tag 轮恒跑。
 
 ---
 
@@ -182,9 +194,11 @@ put("LD_LIBRARY_PATH", libSearchPath)
 ## 8. 出问题时的排查顺序
 
 1. **看真机诊断面板**（App 打开即是），对照 `docs/architecture.md` 第 9 节。
-2. **CI 失败** → `admin-logs-<run_id>` 拉日志。不要猜。
+2. **CI 失败** → 直接读那一轮的 job 日志正文（§4 末尾那四条 API）。不要猜，猜一轮就是几十分钟到几小时。
 3. **真机报错看不懂** → 查 `docs/architecture.md` 的"错误码速查"。
-4. **改了没生效** → 先确认跑对了 workflow；再确认 APK 是从 `apk-latest` 拿的。
+4. **改了没生效** → 先确认这条改动归哪个版本流、有没有推对应的发布 tag（只有 tag 轮投递）；
+   再确认设备上装的确实是那一版：壳看 `files/provisioning.json` 的 `appVersion`/`appVersionCode`
+   （ADR-0004 §5），Program 看 `files/programs/<id>/CURRENT`，C 层看清单的 `revision`。
 
 ---
 

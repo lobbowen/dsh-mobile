@@ -424,12 +424,10 @@ if (!hasReadelf) {
 // ---------------------------------------------------------------------------
 // 收口掉的三份内联实现各留了特征串；任何一处回潮 = 同一事实又有了第二种结论。
 // 对照组在 ⑩ 末尾：特征串必须**确实存在于宿主**，否则这一批断言是零命中的空转。
-const SITES = [
-  '.github/workflows/fast-apk.yml',
-  '.github/workflows/build-apk.yml',
-  '.github/workflows/release-admin.yml',
-  'scripts/build-node-android.sh',
-];
+// 扫**全部** workflow，不是白名单：新增一条链不会悄悄逃出这批判据（同 docs/adr/0011 的收口口径）。
+const SITES = fs.readdirSync(path.join(ROOT, '.github/workflows'))
+  .map((f) => '.github/workflows/' + f)
+  .concat(['scripts/build-node-android.sh']);
 // 判据特征：对齐值字面量、bionic 解释器路径、把系统库名抄成一份 case 列表。
 // 每条都配一个**对照组**（在合法住处必须命中）—— 零命中的「不再内联」断言是空转。
 const DEPS_FILE = path.join(ROOT, 'scripts/native-deps.txt');
@@ -460,19 +458,32 @@ for (const rel of SITES) {
   }
 }
 {
-  // 五个出口必须都接上宿主。期望次数写死：少一个出口就少一道判据。
+  // 三个出口必须都接上宿主（2026-09-30 发布连归一后：release-admin 的 pin / repack 两处随该链
+  // 废除 —— 少的是**口**，不是判据；固化那一处判的就是同一轮构建里已被判过的那批字节）。
+  // 期望次数写死：少一个出口就少一道判据。
   const CALLERS = [
     ['scripts/build-node-android.sh', 1],
     ['.github/workflows/fast-apk.yml', 1],
     ['.github/workflows/build-apk.yml', 1],
-    ['.github/workflows/release-admin.yml', 2],
   ];
-  for (const [rel, want] of CALLERS) {
+  const called = (rel) => {
     const p = path.join(ROOT, rel);
     // 只数**调用**（`bash …verify-runtime-elf.sh`），echo 里提路径、注释里讲历史都不算。
-    const hits = (stripComments(fs.readFileSync(p, 'utf8')).match(/bash\s+"?\S*verify-runtime-elf\.sh/g) || []).length;
-    check(`⑩ ${rel} 调用宿主 ${want} 次`, hits === want, `实际 ${hits} 次`);
-  }
+    return (stripComments(fs.readFileSync(p, 'utf8')).match(/bash\s+"?\S*verify-runtime-elf\.sh/g) || []).length;
+  };
+  for (const [rel, want] of CALLERS) check(`⑩ ${rel} 调用宿主 ${want} 次`, called(rel) === want, `实际 ${called(rel)} 次`);
+  // 反向：表外的任何文件都不许调宿主 —— 表是白名单，只判正向的话，新加一条链自己接一份判据
+  // 却不改表，这批判据不会红（那正是「多个出口只有一个真在跑」的形状）。扫描范围要覆盖
+  // **两类**可能的调用方（workflow 与 scripts），只走 workflows 等于给 scripts 留了表外的口子。
+  const inTable = (rel) => CALLERS.some(([r]) => r === rel);
+  const candidates = [
+    ...fs.readdirSync(path.join(ROOT, '.github/workflows')).map((f) => '.github/workflows/' + f),
+    ...fs.readdirSync(path.join(ROOT, 'scripts'))
+      .filter((f) => f.endsWith('.sh') || f.endsWith('.js'))
+      .map((f) => 'scripts/' + f),
+  ];
+  const strays = candidates.filter((rel) => !inTable(rel) && called(rel) > 0);
+  check('⑩ 表外（workflows 与 scripts 全量）没有文件偷偷接宿主（新增出口必须先改表）', strays.length === 0, strays.join(','));
 }
 
 finish();

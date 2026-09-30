@@ -1,7 +1,16 @@
-name: Fast APK (no Node rebuild)
+name: Release OS APK (standard chain)
 
 # ============================================================================
-#  日常出包入口。**不编译 Node** —— 这是本项目效率的核心。
+#  **OS（壳 APK）版本流的唯一发布链**。全仓每条版本流恰好一条链（投递只由人打的带版本号 tag 决定）；唯一的例外是能力件那条 pin-capabilities.yml —— 它的身份是内容指纹、入口是 dispatch（ADR-0011 §5）。，见
+#  docs/adr/0011-one-release-chain-per-stream.md 与 ci.yml 头部那张表。
+#
+#  两个身份，一条链：
+#    · push 到 main（命中 paths 白名单）= **只构建校验，不投递**。合并到 main 不再自动发
+#      任何一个包 —— 旧形态「合并即出包」让每一次无关合并都在挤压同一个版本空间，
+#      而「出包」从来不是被人**决定**的（DS-14/DS-16 整条取证链就长在这上面）。
+#    · 推 tag `os-release-<versionName>-<versionCode>` = **发布这一版**。tag 名里那两个数
+#      必须与 `version.json` 逐字相等（判据在下面的 Publish 步），所以「发的是哪一版」在
+#      git 里留痕，而同号换字节无路可走（版本门禁吃 auto 通道 + 两格取严）。
 #
 #  背景：Node 交叉编译要跑两份 V8（host x64 + target aarch64），
 #  在 GitHub 免费 runner 上耗时 2~3 小时。而绝大多数开发改动
@@ -12,14 +21,14 @@ name: Fast APK (no Node rebuild)
 #  本 workflow 的做法：
 #    从固定 Release（node-runtime-<version>-<abi>）下载预编译的
 #    libnode.so + libc++_shared.so → 校验 sha256 → 放进 jniLibs/
-#    → 直接 gradle assembleDebug → 审计 → 发布。
+#    → 直接 gradle assembleDebug → 审计 →（仅当 tag 命中）发布。
 #    全程分钟级。
 #
-#  什么时候该用 build-apk.yml（全量 Node 编译，手动触发）而不是这条：
+#  什么时候该用 build-apk.yml（全量 Node 编译，Runtime 版本流）而不是这条：
 #    · 改了 scripts/build-node-android.sh
 #    · 要换 Node 版本
-#    这两类改动才需要真正重编，编完用 release-admin 的 pin 模式固化
-#    （tag: pin-node-*），之后本 workflow 自动用上新版本。
+#    这两类改动才需要真正重编；那条链自己固化 node-runtime-*（tag: runtime-release-*），
+#    之后本链自动用上新版本。
 #
 #  决策表见 docs/architecture.md 第 8 节。
 # ============================================================================
@@ -33,14 +42,14 @@ on:
     branches: [main, master]
     # 只在【真正影响 APK 内容】的路径变更时触发。
     # 用 paths 白名单（而非 build-apk.yml 的 paths-ignore 黑名单）：
-    # 白名单的默认语义是"不匹配就不跑"，对日常出包这条高频路径，
-    # 宁可漏跑（可手动/ tag 触发）也不要因新增目录而莫名跑起来。
+    # 白名单的默认语义是"不匹配就不跑"，对日常构建校验这条高频路径，
+    # 宁可漏跑（可手动触发）也不要因新增目录而莫名跑起来。
     paths:
       - 'container/app/**'
       # container/app/** 里包含**不进 APK 的测试源码**（src/test、src/androidTest）——
-      # 纯测试改动不改变 APK 字节，放进来就会触发构建+发布，再被版本门禁以「同版本重发」
-      # 拒掉（CI 实证：commit 0635e558）。这与下面 scripts/* 的处理是同一条既有规则
-      # ——「产物字节没变的路径不进白名单」（先例：scripts/build-node-android.sh）。
+      # 纯测试改动不改变 APK 字节，放进来就会触发构建，白烧机时。这一格与下面
+      # 「构建脚本不进白名单」是同一条既有规则 ——「产物字节没变的路径不进白名单」
+      # （先例：scripts/build-node-android.sh；CI 实证：commit 0635e558 曾因这格触发过构建）。
       - '!container/app/src/test/**'
       - '!container/app/src/androidTest/**'
       - 'gradle/**'
@@ -53,24 +62,24 @@ on:
       # 以及 gradle 的 keepDebugSymbols。改它就等于改了 APK 内容。
       - '.github/native-assets.txt'
       # native/ 下的 C 源（flock/publish/ptyprobe 等）现场编译进 jniLibs ——
-      # 改源码同样等于改 APK 内容（tag 触发不受 paths 限制，但 push 直出也要能触发）。
+      # 改源码同样等于改 APK 内容。
       - 'container/native/**'
       # 刻意**不**放构建脚本（如 scripts/build-native-capabilities.sh）：与既有先例一致 ——
       # Node 的构建脚本 scripts/build-node-android.sh 同样不在此白名单，它走 build-apk.yml 那条
       # 重型手动路径。理由是实测出来的：把构建脚本放进来后，**纯重构**（产物字节其实没变）
-      # 也会触发本链，而版本门禁会要求 bump versionCode —— 白白发一个包。
+      # 也会触发本链。
       # 构建脚本的改动由「C 源变更」（container/native/** 已在上方）或手动 dispatch 覆盖。
       # version.json 决定 APK 的分发身份（versionName / versionCode）。改它 = 改产物身份，
-      # 而本 workflow 的版本门禁正是拿它比较 —— 原先不在白名单，会出现
-      # 「改了版本却不触发构建 / 只改版本时无人验证」。
+      # 而本 workflow 的版本门禁与发布 tag 名都拿它比对 —— 只改版本时也必须有人验证。
       - 'version.json'
       # 注意【不】包含 programs/console/**：ADR-0005 后 Program 不随 APK 分发（下面有专门断言），
-      # Program 改动走 program-ota.yml 出 OTA 包 —— 让 fast-apk 监听它只会白烧机时。
-    # 额外的 tag 触发：推 fast-<任意> 即可手动跑一次，不必改代码。
-    # 维护环境（沙箱）无法操作网页、workflow_dispatch 点不了，
-    # tag 是最干净的显式触发手段。
+      # Program 改动走 program-ota.yml 出 OTA 包 —— 让本链监听它只会白烧机时。
+    # 发布入口：**带版本号的 tag**。推 `os-release-<versionName>-<versionCode>` 即决定发这一版。
+    # 沙箱侧打不开网页、workflow_dispatch 点不动，tag 是唯一能从命令行落下的显式动作；
+    # 与旧的 `fast-*`（任意名字、不带版本）的区别就是：**发的是哪一版写在 ref 名里**。
+    # 注意 tag 触发**不等于**投递 —— 还要过 Publish 那一步的「tag 名 == version.json」判据。
     tags:
-      - 'fast-*'
+      - 'os-release-*'
   workflow_dispatch:
     inputs:
       node_version:
@@ -204,11 +213,10 @@ jobs:
           if ! gh release view "$TAG" --repo '${{ github.repository }}' >/dev/null 2>&1; then
             echo "[error] 找不到 Release: $TAG"
             echo
-            echo "说明预编译运行时尚未固化。请先执行一次："
-            echo "  Actions → 'Admin (cancel / status)' → Run workflow，mode 选 pin"
-            echo "  或推送 tag: pin-node-latest"
+            echo "说明该版本的预编译运行时尚未固化。固化属于 **Runtime 版本流**，只有一条链会写它："
+            echo "  推 tag: runtime-release-<NODE_VERSION>-<ABI>   （触发 build-apk.yml 全量交叉编译并固化）"
             echo
-            echo "（固化会从最近一次成功的 build-apk 运行里提取并校验两个 .so）"
+            echo "（那条链在同一轮构建里就地提取并校验两个 .so，不再从别的 run 回取产物）"
             exit 1
           fi
 
@@ -349,13 +357,14 @@ jobs:
         id: signing
         # 「设备能否自我升级 APK」的唯一开关。判据只有一份实现：
         # scripts/inject-apk-keystore.sh（三档退出语义写在那份脚本的头部，这里不复述）。
-        # 本链路的【政策】是日常出档：退 10（没配密钥）可继续 —— 包本身可用，
+        # 本链路的【政策】分两档：构建校验轮退 10（没配密钥）可继续 —— 包本身可用，
         # 只是不能覆盖安装到既有设备上，这件事由后面的签名门禁打 ::warning:: 说清；
         # 退 2（配了却用不成）必须当场红，等 20 分钟后在签名步骤才炸会把真因
-        # （base64 残缺）伪装成「密码/别名不对」。
+        # （base64 残缺）伪装成「密码/别名不对」。发布轮（os-release-* tag）由下面的
+        # 签名门禁按 --require-stable 硬拦，没密钥就发不出去。
         #
-        # secret 命名复用 release-admin repack 那一组，不另立一套；与 OTA Program 签名
-        # （ed25519）是两条独立信任根 —— 辨析见 scripts/keygen-android-keystore.sh 头注释。
+        # secret 命名沿用仓库里既有的那一组（旧 release-admin repack 用的同一组），不另立一套；
+        # 与 OTA Program 签名（ed25519）是两条独立信任根 —— 辨析见 scripts/keygen-android-keystore.sh 头注释。
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -369,7 +378,7 @@ jobs:
             echo "::error title=keystore 注入失败::ANDROID_KEYSTORE_BASE64 已配置但用不成（原因见上方 [error] 行）—— 不许带着坏配置继续构建。"
             exit 1
           fi
-          [ "$rc" = 0 ] || echo "[lobos-signing] 按「未配置密钥」档继续：本次产物是 debug 签名包（日常链允许，但**不会**写 apk-latest）。"
+          [ "$rc" = 0 ] || echo "[lobos-signing] 按「未配置密钥」档继续：本次产物是 debug 签名包（构建校验轮允许；发布轮由下面的签名门禁按发布档硬拦）。"
 
       - name: Build debug APK
         run: |
@@ -378,13 +387,17 @@ jobs:
 
       - name: Gate — verify APK signing identity（稳定签名）
         # 判据的唯一实现是 scripts/verify-apk-signing.sh（三档语义与动机见脚本头注释）。
-        # 本链路是日常出包：允许 debug 档（脚本自己打 ::warning::），但锚点在就必须逐指纹
-        # 比对 —— 「配了 keystore 却签成别的 key」以前查不出来。
+        # 档位随**这一轮要不要投递**变，而不是随链路名变：
+        #   · 构建校验轮（push / dispatch）允许 debug 档（脚本自己打 ::warning::）—— 取证要用它。
+        #   · 发布轮（os-release-* tag）**要求稳定签名**：全仓只剩这一颗投递口，发出去就是
+        #     设备侧那个 versionCode 的持有者。一次性 debug 签名会把既有设备打成
+        #     INSTALL_FAILED_UPDATE_INCOMPATIBLE，而锚点在时必须逐指纹比对（这一格以前查不出来）。
         run: |
           set -euo pipefail
           APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)"
           ARGS=()
           [ -z "${LOBOS_APK_CERT_FILE:-}" ] || ARGS=(--cert "$LOBOS_APK_CERT_FILE")
+          case "${GITHUB_REF:-}" in refs/tags/os-release-*) ARGS+=(--require-stable) ;; esac
           bash scripts/verify-apk-signing.sh "$APK" "${ARGS[@]}"
 
       - name: Audit APK contents
@@ -401,12 +414,18 @@ jobs:
           name: lobos-apk
           path: container/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          # 这份不只是构件，还是 pin-node 的唯一裸 .so 来源：release-admin 按 run-id
-          # 回取它、从 APK 的 lib/arm64-v8a/ 里解出 libnode.so。留 14 天 = 覆盖
-          # 「事后想补固化某一轮」的窗口；不设则默认 90 天，每轮 50 MiB 无限叠加。
-          retention-days: 14
+          # 这份是**取证用的构件**，不是发布物：发布物只有下面 v<versionName> 归档里那颗。
+          # 旧注释说它是 release-admin pin-node 的「唯一裸 .so 来源」—— 那条投递口已随
+          # release-admin 一起废除（Node 固化改在 build-apk 同一轮里做，产物就在它自己的工作树），
+          # 所以这里不再有跨 run 的下游读者，留 3 天只为事后翻查当轮构建。
+          retention-days: 3
 
       - name: Publish APK to Release
+        # 全仓**唯一**的壳 APK 投递口。触发条件只有一条：ref 是 `os-release-<versionName>-<versionCode>`
+        # 且那两个数与 version.json 逐字相等（下面现算现比）。push 到 main / dispatch / 任意别的
+        # tag 形态一律**不投递**（构建校验照跑）。旧形态是「合并即出包」+「fast-* 任意 tag 也能出包」，
+        # 于是发布不是一个决定，而是一个副作用（见 docs/adr/0011）。
+        if: ${{ startsWith(github.ref, 'refs/tags/os-release-') }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -414,103 +433,70 @@ jobs:
           APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)"
           VN="$(node -p "require('./version.json').shell.versionName")"
           VC="$(node -p "require('./version.json').shell.versionCode")"
+          # ── 发布决定的一致性：tag 名 == version.json == 本次产物 ─────────────────────
+          # 为什么必须比：tag 是「人要发这一版」的唯一凭据，而 APK 是从 ref 检出的工作树构建的。
+          # 若有人对旧 ref 打新 tag（或先打 tag 再 bump），发出去的东西与 tag 说的不是同一版，
+          # 那正是 ADR-0004 要防的「内容变了但版本没变」的镜像形状 —— 版本变了而内容没变。
+          WANT="os-release-${VN}-${VC}"
+          if [ "${GITHUB_REF_NAME:-}" != "$WANT" ]; then
+            echo "::error title=发布 tag 与版本事实源不符::tag 是 ${GITHUB_REF_NAME:-空}，而 version.json 说的是 $WANT。" \
+              && echo "::error::要么重打一个名字与 version.json 相符的 tag，要么先 bump version.json 再打 tag —— 本次不投递。"
+            exit 1
+          fi
           VAPK="app-debug-${VN}+${VC}.apk"
-          echo "[version] 本次归档 $VN (versionCode=$VC) → $VAPK"
+          echo "[version] 本次发布 $VN (versionCode=$VC) → $VAPK，tag=$GITHUB_REF_NAME"
 
           # 先改名再交出去：gh 的资产名取 file 的 basename（`#` 后面只是 label，不改名），
           # 所以"版本化资产名"只能靠这份临时目录里的副本实现。
           VDIR="$(mktemp -d)"
           cp "$APK" "$VDIR/$VAPK"
 
-          # ── 版本门禁（VERSION-GATE 1/4：判据 scripts/verify-apk-version-gate.sh，取数外壳
+          # ── 版本门禁（判据 scripts/verify-apk-version-gate.sh，取数外壳
           #    scripts/check-apk-release-version.sh）─────────────────────────────
-          # 通道怎么定：只有「合并到分支后自动出包」是 auto —— 那条路没人看着，最能把
-          # 「改了 APK 却没 bump 版本」咽下去。`fast-*` tag 与人点的 workflow_dispatch 都是
-          # explicit（显式要求原地重传，正当用途是「投递本身坏了」）。
-          # 注意 dispatch 不一定给出 tag 形态的 GITHUB_REF_TYPE（它跟着被选中的 ref），
-          # 所以先按 event_name 判，再看 ref_type —— 与 release-admin 里 `${GITHUB_REF_TYPE} = tag`
-          # 只在 tag 触发时成立是同一条事实（那里靠它解析 publish-<run_id>）。
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
-            VCHANNEL=explicit
-          else
-            VCHANNEL=auto
-          fi
-          # 参照物 = 日常链自己的归档族读数（scripts/read-archived-shell-version.sh 从 v<versionName>
-          # 的资产名里取回最高 versionCode）。**不能拿 apk-latest 当参照物**：那条别名由发布面维护，
-          # 线上 39 个 Release 里一个 apk-latest 都没有、14 个归档带 version.json 的是 0 个（2026-09-30
-          # 现读），于是取数每次退「首次发布」，这道门从立起到今天一个数都没比过（债表 DS-14）。
-          # 通道仍按上面的判定：main 自动出包是 auto —— 同 versionCode 换了 APK 字节必须 bump 或改走 fast-* tag。
+          # 通道**恒为 auto**：全仓只剩这一个投递口，而它每次都带版本号，所以旧的那格
+          # 「显式通道允许同版本重发（修投递）」已无对应场景 —— 投递坏了的正确反应是
+          # bump 一个版本号，而不是让同一个 versionCode 指向另一批字节。
+          # 参照物 = 这条链自己写的 `v<versionName>` 归档族读数（read-archived-shell-version.sh），
+          # 再加第二格回执账本（read-apk-receipts.sh）两格取严 —— 线上那格可以被删小，
+          # 账本那格住在只追加分支里删不动（债表 DS-14 定性 + DS-16 实测）。
           TAG="archive"
-          bash scripts/check-apk-release-version.sh version.json "$TAG" "$VCHANNEL"
+          bash scripts/check-apk-release-version.sh version.json "$TAG" auto
 
-          # 版本化资产进**独立 tag**（v<versionName>），**不放**滚动 latest：
-          # 否则 latest 会随每次发布无限堆积历史 APK（滚动通道只该有"当前"）。
+          # 版本化资产进**独立 tag**（v<versionName>）。全仓**不再有滚动别名**：
+          # 旧的 apk-latest 由三条链各自覆盖、且 2026-09-30 线上现读根本不存在，
+          # 设备上没有任何东西读它（注册表 DS-11 实读）⇒ 随那三条投递口一起废除。
           VTAG="v$VN"
           bash scripts/gh-release-upload.sh "$VTAG" \
             --title "Lob OS $VN" \
-            --notes "版本化归档：versionName=$VN，versionCode=$VC。日常链不写滚动别名；发布面滚动别名仍是 apk-latest。" "$VDIR/$VAPK"
+            --notes "版本化归档：versionName=$VN，versionCode=$VC。发布由 os-release-${VN}-${VC} tag 决定；全仓无滚动别名。" "$VDIR/$VAPK"
 
-          # ── 发布回执记账（VERSION-GATE 记账口 1/4）───────────────────────────────
-          # 排在投递成功之后：账要记的是「已经发出去了」这件事，先记账再上传就会留下
-          # 「账上有而线上没有」的反向缺口。取严参照物靠这一行活着（债表 DS-16）。
+          # ── 发布回执记账（唯一写入口，排在投递成功之后）────────────────────────────
+          # 账要记的是「已经发出去了」这件事，先记账再上传就会留下「账上有而线上没有」的反向缺口。
           # 判红就让它红：账没记上必须在这轮 CI 上看见，不许把「下一轮拿更小的下界比」
           # 当成正常（同一门禁不许有第二份写入路径，所以这里只有宿主这一处调用）。
-          bash scripts/append-apk-receipt.sh fast-apk "$VCHANNEL" version.json \
+          bash scripts/append-apk-receipt.sh fast-apk auto version.json \
             "$VDIR/$VAPK" \
             "https://github.com/${{ github.repository }}/releases/download/$VTAG/${VAPK}"
 
           rm -rf "$VDIR"
           echo
-          echo "下载地址（日常链只发版本化归档，滚动别名 apk-latest 由发布面维护）:"
+          echo "下载地址（唯一投递口，只发版本化归档）:"
           echo "  https://github.com/${{ github.repository }}/releases/download/$VTAG/${VAPK}"
-
-      - name: Report to ci-ok
-        if: success()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          git config --global --add safe.directory '*'
-          rm -rf /tmp/okr && mkdir -p /tmp/okr && cd /tmp/okr
-          git clone --quiet \
-            "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" . || {
-              echo "[warn] clone 失败，跳过上报"; exit 0; }
-
-          APK_SHA="$(sha256sum "$GITHUB_WORKSPACE"/container/app/build/outputs/apk/debug/*.apk | awk '{print $1}')"
-          # 跨步骤没有共享 shell 变量：版本号必须在本步骤内自算（原写法引用上一段的变量 = unbound）。
-          VN="$(node -p "require('$GITHUB_WORKSPACE/version.json').shell.versionName")"
-          VC="$(node -p "require('$GITHUB_WORKSPACE/version.json').shell.versionCode")"
-          VAPK="app-debug-${VN}+${VC}.apk"
-          {
-            echo "BUILD_OK"
-            echo "time    : $(date -u)"
-            echo "mode    : fast-apk (no Node rebuild)"
-            echo "runtime : ${{ env.runtime-tag }}"
-            echo "sha     : ${GITHUB_SHA:0:7}"
-            echo "apk     : ${VAPK}"
-            echo "apk_sha : $APK_SHA"
-            echo "url     : https://github.com/${{ github.repository }}/releases/download/v${VN}/${VAPK}"
-          } > ci-ok.txt
-
-          git config user.email "ci@workbuddy.local"
-          git config user.name "CI Diagnostic Bot"
-          git add ci-ok.txt
-          git commit -q -m "ci: fast-apk ok (${GITHUB_SHA:0:7})" || true
-          git push origin HEAD:ci-ok --force && echo "[ok] ci-ok 已更新"
 
       - name: Gate — APK 形态（两侧对照，含 release 变体控件构建）
         id: formgate
-        # 判据的唯一实现是 scripts/verify-apk-release-form.sh。本链路发的是版本化归档
-        # （debug 形态，取证要用），**不写滚动别名**，所以这里不拦发布，只做两件事：
-        # ① 让这把尺子每次合并都被两侧检验：debug 档必须被读成 debuggable。
+        # 判据的唯一实现是 scripts/verify-apk-release-form.sh。本链当前投递的是版本化归档
+        # （debug 形态，真机取证 run-as 要用；换成 release 形态是债 AUD-G33/E3.3，
+        #  代价=存量设备必须卸载重装 = 供给与 adb 配对全部重跑，那一步归人定时机），所以
+        # 这里不拦发布，只做两件事：
+        # ① 让这把尺子每次构建都被两侧检验：debug 档必须被读成 debuggable。
         #    只测「release 侧判绿」的尺子分不清「包真的干净」与「解析根本没生效」——
         #    对照组红点会直接说「形态门禁失灵」，这是这条门禁不空转的前提。
-        # ② 每次合并都真的构建一次 release 变体。发布面（build-apk 三小时手动、
-        #    release-admin 按人触发）从未系统跑过 assembleRelease，所以「这个变体到底
-        #    构建得出来吗、出来的是不是非 debuggable」以前只能等那条几十分钟的链路去试
+        # ② 每次构建都真的跑一次 assembleRelease。全仓只剩这一条 APK 构建链，
+        #    「这个变体到底构建得出来吗、出来的是不是非 debuggable」只能在这里被回答
         #    （债 AUD-G33 的成因之一就是发布路径长期不被执行）。
-        # 排在 ci-ok 上报之后：控件构建坏了要让人看见（job 判红），但不该把当天的
-        # 取证归档投递一起咽掉。
+        # 排在 Publish 之后：控件构建坏了要让人看见（job 判红），但不该把已经判过的
+        # 归档投递一起咽掉 —— 形态那半是 AUD-G33 的账，不是这一轮的闸门。
         # 这里【不】跑签名门禁：无 keystore 时 AGP 出的是 app-release-unsigned.apk，
         # 拿它去查签名只会得到「读不出证书」这种与形态无关的噪音。
         run: |

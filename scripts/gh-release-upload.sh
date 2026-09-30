@@ -11,6 +11,10 @@
 #  「覆盖上传」注释块），于是它删掉了 app-debug.apk、传上去的是 app-signed.apk ——
 #  稳定下载地址 404，已装设备读不到更新；没有任何一份副本会自查这件事。
 #
+#  现在的调用点（docs/adr/0011 发布连归一之后）：fast-apk（壳 APK 唯一投递口）、
+#  build-apk（Node 运行时固化）、pin-capabilities（能力件固化）、program-ota（归档 +
+#  通道两格）。名单由 test/gh-release-upload-test.js 按集合相等钉住，多一条要先记账。
+#
 #  本宿主把三件事收成一件事，并且**上传后必须回读确认**：资产名与字节数都对得上
 #  才算发布发生。上传命令返回 0 不等于线上真有了（孤立资产/后端 404 的前科见
 #  fast-apk.yml 里 2026-09-23 的记录）。
@@ -39,6 +43,8 @@
 #  这类假阳性本仓已有前科（scripts/verify-apk-native.sh 头部记录）。
 # ============================================================================
 set -euo pipefail
+
+source "$(dirname "$0")/gh-absence.sh"
 
 usage() { echo "[error] 用法: bash scripts/gh-release-upload.sh <release tag> [--title T] [--notes N|--notes-file F] [--prune 正则] [--keep 名称]… [--skip-existing] <文件>…"; }
 optval() { [ $# -ge 2 ] || { echo "[error] $1 缺值"; usage; exit 2; }; }
@@ -84,17 +90,15 @@ done
 # 的 tag，并把这次产物当首次发布 —— 三档语义与 read-release-asset.sh 同构。
 CREATE_NEEDED=0
 if ! VIEW_ERR="$(gh release view "$TAG" --repo "$REPO" 2>&1 >/dev/null)"; then
-  LOW="${VIEW_ERR,,}"
-  case "$LOW" in
-    # 措辞表与 scripts/read-release-asset.sh 的 absent() 保持同一份语义（那边是唯一判据宿主）；
-    # 两处列表不一致会让同一句 gh 报错在这里被判「不存在」、在那边被判「看不清」。
-    *"not found"*|*"does not exist"*|*"could not find"*|*"could not locate"*|*"http 404"*|*"no assets"*|*"matching pattern"*)
-      echo "[gh-release-upload] Release $TAG 不存在，创建中…"
-      CREATE_NEEDED=1 ;;
-    *)
-      echo "::error title=读 Release 失败::看不清 $TAG 的线上状态就不许继续发布（原因：$VIEW_ERR）"
-      exit 1 ;;
-  esac
+  # 词表住 scripts/gh-absence.sh（本仓只此一份）：这里原先自己抄了一张比两个 reader 更宽的表，
+  # 于是同一句报错在投递口算「不存在」、在取数口算「看不清」。
+  if gh_absent "$VIEW_ERR"; then
+    echo "[gh-release-upload] Release $TAG 不存在，创建中…"
+    CREATE_NEEDED=1
+  else
+    echo "::error title=读 Release 失败::看不清 $TAG 的线上状态就不许继续发布（原因：$VIEW_ERR）"
+    exit 1
+  fi
 elif [ "$SKIP_EXISTING" = 1 ]; then
   echo "[gh-release-upload] Release $TAG 已存在 —— --skip-existing：归档只建一次，本次不动它。"
   exit 0

@@ -6,16 +6,23 @@ name: Pin native capabilities
 # 与 build-apk（2~3 小时 Node 全量）分开，避免混在一条链里。
 #
 # 幂等：Release 的 tag 由**源指纹**命名（scripts/native-capabilities-fingerprint.sh），
-# 同一份源码重复跑不会产生第二个产物。
+# 同一份源码重复跑不会产生第二个产物。tag 已存在时**只核对字节、不覆盖**（--skip-existing 只
+# 免掉创建，不免掉验证 —— 与 program-ota 的归档同一口径）。
 #
-# 拓扑：本 workflow 负责「产出 + 固化 + 记账」；随后 fast-apk 按指纹**下载校验**，
+# 本链**不写 main**（2026-09-30 归一发布连时删掉了它的 `git push`）：固化记录
+# （.github/native-capabilities-pin.json）是仓内文件，它的唯一写入口是正常推送通道。
+# 让 CI 直接推 main 等于多出第二个「谁能改主干」的答案：它与本轮其它提交抢同一个 ref，
+# 一旦与人工推送交错就会把别人的改动冲掉，而这件事在 CI 日志里看不见。
+# 所以本链的职责到「产出不可变 Release + 把该记的那一格打印/存档」为止，剩下的写入由人推。
+#
+# 拓扑：本 workflow 负责「产出 + 固化」；随后 fast-apk 按指纹**下载校验**，
 # 命中即不再现场编译（见 .github/native-capabilities-pin.json）。
 
 on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write     # 建 Release / 传资产 / 回写固化记录
+  contents: write     # 建 Release / 传资产 / 留一份固化记录产物（不推 main）
 
 jobs:
   pin:
@@ -66,21 +73,62 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "=== 固化内容 ==="; cat "$ZIP.sha256"; cat "$M/manifest.txt"
 
+      - name: 已固化过就核对字节（跳过创建 ≠ 跳过核对）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          RTAG="native-cap-${FP}-${ABI}"
+          mkdir -p /tmp/arc
+          rc=0
+          bash scripts/read-release-asset.sh "已固化的能力件 sha" "$RTAG" "$ZIP.sha256" /tmp/arc || rc=$?
+          case "$rc" in
+            0)
+              OLD="$(cut -d' ' -f1 "/tmp/arc/$ZIP.sha256" | tr -d '\r\n')"
+              if [ -z "$OLD" ]; then
+                echo "::error title=读到的 sha256 是空的::$RTAG/$ZIP.sha256 取到了却是空文件 —— 拿它比等于没比，本次不固化。"
+                exit 1
+              fi
+              if [ "$OLD" != "$SHA" ]; then
+                echo "::error title=同一源指纹产出了两批字节::$RTAG 线上记的是 $OLD，本轮算出的是 $SHA。" \
+                  && echo "::error::tag 名取自源指纹，指纹相同而字节不同 ⇒ 构建不再可复现（产物里混进了时间/路径一类东西）。" \
+                    && echo "::error::先把构建改成可复现，再来谈固化 —— 覆盖会把已出货 APK 的依赖指向另一批字节。"
+                exit 1
+              fi
+              echo "[pin] $RTAG 已在位且字节一致（$OLD）—— 本次不动它，只补记录"
+              ;;
+            10) echo "[pin] $RTAG 还不存在 —— 本次是这份指纹的首次固化" ;;
+            *)  echo "::error title=看不清线上是否已固化::$RTAG 读取失败（rc=$rc）—— 不许在这种状态下固化。"; exit 1 ;;
+          esac
+
       - name: 发布为不可变 Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           # 判据只住 scripts/gh-release-upload.sh（同名资产记录、孤立对象回退、事后逐字节确认）。
-          bash scripts/gh-release-upload.sh "native-cap-${FP}-${ABI}" --title "Native capabilities ${FP}" --notes "小件能力件固化产物。源指纹 ${FP}，ABI ${ABI}。清单见包内 manifest.txt。" "$ZIP" "$ZIP.sha256"
+          # --skip-existing：tag 已由上面的核对步判过，已存在且一致就不该再传第二份字节覆盖它 ——
+          # 「不可变」写在名字里，覆盖一次，已出货 APK 所依赖的那份运行时就对不上了。
+          bash scripts/gh-release-upload.sh "native-cap-${FP}-${ABI}" --skip-existing \
+            --title "Native capabilities ${FP}" \
+            --notes "小件能力件固化产物。源指纹 ${FP}，ABI ${ABI}。清单见包内 manifest.txt。" \
+            "$ZIP" "$ZIP.sha256"
 
-      - name: 回写固化记录
+      - name: 算出该记的那一格（不写 main：主干的唯一写入口是推送通道）
         run: |
           set -euo pipefail
+          # 只在**工作树**里落这份记录，让 fast-apk 的下游读者与本轮日志看到的是同一格；
+          # 推送由人决定 —— 与本仓其余发布链一致（没有任何 workflow 推 main）。
           FP="$FP" ZIP="$ZIP" SHA="$SHA" ABI="$ABI" node -e 'const fs=require("fs");const p=".github/native-capabilities-pin.json";const j=JSON.parse(fs.readFileSync(p,"utf8"));j.pins[process.env.FP]={tag:"native-cap-"+process.env.FP+"-"+process.env.ABI,zip:process.env.ZIP,sha256:process.env.SHA,abi:process.env.ABI};fs.writeFileSync(p,JSON.stringify(j,null,2)+String.fromCharCode(10));'
-          git config user.name ci-pin
-          git config user.email ci-pin@users.noreply.github.com
-          git add .github/native-capabilities-pin.json
-          if git diff --cached --quiet; then echo "固化记录无变化（该指纹已固化过）"; exit 0; fi
-          git commit -m "pin: native capabilities ${FP}"
-          git push
+          if git diff --quiet -- .github/native-capabilities-pin.json; then
+            echo "[record] 该指纹已在册（${FP}）—— 记录无变化"
+          else
+            echo "[record] 需要把这一格推上 main 才会有人按下发它取件（本步不推）："
+            git --no-pager diff -- .github/native-capabilities-pin.json
+            echo "::warning title=固化记录待推送::$FP 的 Release 已在位，但 fast-apk 读的是仓内那份 pin.json —— 不推就等于没固化。"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-capabilities-pin-record
+          path: .github/native-capabilities-pin.json
+          retention-days: 7

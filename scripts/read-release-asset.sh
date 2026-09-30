@@ -35,15 +35,15 @@ unknown() {
 mkdir -p "$OUTDIR"
 ERR="$OUTDIR/.read-err"
 
-# 「确实不存在」的措辞：gh 在不同子命令下会给 404、"not found"、"doesn't contain any
-# asset matching pattern" 这几种，都只意味着**没有那个东西**，不意味着读失败。
-absent() { grep -qiE 'HTTP 404|Not Found|no assets|matching pattern|not found|does not exist' "$1"; }
+# 「不存在」与「取不到」怎么分开判：词表唯一住在 scripts/gh-absence.sh（三处取数宿主共用一份，
+# 各自持表会让同一句 gh 报错在不同链得出相反结论）。
+source "$(dirname "$0")/gh-absence.sh"
 
 # ① Release 在不在。这一步不能省：直接 download 时「Release 不存在」和「Release 在但
 # 资产不在」会混成同一句报错，而调用方要区分「通道还没开过」与「通道开过但清单丢了」
 # ——后者不是首次发布，是状态丢了（APK 侧由版本门禁判红）。
 if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>"$ERR"; then
-  if absent "$ERR"; then
+  if gh_absent "$(cat "$ERR")"; then
     echo "[read:$LABEL] Release $TAG 不存在 —— 按首次发布处理"
     exit 10
   fi
@@ -57,7 +57,7 @@ if gh release download "$TAG" -p "$ASSET" -O "$OUTDIR/$ASSET" --repo "$REPO" 2>"
   echo "[read:$LABEL] 取到 $TAG/$ASSET ($(wc -c <"$OUTDIR/$ASSET") 字节)"
   exit 0
 fi
-if absent "$ERR"; then
+if gh_absent "$(cat "$ERR")"; then
   echo "[read:$LABEL] Release $TAG 在，但没有资产 $ASSET —— 按首次发布处理"
   exit 10
 fi

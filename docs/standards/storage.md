@@ -61,7 +61,7 @@ lobos/
 | C 层工具（npm·pnpm·git·jq·curl·sqlite3…） | 设备上 `$PREFIX/lib/toolchain/<name>/`，真名链接在 `$PREFIX/bin/` | ❌ 不在 git、也不在 APK —— 由签名清单投放，随包那份是第二事实源 |
 | Program 投递产物 | `release/`、`feed/` | ❌ |
 | **秘密** | `<filesDir>/.secrets/`（**仓库之外**）、`keys/` | ❌ 绝不入库 |
-| **发布物** | GitHub Release：`node-runtime-<ver>-<abi>`、`apk-latest`、`program-*` | 不入 git |
+| **发布物** | GitHub Release：`v<versionName>`（壳版本化归档）、`node-runtime-<ver>-<abi>`、`native-cap-<指纹>-<abi>`、`program-*`；对象存储：`userland/` 件 + `userland-<channel>/` 清单 | 不入 git |
 | 大文件 | 单文件 > 5MB 一律走 Release 附件 | ❌ |
 
 > `container/_artifacts/` 已删除（ADR-0005 之后它不再承载 Program 样本）。

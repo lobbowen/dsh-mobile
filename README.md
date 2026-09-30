@@ -129,7 +129,10 @@ ANDROID_NDK=/path/to/ndk ./scripts/build-node-android.sh 24.21.0
 
 ### 5.3 出包（APK）
 
-**路径 A（推荐）：GitHub Actions 一键出包** —— `fast-apk.yml`（日常，分钟级）或 `build-apk.yml`（改了 Node 版本/编译脚本，2~3 小时）。
+**路径 A（唯一交付通道）：GitHub Actions** —— 构建校验走 `fast-apk.yml`（分钟级，推 `main` 即跑但**不投递**）；
+发这一版才推 `os-release-<versionName>-<versionCode>` tag。改了 Node 版本/编译脚本才走 `build-apk.yml`
+（2~3 小时，推 `runtime-release-<ver>-<abi>` 时顺带固化运行时）。全仓每条版本流只有一条发布链，
+表见 [docs/adr/0011-one-release-chain-per-stream.md](docs/adr/0011-one-release-chain-per-stream.md)。
 
 **路径 B（本地逃生通道 —— 需 SDK/NDK/JDK；项目政策是构建一律走 CI）：**
 

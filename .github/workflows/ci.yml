@@ -2,7 +2,19 @@ name: CI (gates)
 
 # 统一门禁：容器引擎（契约/对账/原生资产/桥）+ Program 回归 + 面板前端。
 # 单一事实源与红线见 docs/standards/storage.md、docs/standards/testing.md。
-# 出包（APK/Program OTA）不在这里，见 fast-apk / build-apk / program-ota。
+#
+# 本文件【不投递任何东西】。全仓能把产物写到设备可读位置的链只有下面这五条，每流一条、目的地唯一
+# （见 docs/adr/0011-one-release-chain-per-stream.md）。前四条**只由人打的带版本号 tag 投递**；
+# 第五条是那条例外：能力件的身份要构建完才知道，所以入口是 dispatch、目的地由内容指纹决定。
+#   OS      fast-apk.yml         tag os-release-*           → v<versionName> 归档
+#   Runtime build-apk.yml        tag runtime-release-*      → node-runtime-<ver>-<abi> 固化
+#   C 层    build-userland.yml   tag userland-<channel>-<revision> → 对象存储 userland/
+#   Program program-ota.yml      tag program-ota-<channel>-<version> → program-<version> + 通道指针
+#   能力件  pin-capabilities.yml dispatch（无 push 触发）  → native-cap-<指纹>-<abi> 固化
+# 这条名单由 container/engine/test/release-trigger-test.js 钉住：新增投递宿主必须登记，
+# 已登记的链丢掉 tag 条件（= 合并即投递的旧形状）直接判红。
+# 面板产物只有一个发布者：program-ota.yml。旧 console-release job（发
+# lobos-console-panel-<ver>.tar.gz 的第二个面板出口，形状与 Program 包无关）已删。
 
 on:
   push:
@@ -187,46 +199,6 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npm run verify
-
-      - name: 上传前端构建产物
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v4
-        with:
-          name: ui-dist
-          path: programs/console/ui/dist
-          if-no-files-found: error
-
-  # ══════════════════════════════════════════════════════════════════════════
-  # console-release：tag 触发，把面板产物作为 OTA 资源挂到 Release（不发布 npm）
-  # ══════════════════════════════════════════════════════════════════════════
-  console-release:
-    needs: console
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: ui-dist
-          path: ui-dist
-      - name: 打包面板产物（OTA 资源）
-        shell: bash
-        run: |
-          set -euo pipefail
-          VER="$(node -p "require('./programs/console/package.json').version")"
-          echo "  版本: $VER"
-          if [ -z "$(ls -A ui-dist 2>/dev/null)" ]; then
-            echo "::error::未生成任何 UI 构建产物"; exit 1
-          fi
-          tar -czf "lobos-console-panel-$VER.tar.gz" -C ui-dist .
-          ls -lh "lobos-console-panel-$VER.tar.gz"
-      - name: 附加到 GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: lobos-console-panel-*.tar.gz
-          generate_release_notes: true
 
   # ══════════════════════════════════════════════════════════════════════════
   # app-tests：Android 侧 JVM 单元测试（纯逻辑，不需要模拟器）

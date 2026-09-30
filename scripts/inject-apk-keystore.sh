@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
 #
 # APK 签名 keystore 注入 —— 「把 secret 变成构建能用的文件，并且当场证它能用」的唯一实现。
-# 调用点：fast-apk / build-apk 的 Inject release keystore，release-admin repack 的 Sign APK。
-# 三处此前各自抄了一份「base64 解码 + keytool 核验」，而 release-admin 那份把三个 secret
-# 直接内插进命令行 —— keystore 口令会出现在 runner 的进程表里。收口后口令只走 env。
+# 调用点：fast-apk 一条（docs/adr/0011 之后全仓只剩它构建并投递壳 APK）。
+# 收口之前是 fast-apk / build-apk / release-admin repack 三处各抄一份「base64 解码 + keytool
+# 核验」，而 release-admin 那份把三个 secret 直接内插进命令行 —— keystore 口令会出现在
+# runner 的进程表里。收口后口令只走 env；后两条链随发布连归一一起废除。
 #
-# 为什么核验要在这里、而不是等 gradle/apksigner：密码错或 base64 残缺时，全量链路
-# （build-apk 含 Node 交叉编译，2~3 小时）会一路跑到最后的签名步骤才炸。
+# 为什么核验要在这里、而不是等 gradle/apksigner：密码错或 base64 残缺时，构建会一路跑到
+# 最后的签名步骤才炸（fast-apk 从装依赖到出包约 20 分钟；历史上的全量链含 Node 交叉编译要
+# 2~3 小时）—— 那时报错看着像「密码不对」，真因却是二十分钟前的解码。
 #
 # 判据（与 scripts/read-release-asset.sh 同一套三档语义）：
 #   退 0  = 已注入并核验通过；同时导出 keys/release.cert（PEM），它是
 #           scripts/verify-apk-signing.sh 的比对锚点 —— 事实进产物，不留跨步骤的标记文件
 #   退 10 = 未配置 ANDROID_KEYSTORE_BASE64 ——「本次就是 debug 签名包」是合法档位，
-#           含义由【调用方】决定：日常出包放行并告警，发布链路必须判红
+#           含义由【调用方】决定：构建校验轮放行并告警，发布轮（os-release-* tag）必须判红
 #   退 2  = 配了但注入不成（解码失败 / 密码错 / 别名错 / keytool 不可用）—— 禁止继续构建
 #
 # 用法: bash scripts/inject-apk-keystore.sh [目标目录，默认 keys]
 # 读入: KS_B64(必) KS_PASS(配了 KS_B64 则必) KS_ALIAS(默认 lobos) KS_KEYPASS(默认=KS_PASS)
-#       —— 与 fast-apk / build-apk / release-admin 早已在用的那组 secret 同名，不另立一套
+#       —— 与仓里早已在用的那组 secret 同名，不另立一套
 set -euo pipefail
 
 DEST="${1:-keys}"
@@ -27,7 +29,7 @@ CERT="$DEST/release.cert"
 if [ -z "${KS_B64:-}" ]; then
   echo "[lobos-signing] 未配置 ANDROID_KEYSTORE_BASE64 —— 本次产物将是 AGP 现场生成的一次性 debug 签名。"
   echo "[lobos-signing] 后果：指纹每次都不同 ⇒ 新包装到已装设备上会 INSTALL_FAILED_UPDATE_INCOMPATIBLE。"
-  echo "[lobos-signing] 发布链路（build-apk / repack）据此判红；日常开发构建放行。"
+  echo "[lobos-signing] 发布轮（推 os-release-* tag 的那一轮）据此判红；构建校验轮放行。"
   exit 10
 fi
 # 配了 keystore 却没配口令 = 配坏了，不是「未配置」：退 10 会让发布链路把它读成

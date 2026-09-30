@@ -12,7 +12,8 @@
 //   ① 行为：这把尺子**两侧都要能红** —— release 判绿、debug 判红，对照档（--expect-debuggable）
 //      反向也要能红。只测发布侧的绿分不清「包真的干净」与「解析根本没生效」。
 //      「取不到读数一律判红」的每一条退路逐条证伪。
-//   ② 接线：三个 latest 写者都调它且不带对照档；fast-apk 两侧都调；门禁排在上传之前。
+//   ② 接线：投壳 APK 的链只有 fast-apk 一条（发布连归一，docs/adr/0011），它两侧都调、
+//      恰好一次带对照档；签名门禁排在投递之前，形态门禁刻意排在之后。
 //   ③ 回潮：workflow 里不许再自己 `dump badging`（同一判据的第二份拷贝）。
 //
 // 全程用假 aapt/aapt2：真读一次要 Android SDK，而这里要的是秒级判定，
@@ -215,44 +216,54 @@ const form = (o = {}, extra = []) => run([APK, ...extra], o);
   const CALL = /bash scripts\/verify-apk-release-form\.sh[^\n]*/g;
   const calls = (t) => strip(t).match(CALL) || [];
 
+  // 调用点用 readdir 扫**全集**：发布连归一（docs/adr/0011）之后投壳 APK 的链只剩 fast-apk 一条，
+  // build-apk 的 gate-form 与 release-admin 的 publish/repack 两处随「它们不再投 APK」一起消失 ——
+  // 少的是**口**，不是这把尺子：两侧对照仍在唯一投递口里每次构建都跑。
   const formCallers = wfs.filter(([, t]) => /scripts\/verify-apk-release-form\.sh/.test(t)).map(([f]) => f).sort();
-  check('形态门禁被三条链同调（build-apk / fast-apk / release-admin）',
-    JSON.stringify(formCallers) === JSON.stringify(['build-apk.yml', 'fast-apk.yml', 'release-admin.yml']),
-    formCallers.join(','));
+  check('形态门禁只被投壳 APK 的那一条链调用（多一条调用点 = 又多出一条发布口）',
+    JSON.stringify(formCallers) === JSON.stringify(['fast-apk.yml']), formCallers.join(','));
 
-  // 写 latest 的三个口子：判「必须不是 debuggable」，所以一次都不带对照档。
-  const bc = calls(byName['build-apk.yml']);
-  const ra = calls(byName['release-admin.yml']);
-  check('发布面调用点：build-apk 1 处、release-admin 2 处（publish + repack），全部不带对照档',
-    bc.length === 1 && ra.length === 2 && [...bc, ...ra].every((c) => !/--expect-debuggable/.test(c)),
-    JSON.stringify([...bc, ...ra]));
-
-  // fast-apk 不写 latest，它的职责是把这把尺子的两侧每次合并都验一遍。
+  // 唯一投递口不写滚动别名，它的职责是把这把尺子的**两侧**每次构建都验一遍。
   const fa = calls(byName['fast-apk.yml']);
-  check('日常链两侧对照：两次调用、恰好一次带对照档',
+  check('唯一投递口两侧对照：两次调用、恰好一次带对照档',
     fa.length === 2 && fa.filter((c) => /--expect-debuggable/.test(c)).length === 1,
     JSON.stringify(fa));
+  // 投出去的与判成 debug 的必须是**同一颗**：多链共尺时靠「档」对齐，单链自己就要对齐取数口。
+  // 所以钉的是「debug 取数口只有一个目标」而不是出现几次 —— 归一后每多一个消费步骤
+  // （签名、审计、投递…）就多一次同一取数，计数会跟着变，而「所有人拿同一颗」这条不会。
+  const picks = (byName['fast-apk.yml'].match(/pick\.sh (apk-debug|apk-release) \S+/g) || []);
+  const debugTargets = [...new Set(picks.filter((p) => p.startsWith('pick.sh apk-debug')))];
+  const releaseTargets = [...new Set(picks.filter((p) => p.startsWith('pick.sh apk-release')))];
+  check('fast-apk 的 debug 取数口只有一个目标（各步骤都拿同一颗，包括形态门禁判的那颗）',
+    debugTargets.length === 1, JSON.stringify(debugTargets));
+  check('release 变体只被取一次（那次控件构建，AUD-G33 的账）',
+    releaseTargets.length === 1, JSON.stringify(releaseTargets));
+  // 换成 release 形态投递那天（债 AUD-G33）：上面两条（对照档那一侧、取数口目标）要一起改，
+  //   不许只把 --expect-debuggable 删掉留下另一侧 —— 那把「两侧都验」变成「只验一侧」。
 
-  // 先判后发：形态门禁不许排在发布之后当摆设。
-  // release-admin 的 pin job 传的是 Node 运行时（不是 APK），所以这里不要求上传次数相等，
-  // 只要求每个门禁后面确实还有一次上传可拦。
+  // 先判后发：**签名**门禁必须排在投递之前（签错的包发出去 = 设备身份换掉且不可逆）。
+  // 形态门禁刻意排在投递**之后**，且这不是疏漏：本链当前投的就是 debug 形态（AUD-G33 在册），
+  //   拿「必须非 debuggable」拦自己会把自己拦死；它拦的是「这把尺子两侧仍有效 + release 变体
+  //   构建得出来」。两条次序是**两个判据**，所以这里分开钉，不写成一句「都在上传之前」。
   const pos = (t, re) => { const out = []; let m; while ((m = re.exec(t)) !== null) out.push(m.index); return out; };
-  const UP = /bash scripts\/gh-release-upload\.sh/g;
-  for (const [f, n] of [['build-apk.yml', 1], ['release-admin.yml', 2]]) {
-    const src = strip(byName[f]);
-    const g = pos(src, CALL), u = pos(src, UP);
-    check(`${f}：${n} 处形态门禁都排在某次上传之前（判完再发）`,
-      g.length === n && g.every((p) => u.some((x) => x > p)),
-      JSON.stringify({ gates: g.length, uploads: u.length }));
-  }
+  const fsrc = strip(byName['fast-apk.yml']);
+  const signAt = pos(fsrc, /bash scripts\/verify-apk-signing\.sh/g);
+  const upAt = pos(fsrc, /bash scripts\/gh-release-upload\.sh/g);
+  const formAt = pos(fsrc, CALL);
+  check('fast-apk：签名门禁排在投递之前（判完再发）',
+    signAt.length === 1 && upAt.length >= 1 && upAt.every((u) => u > signAt[0]),
+    JSON.stringify({ sign: signAt, uploads: upAt }));
+  check('fast-apk：形态门禁的两处调用都排在投递之后（AUD-G33 的知情状态；换了投递形态这条要跟着改）',
+    formAt.length === 2 && formAt.every((g) => g > upAt[0]),
+    JSON.stringify({ form: formAt, firstUpload: upAt[0] }));
 
-  // 发布面构建的必须是 release 变体（注释里的历史提及不算）。
+  // 变体构建：唯一投递口两侧都真构建（debug 投递 + release 控件），出 APK 的验证载体链只构建 debug。
   const gradle = (t) => strip(t).match(/\.\/gradlew[^\n]*/g) || [];
-  check('build-apk 构建 release 变体，且不再构建 debug 变体',
-    gradle(byName['build-apk.yml']).some((c) => /assembleRelease/.test(c))
-      && !gradle(byName['build-apk.yml']).some((c) => /assembleDebug/.test(c)),
+  check('build-apk 只构建 debug 验证载体（它不再投 APK；release 变体的控件构建归唯一投递口）',
+    gradle(byName['build-apk.yml']).some((c) => /assembleDebug/.test(c))
+      && !gradle(byName['build-apk.yml']).some((c) => /assembleRelease/.test(c)),
     JSON.stringify(gradle(byName['build-apk.yml'])));
-  check('fast-apk 每次合并都真构建一次 release 变体（发布路径长期不被执行正是 AUD-G33 的成因）',
+  check('fast-apk 每次构建都真跑一次 release 变体（发布路径长期不被执行正是 AUD-G33 的成因）',
     gradle(byName['fast-apk.yml']).some((c) => /assembleRelease/.test(c))
       && gradle(byName['fast-apk.yml']).some((c) => /assembleDebug/.test(c)),
     JSON.stringify(gradle(byName['fast-apk.yml'])));

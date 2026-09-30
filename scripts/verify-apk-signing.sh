@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 #
 # APK 签名身份门禁 —— 「这个包到底是谁签的、能不能装到既有设备上」的唯一实现。
-# 调用点：fast-apk（日常出包，允许 debug 身份但必须显式告警）、build-apk（发 apk-latest，
-# 必须稳定签名）、release-admin repack（重签之后、投给 apk-latest 之前同样按 stable 档核）。
+# 调用点：fast-apk 一条（docs/adr/0011 之后全仓只有它投壳 APK）。同一份判据按 ref 分两档：
+#   构建校验轮（push / dispatch）允许 debug 身份但必须显式告警；
+#   发布轮（os-release-* tag）带 --require-stable，非稳定身份一律红。
+# 以前还有 build-apk 与 release-admin repack 两个调用点，随「它们不再投 APK」一起消失。
 #
 # 为什么要门禁（真实后果，不是洁癖）：AGP 在没有 keystore 时会用 runner 现场生成的
 # debug keystore 签名，指纹【每次构建都不同】⇒ 新包装到已装设备上直接
@@ -140,7 +142,7 @@ fi
 
 if [ "$IS_DEBUG" = "1" ]; then
   if [ "$REQUIRE_STABLE" = "1" ]; then
-    echo "::error title=发布包是 debug 签名::本链路产物会投给存量设备（apk-latest），一次性 debug 签名会把它们打成 INSTALL_FAILED_UPDATE_INCOMPATIBLE —— 请配置 ANDROID_KEYSTORE_BASE64 后重跑。"
+    echo "::error title=发布包是 debug 签名::本链路产物会投给存量设备（v<versionName> 版本化归档），一次性 debug 签名会把它们打成 INSTALL_FAILED_UPDATE_INCOMPATIBLE —— 请配置 ANDROID_KEYSTORE_BASE64 后重跑。"
     exit 1
   fi
   echo "::warning title=开发签名（不可发布）::未配置 ANDROID_KEYSTORE_BASE64，本次为 debug 签名；既有设备无法覆盖安装，且无自我升级能力。见 docs/runbook/release.md"

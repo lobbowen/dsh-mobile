@@ -15,8 +15,10 @@
 #   拿一份不完整的下界在比（同 scripts/verify-ota-anchor.sh 那条「回执推不上就该看见红」的处置）。
 #
 # 用法: bash scripts/append-apk-receipt.sh <链路名> <auto|explicit> <version.json> <APK 文件> <发布网址> [run_id]
-#   <链路名> 只用于读数点名（fast-apk / build-apk / release-admin-publish / release-admin-repack）
-#   version.json 必须是**这个包自己**那份（判据宿主用 VG_SRC_DIR 留出来的那份，别再取一次）
+#   <链路名> 只用于读数点名。归一之后投壳 APK 的链只剩一条（fast-apk）；账本里留下的
+#     build-apk / release-admin-publish / release-admin-repack 那几笔是**历史行**，不许删 ——
+#     它们是「线上发过哪些 versionCode」的下界证据（债表 DS-16），删账等于自动放松门禁。
+#   version.json 必须是**这个包自己**那份（调用方工作树里的那份，不是线上取回来的参照物）
 # 退出: 0 已记账 / 2 参数或环境不成立（没记上，调用方不得当成功）/ 1 线上账本没接受这次追加
 set -euo pipefail
 

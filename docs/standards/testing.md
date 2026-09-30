@@ -41,6 +41,12 @@
 - 只读检查：`read` / `grep` / `glob` / `ls` / 统计
 - 提交与推送（经 API 或 tag 通道）
 - **对账的"报告模式"**（只列事实、不做断言）—— 它不是测试
+- **显式预读**：`CI=true <既有的测试命令>`。它存在的唯一理由是在烧一整轮机时之前先看见自己写的红
+  （门禁测试读的是仓内文件，本地与 runner 的差集在这里最小）。三条限制：
+  结论**永远不许**被写成「验证通过」（那个词只来自刚读到的 CI 日志正文，§5）；
+  需要 Android SDK / adb / qemu 的那些在这里同样不算数；
+  它要 `CI=true` 是**故意的** —— `require-ci.js` 的退 86 就是让这件事必须留下一次显式伪造环境的痕迹，
+  而不是"顺手跑一下"。
 
 ## 5. 唯一合法验证通道
 
@@ -48,10 +54,15 @@
 编辑（可连续多文件） → 一次提交 → 推分支/PR → CI 执行 → 读 CI 结果 → 修复 → 再推
 ```
 
-读取 CI 结果的两条通道：
+读取 CI 结果只有一条通道：
 
-1. **API**：`GET /actions/runs/{id}`、`/jobs`、`/jobs/{job_id}/logs`
-2. **admin 回执通道**：`git push origin refs/tags/admin-<cmd>` → 结果写 `ci-admin` 分支
+1. **API**：`GET /actions/runs/{id}`、`/actions/runs/{id}/jobs`、`/actions/jobs/{job_id}/logs`
+   （凭据是仓外 PAT，见 [../runbook/git.md](../runbook/git.md) §6）
+
+> 曾有的第二条「admin 回执通道」（推 `admin-<cmd>` tag，让 CI 把结果写到 `ci-admin` 分支）**已废止**：
+> 它的存在前提是「维护环境没有可用 PAT」，而 2026-09-28 起本机有 PAT + DoH 通道，前提被证伪；
+> 同一形状的那几个自报分支（`ci-hb` / `ci-last` / `ci-ok` / `ci-ping` / `ci-diag`）都靠 force-push
+> 覆盖上一份读数，从读数里看不出序列 —— 债表 DS-16 判死的正是这个形状（ADR-0011 §3）。
 
 > **批次提交**：本地允许连续编辑多个文件，攒成一个逻辑单元后再推 —— 推送是"交付"，
 > 不是"验证"。不要每改一个文件推一次（详见 [contributing.md](../runbook/contributing.md) §2）。
