@@ -1,12 +1,12 @@
 /**
- * 面板 → 安卓容器宿主（HostBridge）面板更新消息桥（单写入者契约）。
+ * 面板 → 安卓容器宿主（HostBridge）内核更新消息桥（单写入者契约）。
  *
- * 单写入者：面板包的安装/升级唯一写入者是**安卓容器 OTA**（APK / HostBridge），
- * 面板只提供版本读取（/guard/version、/guard/version/check），写端点
+ * 单写入者：内核包的安装/升级唯一写入者是**安卓容器 OTA**（APK / HostBridge），
+ * 内核只提供版本读取（/guard/version、/guard/version/check），写端点
  * （/self-update/apply|restart-guard）已下架返回 410 PANEL_UPDATE_SINGLE_WRITER。
  *
  * 于是面板只能经 postMessage 请求容器宿主代执行 panel_update_apply。
- * 协议版本由门禁锁定（面板 SW-6 / 容器 HostBridge 侧须同步递增）。
+ * 协议版本由门禁锁定（内核 SW-6 / 容器 HostBridge 侧须同步递增）。
  */
 
 /** 协议版本：任何语义变更必须递增；须与容器 HostBridge 侧常量一致。 */
@@ -24,16 +24,16 @@ export type PanelUpdateResult = {
   error?: string | null;
 };
 
-/** 是否运行在安卓容器宿主内（无宿主 = 直接用浏览器打开面板，不能更新面板）。 */
+/** 是否运行在安卓容器宿主内（无宿主 = 直接用浏览器打开面板，不能更新内核）。 */
 export function hasHostBridge(): boolean {
   try { return window.parent !== window; } catch { return false; }
 }
 
-/** 请求安卓容器宿主更新面板并等待终结结果。 */
+/** 请求安卓容器宿主更新内核并等待终结结果。 */
 export function requestPanelUpdate(timeoutMs = 6 * 60 * 1000): Promise<PanelUpdateResult> {
   return new Promise((resolve) => {
     if (!hasHostBridge()) {
-      resolve({ ok: false, error: "面板更新由安卓容器执行：请在容器面板中操作。" });
+      resolve({ ok: false, error: "内核更新由安卓容器执行：请在容器面板中操作。" });
       return;
     }
     const requestId = "kupd-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);

@@ -1,12 +1,12 @@
 /**
- * 任务中心（console）— 老 UI 任务中心域，统一安装/升级/卸载/更新任务状态与历史
+ * 任务中心（supervisor）— 老 UI 任务中心域，统一安装/升级/卸载/更新任务状态与历史
  * 数据：GET /tasks（低频，进入页面时拉取 + 手动刷新）
  */
 import { useEffect, useState } from "react";
 import { ListChecks, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../../framework/ui";
-import { consoleApi, type TaskRecord } from "../../services/console";
+import { supervisorApi, type TaskRecord } from "../../services/supervisor";
 import { TASK_ACTION_LABEL, TASK_KIND_LABEL, TASK_STATE_META } from "./nav";
 import { formatDateTime } from "./format";
 import { Card, Pill } from "./widgets";
@@ -19,7 +19,7 @@ export function TasksPage() {
 
   async function load() {
     try {
-      const r = await consoleApi.tasks();
+      const r = await supervisorApi.tasks();
       setTasks(r.tasks);
     } catch (e) { toast.error(String(e)); }
   }

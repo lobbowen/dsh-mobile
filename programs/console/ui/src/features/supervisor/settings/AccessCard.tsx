@@ -3,17 +3,17 @@
  * 与版本环境、镜像源彻底解耦——各自加载、各自失败，互不拖累。）
  *
  * ⚠ 已删除的「启动」区块（勿回潮）：开机自启（/autostart）与关闭窗口行为
- *   （/settings/close-action，隐藏至托盘）—— 均属 PC 桌面壳能力，Android 面板
- *   常驻与否由 APK 容器 / Android Service 决定（docs/components/os-architecture-v4.md §5）。
+ *   （/settings/close-action，隐藏至托盘）—— 均属 PC 桌面壳能力，Android 内核
+ *   常驻与否由 APK 容器 / Android Service 决定（docs/components/program-android-plan.md §5）。
  */
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button, Switch } from "../../../framework/ui";
 import { Input } from "../../../framework/ui/input";
 import {
-  consoleApi, type AccessKeyStatus, type LanPanelStatus,
-} from "../../../services/console";
-import { useConsoleAction } from "../useConsoleAction";
+  supervisorApi, type AccessKeyStatus, type LanPanelStatus,
+} from "../../../services/supervisor";
+import { useSupervisorAction } from "../useSupervisorAction";
 import { Card, CardTitle } from "../widgets";
 
 /** 访问区块（自身只拉自身数据；任一失败只影响本区块内容，不影响其他设置卡） */
@@ -21,13 +21,13 @@ export function AccessCard() {
   const [lan, setLan] = useState<LanPanelStatus | null>(null);
   const [ak, setAk] = useState<AccessKeyStatus | null>(null);
   const [akInput, setAkInput] = useState("");
-  const { busy, run } = useConsoleAction();
+  const { busy, run } = useSupervisorAction();
 
   // 区块自加载：各端点独立失败（各自 catch），互不影响
   const load = useCallback(async () => {
     const [l, k] = await Promise.all([
-      consoleApi.lanPanel().catch(() => null),
-      consoleApi.accessKey().catch(() => null),
+      supervisorApi.lanPanel().catch(() => null),
+      supervisorApi.accessKey().catch(() => null),
     ]);
     if (l) setLan(l);
     if (k) setAk(k);
@@ -37,7 +37,7 @@ export function AccessCard() {
   async function toggleLan(v: boolean) {
     setLan((p) => (p ? { ...p, enabled: v } : p));
     try {
-      const r = await consoleApi.setLanPanel(v);
+      const r = await supervisorApi.setLanPanel(v);
       if (r.ok === false) { toast.error(r.error || "设置失败"); setLan((p) => (p ? { ...p, enabled: !v } : p)); return; }
       setLan(r); // 后端返回含真实 urls
       toast.success(v ? "已开启局域网访问" : "已关闭局域网访问（仅本机）");
@@ -46,7 +46,7 @@ export function AccessCard() {
   async function saveAccessKey() {
     const key = akInput.trim();
     if (key && key.length < 8) { toast.error("访问密钥至少 8 位（建议 16+ 位随机串）"); return; }
-    await run("akk", () => consoleApi.setAccessKey(key), {
+    await run("akk", () => supervisorApi.setAccessKey(key), {
       success: key ? "访问密钥已设置" : "访问密钥已清除",
       refresh: false,
       onDone: () => { setAkInput(""); void load(); },

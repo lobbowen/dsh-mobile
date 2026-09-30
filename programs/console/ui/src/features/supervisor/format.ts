@@ -1,5 +1,5 @@
 /**
- * console 业务共享格式化 —— 页面一律走这里，禁止页面级重定义 fmt 函数。
+ * supervisor 业务共享格式化 —— 页面一律走这里，禁止页面级重定义 fmt 函数。
  * 覆盖后端常见时间形态：ISO 字符串 / 毫秒时间戳 / Date。
  */
 const pad = (n: number) => String(n).padStart(2, "0");

@@ -3,7 +3,7 @@
  * vi.stubGlobal 注入 fetch，验证 refreshEvents 合并去重与并发守卫行为。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { consoleStore } from "./polling";
+import { supervisorStore } from "./polling";
 
 /** 等待事件循环微任务链（refresh 内部 async 无句柄可 await，需拍两拍） */
 async function settle(): Promise<void> {
@@ -23,10 +23,12 @@ function emptyResponse(body: object): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
-/** 心跳真实消费的端点（与 polling.ts syncAll 一致：status / ports）
+/** 心跳真实消费的端点（与 polling.ts syncAll 一致：status / router / providers / ports）
  *  ⚠ 已删除的端点（勿回潮）：/instances、/lan-access、/lan/frp —— 实例管理与远程控制域已整体移除。 */
 const baseEndpoints: Record<string, object> = {
-  "/status": { phase: "RUNNING", programPid: 1 },
+  "/status": { phase: "RUNNING", lobosPid: 1 },
+  "/router/status": { running: false, usage: {} },
+  "/router/providers": { presets: [], providers: [], proxyApps: [] },
   "/ports": { records: [] },
 };
 
@@ -42,15 +44,15 @@ function installFetch(eventsHandler: (seq: number) => Response) {
 }
 
 beforeEach(() => {
-  consoleStore._resetForTest();
+  supervisorStore._resetForTest();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
-  consoleStore.stop();
-  consoleStore._resetForTest();
+  supervisorStore.stop();
+  supervisorStore._resetForTest();
 });
 
-describe("consoleStore 事件合并", () => {
+describe("supervisorStore 事件合并", () => {
   it("按 seq 去重：两批含重叠 seq 时最终事件无重复", async () => {
     let call = 0;
     // 第一批 [(1,2,3)]，第二批仍返回 [(1,2,3)]（模拟后端游标回退/并发内联）
@@ -59,10 +61,10 @@ describe("consoleStore 事件合并", () => {
       return eventsResponse(3, [1, 2, 3]);
     });
     // 手动触发 refreshEvents 两次（refresh 内部含 events 刷新）
-    consoleStore.refresh();
-    consoleStore.refresh();
+    supervisorStore.refresh();
+    supervisorStore.refresh();
     await settle();
-    const events = consoleStore.snapshot.events;
+    const events = supervisorStore.snapshot.events;
     // 批次反转保证最新在前；两批同 seq → 去重后应为 3 条且 seq 不重复
     expect(events).toHaveLength(3);
     const seqs = events.map((e) => e.seq);
@@ -75,16 +77,16 @@ describe("consoleStore 事件合并", () => {
       if (after >= 3) return eventsResponse(5, [4, 5]);
       return eventsResponse(3, [1, 2, 3]);
     });
-    consoleStore.refresh();
+    supervisorStore.refresh();
     await settle();
     // 首次拉取完成，eventsSeq 推进到 3
-    expect(consoleStore.snapshot.events.map((e) => e.seq)).toEqual([3, 2, 1]);
-    consoleStore.refresh();
+    expect(supervisorStore.snapshot.events.map((e) => e.seq)).toEqual([3, 2, 1]);
+    supervisorStore.refresh();
     await settle();
     // 第二次按 after=3 增量拉 [4,5]，合并去重后头插 → [5,4,3,2,1]
-    const events = consoleStore.snapshot.events;
+    const events = supervisorStore.snapshot.events;
     expect(events.map((e) => e.seq)).toEqual([5, 4, 3, 2, 1]);
-    expect(consoleStore.snapshot.eventsSeq).toBe(5);
+    expect(supervisorStore.snapshot.eventsSeq).toBe(5);
   });
 
   it("in-flight 守卫：并发 refresh 不因竞态双插", async () => {
@@ -96,10 +98,10 @@ describe("consoleStore 事件合并", () => {
       return eventsResponse(3, [1, 2, 3]);
     });
     // 同时触发多次 refresh（syncAll + refreshEvents 各自独立，events 应有自己的守卫）
-    consoleStore.refresh();
-    consoleStore.refresh();
-    consoleStore.refresh();
+    supervisorStore.refresh();
+    supervisorStore.refresh();
+    supervisorStore.refresh();
     await settle();
-    expect(consoleStore.snapshot.events).toHaveLength(3);
+    expect(supervisorStore.snapshot.events).toHaveLength(3);
   });
 });

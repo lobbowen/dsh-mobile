@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * console 宿主 — 领域类型（对齐 lobos-panel HTTP API 实契约）
+ * supervisor 宿主 — 领域类型（对齐 lobos-supervisor HTTP API 实契约）
  * ============================================================================
  * 来源：src/presentation/api.js 全路由 + ui/（core.js / views-* / app.js）消费字段 + 线上抽样。
  * 只放纯数据类型，不含任何实现。
@@ -8,7 +8,7 @@
  */
 
 // ── /status ──────────────────────────────────────────────
-export type ProgramPhase =
+export type LobosPhase =
   | "RUNNING" | "STOPPED" | "STARTING" | "RESTARTING"
   | "BACKOFF" | "OBSERVED" | string;
 
@@ -47,7 +47,7 @@ export interface NativeCapsReport {
   at?: string;
 }
 
-export interface NativeProgramStatus {
+export interface NativeLobosStatus {
   installed: boolean;
   version?: string | null;
   binPath?: string | null;
@@ -63,7 +63,7 @@ export interface NativeProgramStatus {
   nativeCaps?: NativeCapsReport | null;
 }
 
-export interface ProgramVersionInfo {
+export interface LobosVersionInfo {
   installed?: string;
   latest?: string;
   updateAvailable?: boolean;
@@ -88,15 +88,15 @@ export interface UpgradeState {
 // sessionState 是整个服务链的运行相位（退出中/已退出）。
 export type SessionState = "starting" | "running" | "stopping" | "stopped" | "failed" | string;
 
-export interface ConsoleStatus {
+export interface SupervisorStatus {
   desired?: "running" | "stopped";
-  phase?: ProgramPhase;
+  phase?: LobosPhase;
   sessionState?: SessionState;
   guardVersion?: string;
-  /** 原生 Lob OS 主干视图（/status 随快照下发）：守护开关与运行态的唯一数据源。 */
+  /** 原生 LOBOS 主干视图（/status 随快照下发）：守护开关与运行态的唯一数据源。 */
   main?: MainInstance | null;
-  programPid?: number | null;
-  programPort?: number | null;
+  lobosPid?: number | null;
+  lobosPort?: number | null;
   adopted?: boolean;
   guardPid?: number;
   lastProbeAt?: string | null;
@@ -107,15 +107,15 @@ export interface ConsoleStatus {
   lastFailure?: string | null;
   upgradeHold?: boolean;
   commandMissing?: boolean;
-  tokenCaptured?: boolean;
-  native?: NativeProgramStatus;
-  version?: ProgramVersionInfo;
+  lobosTokenCaptured?: boolean;
+  native?: NativeLobosStatus;
+  version?: LobosVersionInfo;
   upgrade?: UpgradeState;
   tasks?: unknown[];
   updatedAt?: string;
 }
 
-/** 原生 Lob OS 主干视图（后端 programMainView()，随 /status 下发）。
+/** 原生 LOBOS 主干视图（后端 lobosMainView()，随 /status 下发）。
  *  ⚠ 实例/沙箱域与远程控制字段（remoteEnabled/remoteToken/frpEnabled/frpRemotePort/wanPort）已删除。 */
 export interface MainInstance {
   id: "main";
@@ -130,7 +130,7 @@ export interface MainInstance {
 }
 
 // ── /events ──────────────────────────────────────────────
-export interface ConsoleEvent {
+export interface SupervisorEvent {
   seq?: number;
   type: string;
   ts: string;
@@ -148,7 +148,7 @@ export interface ConsoleEvent {
     [k: string]: unknown;
   } | null;
 }
-export interface EventsPage { seq: number; events: ConsoleEvent[]; }
+export interface EventsPage { seq: number; events: SupervisorEvent[]; }
 
 // ── /ports（端口注册表：对接后端的全部已注册端口）──
 export interface PortRecord {
@@ -161,6 +161,114 @@ export interface PortRecord {
 }
 export interface PortsResponse { records?: PortRecord[]; }
 
+// ── router ──────────────────────────────────────────────
+export type ProviderKind = "direct" | "proxy";
+export type AccountStatus =
+  | "registering" | "review" | "frozen" | "banned" | "discarded" | "ready" | "normal" | string;
+export interface QuotaWindow {
+  status?: string;
+  percent?: number;
+  resetsAt?: string | number;
+}
+export interface AccountQuota {
+  rolling?: QuotaWindow;
+  weekly?: QuotaWindow;
+  monthly?: QuotaWindow;
+  monthlyRemaining?: number;
+  /** 月额度随订阅续期重置时刻（epoch ms；Command /alpha/billing/subscriptions currentPeriodEnd 真实采样 2026-09）。 */
+  monthlyResetAt?: number | null;
+  /** Command /alpha/billing/credits 原体透传（真实采样 2026-09-04）：belowThreshold/creditThreshold 为上游低余额提醒 */
+  credits?: {
+    monthlyCredits?: number | null;
+    purchasedCredits?: number | null;
+    freeCredits?: number | null;
+    belowThreshold?: boolean;
+    creditThreshold?: number | null;
+  } | null;
+}
+export interface ProviderAccount {
+  keyId: string;
+  maskedKey: string;
+  status: AccountStatus;
+  instanceStatus?: string;
+  quota?: AccountQuota;
+  quotaStatus?: string;
+  usable?: boolean;
+  /** 当前在用（= 显式锁定 或 自动在用 activeAccount）；账号行高亮依据 */
+  selected?: boolean;
+  /** 用户显式锁定（持久化 selectedAccountKeyId 指向本账号；区别于自动在用的 selected） */
+  locked?: boolean;
+  healthy?: boolean;
+  requests?: number;
+  totalTokens?: number;
+  version?: string | null;
+  updateAvailable?: boolean;
+  registeredAt?: number;
+  detectError?: string | null;
+  nextResetAt?: number | null;
+  /** 受限原因与恢复方式（window=到点恢复 / credits=充值后轮询恢复 / banned=人工复核） */
+  limit?: {
+    kind?: "window" | "credits" | "banned";
+    since?: number;
+    reason?: string | null;
+    recovery?: { type?: "at" | "poll" | "manual"; at?: number | null; periodMs?: number | null } | null;
+  } | null;
+}
+export interface RouterProvider {
+  id: string;
+  name: string;
+  kind: ProviderKind;
+  proxyAppId?: string | null;
+  activated?: boolean;
+  active?: boolean;
+  exhausted?: boolean;
+  apiPort?: number;
+  apiBase?: string;
+  accounts?: ProviderAccount[];
+  /** 持久化显式锁定账号（null=未手动锁，路由自动在用） */
+  selectedAccountKeyId?: string | null;
+  /** 显式锁定标志（区分自动在用） */
+  locked?: boolean;
+  /** 当前在用/锁定账号 keyId（列表/头部同源锚点） */
+  activeKeyId?: string | null;
+}
+export interface ProviderPreset {
+  id: string;
+  name: string;
+  baseUrl?: string;
+  plan?: { per5hUsd?: number; weeklyUsd?: number; monthlyUsd?: number } | null;
+  adapter?: unknown;
+  pricing?: unknown;
+  note?: string;
+}
+export interface ProxyAppInfo {
+  id: string;
+  name: string;
+  registry?: unknown;
+  installed?: string;
+  latest?: string;
+  updateAvailable?: boolean;
+}
+export interface RouterStatus {
+  running: boolean;
+  autostart?: boolean;
+  // conflict?: boolean —— 已移除（后端从不产出，死字段；2026-09 审计）
+  activatedProviders?: number;
+  usage: {
+    requests: number;
+    errors: number;
+    totalTokens: number;
+    promptTokens?: number;
+    completionTokens?: number;
+    costUsd?: number | null;
+  };
+  providers?: RouterProvider[];
+}
+export interface ProvidersResponse {
+  presets?: ProviderPreset[];
+  providers?: RouterProvider[];
+  proxyApps?: ProxyAppInfo[];
+}
 // ── /tasks ──────────────────────────────────────────────
 export type TaskKind = "native" | "plugin" | "proxy-app";
 export type TaskAction = "install" | "upgrade" | "uninstall" | "update";
@@ -241,6 +349,17 @@ export interface PluginJobStatus {
   targets?: Array<{ name?: string; ok?: boolean; error?: string | null }>;
   error_?: never;
 }
+// 反代更新任务进度（/router/proxy/update/status；steps 逐实例，支持多实例依次更新可视化）
+export interface ProxyUpdateStatus {
+  state?: JobState;
+  restarted?: number;
+  errors?: number;
+  startedAt?: number | null;
+  finishedAt?: number | null;
+  steps?: Array<{ name: string; state: string }>;
+  taskId?: string;
+  error?: string;
+}
 // ── settings / env / guard / registry ─────
 export interface LanPanelStatus { enabled: boolean; host?: string; port?: number; urls?: string[]; }
 export interface AccessKeyStatus { configured: boolean; host?: string; }
@@ -262,13 +381,13 @@ export interface GuardVersion { version?: string; commit?: string; latest?: stri
 export interface PlatformCapabilities {
   platform?: string;
   arch?: string;
-  /** 沙箱多实例（安卓面板无实例域，恒 false） */
+  /** 沙箱多实例（安卓内核无实例域，恒 false） */
   multiInstance?: boolean;
   /** 接管既有进程（端口/命令行反查 /proc） */
   pidAdoption?: boolean;
   /** 进程树终止（安卓由容器 / Android Service 管理，恒 false） */
   processTreeKill?: boolean;
-  /** 桌面通知（面板无通知通道，经容器 HostBridge，恒 false） */
+  /** 桌面通知（内核无通知通道，经容器 HostBridge，恒 false） */
   desktopNotify?: boolean;
   /** 开机自启（归 APK 容器 / Android Service，恒 false） */
   autostart?: boolean;
@@ -288,8 +407,8 @@ export interface EnvStatus {
 /** Node.js 环境检测（GET /env/node-lts）。
  *
  *  ⚠ 2026-09-13 修正契约（此前声明了后端**从不产出**的字段）：
- *    旧声明含 latestLts / ltsName / updateAvailable，而面板
- *    `OS runtime API` **明确不做远端查询**
+ *    旧声明含 latestLts / ltsName / updateAvailable，而内核
+ *    `guard/supervisor/settings-view.js.nodeLtsStatus()` **明确不做远端查询**
  *    （避免守卫启动依赖网络），实返只有 { ok, current, major, ltsLine, suggested,
  *    fetchedAt, cached }。于是前端那两个分支恒不可达、类型声明与实现分叉。
  *    现按真实返回对齐。若产品确需「官方最新 LTS」，应另开端点或改走壳 env_status 契约。 */
@@ -315,7 +434,7 @@ export interface GenericOk { ok?: boolean; error?: string | null; [k: string]: u
 // ── /lifecycle（2026-09 归一化：统一生命周期 API）────────────────────────────
 /** 生命周期模块 id（= 守卫 LifecycleManager 实际注册项，见 src/guard/lifecycle/adapters.js）。
  *  ⚠ 已删除的模块（勿回潮）：lan（远程控制）、instances（沙箱实例）。 */
-export type LifecycleModuleId = "main" | "plugins";
+export type LifecycleModuleId = "lobos" | "router" | "plugins";
 export interface LifecycleModuleState {
   id: string;
   kind?: string;

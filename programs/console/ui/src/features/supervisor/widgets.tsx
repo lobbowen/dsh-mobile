@@ -1,5 +1,5 @@
 /**
- * console 页面的标准展示基件（全部使用框架令牌；页面零硬编码）
+ * supervisor 页面的标准展示基件（全部使用框架令牌；页面零硬编码）
  * 规范依据：UI_STANDARDS_AND_REPLACEMENT.md §1.4（状态点/胶囊/面板/指标）
  */
 import type { ReactNode } from "react";

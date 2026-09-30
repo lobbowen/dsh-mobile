@@ -1,35 +1,35 @@
 /**
- * 控制面板（面板 overview）
- * 数据：consoleStore /status（含 main 主干视图）+ /events 快照
+ * 控制面板（内核 overview）
+ * 数据：supervisorStore /status（含 main 主干视图）+ /events 快照
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, ArrowUpRight, Power, RefreshCw, Rocket,
   ShieldCheck, TerminalSquare, Trash2, TriangleAlert,
 } from "lucide-react";
-import type { AdbStatus, NodeLtsStatus } from "../../services/console";
+import type { AdbStatus, NodeLtsStatus } from "../../services/supervisor";
 import { toast } from "sonner";
 import { Button } from "../../framework/ui";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../framework/ui/dialog";
 import { formatClockTime } from "./format";
-import { consoleApi, useConsoleData, type ConsoleEvent } from "../../services/console";
+import { supervisorApi, useSupervisorData, type SupervisorEvent } from "../../services/supervisor";
 import { Card, CardTitle, Metric, Pill, ToneDot } from "./widgets";
 import { cn } from "../../framework/utils";
 import { PortPanel } from "./PortPanel";
 import { EVENT_LABELS, SUP_PHASE_META, friendlyFailure } from "./nav";
-import { useConsoleAction } from "./useConsoleAction";
+import { useSupervisorAction } from "./useSupervisorAction";
 
 const NOISE = new Set(["dist_registry_selected", "lan_panel_changed"]);
 
 /** 能力三态词表。null 一律显式写成「未知」，不许与「可用」同形也不许省略整行 ——
- *  空白在面板重启后与全通长得一样，那是第二种假绿。 */
+ *  空白在内核重启后与全通长得一样，那是第二种假绿。 */
 const capWord = (ok: boolean | null): string => (ok === true ? "可用" : ok === false ? "不可用" : "未知");
 
 export function OverviewPage() {
-  const { snap } = useConsoleData();
-  const { busy, run } = useConsoleAction();
+  const { snap } = useSupervisorData();
+  const { busy, run } = useSupervisorAction();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
-  // main(原生 Lob OS) 守护开关（守护=跟开关走，默认关，持久化 program-main.json）
+  // main(原生 LOBOS) 守护开关（守护=跟开关走，默认关，持久化 lobos-main.json）
   const [mainGuardian, setMainGuardian] = useState<boolean | null>(null);
   const s = snap.status;
   const native = s?.native;
@@ -42,23 +42,23 @@ export function OverviewPage() {
   const upg = s?.upgrade;
   const phaseMeta = SUP_PHASE_META[s?.phase ?? ""] ?? { label: s?.phase || "未知", tone: "off" as const };
 
-  // ⚠ 已删除的能力（勿回潮）：「Lob OS Web」按钮（/instances/main/open-web）—— 服务端代开浏览器
+  // ⚠ 已删除的能力（勿回潮）：「LOBOS Web」按钮（/instances/main/open-web）—— 服务端代开浏览器
   //   属 PC 桌面能力；安卓上 platform.os.browser.open() 无实现，面板改由容器 WebView 直接导航。
-  //   2026-09-23：该「直接导航」的落点即下方 enterProgram() + 「进入 Lob OS」按钮（客户端跳
-  //   window.top 到 /native/access 返回的回环 URL），与被删的「服务端代开」是两种能力。
-  const running = Boolean(s?.programPid);
+  //   2026-09-23：该「直接导航」的落点即下方 enterLobos() + 「进入 LOBOS」按钮（客户端跳
+  //   window.top 到 /lobos/access 返回的回环 URL），与被删的「服务端代开」是两种能力。
+  const running = Boolean(s?.lobosPid);
   const upgradeRunning = upg?.state === "running";
 
   const events = useMemo(() => snap.events.filter((e) => !NOISE.has(e.type)), [snap.events]);
 
-  async function toggleProgram() {
-    // 2026-09：启停统一走 /lifecycle/program/start|stop（语义与旧 /start|/stop 等价，单一控制路径）
-    await run("main", () => (running ? consoleApi.lifecycleStop("main") : consoleApi.lifecycleStart("main")), { success: running ? "正在停止 Lob OS…" : "正在启动 Lob OS…" });
+  async function toggleLobos() {
+    // 2026-09：启停统一走 /lifecycle/lobos/start|stop（语义与旧 /start|/stop 等价，单一控制路径）
+    await run("lobos", () => (running ? supervisorApi.lifecycleStop("lobos") : supervisorApi.lifecycleStart("lobos")), { success: running ? "正在停止 LOBOS…" : "正在启动 LOBOS…" });
   }
   async function checkUpdate() {
     // 检测完成后即时反馈：已是最新 / 发现新版（后端返回 updateAvailable + latest）
     await run("chk", async () => {
-      const res = await consoleApi.nativeCheckUpdate();
+      const res = await supervisorApi.nativeCheckUpdate();
       if (res?.ok === false) { toast.error(res.error || "检测失败"); return; }
       if (res?.updateAvailable && res.latest) {
         toast.success("发现新版本 " + res.latest + (res.installed ? "（当前 " + res.installed + "），可一键升级" : ""));
@@ -66,34 +66,34 @@ export function OverviewPage() {
         toast.success("已是最新版本" + (res.installed ? "（" + res.installed + "）" : ""));
       }
     });
-    // run 成功后 useConsoleAction 已自动 refresh()；后端异步推进由 2s 统一心跳呈现（R6 修复：去除 1500ms 魔法时序）。
+    // run 成功后 useSupervisorAction 已自动 refresh()；后端异步推进由 2s 统一心跳呈现（R6 修复：去除 1500ms 魔法时序）。
   }
-  async function upgradeProgram() {
+  async function upgradeLobos() {
     setUpgradeOpen(false);
-    await run("upg", () => consoleApi.nativeUpgrade(), { success: "升级已开始，请耐心等待…" });
+    await run("upg", () => supervisorApi.nativeUpgrade(), { success: "升级已开始，请耐心等待…" });
     // 升级为异步任务：状态机经 /status.upgrade 呈现，由 2s 轮询推进
   }
-  async function enterProgram() {
-    // 经 /native/access 取带令牌的回环直连 URL（令牌只回环下发）。容器 WebView 中面板嵌在
+  async function enterLobos() {
+    // 经 /lobos/access 取带令牌的回环直连 URL（令牌只回环下发）。容器 WebView 中面板嵌在
     // /__host 宿主帧 iframe 内 → 导航 window.top 整窗换页；浏览器直开时 top===self 语义一致。
     // 返回面板 = 重开 App（容器固定加载 /__host）。
     await run("enter", async () => {
-      const r = await consoleApi.programAccess();
-      if (!r?.ok || !r.url) throw new Error(r?.error || "未获得 Lob OS 访问地址");
+      const r = await supervisorApi.lobosAccess();
+      if (!r?.ok || !r.url) throw new Error(r?.error || "未获得 LOBOS 访问地址");
       (window.top ?? window).location.href = r.url;
     }, { refresh: false });
   }
-  async function installProgram() {
-    if (!confirm("将在线安装最新版 Agent Program（需数分钟，自动适配最快镜像源）。确定继续？")) return;
-    await run("inst", () => consoleApi.nativeInstall(), { success: "开始安装 Agent Program…" });
+  async function installLobos() {
+    if (!confirm("将在线安装最新版 the Agent（需数分钟，自动适配最快镜像源）。确定继续？")) return;
+    await run("inst", () => supervisorApi.nativeInstall(), { success: "开始安装 the Agent…" });
   }
-  async function uninstallProgram() {
-    if (!confirm("将彻底卸载 Agent Program：删除全部文件、数据、缓存与日志，不留残留。确定继续？")) return;
-    await run("uni", () => consoleApi.nativeUninstall(), { success: "开始卸载…" });
+  async function uninstallLobos() {
+    if (!confirm("将彻底卸载 the Agent：删除全部文件、数据、缓存与日志，不留残留。确定继续？")) return;
+    await run("uni", () => supervisorApi.nativeUninstall(), { success: "开始卸载…" });
   }
 
-  // main 守护开关：读 /status 随快照下发的 main.guardian（programMainView 持久化源，即时准确）——
-  // 不走 /lifecycle/program（B 平面由心跳同步，打开后立即刷新会读到同步前旧值 = 开关弹回关）。
+  // main 守护开关：读 /status 随快照下发的 main.guardian（lobosMainView 持久化源，即时准确）——
+  // 不走 /lifecycle/lobos（B 平面由心跳同步，打开后立即刷新会读到同步前旧值 = 开关弹回关）。
   useEffect(() => {
     const g = s?.main?.guardian;
     if (typeof g === "boolean") setMainGuardian(g);
@@ -102,12 +102,12 @@ export function OverviewPage() {
   async function toggleMainGuardian() {
     // 按钮模式：点击翻转，消费后端返回值即时刷新
     const v = !(mainGuardian === true);
-    await run("gu", () => consoleApi.nativeSettings({ guardian: v }).then((r2) => {
+    await run("gu", () => supervisorApi.nativeSettings({ guardian: v }).then((r2) => {
       const g = r2?.main?.guardian;
       if (typeof g === "boolean") setMainGuardian(g);
       return r2;
     }), {
-      success: v ? "已开启 Lob OS 进程守护（崩溃自动拉起）" : "已关闭 Lob OS 进程守护（崩溃后不再自动拉起）",
+      success: v ? "已开启 LOBOS 进程守护（崩溃自动拉起）" : "已关闭 LOBOS 进程守护（崩溃后不再自动拉起）",
       refresh: false,
     });
   }
@@ -135,7 +135,7 @@ export function OverviewPage() {
           <div className="flex flex-col gap-5 border-b border-border px-6 py-5 md:border-b-0 md:border-r">
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-baseline gap-2">
-                <h3 className="truncate text-xl font-semibold tracking-[-0.01em] text-foreground">Agent Program</h3>
+                <h3 className="truncate text-xl font-semibold tracking-[-0.01em] text-foreground">the Agent</h3>
                 <span className="shrink-0 font-mono text-sm text-muted-foreground">v{installedVer}</span>
               </div>
               {busy === "chk" ? (
@@ -161,7 +161,7 @@ export function OverviewPage() {
               <div className="flex items-center gap-2">
                 <ToneDot tone="boot" ping />
                 <span className="text-base font-semibold leading-none text-foreground">
-                  {installing ? "正在安装 Agent Program…" : "正在卸载 Agent Program…"}
+                  {installing ? "正在安装 the Agent…" : "正在卸载 the Agent…"}
                 </span>
               </div>
             ) : (
@@ -241,8 +241,8 @@ export function OverviewPage() {
 
           <div className="flex items-center bg-[image:var(--panel-accent-gradient)] px-6 py-5">
             <div className="grid w-full grid-cols-2 gap-x-6 gap-y-4 @min-[560px]:grid-cols-4">
-              <Metric icon={<Activity className="size-4" />} label="端口" value={s?.programPort ? String(s.programPort) : "—"} mono />
-              <Metric icon={<TerminalSquare className="size-4" />} label="PID" value={s?.programPid ? String(s.programPid) : "—"} mono />
+              <Metric icon={<Activity className="size-4" />} label="端口" value={s?.lobosPort ? String(s.lobosPort) : "—"} mono />
+              <Metric icon={<TerminalSquare className="size-4" />} label="PID" value={s?.lobosPid ? String(s.lobosPid) : "—"} mono />
               <Metric icon={<RefreshCw className="size-4" />} label="重启次数" value={String(s?.restartCount ?? 0)} mono />
               <Metric icon={<ArrowUpRight className="size-4" />} label="最近故障" value={s?.lastFailure ? friendlyFailure(s?.lastFailure) : "无"} warn={Boolean(s?.lastFailure)} />
             </div>
@@ -257,24 +257,24 @@ export function OverviewPage() {
           {/* 右：安装/运行操作 + 分隔线 + 危险操作——ml-auto: 左信息隐藏(窄屏)时按钮组靠右对齐 */}
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {!installed && !nBusy ? (
-              <Button size="sm" disabled={busy === "inst"} onClick={() => void installProgram()}>
-                <Rocket className="size-4" />安装 Lob OS
+              <Button size="sm" disabled={busy === "inst"} onClick={() => void installLobos()}>
+                <Rocket className="size-4" />安装 LOBOS
               </Button>
             ) : installed && !nBusy && !upgradeRunning ? (
               <>
-                {/* D3-A 定案：主 Lob OS 由守卫统一自 spawn（始终守护拉起），无「进程守护」开关；
-                    运行操作统一白底 outline（卸载 Lob OS 为唯一高危实色按钮） */}
-                {/* 「进入 Lob OS」全断点可见（2026-09-23 真机：小屏无任何入口进不了 Lob OS）——
+                {/* D3-A 定案：主 LOBOS 由守卫统一自 spawn（始终守护拉起），无「进程守护」开关；
+                    运行操作统一白底 outline（卸载 LOBOS 为唯一高危实色按钮） */}
+                {/* 「进入 LOBOS」全断点可见（2026-09-23 真机：小屏无任何入口进不了 LOBOS）——
                     运行态主操作，primary 实色与 outline 运行操作区分 */}
                 {running ? (
-                  <Button disabled={busy === "enter"} onClick={() => void enterProgram()} size="sm">
-                    <ArrowUpRight className="size-4" />进入 Lob OS
+                  <Button disabled={busy === "enter"} onClick={() => void enterLobos()} size="sm">
+                    <ArrowUpRight className="size-4" />进入 LOBOS
                   </Button>
                 ) : null}
-                <Button disabled={busy === "main"} onClick={() => void toggleProgram()} size="sm" variant="outline">
-                  {running ? <><Power className="size-4 text-status-error" />停止 Lob OS</> : <><Rocket className="size-4 text-primary" />启动 Lob OS</>}
+                <Button disabled={busy === "lobos"} onClick={() => void toggleLobos()} size="sm" variant="outline">
+                  {running ? <><Power className="size-4 text-status-error" />停止 LOBOS</> : <><Rocket className="size-4 text-primary" />启动 LOBOS</>}
                 </Button>
-                {/* 分割线（自停止/启动 Lob OS 后开始分割）→ 进程守护按钮（按钮式，非 Switch） */}
+                {/* 分割线（自停止/启动 LOBOS 后开始分割）→ 进程守护按钮（按钮式，非 Switch） */}
                 <span aria-hidden="true" className="mx-1 h-5 w-px bg-border" />
                 <Button className="h-[30px]" disabled={busy === "gu" || mainGuardian === null} onClick={() => void toggleMainGuardian()} size="sm" variant="outline">
                   <ShieldCheck className={cn("size-4", mainGuardian === true ? "text-status-ok" : "text-muted-foreground")} />
@@ -285,8 +285,8 @@ export function OverviewPage() {
             {installed && !nBusy ? (
               <>
                 {/* 守护后无分割线(2026-09 用户定稿)——守护与危险操作直接相邻 */}
-                <Button className="hidden h-[30px] md:inline-flex" disabled={busy === "uni"} onClick={() => void uninstallProgram()} size="sm" variant="destructive">
-                  <Trash2 className="size-4" />卸载 Lob OS
+                <Button className="hidden h-[30px] md:inline-flex" disabled={busy === "uni"} onClick={() => void uninstallLobos()} size="sm" variant="destructive">
+                  <Trash2 className="size-4" />卸载 LOBOS
                 </Button>
               </>
             ) : null}
@@ -297,13 +297,13 @@ export function OverviewPage() {
       {/* 下端两栏（对齐环境变量左右结构）：左=事件日志（懒加载）/ 右=端口管理 */}
       <div className="grid items-start gap-4 @min-[860px]:grid-cols-[minmax(0,1fr)_420px]">
         <EventLogPanel events={events} />
-        <PortPanel />
+        <PortPanel providers={snap.providers?.providers ?? []} />
       </div>
 
       {/* 升级确认弹窗 */}
       <Dialog open={upgradeOpen} onOpenChange={setUpgradeOpen}>
         <DialogContent className="max-w-[420px]">
-          <DialogHeader><DialogTitle>升级 Agent Program</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>升级 the Agent</DialogTitle></DialogHeader>
           <div className="grid gap-3">
             <div className="flex items-center justify-center gap-3 rounded-md bg-muted px-4 py-3">
               <div className="text-center">
@@ -317,12 +317,12 @@ export function OverviewPage() {
               </div>
             </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              升级将先停止 Lob OS、安装新版本后自动拉起（需数分钟）。期间进行中的请求会中断，失败会自动回滚到当前版本。
+              升级将先停止 LOBOS、安装新版本后自动拉起（需数分钟）。期间进行中的请求会中断，失败会自动回滚到当前版本。
             </p>
           </div>
           <DialogFooter>
             <Button onClick={() => setUpgradeOpen(false)} variant="outline">取消</Button>
-            <Button disabled={busy === "upg" || upgradeRunning} onClick={() => void upgradeProgram()}>
+            <Button disabled={busy === "upg" || upgradeRunning} onClick={() => void upgradeLobos()}>
               {busy === "upg" || upgradeRunning ? "升级中…" : "开始升级"}
             </Button>
           </DialogFooter>
@@ -339,7 +339,7 @@ function EnvDetect() {
   useEffect(() => {
     let alive = true;
     const load = async () => {
-      const r = await consoleApi.nodeLts().catch(() => null);
+      const r = await supervisorApi.nodeLts().catch(() => null);
       if (alive) setNode(r);
     };
     void load();
@@ -351,7 +351,7 @@ function EnvDetect() {
   if (!node?.current) return <span className="min-w-[120px] text-xs text-muted-foreground">环境检测…</span>;
 
   // ⚠ 2026-09-13：改为消费后端**真实产出**的字段。
-  //   原实现读 latestLts / updateAvailable / ltsName —— 后端（OS runtime API）
+  //   原实现读 latestLts / updateAvailable / ltsName —— 后端（settings-view.js.nodeLtsStatus）
   //   从不产出这三个键（它不做远端查询），故「可更新到 vX LTS」整块是**不可达死分支**。
   //   现用 ltsLine（偶数主版本=通常为 LTS 线）给出真实提示，suggested 作 title 明细。
   return (
@@ -379,7 +379,7 @@ function AdbEnv() {
   useEffect(() => {
     let alive = true;
     const load = async () => {
-      const r = await consoleApi.adbStatus().catch(() => null);
+      const r = await supervisorApi.adbStatus().catch(() => null);
       if (alive) setSt(r);
     };
     void load();
@@ -398,7 +398,7 @@ function AdbEnv() {
   );
 }
 
-/** 事件日志（懒加载）：先渲染 15 条；滚到列表底部哨兵出现 → 继续 +15，直到全部事件渲染完。 */function EventLogPanel({ events }: { events: ConsoleEvent[] }) {
+/** 事件日志（懒加载）：先渲染 15 条；滚到列表底部哨兵出现 → 继续 +15，直到全部事件渲染完。 */function EventLogPanel({ events }: { events: SupervisorEvent[] }) {
   const PAGE = 12;
   const [visible, setVisible] = useState(PAGE);
   const total = events.length;
@@ -437,7 +437,7 @@ function AdbEnv() {
   );
 }
 
-function EventRow({ e }: { e: ConsoleEvent }) {
+function EventRow({ e }: { e: SupervisorEvent }) {
   const tone = EVENT_TONE[e.type] ?? "boot";
   const label = EVENT_LABELS[e.type] ?? e.type;
   const msg = eventDetail(e);
@@ -451,7 +451,7 @@ function EventRow({ e }: { e: ConsoleEvent }) {
 }
 
 /** 事件 → 人性化描述（对齐后端遥测语义；无匹配则空串 —— 标签已表达类型） */
-function eventDetail(e: ConsoleEvent): string {
+function eventDetail(e: SupervisorEvent): string {
   const d = e.data;
   if (!d) return "";
   const fmt = (n: unknown) => Number(n ?? 0).toLocaleString("en-US");
@@ -459,9 +459,18 @@ function eventDetail(e: ConsoleEvent): string {
   if (typeof d.message === "string") return d.message;
   if (typeof d.reason === "string") return friendlyFailure(d.reason);
   if (typeof d.desired === "string") return "期望 " + d.desired;
+  // 路由遥测
+  if (e.type === "router_usage") return (d.model || "") + (d.model ? " · " : "") + fmt(d.tokens) + " tokens";
+  if (e.type === "router_pick") return [(d.provider || ""), (d.key || "")].filter(Boolean).join(" · ");
+  if (e.type === "account_ready" || e.type === "account_frozen" || e.type === "account_banned" || e.type === "account_recovered" || e.type === "account_review" || e.type === "account_exhausted") {
+    return (d.key || "") + (d.key ? " · " : "") + (d.provider || "");
+  }
+  if (e.type === "provider_quota_refreshed") return (d.provider || "") + " 额度已刷新";
+  if (e.type === "proxy_update_available") return [(d.pkg || ""), (d.from || ""), (d.to || "")].filter(Boolean).join(" → ");
+  if (e.type === "proxy_instance_started") return "port=" + (d.port ?? "") + (d.pid ? " pid=" + d.pid : "");
   // 守护开关变更 —— 写清对象 + 开/关
-  if (e.type === "guardian_changed") {
-    const who = d.name || (d.id === "main" ? "原生 Lob OS" : d.id || "目标");
+  if (e.type === "lobos_guardian_changed") {
+    const who = d.name || (d.id === "main" ? "原生 LOBOS" : d.id || "目标");
     return who + " · 进程守护" + (d.enabled === true ? " → 开启" : " → 关闭");
   }
   // 通用指标字段拼装
@@ -478,20 +487,25 @@ function eventDetail(e: ConsoleEvent): string {
 const EVENT_TONE: Record<string, "ok" | "err" | "warn" | "boot" | "off"> = {
   running: "ok", adopted: "ok", spawned: "ok", main_instance_registered: "ok",
   upgrade_installed: "ok", upgrade_done: "ok", api_listening: "ok",
+  account_ready: "ok", account_confirmed: "ok", account_recovered: "ok",
+  proxy_instance_started: "ok", proxy_update_applied: "ok",
+  router_provider_activated: "ok", router_provider_endpoint: "ok",
   plugin_install_done: "ok",
   native_installed: "ok", plugin_update_done: "ok",
-  program_exited: "err", unhealthy: "err",
+  account_frozen: "err", account_banned: "err", lobos_exited: "err", unhealthy: "err",
   spawn_failed: "err", spawn_error: "err", upgrade_failed: "err", api_error: "err",
+  proxy_instance_failed: "err",
   native_install_failed: "err", native_uninstall_failed: "err",
   plugin_install_job_failed: "err", plugin_update_job_failed: "err",
-  plugin_uninstall_job_failed: "err",
+  plugin_uninstall_job_failed: "err", router_stream_aborted: "err",
   sigkill_sent: "err", start_timeout: "err", crash_loop_entered: "err",
   guard_exit: "warn", version_check_failed: "warn", restart_triggered: "warn",
-  program_not_installed: "warn", sigterm_sent: "warn",
+  lobos_not_installed: "warn", sigterm_sent: "warn", account_review: "warn",
   // 配置/开关变更(黄 warn)——与运行状态绿、异常红、启动蓝区分
-  guardian_changed: "warn",
-  upgrade_started: "warn", upgrade_stopping_program: "warn",
+  lobos_guardian_changed: "warn",
+  proxy_update_available: "warn", upgrade_started: "warn", upgrade_stopping_lobos: "warn",
   native_uninstall_started: "warn",
+  account_discarded: "off", router_stopped: "off", proxy_instance_stopped: "off",
   plugin_uninstall_done: "off", native_uninstalled: "off",
-  upgrade_skipped: "off", stop: "off",
+  upgrade_skipped: "off", router_provider_deactivated: "off", stop: "off",
 };

@@ -3,7 +3,7 @@
  * 不依赖真实后端：vi.stubGlobal 注入 fetch。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { consoleApi, LONG_TIMEOUT_MS } from "./client";
+import { supervisorApi, LONG_TIMEOUT_MS } from "./client";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -17,21 +17,21 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("consoleApi http 客户端", () => {
+describe("supervisorApi http 客户端", () => {
   it("2xx 返回解析后的 JSON", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, { ok: true, programPid: 42 })));
-    const r = await consoleApi.status();
-    expect(r).toEqual({ ok: true, programPid: 42 });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, { ok: true, lobosPid: 42 })));
+    const r = await supervisorApi.status();
+    expect(r).toEqual({ ok: true, lobosPid: 42 });
   });
 
   it("非 2xx 时优先抛后端 {error} 文案", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(500, { error: "面板故障" })));
-    await expect(consoleApi.status()).rejects.toThrow("面板故障");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(500, { error: "内核故障" })));
+    await expect(supervisorApi.status()).rejects.toThrow("内核故障");
   });
 
   it("非 2xx 无 error/message 时回退 HTTP 状态 + 路径", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(404, null)));
-    await expect(consoleApi.tasks()).rejects.toThrow(/HTTP 404 \/tasks/);
+    await expect(supervisorApi.tasks()).rejects.toThrow(/HTTP 404 \/tasks/);
   });
 
   it("请求携带 abort 信号（http 内 withTimeout 注入），后端挂起时 fetch 被 abort", async () => {
@@ -41,7 +41,7 @@ describe("consoleApi http 客户端", () => {
       // 永不 resolve 的挂起请求（模拟后端无响应）；由 http 的 AbortController 兜底
       return new Promise((_resolve) => undefined);
     }));
-    const p = consoleApi.status();
+    const p = supervisorApi.status();
     // 断言请求确实带上了可 abort 的信号（withTimeout 已装配）
     expect(receivedSignal).toBeDefined();
     expect(receivedSignal?.aborted).toBe(false);
@@ -50,7 +50,7 @@ describe("consoleApi http 客户端", () => {
     p.catch(() => undefined);
   });
 
-  it("长轮询端点豁免超时到 LONG_TIMEOUT_MS", () => {
+  it("长轮询端点（proxyLoginWait）豁免超时到 LONG_TIMEOUT_MS", () => {
     expect(LONG_TIMEOUT_MS).toBeGreaterThanOrEqual(180_000);
   });
 });
@@ -60,7 +60,7 @@ describe("ADB 状态客户端", () => {
     const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
       Promise.resolve(jsonResponse(200, { ok: true, paired: false, pubkey: "k" })));
     vi.stubGlobal("fetch", fetchMock);
-    const r = await consoleApi.adbStatus();
+    const r = await supervisorApi.adbStatus();
     expect(r).toEqual({ ok: true, paired: false, pubkey: "k" });
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/adb/status");

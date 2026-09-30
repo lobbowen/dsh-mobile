@@ -38,7 +38,7 @@ function readState(snap: unknown): JobState | null {
 
 /**
  * 轮询任务直到 done/failed（或超时/中止）。
- * @param fetchStatus 取状态快照（如 consoleApi.pluginInstallStatus(jobId)）
+ * @param fetchStatus 取状态快照（如 supervisorApi.pluginInstallStatus(jobId)）
  */
 export async function pollJob<T>(
   fetchStatus: () => Promise<T>,

@@ -6,7 +6,7 @@ import { cn } from "../utils"
 
 /**
  * ============================================================================
- * Lob OS 通用 UI 框架 — Select（下拉选择，U1 补齐）
+ * LOBOS 通用 UI 框架 — Select（下拉选择，U1 补齐）
  * ============================================================================
  * 基于 radix-ui Select 的令牌化封装（替代页面裸 <select>），对齐 shadcn 语义：
  *   Select / SelectTrigger / SelectContent / SelectItem / SelectValue / SelectGroup / SelectLabel

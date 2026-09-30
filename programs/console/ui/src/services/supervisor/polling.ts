@@ -1,19 +1,21 @@
 /**
  * ============================================================================
- * console 运行态轮询中心（对齐老 UI unifiedTick 语义：单源快照 → 视图只读）
+ * supervisor 运行态轮询中心（对齐老 UI unifiedTick 语义：单源快照 → 视图只读）
  * ============================================================================
  * - start() 每 2s 并行拉运行态 + 增量事件（after=seq），写入快照并发给订阅者
  * - 任意写操作后可 refresh()（立即同步一次）
  * - 纯 JS 事件订阅（set 通知），页面用 useSyncExternalStore 或 useEffect 消费
  * ============================================================================
  */
-import { consoleApi } from "./client";
+import { supervisorApi } from "./client";
 import type {
-  EventsPage, PortsResponse, ConsoleStatus,
+  EventsPage, PortsResponse, ProvidersResponse, RouterStatus, SupervisorStatus,
 } from "./types";
 
-export interface ConsoleSnapshot {
-  status: ConsoleStatus | null;
+export interface SupervisorSnapshot {
+  status: SupervisorStatus | null;
+  router: RouterStatus | null;
+  providers: ProvidersResponse | null;
   /** 端口注册表快照（R4 修复：从 PortPanel 独立 5s 轮询收敛进统一心跳） */
   ports: PortsResponse | null;
   events: EventsPage["events"];
@@ -21,14 +23,14 @@ export interface ConsoleSnapshot {
   online: boolean;
 }
 
-function empty(): ConsoleSnapshot {
+function empty(): SupervisorSnapshot {
   return {
-    status: null, ports: null,
+    status: null, router: null, providers: null, ports: null,
     events: [], eventsSeq: 0, online: false,
   };
 }
 
-type Listener = (snap: ConsoleSnapshot) => void;
+type Listener = (snap: SupervisorSnapshot) => void;
 const listeners = new Set<Listener>();
 let snap = empty();
 let started = false;
@@ -39,20 +41,22 @@ let busy = false;
 let eventsBusy = false;
 
 function emit() { for (const l of listeners) l(snap); }
-function setPartial(p: Partial<ConsoleSnapshot>) { snap = { ...snap, ...p }; emit(); }
+function setPartial(p: Partial<SupervisorSnapshot>) { snap = { ...snap, ...p }; emit(); }
 
 async function syncAll() {
   if (busy) return;
   busy = true;
   try {
-    const [status, ports] = await Promise.all([
-      consoleApi.status().catch(() => null),
-      consoleApi.ports().catch(() => null),
+    const [status, router, providers, ports] = await Promise.all([
+      supervisorApi.status().catch(() => null),
+      supervisorApi.routerStatus().catch(() => null),
+      supervisorApi.providers().catch(() => null),
+      supervisorApi.ports().catch(() => null),
     ]);
     const online = !!status;
     // R4 修复：心跳不再附带 /tasks —— snap.tasks 无消费者（TasksPage 自管本地 state + 手动刷新），
     // 每 2s 白拉一次低频任务列表属于无效网络开销。
-    setPartial({ status, ports, online });
+    setPartial({ status, router, providers, ports, online });
   } catch {
     setPartial({ online: false });
   } finally {
@@ -64,7 +68,7 @@ async function refreshEvents() {
   if (eventsBusy) return;
   eventsBusy = true;
   try {
-    const r = await consoleApi.events(snap.eventsSeq, 60);
+    const r = await supervisorApi.events(snap.eventsSeq, 60);
     if (r.events && r.events.length) {
       // 后端增量升序 → 新批次在前（老 UI 语义：数组头 = 最新）。
       // 按 seq 去重兜底：即使 in-flight 曾交叠/后端游标回退，也不让同 seq 双插。
@@ -85,7 +89,7 @@ async function refreshEvents() {
   finally { eventsBusy = false; }
 }
 
-export const consoleStore = {
+export const supervisorStore = {
   get snapshot() { return snap; },
   /** 订阅快照变更；返回取消函数 */
   subscribe(listener: Listener): () => void {

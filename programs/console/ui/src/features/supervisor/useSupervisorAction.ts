@@ -3,13 +3,13 @@
  *
  * 模式：任一后端写操作 = setBusy(key) → await api → 成功 toast / 失败 toast → onDone/refresh
  *  - success：成功 toast 文案
- *  - refresh：是否刷新全局 console 快照（默认 true）
+ *  - refresh：是否刷新全局 supervisor 快照（默认 true）
  *  - onDone：页面级差异化后置动作（如重载本页列表），成功与失败后都会执行
  * 每页一个实例；key 用于按钮级忙碌态。
  */
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
-import { consoleStore } from "../../services/console";
+import { supervisorStore } from "../../services/supervisor";
 
 export type ActionBusy = string | null;
 
@@ -22,7 +22,7 @@ export type RunOptions = {
   onDone?: () => void;
 };
 
-export function useConsoleAction() {
+export function useSupervisorAction() {
   const [busy, setBusy] = useState<ActionBusy>(null);
 
   const run = useCallback(async (
@@ -41,7 +41,7 @@ export function useConsoleAction() {
     } finally {
       setBusy(null);
       opts?.onDone?.();
-      if (ok && opts?.refresh !== false) consoleStore.refresh();
+      if (ok && opts?.refresh !== false) supervisorStore.refresh();
     }
     return ok;
   }, []);
