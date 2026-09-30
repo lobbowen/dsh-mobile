@@ -9,23 +9,23 @@
 
 | 项 | 值 |
 |---|---|
-| 安装包 | `apk-latest` 的 `app-release.apk`（发布面产物，**非 debuggable**） |
-| 开发/取证包 | 日常链的版本化归档 `v<versionName>` 上的 `app-debug-<versionName>+<versionCode>.apk`（debuggable，`run-as` 可用）—— 只在「内核没起来、控制面无从可读」时用它复现 |
+| 安装包 | 版本化归档 `v<versionName>` 上的 `app-debug-<versionName>+<versionCode>.apk` —— 归一发布连后这是**唯一**的壳投递物（ADR-0011）；当前形态是 debuggable ⇒ `run-as` 可用。换成 release 形态是 AUD-G33/E3.3 的账，届时这一行与下一行会合并 |
+| 开发/取证包 | 同一颗。内核没起来、控制面无从可读时就直接 `run-as lobos.app` 读私有目录 |
 | 设备通道 | **canary**（`assets/program-feed.json`: `baseUrl=https://hubcdn.zll.ink`, `channel=canary`） |
 | 已发布内核 | **别写死在本清单里**，从通道现读：`<base>/program-<channel>/program-manifest.json?t=<ms>`（`?t=` 不能省，理由见 [program-ota.md §2.1](program-ota.md)）。下文用 `<目标版本>` 指代它，落到哪条就 substituted 成实际值 |
 
 ### 0.1 读数怎么取：控制面回环 HTTP
 
-发布包 `android:debuggable=false` ⇒ `adb shell run-as lobos.app` 会被系统拒绝，设备私有目录
-**不再有 shell 侧的读法**。常规通道是控制面（面板 HTTP，只绑回环：`platform/config.js:21`），
-经 `adb forward` 打进设备：
+**当前投递的那颗是 debug 形态 ⇒ `run-as lobos.app` 可用**（见 §0 那两行）。等 AUD-G33/E3.3 换成
+release 形态（`android:debuggable=false`）之后，`run-as` 会被系统拒绝、设备私有目录**不再有 shell 侧的读法**，
+那时以下面这条为主通道：控制面（面板 HTTP，只绑回环：`platform/config.js:21`），经 `adb forward` 打进设备：
 
 ```bash
 adb -s <serial> forward tcp:36360 tcp:36360
 BASE=http://127.0.0.1:36360
 
 curl -s "$BASE/status"                       # 相位 + 首行状态 + 已装 Program（三处同源那一份）
-curl -s "$BASE/diagnostics/provisioning"     # 开机体检快照：五项体检 + 三条版本流身份
+curl -s "$BASE/diagnostics/provisioning"     # 开机体检快照：五项体检 + 壳/内核两条流身份
 curl -s "$BASE/native/capabilities"          # 上一轮原生件/能力件核验的落盘结论（不重跑探针）
 curl -s "$BASE/diagnostics/events?limit=400" # 启动链逐事件（含探针 data 原文）
 ```

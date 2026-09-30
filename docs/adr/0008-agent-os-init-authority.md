@@ -60,8 +60,12 @@ Program 按 manifest 申报 capability → 特权域按「可静默 / 需人点 
 **不做任何进程外复活兜底**（否决词汇在册，见 ADR-0006）。journal 只做「打断可见」。
 
 ### C4 投递合同（发布维 → 共享通道）
-共享发布通道（`apk-latest` 滚动别名、`v<versionName>` 版本化归档）**唯一合法写者 = main 的 head 字节**。
-判据不是「谁有权 dispatch」而是「写进去的东西是否可追溯到已合入的 main commit」。
+共享发布通道（`v<versionName>` 版本化归档、`program-*`、`node-runtime-*`、`native-cap-*`）
+**唯一合法写者 = 由发布 tag 决定的那一轮构建，其代码来自已合入 main 的 head 字节**
+（每条版本流一个 tag 一个投递口，见 ADR-0011；旧的 `apk-latest` 滚动别名连同它的三个写者已废止）。
+判据不是「谁有权 dispatch」而是「写进去的东西是否可追溯到一条写明版本号的 tag + 一个 main commit」。
+唯一例外是能力件：它的身份是内容指纹、构建完才知道，所以入口是 `workflow_dispatch`，
+可追溯性由 `native-cap-<指纹>-<abi>` 这个不可变 tag 本身承担（ADR-0011 §5）。
 
 ---
 

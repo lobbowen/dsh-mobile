@@ -2,7 +2,10 @@
 #
 # 随包原生 ELF 的形态判据 —— 「这份东西装到真机上能不能被跑起来」的唯一实现。
 # 调用点（少一个就留一个放行口子）：构建 build-node-android.sh；打包 fast-apk.yml
-# 与 build-apk.yml 的 pre-gradle Gate；固化 release-admin.yml 的 pin；重打包同文件的 repack。
+# 与 build-apk.yml 的 pre-gradle Gate。出口数由 test/verify-runtime-elf-test.js ⑩ 按表钉住，
+# 表外的 workflow **或 scripts 里的脚本**接上宿主就红 —— 新增出口必须先改进表。
+# （2026-09-30 发布连归一：release-admin 的 pin / repack 两处随该链废除。固化那一步判的
+#  就是同一轮构建里已被判过的那批字节，所以少的是**口**，不是判据。）
 #
 # 五条判据。同一条事实此前有五处出口、三份实现、两种严格度（pin 判红，构建脚本只打
 # [info]/[warn]，build-apk 只判架构），2026-09-27 收口成一份实现、一种结论。

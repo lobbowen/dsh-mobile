@@ -2,7 +2,10 @@
 #
 # APK 内原生件清单审计 —— 「包里到底有没有运行期要的东西」的唯一实现。
 # 调用点（少一个就留一个放行口子）：打包 fast-apk.yml 与 build-apk.yml 的
-# Audit APK contents；诊断 release-admin.yml 的 diag 模式（--report，只出事实）。
+# Audit APK contents —— 前者是壳 APK 唯一投递口，后者出的是随内核固化留痕的验证载体。
+# `--report`（只出事实不判红）目前没有链路调用：它的调用方是 release-admin.yml 的 diag 模式，
+# 那条链随发布连归一废除。留这一档是因为审计宿主必须能被单独点着复算一个既有包（test 在册），
+# 不是为了兼容旧链路。
 #
 # 为什么要这一步（真实教训）：真机报 cannot locate symbol
 # "_ZTVNSt6__ndk119basic_ostringstream..."，那是运行期动态链接找不到

@@ -1,35 +1,54 @@
-name: Build Lob OS APK
+name: Build & Pin Node Runtime
 
-# 这个工作流存在的意义：CI 运行器有完整的公网（能访问 dl.google.com），
-# 而本仓库作者所在的沙箱环境外网被白名单限制、无法下载 Android SDK/NDK。
-# 因此“出包”交给 GitHub Actions：一键编译出可安装的 **release 形态** APK（非 debuggable，
-# 形态由 scripts/verify-apk-release-form.sh 判）作为构件(artifact)下载，并投给 apk-latest。
+# ============================================================================
+#  **Runtime（Node 等）版本流的唯一发布链**。全仓每条版本流恰好一条链（投递只由人打的带版本号 tag 决定）；唯一的例外是能力件那条 pin-capabilities.yml —— 它的身份是内容指纹、入口是 dispatch（ADR-0011 §5）。，见
+#  docs/adr/0011-one-release-chain-per-stream.md 与 ci.yml 头部那张表。
 #
-# 用法：Actions → 手动 Run workflow（仅改 Node 运行时/编译脚本时才需要；
-# 日常出包走 fast-apk，不碰这条路）。
+#  这个工作流存在的意义：CI 运行器有完整的公网（能访问 dl.google.com），
+#  而本仓库作者所在的沙箱环境外网被白名单限制、无法下载 Android SDK/NDK。
+#  因此 Node 的交叉编译只能在这里做。
 #
-# 注：诊断日志经 PAT（仓库 Secret）推到 ci-diag 分支，维护者在沙箱侧经 raw 通道读取。
+#  两个身份，一条链：
+#    · workflow_dispatch = **只构建校验**。产物 APK 作为 Actions 构件留存，
+#      它证明「这份新运行时装进真 APK 之后各门禁仍然成立」，但它**不是发布物** ——
+#      壳 APK 只有一个投递口（fast-apk.yml，OS 版本流）。
+#    · 推 tag `runtime-release-<node 版本>-<abi>` = **固化这一版运行时**：
+#      把 libnode.so + libc++_shared.so 发成不可变 Release `node-runtime-<版本>-<abi>`，
+#      之后 fast-apk 按该 tag 下载、不再重编。版本号写在 tag 名里，与
+#      `assets/node-versions.json` 现算出来的那一个逐字相符才动手。
+#    旧形态是「本链把 APK 投给 apk-latest」+「release-admin 的 pin 模式从**别的 run**
+#    回取 artifact 再固化」。前者随 apk-latest 一起废除（设备上没有任何东西读那条别名，
+#    注册表 DS-11 实读；线上 2026-09-30 现读它根本不存在）；后者收进本链同一轮 ——
+#    跨 run 回取产物已经真实断过一次（artifact 改名 ⇒ pin 链路取不到件，债 AUD-G33 取证记录）。
+#
+#  注：本轮构建进行到哪一步由 Actions 日志与 `/actions/runs/<id>/jobs` 直接读，
+#  不再往 `ci-hb` / `ci-ping` / `ci-ok` / `ci-last` / `ci-diag` 这些 force-push 分支写自报
+#  （那五处写者每次都把上一份读数原地换掉，那里读不出序列 —— 债表 DS-16 判死的同一形状）。
+# ============================================================================
 
 on:
   workflow_dispatch:
-  # push 触发已移除（2026-09 单仓迁移决策）：本 workflow 一跑就是 2~3 小时的
-  # Node 全量交叉编译。预编译运行时已固化为 node-runtime-* Release（永久、可校验），
-  # 日常出包【全部】走 fast-apk（分钟级）。若保留 push 触发，单仓的首推/误推
-  # 会白烧数小时机时去重编一份【并不变化】的基础环境 —— 这正是本次迁移要根除的浪费。
-  # 只有真的改 Node 版本 / scripts/build-node-android.sh 时，才手动 Run workflow，
-  # 跑完用 pin-node 固化，fast-apk 自动用上新产物。
+  # 固化入口：**带版本号的 tag**。它同样会跑一遍完整构建（3~4 小时），跑完才投递。
+  # 之所以不是"编完再另点一条固化链"：那要求固化步去别的 run 里找产物，而产物名一改就断，
+  # 且找到的是**哪一份**由那次 run 的运气决定 —— 判据要能被兑现，就不能靠回取。
+  push:
+    tags:
+      - 'runtime-release-*'
+  # 刻意【不】监听 push 到分支：本 workflow 一跑就是 2~3 小时的 Node 全量交叉编译。
+  # 预编译运行时已固化为 node-runtime-* Release（永久、可校验），日常出包【全部】
+  # 走 fast-apk（分钟级）。若保留 push 触发，单仓的首推/误推会白烧数小时机时去重编
+  # 一份【并不变化】的基础环境 —— 这正是 2026-09 单仓迁移要根除的浪费。
 
 # ---------------------------------------------------------------------------
 # 并发控制：同一个 ref 上只允许一个构建在跑。
 #
 # 为什么要加（真实教训）：曾经在上一轮尚未结束时就推了新 commit，导致三个 run
-# 同时存在、同时往 ci-hb 这一个分支推心跳，互相覆盖 —— 外部监控于是彻底看不清
-# 「哪一轮在跑、跑到哪了」，我甚至无法判断新推的那轮是死是活。
-# 更糟的是它们还会争抢同一台机器的资源，把彼此拖慢。
+# 同时存在 —— 它们争抢同一台机器的资源把彼此拖慢，而外部完全看不清
+# 「哪一轮在跑、跑到哪了」。
 #
 # cancel-in-progress: true 的取舍：
-# 推新提交时直接取消旧的（旧的那个已经没有意义了，代码都变了），
-# 保证「最新代码 = 唯一在跑的构建」，监控永远指向正确目标。
+# 同一 ref 上推新东西时直接取消旧的（旧的那个已经没有意义了，代码都变了），
+# 保证「最新代码 = 唯一在跑的构建」。
 # 代价是旧构建的 Node 编译成果丢失 —— 但它本来也对应旧脚本，
 # 缓存 key 不同，留着也用不上。
 # ---------------------------------------------------------------------------
@@ -51,129 +70,6 @@ jobs:
     permissions:
       contents: write
     steps:
-      # ---------------------------------------------------------------------------
-      # 心跳：把「CI 活着、当前在哪个阶段」持续推到 ci-hb 分支。
-      #
-      # 为什么需要：沙箱侧读不到 GitHub Actions 日志，只能靠分支自报。原先只有开头
-      # 一个 ci-ping，之后直到结束都没有任何信号，于是「还在编译」和「已经卡死」
-      # 在外部看起来完全一样 —— 曾经为此白等 70 分钟。
-      #
-      # 做法：起一个后台循环，每 45 秒把「第几跳 + 时间戳 + 当前阶段」推一次。
-      # 阶段名由后续步骤通过 /tmp/ci-stage 文件更新（见 set-stage 步骤）。
-      # 循环在 job 结束时由 trap 清理，不阻塞主流程。
-      # ---------------------------------------------------------------------------
-      - name: Start heartbeat updater
-        id: hbstart
-        run: |
-          echo "boot" > /tmp/ci-stage
-          cat > /tmp/heartbeat.sh <<'HB'
-          #!/usr/bin/env bash
-          # 后台心跳：独立进程，每 45s 推一次 ci-hb。失败静默重试，绝不干扰主构建。
-          #
-          # 注意间隔别调太大：上一轮 job 在「远早于 timeout 的时刻」突然消失，
-          # 最后一个心跳就是唯一的现场证据。45s 的粒度能看清内存趋势。
-          set +e
-          export GIT_TERMINAL_PROMPT=0
-          cd /tmp/hbrepo 2>/dev/null || exit 0
-          n=0
-          while [ -f /tmp/ci-keepalive ]; do
-            n=$((n+1))
-            stage="$(cat /tmp/ci-stage 2>/dev/null || echo unknown)"
-            {
-              echo "CI_HEARTBEAT"
-              echo "beat : $n"
-              echo "time : $(date -u)"
-              echo "stage: $stage"
-              echo "run  : $RUN_ID"
-              echo "sha  : $SHA"
-              # 内存水位：这是判断「会不会被 OOM 杀掉」的关键指标。
-              # 上一轮就是内存耗尽导致进程被系统杀掉（OOM）、连收尾步骤都没记录，
-              # 而当时的心跳里完全没有内存信息，只能靠猜。现在把它带上。
-              # MemAvailable 取 /proc/meminfo；cgroup 限额另记一行便于对照。
-              echo "mem  : $(awk '/^MemAvailable:/{printf "avail=%.1fGB", $2/1048576}' /proc/meminfo 2>/dev/null)"
-              echo "cgmax: $(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo n/a)"
-              echo "load : $(cat /proc/loadavg 2>/dev/null | cut -d' ' -f1-3)"
-              # 日志体积 + 已编译目标数：判断「卡死」还是「在推进」的最直接依据。
-              # 编 6800 个 TU 的日志有十几 MB，只看 tail 看不出速度，这两个数字能。
-              # objs 优先数脚本自己打的 [progress ...] 行（含 host/target 计数）；
-              # 退回数编译命令行数量。用 tail -c 限制扫描范围，避免每 45 秒
-              # 全量扫十几 MB 拖慢 runner。
-              if [ -f /tmp/node-build.log ]; then
-                echo "logsize: $(wc -c < /tmp/node-build.log 2>/dev/null || echo 0)"
-                prog="$(tail -c 200000 /tmp/node-build.log 2>/dev/null | grep -o 'host=[0-9]* target=[0-9]*' | tail -1)"
-                echo "objs   : ${prog:-$(tail -c 400000 /tmp/node-build.log 2>/dev/null | grep -c 'clang++\|cc1plus' || echo 0)}"
-                # 是否已经出现 OOM 痕迹（系统会打 oom-kill 或进程报 Killed）
-                echo "oomhits: $(tail -c 200000 /tmp/node-build.log 2>/dev/null | grep -c 'Killed signal\|out of memory\|oom-kill' || echo 0)"
-                echo "lastprog: $(tail -3 /tmp/node-build.log 2>/dev/null | tr '\n' ' ' | cut -c1-160)"
-              else
-                # 缓存命中时 node-build 步骤会被整体跳过，不会有 node-build.log。
-                # 必须显式写出来，否则外部会看到一片空白而无法判断"是跳过了还是卡住了"。
-                echo "logsize: 0 (skipped: node build cache hit)"
-                echo "objs   : n/a"
-                echo "oomhits: n/a"
-                echo "lastprog: (node build skipped — reused cached binary)"
-              fi
-            } > hb.txt
-            git add hb.txt >/dev/null 2>&1
-            git commit -q -m "hb $n ($stage)" >/dev/null 2>&1
-            git push -q origin HEAD:ci-hb --force >/dev/null 2>&1
-            sleep 45
-          done
-          HB
-          chmod +x /tmp/heartbeat.sh
-          touch /tmp/ci-keepalive
-          git config --global --add safe.directory '*'
-          TOKEN_USE="${{ secrets.PAT }}"
-          [ -z "$TOKEN_USE" ] && TOKEN_USE="${{ secrets.GITHUB_TOKEN }}"
-          rm -rf /tmp/hbrepo && mkdir -p /tmp/hbrepo && cd /tmp/hbrepo
-          git clone --quiet "https://x-access-token:${TOKEN_USE}@github.com/${{ github.repository }}.git" . || exit 0
-          git config user.email "ci@workbuddy.local"
-          git config user.name "CI Heartbeat"
-          export TOKEN_USE REPO_SLUG="${{ github.repository }}" RUN_ID="${{ github.run_id }}" SHA="${{ github.sha }}"
-          setsid nohup /tmp/heartbeat.sh >/dev/null 2>&1 < /dev/null &
-          echo "heartbeat started (pid $!), pushes to ci-hb every 45s"
-
-      # ---------------------------------------------------------------------------
-      # 连通性探针：在第一时间把 run 信息推到 ci-ping 分支。
-      # 目的：区分「CI 根本没启动」vs「CI 跑了但推送受阻」。
-      # 优先用 PAT（全权限，一定能推）；PAT 未配置时退回 GITHUB_TOKEN。
-      # 沙箱侧经 raw 通道即可读到，无需 API。
-      # ---------------------------------------------------------------------------
-      - name: Ping (push ci-ping branch to prove CI ran)
-        id: ping
-        env:
-          PAT: ${{ secrets.PAT }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "1/9 ping-ready" > /tmp/ci-stage
-          git config --global --add safe.directory '*'
-          rm -rf /tmp/ping && mkdir -p /tmp/ping && cd /tmp/ping
-          TOKEN_USE="${PAT}"
-          if [ -z "$TOKEN_USE" ]; then
-            echo "::warning::secrets.PAT is empty; falling back to GITHUB_TOKEN"
-            TOKEN_USE="${GH_TOKEN}"
-          fi
-          if ! git clone "https://x-access-token:${TOKEN_USE}@github.com/${{ github.repository }}.git" . ; then
-            echo "::error::ci-ping: git clone failed (token=${TOKEN_USE:0:8}...)"
-            exit 1
-          fi
-          {
-            echo "CI_PING_OK"
-            echo "time : $(date -u)"
-            echo "run  : ${{ github.run_id }}"
-            echo "sha  : ${{ github.sha }}"
-            echo "token: $( [ -n "${PAT}" ] && echo PAT || echo GITHUB_TOKEN )"
-          } > ping.txt
-          git config user.email "ci@workbuddy.local"
-          git config user.name "CI Probe"
-          git add ping.txt
-          git commit -m "ci: ping"
-          if ! git push origin HEAD:ci-ping --force; then
-            echo "::error::ci-ping: git push failed — token has no write access"
-            exit 1
-          fi
-          echo "::notice::ci-ping pushed successfully"
-
       - name: Checkout
         id: checkout
         uses: actions/checkout@v4
@@ -193,7 +89,6 @@ jobs:
         env:
           OTA_PUBLIC_KEY: ${{ secrets.OTA_PUBLIC_KEY }}
         run: |
-          echo "3/9 ensure-ota-anchor" > /tmp/ci-stage
           ANCHOR="container/app/src/main/assets/ota-public.pem"
           if [ -n "$OTA_PUBLIC_KEY" ]; then
             printf '%s' "$OTA_PUBLIC_KEY" > "$ANCHOR"
@@ -213,7 +108,6 @@ jobs:
       - name: Validate workflow file
         id: wfvalidate
         run: |
-          echo "2/9 validate-workflow" > /tmp/ci-stage
           # 校验【全部】workflow，而不是只校验自己。
           # 只校验自己时，新建/改动的其它 workflow 出问题就没人管 ——
           # 校验范围本身成了盲区（这里真实踩过：新加的 workflow 有重复
@@ -231,14 +125,7 @@ jobs:
         # · 只需 Node，秒级完成，有错立刻知道；
         # · 不依赖任何构建产物 —— test:logic 全部自带 fixture，
         #   基线包那条测试路径已随 ADR-0005（本地 feed 与 APK 内置基线收敛删除）退役。
-        #
-        # 必须更新 /tmp/ci-stage。这是一个真实踩过的坑：
-        # 失败诊断（第 25 步）读的是 /tmp/ci-stage 这个**由各步骤自行写入**的
-        # 进度文件。若新加的步骤不写它，诊断里就会显示**上一步**的名字 ——
-        # 于是"容器引擎测试失败"会被报成"validate-workflow 失败"，指向完全错误的方向。
-        # 步骤 id 同理：诊断脚本按 id 列 outcomes，漏登记就看不到这一步的状态。
         run: |
-          echo "2.5/9 container/engine-tests" > /tmp/ci-stage
           set -euo pipefail
           # 步骤体唯一宿主：scripts/run-engine-tests.sh（与 ci.yml 同源，含 ensure-tool 纪律）。
           bash scripts/run-engine-tests.sh
@@ -260,7 +147,6 @@ jobs:
       - name: Show Android SDK env
         id: sdkenv
         run: |
-          echo "sdk-env" > /tmp/ci-stage
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
           echo "ANDROID_HOME=${ANDROID_HOME:-<unset>}"
           ls "$ANDROID_SDK_ROOT" 2>/dev/null || true
@@ -268,7 +154,6 @@ jobs:
       - name: Install SDK packages (platform-tools / platform / build-tools; NDK reused if present)
         id: sdkinstall
         run: |
-          echo "4/9 sdk-install" > /tmp/ci-stage
           set -o pipefail
           # 不显式设置 ANDROID_HOME/ANDROID_SDK_ROOT：runner 镜像自带正确的值。
           # 曾经写成 ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}，而 workflow 级没有
@@ -315,31 +200,54 @@ jobs:
       - name: Install host build deps
         id: hostdeps
         run: |
-          echo "host-deps" > /tmp/ci-stage
           set -x
           sudo apt-get update 2>&1 | tee -a /tmp/host-deps.log
           sudo apt-get install -y git python3 ninja cmake make zip file 2>&1 | tee -a /tmp/host-deps.log
 
-      - name: Resolve latest Node 24.x tag
+      - name: Resolve Node version to build
         id: nodever
+        # 两个身份的版本来源只在这里分岔一次：
+        # · 推 tag runtime-release-<ver>-<abi> = **固化轮，版本由 tag 说了算**。
+        #   这里若也去追「上游最新 24.x」，固化出来的 Release 名字就取决于上游哪天发版，
+        #   而人打的 tag 说的不是那一版 —— fast-apk 正是按版本号下载它的（node-runtime-<ver>-<abi>）。
+        # · workflow_dispatch = 校验轮：取上游最新 24.x，看这份新东西编不编得出来。
+        #   它不投递任何东西，所以版本随上游漂是允许的。
         run: |
-          echo "resolve-node-tag" > /tmp/ci-stage
-          TAG=$(git ls-remote --tags https://github.com/nodejs/node 2>/dev/null \
-            | grep -oE 'refs/tags/v24\.[0-9]+\.[0-9]+$' \
-            | sed 's#refs/tags/v##' | sort -V | tail -1)
-          if [ -z "$TAG" ]; then
-            echo "[warn] could not resolve latest v24.x tag via ls-remote; falling back to 24.21.0"
-            TAG="24.21.0"
-          fi
+          set -euo pipefail
+          ABI="$(bash scripts/read-node-versions.sh abi)"
+          case "${GITHUB_REF:-}" in
+            refs/tags/runtime-release-*)
+              REST="${GITHUB_REF_NAME#runtime-release-}"
+              if [ "$REST" = "${REST%-$ABI}" ]; then
+                echo "::error title=固化 tag 的 ABI 与构建不符::tag 是 ${GITHUB_REF_NAME}，而 abi 现读自 assets/node-versions.json = $ABI，本链路只编 $ABI。"
+                echo "::error::把别的 ABI 写进 tag 名，固化出来的就是挂着别人名字的同一份二进制 —— 本次不编。"
+                exit 1
+              fi
+              TAG="${REST%-$ABI}"
+              case "$TAG" in
+                24.*) ;;
+                *) echo "::error title=固化 tag 的版本号非法::从 ${GITHUB_REF_NAME} 取出的版本是 $TAG（要形如 24.x.y）。" >&2; exit 1 ;;
+              esac
+              echo "固化轮：版本取自 tag -> $TAG（abi=$ABI）"
+              ;;
+            *)
+              TAG=$(git ls-remote --tags https://github.com/nodejs/node 2>/dev/null \
+                | grep -oE 'refs/tags/v24\.[0-9]+\.[0-9]+$' \
+                | sed 's#refs/tags/v##' | sort -V | tail -1)
+              if [ -z "$TAG" ]; then
+                echo "[warn] could not resolve latest v24.x tag via ls-remote; falling back to 24.21.0"
+                TAG="24.21.0"
+              fi
+              echo "校验轮：Resolved Node 24.x -> $TAG"
+              ;;
+          esac
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Resolved Node 24.x -> $TAG"
 
       - name: Sync node-versions.json default/bundled to resolved tag
         id: syncjson
         env:
           NODE_TAG: ${{ steps.nodever.outputs.tag }}
         run: |
-          echo "6/9 sync-json" > /tmp/ci-stage
           python3 - <<'PY'
           import json, os
           p = "container/app/src/main/assets/node-versions.json"
@@ -487,7 +395,6 @@ jobs:
           ANDROID_NDK: ${{ env.ANDROID_NDK }}
           ANDROID_API: "24"
         run: |
-          echo "7/9 NODE-BUILD (longest, V8 compile)" > /tmp/ci-stage
           # 记录 runner 的真实内存与并行度决策，便于事后判断是否又是内存问题。
           echo "=== runner 资源 ==="
           nproc; free -m | head -2
@@ -600,10 +507,11 @@ jobs:
           echo "    运行期由 applicationInfo.nativeLibraryDir 定位并 exec。"
 
           # 就位之外还要过形态判据：命中缓存时 build-node-android.sh 根本不跑，
-          # 那条链路上的产物级校验也就没跑，而本 workflow 会把包直接发到 apk-latest。
+          # 那条链路上的产物级校验也就没跑，而**固化 Release 写的就是这些字节** ——
+          # 固化之后 fast-apk 每次都按 tag 取它，坏形态会被复制进每一个后续 APK。
           # 判据只有一份实现（scripts/verify-runtime-elf.sh：架构 / 16KB 对齐 /
-          # 解释器 / DT_NEEDED 闭环 / DT_RUNPATH 含 $ORIGIN 五项），与 fast-apk/pin/repack
-          # 同源；这里原先另抄了一条 `file | grep aarch64`，已删。
+          # 解释器 / DT_NEEDED 闭环 / DT_RUNPATH 含 $ORIGIN 五项），与 fast-apk 下载后
+          # 校验的那一处同源；这里原先另抄了一条 `file | grep aarch64`，已删。
           # 工具安装探测同样收口（scripts/ensure-tool.sh），不再各抄一份。
           echo "=== ELF 形态门禁（scripts/verify-runtime-elf.sh）==="
           bash scripts/ensure-tool.sh readelf binutils
@@ -622,77 +530,37 @@ jobs:
         # node-pty 走上游配方，软失败只降级终端，不陪葬其它能力。
         run: |
           set -euo pipefail
-          # 回写 ci-stage：本步骤失败时诊断要显示**这一步**的名字（心跳只读这一个文件）。
-          echo "7.4/9 native-caps" > /tmp/ci-stage
           bash scripts/build-native-capabilities.sh
 
-      - name: Inject release keystore (required for release signing)
-        id: signing
-        # =====================================================================
-        # 「设备能否自我升级 APK」的唯一开关。
-        # 判据只有一份实现：scripts/inject-apk-keystore.sh（解码 → keytool 核验 →
-        # 导出比对锚点，三档退出语义见脚本头注释）。
-        #
-        # 本链路的【政策】比 fast-apk 严：产物发往 apk-latest（存量设备的更新通道），
-        # 「没配密钥」这一档在这里不是可用状态而是发布事故 —— 一次性 debug 签名会把
-        # 已装机群打成 INSTALL_FAILED_UPDATE_INCOMPATIBLE。所以退 10 / 退 2 一律红，
-        # 而且要在这里红：本链路含 Node 交叉编译，跑到 3 小时末端才炸最难查。
-        # （以前这里只往一个临时标记文件里【写】签名状态、全仓零个读取点，
-        #  写什么都不影响下一步照常发布，等于没有门禁。2026-09-26 收口。）
-        #
-        # 与 release-admin.yml 的 repack job 复用同一组 secret 名（ANDROID_KEYSTORE_BASE64 等），
-        # 见 scripts/keygen-android-keystore.sh 头注释里的两把钥匙辨析。
-        # =====================================================================
-        env:
-          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KS_KEYPASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          set -uo pipefail
-          # 写 stage，否则本步骤失败时诊断会显示**上一步**的名字
-          # （ci-stage 是"当前进行到哪"的唯一来源，不回写就会一直停在上一步）。
-          echo "7.5/9 signing" > /tmp/ci-stage
-          rc=0
-          bash scripts/inject-apk-keystore.sh || rc=$?
-          if [ "$rc" = 10 ]; then
-            echo "::error title=发布链路未配置 APK 签名密钥::本链路产物发往 apk-latest（存量设备的更新通道），没有稳定 keystore 就只能得到一次性 debug 签名 —— 禁止发布。请配置 ANDROID_KEYSTORE_BASE64 等 secret 后重跑。"
-            exit 1
-          fi
-          [ "$rc" = 0 ] || exit 1
-
-      - name: Build release APK
+      - name: Build debug APK (验证载体：证明这份运行时装得进真 APK)
         id: gradlebuild
+        # 本链路的投递物只有下面那一个不可变固化 Release —— APK 在这里不是发布物，
+        # 壳 APK 的唯一投递口是 fast-apk.yml（OS 版本流）。仍然打一次包的理由很具体：
+        # fast-apk 下载的是**已固化**的 .so，它答不了「刚编出来的这一版运行时装进
+        # AGP 打的包里，内容审计还成不成立」；只有本轮能答，而固化就发生在本轮之后。
+        # 形态取 debug = 当前投递口实际发出去的那个形态（翻成 release 形态的账在债
+        # AUD-G33/E3.3，代价是存量设备必须卸载重装 = 供给与配对全部重跑，时机归人定）。
+        # 形态与签名身份的对照判据每次构建都由那条链跑两侧（fast-apk 的 formgate），
+        # 这里不抄第二份 —— 同一实现、同一输入跑两遍不叫门禁。
         run: |
-          echo "8/9 gradle-apk" > /tmp/ci-stage
           set -o pipefail
           chmod +x gradlew
-          # 本链路发的是 apk-latest（存量设备的更新通道），产物必须是 **release 形态**（非 debuggable）。
-          # 原先这里是 assembleDebug：debuggable 的包意味着设备私有目录对任意 `adb shell run-as`
-          # 敞开、可被调试器附加 —— 而签名门禁查的是「谁签的」，与「哪种形态」是两个事实：
-          # build.gradle.kts:120-123 让 debug 档也用 release keystore 签名，于是「稳定签名」与
-          # 「debug 形态」同时为真，发布链一路绿（债 AUD-G33）。形态由下面的形态门禁判，
-          # 判据只住 scripts/verify-apk-release-form.sh。
-          # 注意：这里【不要】写 env: ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}。
-          # workflow 级从未定义过 ANDROID_SDK_ROOT，该表达式展开为空字符串，
-          # 于是把 runner 自带的正确值覆盖成空 —— gradle 随即告警
-          # "WARNING: The following problems were found when resolving the SDK
-          # location: Set with empty value"（上一轮日志里真实出现过）。
-          # 本步骤没显式传 env，runner 自带的 ANDROID_SDK_ROOT/ANDROID_HOME 自然生效。
+          # 这里【不要】写 env: ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }} ——
+          # workflow 级从未定义过该变量，表达式展开成空字符串，于是把 runner 自带的正确值
+          # 覆盖成空，gradle 随即告警 "Set with empty value"（上一轮日志里真实出现过）。
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
           echo "ANDROID_HOME=${ANDROID_HOME:-<unset>}"
-          ./gradlew assembleRelease --no-daemon 2>&1 | tee /tmp/gradle-build.log
+          ./gradlew assembleDebug --no-daemon 2>&1 | tee /tmp/gradle-build.log
 
       - name: Audit APK contents (must contain libc++_shared.so)
-        # 判据的唯一实现是 scripts/verify-apk-native.sh，与 fast-apk 同调。
+        # 判据的唯一实现是 scripts/verify-apk-native.sh，与 fast-apk 同源 —— 两个调用点读的是
+        # 不同输入：这里读刚编出来的运行时，fast-apk 读已固化的那份。
         # 本链路此前只查 native-assets 清单，且 lib/ 零条目只 echo 不红、
-        # 不查 Program 资产（ADR-0005）/npm/小体积件 —— 收口后一并变严：
-        # 这条链路发的是 apk-latest，没有理由比日常链路松。
+        # 不查 Program 资产（ADR-0005）/npm/小体积件 —— 收口后一并变严。
         run: |
-          echo "8.5/9 audit-apk" > /tmp/ci-stage
           # `|| exit 1`：本 step 没开 set -e，pick.sh 报错后脚本会继续往下走 ——
           # 继续就意味着拿空 APK 去审计，红点会落在一个和真因无关的地方。
-          APK="$(bash scripts/pick.sh apk-release container/app/build/outputs/apk/release -name '*.apk' -type f)" \
+          APK="$(bash scripts/pick.sh apk-debug container/app/build/outputs/apk/debug -name '*.apk' -type f)" \
             || { echo "[error] 没有可审计的 APK —— 审计这一步不许空跑"; exit 1; }
           bash scripts/verify-apk-native.sh "$APK" arm64-v8a
 
@@ -700,358 +568,116 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lobos-apk
-          path: container/app/build/outputs/apk/release/*.apk
+          path: container/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          # 同上：这份是 pin-node 按 run-id 回取裸 .so 的来源（release-admin 的固化步
-          # 先在 artifact 里找 libnode.so，找不到才从 APK 的 lib/arm64-v8a/ 解）。
-          # 本 workflow 只在改 Node 运行时/编译脚本时手动跑，一跑数小时，
-          # 却让每份 APK 挂满 90 天没有意义。
-          retention-days: 14
-
-      - name: Gate — APK 形态（发布必须是 release 形态）
-        id: formgate
-        # 与签名门禁是两个事实：签名答「能不能覆盖安装」，形态答「这个包是不是 debug 包」。
-        # 排在签名门禁之前：形态坏了直接说明「这条链路在发 debug 包」，
-        # 比让人先去查 keystore 配置更快指向真因。
-        run: |
-          set -euo pipefail
-          echo "8.6/9 gate-form" > /tmp/ci-stage
-          APK="$(bash scripts/pick.sh apk-release container/app/build/outputs/apk/release -name '*.apk' -type f)" \
-            || { echo "[error] 没有可核验的 APK —— 门禁不许空跑"; exit 1; }
-          bash scripts/verify-apk-release-form.sh "$APK"
-
-      - name: Gate — APK 签名身份（发布必须稳定）
-        id: signgate
-        # 判据的唯一实现是 scripts/verify-apk-signing.sh。
-        # 为什么这一步必须存在而且在【发布之前】：Publish APK to Release 是
-        # `if: success()` 的无条件步骤，而它写的就是 apk-latest —— 存量设备的更新通道。
-        # 以前这条链路只往一个临时标记文件里写过一次状态（全仓零读取点），签名身份从没被核对过，
-        # 所以 debug 签名的包、甚至「配了 keystore 却签成另一把 key」的包都能投出去。
-        # --require-stable + --cert：既要求非 debug，又要求与本次注入的锚点逐指纹一致。
-        run: |
-          set -euo pipefail
-          echo "8.7/9 gate-signing" > /tmp/ci-stage
-          APK="$(bash scripts/pick.sh apk-release container/app/build/outputs/apk/release -name '*.apk' -type f)" \
-            || { echo "[error] 没有可核验的 APK —— 门禁不许空跑"; exit 1; }
-          ARGS=(--require-stable)
-          [ -z "${LOBOS_APK_CERT_FILE:-}" ] || ARGS+=(--cert "$LOBOS_APK_CERT_FILE")
-          bash scripts/verify-apk-signing.sh "$APK" "${ARGS[@]}"
+          # 只是这份验证载体的留痕。它以前是 release-admin 固化步按 run-id 回取裸 .so 的来源，
+          # 而「到别的 run 里找产物」整条已废：artifact 改名真断过一次，且「找到的哪一份」
+          # 由那次 run 的运气决定 —— 固化现在就在本轮（见下一步），不需要留可回取的窗口。
+          retention-days: 3
 
       # ---------------------------------------------------------------------------
-      # 发布到 Release（让 APK 有一个【可直接下载】的稳定网址）。
+      # 固化 = Runtime 版本流的唯一投递口，只由 tag 决定（runtime-release-<ver>-<abi>）。
       #
-      # 为什么需要：Actions 的 artifact 只能从网页界面下载，而下载地址走的是
-      # api.github.com（会 302 到 objects.githubusercontent.com）。本项目的
-      # 维护环境对外网是白名单制，api.github.com 被屏蔽、ghproxy 对 /actions
-      # 路径也返回 403 —— 也就是说 **artifact 在外部拿不到**。
-      # Release 的资产则可经 github.com/<owner>/<repo>/releases/download/...
-      # 访问，且这个路径能被通常的镜像/代理转发，是唯一"外部可达"的分发方式。
+      # 不可变性由 scripts/gh-release-upload.sh 的 --skip-existing 兑现：node-runtime-* 一旦
+      # 存在就不再动它。同版本号换二进制 = 已发布的 APK 与它所依赖的运行时版本对不上，
+      # 而线上看不出任何差别 —— ADR-0004「内容变了但版本号没说谎」在运行时这一侧的同一件事。
+      # 要发新运行时就把 node 版本提上去，别重传。
       #
-      # 用 tag 命名（每轮覆盖同一个 tag）：这样下载网址是稳定的，
-      # 不必每轮去查新网址。文件名带 run 号，便于区分是哪次构建。
-      #
-      # 注意：用 workflow 自带的 GITHUB_TOKEN + permissions:contents=write，
-      # 不依赖 PAT Secret（PAT 在本环境里有时读不到）。
+      # 固化对象 = 本轮 jniLibs 目录里那份**已被 scripts/verify-runtime-elf.sh 判过形态**的文件
+      # （pre-gradle Gate 判的就是这个路径、这些字节），这里不重跑第二遍同一判据。
       # ---------------------------------------------------------------------------
-      - name: Publish APK to Release
-        id: release
-        if: success()
+      - name: Pin Node runtime to immutable Release
+        id: pin
+        if: startsWith(github.ref, 'refs/tags/runtime-release-')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -o pipefail
-          TAG="apk-latest"
-          APK="$(bash scripts/pick.sh apk-release container/app/build/outputs/apk/release -name '*.apk' -type f)" \
-            || { echo "[error] 没有可发布的 APK —— 发布这一步不许空跑"; exit 1; }
-          ls -la container/app/build/outputs/apk/release/ || true
-          if [ ! -f "$APK" ]; then
-            echo "[error] 未找到 $APK，跳过发布"
-            exit 1
-          fi
-          SIZE="$(du -h "$APK" | cut -f1)"
-          echo "APK 大小: $SIZE"
-          # 资产名 = 交出去那份文件的 basename（gh-release-upload.sh 头部那条事实），
-          # 所以先把副本放进临时目录、取名 app-release.apk 再传：这样下面打印的下载网址
-          # 与真上传的名字是同一个串，不靠「AGP 恰好把它签成这个名字」的运气
-          # （没签时 AGP 出的是 app-release-unsigned.apk —— 那样网址就 404，
-          #   而这正是 repack 在 2026-09-26 踩过的形态）。
-          STAGE="$(mktemp -d)"
-          cp "$APK" "$STAGE/app-release.apk"
-          # ── 版本门禁（VERSION-GATE 2/4：判据 scripts/verify-apk-version-gate.sh，取数外壳
-          #    scripts/check-apk-release-version.sh）─────────────────────────────
-          # 为什么这条链路上原来没有门禁：它是手动触发（3 小时全量），写的时候只想着「能不能发出」，
-          # 没人比较过版本号 —— 而从旧 run 的分支再跑一次就能把 latest 发成一个更旧的 versionCode，
-          # 已升级设备从此收不到任何更新，且不可逆。通道固定 explicit：这条路只有人按才走。
-          # 本步只有 `set -o pipefail`（没有 -e），所以门禁必须显式判 rc，不能指望命令失败自动中止。
-          if ! bash scripts/check-apk-release-version.sh version.json "$TAG" explicit; then
-            echo "::error title=版本门禁::上一条已说明原因 —— 本次不发布。"
-            exit 1
-          fi
-          # tag 固定为 apk-latest：存在则覆盖、不存在则创建。整段「确保在 → 覆盖 → 事后
-          # 逐字节确认」的判据只住 scripts/gh-release-upload.sh 一处（含同名资产记录还在、
-          # 后端对象已孤立时的「按名删旧值再传」回退）。
-          # APK 与 version.json 同批上传：否则 latest 的 version.json 说的不是 latest 那个包，
-          # 下一次门禁就是拿假读数比真产物（版本化归档 v<versionName> 仍只由 fast-apk 写，
-          # 这条链路的产物由 Actions artifact 保留）。
-          # --prune 那份废止的资产名：滚动通道只该有「当前」那一个包。留着 app-debug.apk
-          # 就等于线上仍可达一个 debug 形态的历史包，而任何按旧网址装的入口都不会告诉我们它拿到了。
-          # 本步没有 set -e（见上方版本门禁那条注释），所以显式判宿主退出码。
-          bash scripts/gh-release-upload.sh "$TAG" \
-            --title "Lob OS APK (latest)" --notes "自动构建产物，持续覆盖更新。" \
-            --prune '^app-debug\.apk$' \
-            "$STAGE/app-release.apk" version.json \
-            || { echo "::error title=发布失败::上方宿主已说明哪一步没成 —— 不许把这一步当发布成功。"; exit 1; }
-          # ── 发布回执记账（VERSION-GATE 记账口 2/4）：排在投递成功之后，同 fast-apk 那条理由。
-          #    本步没有 set -e（见上），所以记账失败也要显式判 rc —— 账没记上就是这一轮没成。
-          bash scripts/append-apk-receipt.sh build-apk explicit version.json \
-            "$STAGE/app-release.apk" \
-            "https://github.com/${{ github.repository }}/releases/download/${TAG}/app-release.apk" \
-            || { echo "::error title=回执记账::上方宿主已说明为什么没记上 —— 本轮判红（下界不完整时，下一轮的门禁不可信）。"; exit 1; }
-          rm -rf "$STAGE"
-          echo "=== 发布完成 ==="
-          echo "下载地址: https://github.com/${{ github.repository }}/releases/download/${TAG}/app-release.apk"
-          # 把网址写进 ci-ok 便于外部读取
-          echo "APK_URL=https://github.com/${{ github.repository }}/releases/download/${TAG}/app-release.apk" >> "$GITHUB_OUTPUT"
-
-      # ---------------------------------------------------------------------------
-      # 成功自报：把构建成功标记推到 ci-ok 分支（raw 通道可读）。
-      # 用自带 GITHUB_TOKEN + permissions:contents=write，不依赖 PAT Secret。
-      # ---------------------------------------------------------------------------
-      - name: Mark success -> ci-ok branch
-        if: success()
-        env:
-          PAT: ${{ secrets.PAT }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
           set -euo pipefail
-          git config --global --add safe.directory '*'
-          TOKEN_USE="${PAT:-$GH_TOKEN}"
-          # 构建身份三件（sha / 包名+壳版本 / apk_sha）—— 字段与 fast-apk 的 Report to ci-ok 对齐。
-          # 以前这里只写 time/node/apk(仓内相对路径)/url：读不出 apk_sha 就答不了
-          # 「装在机器上那个包是哪次构建」（2026-09-29 真机只能改用 /data/local/tmp 里的
-          # apk.part 现算 sha256 去比 fast-apk 的 ci-ok 才敢确认）。
-          # 全部在 clone 之前取、一律用 $GITHUB_WORKSPACE 定位：clone 完 cwd 就不在仓里了，
-          # 而跨步骤的 shell 变量在这里是 unbound（第八轮 CI 的实证形态）。
-          APK="$(bash "$GITHUB_WORKSPACE/scripts/pick.sh" apk-release \
-            "$GITHUB_WORKSPACE/container/app/build/outputs/apk/release" -name '*.apk' -type f)"
-          APK_SHA="$(sha256sum "$APK" | cut -d' ' -f1)"
-          VN="$(node -p "require('${GITHUB_WORKSPACE}/version.json').shell.versionName")"
-          VC="$(node -p "require('${GITHUB_WORKSPACE}/version.json').shell.versionCode")"
-          rm -rf /tmp/okpush && mkdir -p /tmp/okpush && cd /tmp/okpush
-          git clone "https://x-access-token:${TOKEN_USE}@github.com/${{ github.repository }}.git" .
-          {
-            echo "BUILD_OK"
-            echo "time    : $(date -u)"
-            echo "mode    : build-apk (Node 交叉编译 + release 形态，写 apk-latest)"
-            echo "runtime : ${{ steps.nodever.outputs.tag }}"
-            echo "shell   : ${VN}+${VC}"
-            echo "sha     : ${GITHUB_SHA:0:7}"
-            echo "apk     : $(basename "$APK")"
-            echo "apk_sha : ${APK_SHA}"
-            # 可直接下载的稳定网址（Release 资产，见上方 Publish APK 步骤的说明）。
-            echo "url     : https://github.com/${{ github.repository }}/releases/download/apk-latest/app-release.apk"
-          } > ci-ok.txt
-          git config user.email "ci@workbuddy.local"
-          git config user.name "CI Diagnostic Bot"
-          git add ci-ok.txt
-          git commit -m "ci: build succeeded"
-          git push origin HEAD:ci-ok --force
+          VERSION="$(bash scripts/read-node-versions.sh default)"
+          ABI="$(bash scripts/read-node-versions.sh abi)"
+          RTAG="node-runtime-${VERSION}-${ABI}"
+          SRC="container/app/src/main/jniLibs/${ABI}"
+          # 资产清单来自 .github/native-assets.txt（NativeAssetRegistry 的投影），
+          # 与 fast-apk 的下载侧读同一份 —— 以后加随包二进制时这里不用回来改。
+          ASSETS="$({ grep -v '^[[:space:]]*#' .github/native-assets.txt | grep -v '^[[:space:]]*$' || true; } | tr -d '\r')"
+          [ -n "$ASSETS" ] || { echo "[error] .github/native-assets.txt 里没有任何资产 —— 不知道要固化什么，拒绝投递。"; exit 1; }
+          DIR="$(mktemp -d)"
+          for a in $ASSETS; do
+            [ -f "$SRC/$a" ] || { echo "[error] $SRC/$a 不在 —— 本轮没产出清单要求的资产，固化会把缺口发成既成事实。"; exit 1; }
+            cp -f "$SRC/$a" "$DIR/$a"
+          done
+          cd "$DIR"
+          # shellcheck disable=SC2086
+          sha256sum $ASSETS > SHA256SUMS
+
+          # manifest.json 是 fast-apk 下载后的校验依据：它按 files 里每一项逐个比 sha256。
+          # 校验和在这里算、随产物一起走 —— 让下游自己算，就等于「谁下载谁定义什么是对的」。
+          # 用 python 而不是 heredoc 拼 JSON：YAML 块标量里手搓 JSON 极易因缩进破坏结构。
+          # shellcheck disable=SC2086
+          python3 - "$VERSION" "$ABI" "$RTAG" "${GITHUB_RUN_ID}" $ASSETS <<'PY'
+          import sys, json, hashlib, pathlib, time
+          version, abi, tag, run_id = sys.argv[1:5]
+          files = {}
+          for name in sys.argv[5:]:
+              blob = pathlib.Path(name).read_bytes()
+              files[name] = {"sha256": hashlib.sha256(blob).hexdigest(), "size": len(blob)}
+          m = {"schema": 1, "version": version, "abi": abi, "pin_tag": tag,
+               "source_run": run_id,
+               "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+               "files": files}
+          pathlib.Path("manifest.json").write_text(json.dumps(m, indent=2, ensure_ascii=False))
+          print(json.dumps(m, indent=2, ensure_ascii=False))
+          PY
+
+          echo "RTAG=$RTAG" >> "$GITHUB_OUTPUT"
+          # --notes 必须单行：YAML 块标量里的跨行字符串一有顶格就破坏结构（本仓踩过）。
+          # shellcheck disable=SC2086
+          bash scripts/gh-release-upload.sh "$RTAG" --skip-existing \
+            --title "Node ${VERSION} runtime for Android ${ABI} (prebuilt)" \
+            --notes "$(printf '%b' "预编译的 Node ${VERSION} 安卓原生运行时（bionic 链接，${ABI}）。\n\n来源：build-apk run ${GITHUB_RUN_ID}，固化由 tag ${GITHUB_REF_NAME} 决定。\n\nmanifest.json / SHA256SUMS —— 校验与溯源。\n\n不可变引用：fast-apk.yml 按此 tag 下载，不再重编 Node；要换二进制请提升 node 版本号。")" \
+            $ASSETS manifest.json SHA256SUMS
 
       # ---------------------------------------------------------------------------
-      # 收尾自报：无论成功、失败、超时还是被取消，都在最后推一次 ci-last 分支，
-      # 写清「最终阶段 + 结论」。这是心跳之外的第二重保障。
-      #
-      # 为什么用 always()：原先只有「成功->ci-ok」和「失败->ci-diag」两条路径，
-      # 而 GitHub 对 job 超时/取消的情况**不会**把 job 标成 failure，于是 if: failure()
-      # 不触发，ci-diag 也不更新 —— 外部看起来就是「ping 之后永远静止」，
-      # 分不清「还在编」和「已经死了」。always() 保证任何结局都有留痕。
+      # 失败留痕：只写进 Actions 构件，不再推 ci-diag 分支。
+      # 分支那一版存在的理由是「沙箱读不到 api.github.com」，而现在取日志走的是
+      # DoH 解析 IP + 直连 API 的通道（每次都能读到正文），force-push 分支把上一份读数
+      # 原地换掉的那个形状（债表 DS-16 判死）就没有存在的必要了。
       # ---------------------------------------------------------------------------
-      - name: Final report -> ci-last branch (always runs)
-        if: always()
-        env:
-          PAT: ${{ secrets.PAT }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config --global --add safe.directory '*'
-          # 停掉心跳，避免它在收尾后继续推分支造成混淆
-          rm -f /tmp/ci-keepalive
-          TOKEN_USE="${PAT:-$GH_TOKEN}"
-          mkdir -p /tmp/lastpush
-          {
-            echo "CI_LAST_REPORT"
-            echo "time   : $(date -u)"
-            echo "run    : ${{ github.run_id }}"
-            echo "sha    : ${{ github.sha }}"
-            echo "stage  : $(cat /tmp/ci-stage 2>/dev/null || echo unknown)"
-            echo "job    : ${{ job.status }}"
-            echo
-            echo "=== step outcomes ==="
-            echo "wfvalidate  : ${{ steps.wfvalidate.outcome }}"
-            # enginetests 紧跟在 validate 之后，是"秒级快速失败"的关键一环。
-            # 必须登记 —— 本清单是**手写**的，漏一个步骤就等于该步骤失败时
-            # 诊断里看不到它，会把它误判成"上一步失败"（真实踩过：
-            # 容器引擎测试失败被报成 validate-workflow 失败，指向完全错误的方向）。
-            echo "enginetests : ${{ steps.enginetests.outcome }}"
-            echo "hbstart     : ${{ steps.hbstart.outcome }}"
-            echo "ping        : ${{ steps.ping.outcome }}"
-            echo "checkout    : ${{ steps.checkout.outcome }}"
-            echo "setup-java  : ${{ steps.setupjava.outcome }}"
-            echo "sdk-env     : ${{ steps.sdkenv.outcome }}"
-            echo "sdk-install : ${{ steps.sdkinstall.outcome }}"
-            echo "host-deps   : ${{ steps.hostdeps.outcome }}"
-            echo "node-tag    : ${{ steps.nodever.outcome }}"
-            echo "sync-json   : ${{ steps.syncjson.outcome }}"
-            echo "node-cache  : ${{ steps.nodecache.outcome }}"
-            echo "node-restore: ${{ steps.restorenode.outcome }}"
-            echo "node-reused : ${{ steps.restorenode.outputs.cache-hit }}"
-            echo "node-build  : ${{ steps.nodebuild.outcome }}"
-            # signing 决定产物"能不能装到已有设备上"，必须登记（同 enginetests 的理由）。
-            echo "signing     : ${{ steps.signing.outcome }}"
-            # formgate 判「这个包是不是 release 形态」，signgate 判「谁签的」—— 两个事实，
-            # 少一个读数都会把不该投的包投给存量设备（债 AUD-G33 的形态侧）。
-            echo "formgate    : ${{ steps.formgate.outcome }}"
-            # signgate 是发布前的最后一道身份门禁，红在它身上 = 这个包不该投给存量设备。
-            echo "signgate    : ${{ steps.signgate.outcome }}"
-            echo "gradle-build: ${{ steps.gradlebuild.outcome }}"
-            echo
-            # 容器引擎测试的日志：它是最可能"秒级失败"的一步，
-            # 而失败原因（哪个套件、哪条断言）只在日志里。
-            # 不转存的话，沙箱侧就只能看到一个 outcome=failure，无从下手。
-            echo "=== container/engine test log (tail 60) ==="
-            if [ -f /tmp/engine-test.log ]; then
-              wc -c /tmp/engine-test.log
-              grep -E '^FAIL|^结果' /tmp/engine-test.log | tail -20
-              echo "--- 原始尾部 ---"
-              tail -60 /tmp/engine-test.log | cut -c1-400
-            else
-              echo "(no /tmp/engine-test.log)"
-            fi
-            echo
-            if [ "${{ steps.restorenode.outputs.cache-hit }}" = "yes" ]; then
-              echo "=== node-build.log ==="
-              echo "(skipped — 复用了缓存中已编译的 node 二进制，未重新编译)"
-            else
-              echo "=== node-build.log size / tail ==="
-              wc -c /tmp/node-build.log 2>/dev/null || echo "(no node-build.log)"
-              tail -30 /tmp/node-build.log 2>/dev/null | cut -c1-400
-            fi
-          } > /tmp/ci-last-report.txt
-          cd /tmp/lastpush
-          git clone --quiet "https://x-access-token:${TOKEN_USE}@github.com/${{ github.repository }}.git" . 2>/dev/null || true
-          [ -d .git ] || { echo "[warn] clone failed, skip ci-last"; exit 0; }
-          git config user.email "ci@workbuddy.local"
-          git config user.name "CI Final Report"
-          cp /tmp/ci-last-report.txt ci-last.txt
-          git add -f ci-last.txt
-          git commit -q -m "ci: final report" || true
-          git push origin HEAD:ci-last --force && echo "[ok] ci-last pushed"
-
-      # ---------------------------------------------------------------------------
-      # 失败自诊：沙箱侧无法直接访问 GitHub API/日志，故把报错汇总推到 ci-diag 分支，
-      # 通过 raw.githubusercontent.com（git/raw 流量可穿透 ghproxy）让维护者能读取。
-      # 仅在该 job 任一步骤失败时运行。
-      # ---------------------------------------------------------------------------
-      - name: Capture failure diagnostics (write file + push branch)
+      - name: Collect failure diagnostics
         if: failure()
-        env:
-          PAT: ${{ secrets.PAT }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config --global --add safe.directory '*'
-          TOKEN_USE="${PAT:-$GH_TOKEN}"
           mkdir -p diag
           {
-            echo "=== CI failure diagnostics ==="
+            echo "=== build-apk failure ==="
             echo "run : ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "ref : ${GITHUB_REF_NAME} (${GITHUB_REF})"
             echo "node: ${{ steps.nodever.outputs.tag }}"
-            echo "ANDROID_SDK_ROOT: ${ANDROID_SDK_ROOT:-<unset>}"
-            echo "ANDROID_NDK: ${ANDROID_NDK:-<unset>}"
+            echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
+            echo "ANDROID_NDK=${ANDROID_NDK:-<unset>}"
             echo
-            echo "=== step outcomes (success/failure/skipped) ==="
-            echo "wfvalidate  : ${{ steps.wfvalidate.outcome }}"
-            # enginetests 紧跟在 validate 之后，是"秒级快速失败"的关键一环，必须登记 ——
-            # 漏了它就会把"容器引擎测试失败"误报成"validate-workflow 失败"（真实踩过）。
-            # W6 门禁（programs/console/test/workflow-parse-test.js）检查本清单与正常路径那份逐项一致。
-            echo "enginetests : ${{ steps.enginetests.outcome }}"
-            echo "hbstart     : ${{ steps.hbstart.outcome }}"
-            echo "ping        : ${{ steps.ping.outcome }}"
-            echo "checkout    : ${{ steps.checkout.outcome }}"
-            echo "setup-java  : ${{ steps.setupjava.outcome }}"
-            echo "sdk-env     : ${{ steps.sdkenv.outcome }}"
-            echo "sdk-install : ${{ steps.sdkinstall.outcome }}"
-            echo "host-deps   : ${{ steps.hostdeps.outcome }}"
-            echo "node-tag    : ${{ steps.nodever.outcome }}"
-            echo "sync-json   : ${{ steps.syncjson.outcome }}"
-            echo "node-cache  : ${{ steps.nodecache.outcome }}"
-            echo "node-restore: ${{ steps.restorenode.outcome }}"
-            echo "node-reused : ${{ steps.restorenode.outputs.cache-hit }} (yes=跳过重编)"
-            echo "node-build  : ${{ steps.nodebuild.outcome }}"
-            # signing 决定产物"能不能装到已有设备上"，必须登记（同 enginetests 的理由）。
-            echo "signing     : ${{ steps.signing.outcome }}"
-            # formgate 判「这个包是不是 release 形态」，signgate 判「谁签的」—— 两个事实，
-            # 少一个读数都会把不该投的包投给存量设备（债 AUD-G33 的形态侧）。
-            echo "formgate    : ${{ steps.formgate.outcome }}"
-            # signgate 是发布前的最后一道身份门禁，红在它身上 = 这个包不该投给存量设备。
-            echo "signgate    : ${{ steps.signgate.outcome }}"
-            echo "gradle-build: ${{ steps.gradlebuild.outcome }}"
-            echo
-            if [ "${{ steps.restorenode.outputs.cache-hit }}" = "yes" ]; then
-              echo "（node-build 因命中缓存被跳过，node-build.log 不存在，属正常）"
-            fi
-            echo "=== sdk-install.log (filtered tail 60, license noise removed) ==="
-            grep -viE "warranty|liability|indemnif|export regulation|severability|pre-release|evaluation license|open source software|MIPS|Accept\? \(y/N\)|YOUR USE OF|Google is the parent|third party beneficiaries|EXPORT RESTRICTIONS|governing law|Santa Clara|conflict of laws" /tmp/sdk-install.log 2>/dev/null | tail -60 \
+            echo "=== sdk-install.log tail (license noise removed) ==="
+            grep -viE "warranty|liability|indemnif|export regulation|severability|pre-release|evaluation license|open source software|MIPS|Accept\? \(y/N\)|YOUR USE OF|EXPORT RESTRICTIONS|governing law|Santa Clara|conflict of laws" /tmp/sdk-install.log 2>/dev/null | tail -40 \
               || echo "(no sdk-install.log)"
             echo
-            echo "=== node-build.log :: ALL error lines (grep -n) ==="
-            grep -anE "error:|Error [0-9]+|undefined (reference|symbol)|fatal error|ld\.lld: error|collect2: error" /tmp/node-build.log 2>/dev/null | tail -60 \
-              || echo "(no matching error lines in node-build.log)"
-            echo
-            echo "=== node-build.log :: context around FIRST error (40 lines before/after) ==="
-            FIRST_ERR=$(grep -anE "error:|fatal error" /tmp/node-build.log 2>/dev/null | head -1 | cut -d: -f1)
-            if [ -n "$FIRST_ERR" ]; then
-              START=$(( FIRST_ERR > 40 ? FIRST_ERR - 40 : 1 ))
-              END=$(( FIRST_ERR + 40 ))
-              echo "--- first error at line $FIRST_ERR, showing $START..$END ---"
-              sed -n "${START},${END}p" /tmp/node-build.log | cut -c1-500
+            echo "=== node-build.log :: error lines + first-error context ==="
+            if [ -f /tmp/node-build.log ]; then
+              grep -anE "error:|Error [0-9]+|undefined (reference|symbol)|fatal error|ld\.lld: error|collect2: error" /tmp/node-build.log | tail -40
+              FIRST_ERR=$(grep -anE "error:|fatal error" /tmp/node-build.log | head -1 | cut -d: -f1)
+              if [ -n "${FIRST_ERR:-}" ]; then
+                START=$(( FIRST_ERR > 40 ? FIRST_ERR - 40 : 1 ))
+                echo "--- first error at line $FIRST_ERR, showing $START..$(( FIRST_ERR + 40 )) ---"
+                sed -n "${START},$(( FIRST_ERR + 40 ))p" /tmp/node-build.log | cut -c1-500
+              fi
+              echo "--- tail (warnings filtered) ---"
+              grep -avE "warning:|note:| \^|^\s*\||^\s*[0-9]+ \|" /tmp/node-build.log | tail -80
             else
-              echo "(no 'error:' line found; see tail below)"
+              echo "(no node-build.log — 失败发生在 Node 编译之前，或本轮命中了缓存)"
             fi
             echo
-            echo "=== node-build.log :: context around LAST error (40 lines before/after) ==="
-            LAST_ERR=$(grep -anE "error:|fatal error" /tmp/node-build.log 2>/dev/null | tail -1 | cut -d: -f1)
-            if [ -n "$LAST_ERR" ]; then
-              START=$(( LAST_ERR > 40 ? LAST_ERR - 40 : 1 ))
-              END=$(( LAST_ERR + 40 ))
-              echo "--- last error at line $LAST_ERR, showing $START..$END ---"
-              sed -n "${START},${END}p" /tmp/node-build.log | cut -c1-500
-            else
-              echo "(no 'error:' line found; see tail below)"
-            fi
-            echo
-            echo "=== node-build.log (tail 200, warnings filtered out) ==="
-            grep -avE "warning:|note:| \^|^\s*\||^\s*[0-9]+ \|" /tmp/node-build.log 2>/dev/null | tail -200 \
-              || echo "(no node-build.log — failure occurred before Node build)"
-            echo
-            echo "=== gradle-build.log (tail 150) ==="
-            tail -150 /tmp/gradle-build.log 2>/dev/null || echo "(no gradle-build.log — failure before Gradle)"
+            echo "=== gradle-build.log tail ==="
+            tail -80 /tmp/gradle-build.log 2>/dev/null || echo "(no gradle-build.log — 失败发生在 gradle 之前)"
           } > diag/ci-failure-last.txt
-          echo "----- diag size -----"; wc -c diag/ci-failure-last.txt
-
-          # 推 ci-diag 分支（该通道已由 ci-ping 验证可用）。
-          # 用 clone 出来的独立目录，并显式 mkdir/copy/add/commit，避免被静默吞错。
-          rm -rf /tmp/diagpush && mkdir -p /tmp/diagpush && cd /tmp/diagpush
-          git clone "https://x-access-token:${TOKEN_USE}@github.com/${{ github.repository }}.git" .
-          mkdir -p diag
-          cp "$GITHUB_WORKSPACE/diag/ci-failure-last.txt" diag/ci-failure-last.txt
-          echo "[check] diag dir now contains:"; ls -la diag/
-          git config user.email "ci@workbuddy.local"
-          git config user.name "CI Diagnostic Bot"
-          git add -f diag/ci-failure-last.txt
-          echo "[check] staged files:"; git status --short
-          git commit -m "ci: automated failure diagnostics"
-          echo "[check] commit created:"; git log --oneline -1
-          git push origin HEAD:ci-diag --force
-          echo "--- diagnostics pushed: $(git rev-parse HEAD) ---"
+          wc -c diag/ci-failure-last.txt
       - name: Upload failure diagnostics artifact (backup)
         if: failure()
         uses: actions/upload-artifact@v4

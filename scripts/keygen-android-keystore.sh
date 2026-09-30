@@ -41,7 +41,7 @@
 # 把 keystore base64 存进 secret ANDROID_KEYSTORE_BASE64，
 # 密码存 ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS /
 # ANDROID_KEY_PASSWORD，workflow 里解码到 keys/release.keystore 即可。
-# （与 release-admin.yml 的 repack job 用的那组 secret 同名 —— 复用已有配置，不另立一套。）
+# （这组 secret 名沿用仓里早已在用的那一组 —— 复用已有配置，不另立一套。）
 # ============================================================================
 set -euo pipefail
 

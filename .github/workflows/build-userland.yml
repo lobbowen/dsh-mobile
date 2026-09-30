@@ -14,19 +14,24 @@ name: Build Userland (C 层工具供给)
 # 静态件会绕过整层（2026-09-27 对 bash/rg 的真机定罪）。verify-artifact 把这条钉住。
 # 另一类允许形状是 shebang 脚本（解释器按调用方 PATH 由 D1 兑现）—— 同一把尺子的两个分支，
 # 判据只在 scripts/verify-userland-artifact.sh 一处，入口路径由 scripts/userland-verify.json 声明。
+#
+# ── C 层的唯一发布链（docs/adr/0011）────────────────────────────────────────
+# **发哪一版写在 ref 名里**：推 tag `userland-<channel>-<revision>` 才投递，revision 是正整数。
+# 旧形状是一个 `publish` 布尔输入 + 一个 `channel` 输入 —— 那等于「任何一次 dispatch 都能发，
+# 而发出去的东西没有身份」：同一份内容可以被点两次、两次结果不同，事后说不出发的是哪一次。
+# 现在一条链只有三种轮：
+#   · `push: tags: userland-*`   → 构建 + 闸门 + 投件 + 投清单 + 与线上对账
+#   · `push: main`（paths 命中） → 只构建校验，并拿线上清单对账 ⇒ **改了声明却没发就是这道红**（ENV-26）
+#   · `workflow_dispatch`        → 只构建校验（与 push 校验轮同一条路，点它不会发东西）
+# `revision` 落进清单的 `revision` 格：它是 C 层唯一的单调判据，也是发布前那道闸（--immutable）
+# 唯一比的那一格。设备侧只读 tools[].name/url/sha256/entry/aliases（SupplyProvisioner），
+# 所以加这一格对壳与 Program 都是中性的 —— 归一发布连不需要动上机的代码。
 
 on:
-  workflow_dispatch:
-    inputs:
-      publish:
-        description: '发布到对象存储（设备真正读的那条）'
-        type: string
-        default: 'false'
-      channel:
-        description: 'C 的通道（清单与件都挂在 userland-<channel>/ 下）'
-        type: string
-        default: 'canary'
+  # ⚠️ 一个 workflow 的 on.push 只能出现【一次】：写成两个 push: 块时后一个会在 YAML 里覆盖前一个，
+  #    触发条件变得不可预期（fast-apk.yml 踩过这条坑，注释还在）。所有 push 条件合进同一个块。
   push:
+    # 校验轮：改了「声明怎么算」或「设备读哪两个键」却没发清单，就是下面 drift 那道红。
     branches: [main]
     paths:
       - '.github/workflows/build-userland.yml'
@@ -46,12 +51,55 @@ on:
       # 「线上内容」变成两个宇宙的入口（2026-09-29 定罪 D02：新键声明后从未投过）。
       - 'container/app/src/main/assets/supply/channel.json'
       - 'container/app/src/main/assets/program-feed.json'
+    # 发布轮。**官方语义：Path filters are not evaluated for pushes of tags** ⇒ tag 轮完全不受
+    #   上面 paths 的影响。这条对本链是必需的，不是便利：清单带着 expiresEpochMs TTL，到期就要
+    #   重签重投，而那一轮常常一个文件都没改 —— 若 paths 也管 tag，「重发一份救命清单」这件事
+    #   根本点不动，判据兑现不了（docs/adr/0011）。
+    tags:
+      - 'userland-*'
+  # 只构建校验。刻意【不】留任何「要不要发」的输入：投递只由 tag 名决定（见文件头）。
+  workflow_dispatch:
+
+# 同一个 ref 上只允许一个在跑：交叉编译六个工具是要抢机器的。
+concurrency:
+  group: build-userland-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
 
 jobs:
+  # 通道与版本号**只在这一处**从 ref 名里解出来，下面的 job 全读它的 outputs。
+  # 理由与其余三条链一致：两处各自解析同一个 ref，就可能对同一个 tag 给出两个结论。
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.ref.outputs.channel }}
+      revision: ${{ steps.ref.outputs.revision }}
+      publish: ${{ steps.ref.outputs.publish }}
+    steps:
+      - name: 解出本轮的通道与清单版本号
+        id: ref
+        run: |
+          set -euo pipefail
+          # 通道集合与 program-ota.yml 的 channel 选项一致：canary / stable。
+          if [[ "${GITHUB_REF_NAME}" =~ ^userland-(canary|stable)-([1-9][0-9]*)$ ]]; then
+            echo "发布轮：ref=${GITHUB_REF_NAME} → 通道 ${BASH_REMATCH[1]}，清单 revision ${BASH_REMATCH[2]}"
+            { echo "channel=${BASH_REMATCH[1]}"; echo "revision=${BASH_REMATCH[2]}"; echo "publish=true"; } >> "$GITHUB_OUTPUT"
+          elif [[ "${GITHUB_REF}" == refs/tags/userland-* ]]; then
+            # 走到这里就是 `userland-*` 被上面的 tag 过滤器放进来、但形状不合格。
+            # 必须判红而不是退回校验轮：tag 名就是发布凭据，认不出它就不能当「没想发」。
+            echo "::error title=发布 tag 的形状非法::${GITHUB_REF_NAME} —— 要形如 userland-<channel>-<revision>，" \
+              && echo "::error::channel 取 canary|stable，revision 取正整数（它落进清单的 revision 格，是 C 层唯一的单调判据）。本次不投递。"
+            exit 1
+          else
+            echo "channel=canary" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "[resolve] 校验轮（ref=${GITHUB_REF}）：只构建与对账，不投递"
+          fi
+
   build:
+    needs: resolve
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -83,7 +131,7 @@ jobs:
           # 留一天只为事后取证，此前不设上限=默认 90 天，四个工具轮轮叠加。
           retention-days: 1
       - name: 发布到对象存储（设备真正读的那条）
-        if: ${{ github.event.inputs.publish == 'true' }}
+        if: ${{ needs.resolve.outputs.publish == 'true' }}
         env:
           QINIU_AK: ${{ secrets.QINIU_AK }}
           QINIU_SK: ${{ secrets.QINIU_SK }}
@@ -102,14 +150,14 @@ jobs:
           done
           echo "[qiniu] userland/${{ matrix.tool }} 已发布"
       # 刻意**不**归档到 GitHub Release：设备读的是对象存储（GitHub 在目标网络不可达），归档没有投递价值；
-      # 而 gh-release-upload.sh 在本仓被钉死为「只许五条链路调用」（门禁在册），多一条就是第六个调用方 ——
+      # 而 gh-release-upload.sh 在本仓被钉死为「只许少数链路调用」（门禁在册），多一条就是又一个调用方 ——
       # 与其为一个无投递价值的动作去改那条不变量，不如不做。产物由 actions/upload-artifact 留存。
 
   # C 的**内容清单**：把本轮构建出的件汇成一份、对**原始字节**签名、
   # 发到对象存储。Program 只持通道锚 + 信任根，于是加件/升级只发清单 —— **Program 不动**。
   manifest:
-    needs: build
-    if: ${{ github.event.inputs.publish == 'true' }}
+    needs: [resolve, build]
+    if: ${{ needs.resolve.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -120,6 +168,7 @@ jobs:
       - name: 组装并签名清单（发前用 APK 焊死的公钥自检）
         env:
           OTA_PRIVATE_KEY_PEM: ${{ secrets.OTA_PRIVATE_KEY_PEM }}
+          LOBOS_USERLAND_REVISION: ${{ needs.resolve.outputs.revision }}
         run: |
           set -euo pipefail
           if [ -z "${OTA_PRIVATE_KEY_PEM:-}" ]; then
@@ -129,7 +178,17 @@ jobs:
           mkdir -p keys release
           printf '%s' "$OTA_PRIVATE_KEY_PEM" > keys/ota-private.pem
           chmod 600 keys/ota-private.pem
-          node scripts/publish-userland-manifest.js dist release keys/ota-private.pem "${{ github.event.inputs.channel || 'canary' }}"
+          # revision 从 tag 经 outputs 到这里，中间没有缺省值：不填就抛错，「不写版本号也能发」这条路被封。
+          node scripts/publish-userland-manifest.js dist release keys/ota-private.pem "${{ needs.resolve.outputs.channel }}"
+      - name: 发布前闸门 —— revision 必须严格单调，同 name@version 不许换字节
+        run: |
+          set -euo pipefail
+          # 为什么排在上传之前：这一格判的是「即将发出去的这份清单能不能被发」，
+          # 发完再红就等于已经把设备指向了没有身份的内容。
+          # 顺序上的已知缺口：件本体在 build 轮已经投出去了，所以本步判红时对象存储上
+          # 可能已存在被覆盖的旧 URL —— 这不是本步能撤销的动作，它的职责是**不再让清单把
+          # 这份覆盖合法化**，并把缺口留在 CI 上看得见（同号重发的正确处置是提升件的版本）。
+          node scripts/check-userland-manifest-drift.js --immutable release/userland-manifest.json "${{ needs.resolve.outputs.channel }}"
       - name: 发布清单到对象存储
         env:
           QINIU_AK: ${{ secrets.QINIU_AK }}
@@ -141,7 +200,7 @@ jobs:
             echo "::error title=对象存储未配置::需要 secrets QINIU_AK / QINIU_SK / QINIU_BUCKET"
             exit 1
           fi
-          CH="userland-${{ github.event.inputs.channel || 'canary' }}"
+          CH="userland-${{ needs.resolve.outputs.channel }}"
           # 清单对象键与 APK 里 assets/supply/channel.json 的 manifestName **必须一致**（锚驱动）。
           #   换键的理由见该文件 $comment：旧键被长 TTL 缓存钉死，新上传不作废旧条目。
           ANCHOR=./container/app/src/main/assets/supply/channel.json
@@ -152,17 +211,17 @@ jobs:
           # 对不上就退 1，两条投放口（件与清单）都躲不过。
           export QINIU_PUBLIC_BASE="$(node -p "require('$ANCHOR').baseUrl")"
           # 清单短缓存（否则设备永远读到旧的，表现为「发了没更新」）；件本体长缓存（文件名带版本号）。
-          echo "[qiniu] 目标键: $CH/$MAN 与 $CH/$SIG"
+          echo "[qiniu] 目标键: $CH/$MAN 与 $CH/$SIG（清单 revision ${{ needs.resolve.outputs.revision }}）"
           node scripts/upload-qiniu.js release/userland-manifest.json "$CH/$MAN" --cache-control=60
           node scripts/upload-qiniu.js release/userland-manifest.json.sig "$CH/$SIG" --cache-control=60
           echo "[qiniu] $CH 已更新（两个键都已从 $QINIU_PUBLIC_BASE 回读并逐字节比对）"
 
   # 线上清单 vs 本轮构建算出的声明，逐格对账（不需要任何凭据 —— 只读线上、只比内容格）。
-  # 为什么排在这里：manifest 在 push 触发的 run 里是 skipped，`needs: [build, manifest]` 会把本 job
-  # 一起带走 ⇒ 门禁空转。用 always() 把 skipped 放回来：publish=true 时它在发布之后跑（应一致），
-  # push（publish=false）时 manifest 没跑，本 job 就是「改了声明却没发」的那道红。
+  # 为什么排在这里：manifest 在校验轮是 skipped，`needs: [build, manifest]` 会把本 job
+  # 一起带走 ⇒ 门禁空转。用 always() 把 skipped 放回来：发布轮它在发布之后跑（应一致），
+  # push 校验轮 manifest 没跑，本 job 就是「改了声明却没发」的那道红。
   drift:
-    needs: [build, manifest]
+    needs: [resolve, build, manifest]
     if: ${{ always() && needs.build.result == 'success' && (needs.manifest.result == 'success' || needs.manifest.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
@@ -178,4 +237,4 @@ jobs:
           node scripts/publish-userland-manifest.js dist --project > work/declared.json
           node -p "'[declared] ' + require('./work/declared.json').map(t => t.name + '@' + t.version + ' 入口 ' + t.entry + ' 别名 ' + (t.aliases||[]).map(a=>a.name).join('+')).join(' | ')"
       - name: 与线上清单逐格对账（缺一格就红）
-        run: node scripts/check-userland-manifest-drift.js work/declared.json "${{ github.event.inputs.channel || 'canary' }}"
+        run: node scripts/check-userland-manifest-drift.js work/declared.json "${{ needs.resolve.outputs.channel }}"

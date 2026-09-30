@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
-# 壳 APK 版本门禁 —— 判据的唯一实现（四个发布调用点共用，见 VERSION-GATE 调用点）。
+# 壳 APK 版本门禁 —— 判据的唯一实现。唯一的调用点是 fast-apk（投壳 APK 的那一条标准链）。
 #
-# 为什么判据不许写在 workflow 里：写滚动通道的有四条链路（fast-apk / build-apk /
-# release-admin 的 publish 与 repack）。2026-09-26 盘点时只有 fast-apk 那份比较过版本号，
-# 其余三个都是「拿到 APK 就覆盖 latest」—— 从旧 run 发一次就能把已升级设备永久锁死
-# （versionCode 回退不可逆，只能卸载重装）。写四份必然漂移，收进这一份。
+# 为什么判据不许写在 workflow 里：2026-09-26 盘点时写滚动通道的有四条链路（fast-apk / build-apk /
+# release-admin 的 publish 与 repack），只有 fast-apk 那份比较过版本号，其余三个都是「拿到 APK
+# 就覆盖 latest」—— 从旧 run 发一次就能把已升级设备永久锁死（versionCode 回退不可逆，只能卸载
+# 重装）。写四份必然漂移，所以收进这一份；2026-09-30 发布连归一（docs/adr/0011）后那三条投递口
+# 已删，这份判据的调用点只剩一个 —— **判据留在宿主、而不是跟着口的数量摊开**才是这条收口的本意。
 #
 # 参照物的**名字**是必填参数（第 4 格），不是写死在这里的一句漂亮话：2026-09-30 定罪（债表 DS-14）查出日常链
 #   把参照物写成 apk-latest，而那条通道它自己从不写（滚动别名只由发布面维护）⇒ 这道门从没比过
@@ -21,13 +22,15 @@
 #
 # 为什么同版本重发要分通道：同号换字节 = 用户手里的下载地址指向的东西变了，而版本号没说谎
 # 的能力没有了 —— 实证过一次：改 Kotlin 注释合并后 main push 自动重出，1.1.5(7) 的字节
-# 在原地被换掉。显式通道（fast-* tag / dispatch / 从旧 run 发布）保留同版本重发，因为
-# 「投递本身坏了要重传」是这个通道正当的用途；自动通道必须 bump，否则等于把
-# 「改了 app 没 bump 版本」这件事静默咽掉。
+# 在原地被换掉。所以自动通道必须 bump，否则等于把「改了 app 没 bump 版本」这件事静默咽掉。
+# 而**归一之后全仓没有任何链路传 explicit**（旧的那格「显式通道 = 修投递」对应的场景已经
+# 不存在：投递坏了的正确处置是 bump 一个版本号，见 fast-apk.yml 的 Publish 步）。这一格
+# 保留而不是删掉，是因为它是「两格取严」这套判据的对照组，且恢复参照物那件事必须是一次
+# **改动 main 的动作**（可审计、会留痕），不能是一朵谁都能按的按钮。
 #
 # 用法: bash scripts/verify-apk-version-gate.sh <本次 version.json> <线上清单或 '-'> <auto|explicit> <参照物名> <账本清单或 '-'>
 #   '-'        = 调用方已确认那一格里确实没有版本读数（尚未发布 / 首次发布），不是「取失败了」
-#   <参照物名> = 调用方实际拿谁当线上读数（apk-latest / 某个 release tag / archive）
+#   <参照物名> = 调用方实际拿谁当线上读数（现在的唯一调用方传 archive = 它自己会写的那一族归档）
 #   第 5 格**没有缺省值**：缺省成 '-' 就等于「不记账也能过门」，那正是这一格要防的降级。
 # 退出: 0 放行 / 1 判红（不许发布）/ 2 无从校验（同样不许发布，宁可发不出去）
 set -euo pipefail
@@ -95,7 +98,7 @@ if [ -z "$AVC" ] && [ -z "$LVC" ]; then
   if [ "$CHANNEL" = auto ]; then
     # 参照物上没有版本读数 = 线上状态丢了。自动发布此时照发，就把「不知道线上是什么版本」
     # 伪装成了「线上就是这一版」。红在这里是对的：先把读数补回去（显式通道发一次），再走自动链。
-    die "参照物 $REF 上没有版本读数、回执账本也没起账，自动通道不得在线上版本未知的情况下发布。确认首次发布请走 fast-* tag。"
+    die "参照物 $REF 上没有版本读数、回执账本也没起账 —— 这是参照物整体丢了，不是一个发布场景。自动通道不得在线上版本未知的情况下发布：先把下界补回去（账的唯一写入口 scripts/append-apk-receipt.sh，或找回被删的归档族），再推 os-release-* tag。"
   fi
   echo "[version] 参照物 $REF 无版本读数（首次发布或读数丢失），显式通道放行：本次 versionCode=$VC"
   exit 0
@@ -103,7 +106,7 @@ elif [ -z "$LVC" ]; then
   # 线上有读数、账本没有：分不清「这条链还没起账」与「账本分支被删过」，而后者恰好是 DS-16
   # 要防的形状（删账 = 参照物自动变小 = 门自动变松）。所以自动通道判红，显式通道把它当起账那一次。
   if [ "$CHANNEL" = auto ]; then
-    die "回执账本上没有读数（未起账或已被删）—— 自动通道不许只拿「线上还剩什么」这一格发布：那一格是可以被删小的（债表 DS-16 实测过）。要起账请走 fast-* tag 显式发一次。"
+    die "回执账本上没有读数（未起账或已被删）—— 自动通道不许只拿「线上还剩什么」这一格发布：那一格是可以被删小的（债表 DS-16 实测过）。要起账请由人通过账的唯一写入口把下界补回去，再推 os-release-* tag。"
   fi
   PVC="$AVC"
   REF_USED="$REF"
@@ -142,9 +145,9 @@ if [ "$VC" -lt "$PVC" ]; then
 fi
 if [ "$VC" -eq "$PVC" ]; then
   if [ "$CHANNEL" = auto ]; then
-    die "同版本重发（versionCode=$VC）在自动通道被拒：这次改动动了 APK 内容却没 bump version.json 的 shell.versionCode。请 bump（见 docs/runbook/release.md §2），确认要原地重传则推 fast-* tag。"
+    die "同版本重发（versionCode=$VC）在自动通道被拒：这次改动动了 APK 内容却没 bump version.json 的 shell.versionCode。请 bump（见 docs/runbook/release.md §2）—— 发布连归一后没有「原地重传」这条路，投递坏了就发下一个版本号。"
   fi
-  echo "[version] 同版本重发（versionCode=$VC，显式通道允许：用于修复投递/重传）"
+  echo "[version] 同版本重发（versionCode=$VC，显式通道放行 —— 归一后没有任何链路传 explicit，走到这一格就是在跑人工恢复动作）"
   exit 0
 fi
 echo "[version] 版本前进（$PVC → $VC）"

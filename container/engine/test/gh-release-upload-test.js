@@ -269,14 +269,18 @@ const asset = (c, n) => path.join(c.ST, 'assets', n);
     .map((f) => [f, fs.readFileSync(path.join(WF_DIR, f), 'utf8')]);
   const inline = wfs.filter(([, t]) => INLINE.test(t)).map(([f]) => f);
   check('workflow 无内联 Release 写操作回潮（上传判据只住宿主）', inline.length === 0, inline.join(','));
-  const callers = wfs.filter(([, t]) => /scripts\/gh-release-upload\.sh/.test(t)).map(([f]) => f).sort();
-  // 五个正当调用方：日常出包 / 全量出包 / 内核 OTA / 小件能力件固化 / 管理链。
-  // 判据是**集合相等**而非「包含」—— 多出第六个调用方必须在此显式登记，
+  // 以下名单与政策开关一律**剥注释**再量：链路头注释讲历史时必然会写出宿主名和 `--skip-existing`
+  // 这类字样，拿原文数会把「说明」数成「调用」，门禁就成了装饰。
+  const code = Object.fromEntries(wfs.map(([f, t]) => [f, stripComments(t)]));
+  const callers = wfs.filter(([f]) => /scripts\/gh-release-upload\.sh/.test(code[f])).map(([f]) => f).sort();
+  // 四个正当调用方：壳 APK 唯一投递口 / 内核 Node 固化 / 能力件固化 / Program（归档 + 通道两格）。
+  // 判据是**集合相等**而非「包含」—— 多出第五个链路必须在此显式登记，
   // 否则「上传判据只住宿主」这条纪律会被悄悄抄出第二份。
-  check('上传宿主被五条链路同调（日常/全量/内核/小件固化/管理）',
-    JSON.stringify(callers) === JSON.stringify(['build-apk.yml', 'fast-apk.yml', 'pin-capabilities.yml', 'program-ota.yml', 'release-admin.yml']),
+  // （旧名单里的 release-admin 三条投递口随发布连归一一起废除，见 docs/adr/0011。）
+  check('上传宿主被四条链路同调（壳投递口/内核固化/能力件固化/Program）',
+    JSON.stringify(callers) === JSON.stringify(['build-apk.yml', 'fast-apk.yml', 'pin-capabilities.yml', 'program-ota.yml']),
     callers.join(','));
-  const ko = wfs.find(([f]) => f === 'program-ota.yml')[1];
+  const ko = code['program-ota.yml'];
   // 先展平反斜杠续行：这条链路盯的是「同一宿主被调两次、两档政策各自表达」，
   // 政策开关写在哪一行是排版，不是不变量。
   const koFlat = ko.replace(/\\\n\s*/g, ' ');
@@ -284,33 +288,32 @@ const asset = (c, n) => path.join(c.ST, 'assets', n);
     /gh-release-upload\.sh[^\n]*--skip-existing/.test(koFlat)
       && /gh-release-upload\.sh[^\n]*--prune/.test(koFlat),
     '政策标记丢了就等于把「提升」判成错误');
-  const ra = wfs.find(([f]) => f === 'release-admin.yml')[1];
-  check('repack 用「改名进临时目录」换资产名（`#` 只改 label 不改名，2026-09-26 的 404 根因）',
-    /cp \/tmp\/app-signed\.apk "\$STAGE\/app-release\.apk"/.test(ra), '又回到 # 后面当改名用，latest 地址会再次 404');
+  // 覆盖式投递（通道那一格）会把历史资产留在同一个 Release 上，所以带 --prune 的那格
+  // 必须**同时**是它自己的清理者；反过来说，任何「只覆盖不清理」的滚动格都是堆积缺陷。
+  const rollCalls = (koFlat.match(/bash\s+scripts\/gh-release-upload\.sh[^\n]*/g) || []).filter((c) => /--prune/.test(c));
+  check('通道那一格（--prune）确实存在且只有一格', rollCalls.length === 1, JSON.stringify(rollCalls));
 
-  // 滚动别名上的资产名就是装机地址本身。形态收口后它必须是 app-release.apk，
-  // 且废止的 app-debug.apk 要主动清掉 —— 留着等于线上仍可达一个 debug 形态的历史包，
-  // 而任何按旧地址取包的入口都不会告诉我们它拿到了什么。
-  const byName = Object.fromEntries(wfs);
-  const STAGED_DEBUG_ASSET = /(?:\/tmp|\$STAGE)\/app-debug\.apk/;
-  check('资产名判据自证：收口前真实出现过的两种暂存写法必被抓',
-    STAGED_DEBUG_ASSET.test('cp "$APK" /tmp/app-debug.apk')
-      && STAGED_DEBUG_ASSET.test('cp /tmp/app-signed.apk "$STAGE/app-debug.apk"'),
-    '判据形状与仓库里真实出现过的写法脱节了');
-  check('资产名判据不误伤：版本化归档名与 --prune 里的废止名不算暂存目标',
-    !STAGED_DEBUG_ASSET.test('cp "$APK" "$VDIR/app-debug-${VN}+${VC}.apk"')
-      && !STAGED_DEBUG_ASSET.test("--prune '^app-debug\\.apk$'"),
-    '把归档命名规则当成 latest 资产名会把 fast-apk 抓成回潮');
-  for (const f of ['build-apk.yml', 'release-admin.yml']) {
-    const src = stripComments(byName[f]);
-    check(`${f} 写 latest 的暂存名不再叫 app-debug.apk`, !STAGED_DEBUG_ASSET.test(src),
-      '滚动别名上会出现一个 debug 形态的资产名');
-  }
-  const PRUNE = /--prune '\^app-debug\\\.apk\$'/g;
-  const pruneCount = (t) => (stripComments(t).match(PRUNE) || []).length;
-  check('两个 latest 写文件都带废止资产名清理（build-apk 1 处、release-admin 的 publish+repack 2 处）',
-    pruneCount(byName['build-apk.yml']) === 1 && pruneCount(byName['release-admin.yml']) === 2,
-    JSON.stringify({ bc: pruneCount(byName['build-apk.yml']), ra: pruneCount(byName['release-admin.yml']) }));
+  // 版本化资产名靠**临时目录里的真名副本**实现：gh 的资产名取 basename，
+  // `#` 后面只是 label（2026-09-26 那次 latest 404 的根因就是把 label 当改名）。
+  // 这条以前钉在 release-admin 的 repack 上；壳 APK 唯一的投递口现在是 fast-apk，主体换了、病没变。
+  const faFlat = code['fast-apk.yml'].replace(/\\\n\s*/g, ' ');
+  check('唯一投递口用真名副本换资产名（cp 到 $VDIR/<版本化名>），不靠 `#` label',
+    /cp\s+"?\$?APK"?\s+"\$VDIR\/\$\{?VAPK/.test(faFlat)
+      && !/gh-release-upload\.sh[^\n]*#/.test(faFlat),
+    '又回到 # 后面当改名用，归档地址会再次 404');
+
+  // 滚动别名彻底没有读者了（注册表 DS-11 实读：设备上没有任何东西读 apk-latest），
+  // 归一之后也不许再有写者 —— 别名一旦可被覆盖，「线上这一版是什么字节」就没有答案了。
+  const ALIAS = /gh-release-upload\.sh\s+"?apk-latest/;
+  check('别名判据自证：旧的滚动别名写者必被抓',
+    ALIAS.test('bash scripts/gh-release-upload.sh apk-latest --prune \'^app-debug\\.apk$\' "$STAGE/app-release.apk"'),
+    '判据形状与收口前真实写法脱节了');
+  check('别名判据不误伤：版本化归档名（$VTAG=v<versionName>）不算滚动写者',
+    !ALIAS.test('bash scripts/gh-release-upload.sh "$VTAG" --title "Lob OS $VN" "$VDIR/$VAPK"'),
+    '把归档命名当成滚动别名会把唯一投递口抓成回潮');
+  const aliasWriters = wfs.filter(([, t]) => ALIAS.test(t)).map(([f]) => f);
+  check('没有任何链路再写滚动别名 apk-latest（每次覆盖 = 线上身份不再由版本号决定）',
+    aliasWriters.length === 0, aliasWriters.join(','));
 }
 
 finish();

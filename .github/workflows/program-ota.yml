@@ -1,20 +1,31 @@
 name: Build & Sign Program OTA Bundle
 
-# 构建并签名「可热更新的 Program（L1）」OTA 包：对齐 docs/contracts/base-spec.md §5 通道一（构建期签名）。
+# ============================================================================
+#  **Program（L1 载荷）版本流的唯一发布链**。全仓每条版本流恰好一条链（投递只由人打的带版本号 tag 决定）；唯一的例外是能力件那条 pin-capabilities.yml —— 它的身份是内容指纹、入口是 dispatch（ADR-0011 §5）。，见
+#  docs/adr/0011-one-release-chain-per-stream.md 与 ci.yml 头部那张表。
 #
-# 双信任根：本工作流用 CI secret OTA_PRIVATE_KEY_PEM（ed25519 私钥）签名 Program 包；
-# 设备端用焊死在 APK 的 container/app/src/main/assets/ota-public.pem 验签 —— 私钥绝不进 APK。
+#  构建并签名「可热更新的 Program（L1）」OTA 包：对齐 docs/contracts/base-spec.md §5 通道一（构建期签名）。
 #
-# 用法（手动 Run workflow）：
-#   - program_repo : Program 源码仓（**留空 = 单仓内的 programs/console/ 子目录**；
-#                   仅在需要从 fork/其他仓构建时才填 owner/repo）
-#   - program_ref  : 跨仓构建时的 Program 仓 ref（分支/tag/sha）；留空走单仓，此项无效
-#   - version     : Program 版本号（写进 manifest.json / 包名）
-#   - abi         : 默认 node24-arm64-android35
-#   - url_base    : OTA 下载基址（如 https://cdn.example.com/ota）；留空则不写 url
-#   - publish     : 是否把产物发到 Release
+#  双信任根：本工作流用 CI secret OTA_PRIVATE_KEY_PEM（ed25519 私钥）签名 Program 包；
+#  设备端用焊死在 APK 的 container/app/src/main/assets/ota-public.pem 验签 —— 私钥绝不进 APK。
 #
-# 产物：release/program-<version>.zip + release/program-manifest.json（作为 artifact / Release 下载）。
+#  两个身份，一条链：
+#    · workflow_dispatch = **只构建校验**（产物留在 Actions 构件里，什么都不会改动线上通道）。
+#      可给的输入：program_repo / program_ref（跨仓构建才填）、version、abi、url_base、
+#      channel、rollout_percent —— 这些在这一身份下只影响"这次校验构建长什么样"。
+#    · 推 tag `program-ota-<channel>-<version>`（channel ∈ canary|stable）= **投递这一版**。
+#      ADR-0004：Program 版本**不可复用**，所以版本号写在 tag 名里，且必须与
+#      programs/console/package.json 现读出来的那一个逐字相符才动手。
+#    旧形态里的 `publish` 布尔输入随归一删除：它让「同一次 dispatch 可以顺手投一下」成为可能，
+#    而那条路正是 ADR-0004 说的「内容变了、版本号没说谎」的入口 —— 设备判「没有更新」，
+#    静默不生效，且无任何报错。
+#
+#  放量百分比在 tag 轮恒为 100：灰度这件事由**通道**承担（先发 canary、真机验过，
+#  再用同一个版本号打 stable 的 tag 提升），而不是由「同一版本改一次通道 manifest」承担 ——
+#  后者是一次不涨版本的通道改写，正是这次归一要删掉的形状。
+#
+#  产物：release/program-<version>.zip + release/program-manifest.json（作为 artifact / Release 下载）。
+# ============================================================================
 
 on:
   workflow_dispatch:
@@ -42,17 +53,12 @@ on:
         description: 'OTA 下载基址（结尾不带 /）'
         required: false
         default: ''
-      publish:
-        description: '发布到 Release'
-        type: boolean
-        required: false
-        default: false
       rollout_percent:
-        description: '灰度放量百分比（0-100；100=全量）。设备按 安装ID+版本 确定性分桶'
+        description: '灰度放量百分比（0-100；100=全量）。**只对校验轮生效**，tag 轮恒为 100'
         required: false
         default: '100'
       channel:
-        description: '发布通道：canary=灰度测试（先发这里真机验证），stable=生产'
+        description: '通道：canary=灰度测试（先发这里真机验证），stable=生产。仅校验轮；tag 轮的通道写在 tag 名里'
         type: choice
         options:
           - canary
@@ -77,27 +83,58 @@ jobs:
       # 原先这里默认 '1.0.0'，与 programs/console/package.json 的版本是两个源 —— 会静默分叉（ADR-0004）。
       PROGRAM_VER: ${{ github.event.inputs.version || '' }}
       PROGRAM_ABI: ${{ github.event.inputs.abi || 'node24-arm64-android35' }}
-      # 通道：默认 canary —— Program 推送必须先在灰度真机跑过，再提升到 stable。
-      PROGRAM_CHANNEL: ${{ github.event.inputs.channel || 'canary' }}
+      # 通道只在下面的 Resolve 步骤里定一次（校验轮取输入、投递轮取 tag 名），
+      # 不在这里给缺省：job 级 env 与 GITHUB_ENV 同名时的优先级不该留给猜测。
       OTA_URL_BASE: ${{ github.event.inputs.url_base || '' }}
     steps:
       - name: Checkout container repo
         uses: actions/checkout@v4
 
-      - name: Resolve program version + requiresProtocol from programs/console/package.json
+      - name: Resolve program version + channel + requiresProtocol
+        id: resolve
         run: |
           set -euo pipefail
-          V="${{ github.event.inputs.version }}"
-          if [ -z "$V" ]; then
-            V="$(node -p "require('./programs/console/package.json').version")"
-            echo "[version] Program 版本（来自 programs/console/package.json）: $V"
-          else
-            echo "[version] Program 版本（显式指定）: $V"
-          fi
+          SRC_VER="$(node -p "require('./programs/console/package.json').version")"
+          case "${GITHUB_REF:-}" in
+            refs/tags/program-ota-*)
+              # 投递轮：**版本与通道都由 tag 名决定**，且必须与事实源逐字相符。
+              # 为什么要比：tag 是「人要发这一版」的唯一凭据，而包是从 ref 检出的工作树构建的。
+              # 若有人对旧 ref 打新 tag（或先打 tag 再改 package.json），发出去的东西与
+              # tag 说的不是同一版 —— 而设备只认版本号，A/B 两个内容会共用同一个身份。
+              REST="${GITHUB_REF_NAME#program-ota-}"
+              case "$REST" in
+                canary-*) CHANNEL=canary; V="${REST#canary-}" ;;
+                stable-*) CHANNEL=stable; V="${REST#stable-}" ;;
+                *)
+                  echo "::error title=发布 tag 形状不符::tag 是 ${GITHUB_REF_NAME}，要形如 program-ota-<canary|stable>-<version>。"
+                  echo "::error::通道写在 tag 名里，因为「发哪个通道」和「发哪一版」一样是不可事后推断的决定。"
+                  exit 1 ;;
+              esac
+              if [ "$V" != "$SRC_VER" ]; then
+                echo "::error title=发布 tag 与版本事实源不符::tag 说 $V，而 programs/console/package.json 现读出来是 $SRC_VER。"
+                echo "::error::要么重打一个与事实源相符的 tag，要么先改 package.json 再打 tag —— 本次不投递。"
+                exit 1
+              fi
+              echo "[version] 投递轮：tag=${GITHUB_REF_NAME} → channel=$CHANNEL version=$V（与事实源一致）"
+              ;;
+            *)
+              # 校验轮：什么都不会投递，所以允许显式指定版本去试打。
+              CHANNEL="${{ github.event.inputs.channel || 'canary' }}"
+              V="${{ github.event.inputs.version }}"
+              if [ -z "$V" ]; then
+                V="$SRC_VER"
+                echo "[version] Program 版本（来自 programs/console/package.json）: $V"
+              else
+                echo "[version] Program 版本（显式指定，仅本次校验构建）: $V"
+              fi
+              ;;
+          esac
           echo "PROGRAM_VER=$V" >> "$GITHUB_ENV"
+          echo "PROGRAM_CHANNEL=$CHANNEL" >> "$GITHUB_ENV"
           P="$(node -p "require('./programs/console/package.json').lobos.requiresProtocol || 0")"
           echo "LOBOS_PROGRAM_REQUIRES_PROTOCOL=$P" >> "$GITHUB_ENV"
           echo "[version] Program 要求的最低桥协议: $P"
+          echo "[channel] channel=$CHANNEL"
 
       - name: Restore signing private key from secret
         env:
@@ -182,7 +219,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish to Release
-        if: ${{ github.event.inputs.publish == 'true' || startsWith(github.ref, 'refs/tags/program-ota-') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/program-ota-') }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -221,9 +258,14 @@ jobs:
           ROLL="program-$PROGRAM_CHANNEL"
           echo "[channel] channel=$PROGRAM_CHANNEL rolling=$ROLL"
 
-          # ── 版本前进门禁（**按通道**比较）────────────────────────────────
+          # ── 版本门禁（**按通道**比较；同一通道同号即红）─────────────────────────
           # 发布一个"不大于本通道已发布"的版本 = 该通道设备永远不更新且无报错。
-          # 按通道而非全局：canary 可以领先 stable；提升(promote)到 stable 时对 stable 仍需前进。
+          # 按通道而非全局：canary 可以领先 stable；用同一个版本号打 stable 的 tag 提升时，
+          # 比的是**目标通道**的读数，仍要求前进。
+          # 同版本对同一通道重发以前是**放行**的（理由="修投递/重传/补签都在版本没变时发生"），
+          # 现在判红：ADR-0004 说的就是这一件事 —— 同号换内容，设备判「没有更新」，
+          # 静默不生效且无任何报错。投递坏了的正确反应是 bump 版本号，不是让同一个版本号
+          # 指向另一批字节。
           # 「该通道还没有 manifest」与「取不到 manifest」是两种结局，分类只住
           # scripts/read-release-asset.sh（APK 侧读 version.json 用的是同一处）。
           # 旧写法把「取不到」降成 ::warning 然后照发，还把「取到了但读不出 version」
@@ -246,20 +288,45 @@ jobs:
           fi
           if [ -n "$CUR" ]; then
             echo "[version] $ROLL 已发布=$CUR，本次=$PROGRAM_VER"
-            # 门禁只拦**回退**，放行**同版本重发**。这与 APK 侧 versionCode 门禁的
-            # 「显式通道」那一格同形：本 workflow 的发布口全部是人触发的显式动作
-            # （tag `program-ota-*` 或 dispatch 的 publish=true），没有"自动同号覆盖"那条路。
-            # 为什么同版本必须放行：修投递通道、重传、补签，都发生在"版本没变"的时候；
-            # 若判成错误，这些修复就永远落不了地。而且同版本重发不会让设备"看起来有更新"
-            # ——它本来就不会更新（版本相等），这只是把同一份产物重新送到目标位置。
             if [ "$PROGRAM_VER" = "$CUR" ]; then
-              echo "[ok] 同版本重发（$CUR）：允许，用于修复投递/重传"
-            else
-              node -e "const {isNewer}=require('./container/engine/src/program-version'); if(isNewer(process.argv[1],process.argv[2])){process.exit(1)}" "$CUR" "$PROGRAM_VER" \
-                || { echo "::error title=Program 版本回退::$ROLL 上本次 $PROGRAM_VER 低于已发布 $CUR —— 设备有版本下限，会拒绝安装；且该通道设备也判为无更新。请递增 programs/console/package.json 的 version。"; exit 1; }
-              echo "[ok] 版本前进（$CUR → $PROGRAM_VER）"
+              echo "::error title=Program 版本复用::$ROLL 上已经是 $CUR —— 同号再发一次，设备判「没有更新」，内容换了也没人知道。"
+              echo "::error::请递增 programs/console/package.json 的 version 再打 tag。跨通道提升（canary→stable）比的是目标通道的读数，不受这条约束。"
+              exit 1
             fi
+            node -e "const {isNewer}=require('./container/engine/src/program-version'); if(isNewer(process.argv[1],process.argv[2])){process.exit(1)}" "$CUR" "$PROGRAM_VER" \
+              || { echo "::error title=Program 版本回退::$ROLL 上本次 $PROGRAM_VER 低于已发布 $CUR —— 设备有版本下限，会拒绝安装；且该通道设备也判为无更新。请递增 programs/console/package.json 的 version。"; exit 1; }
+            echo "[ok] 版本前进（$CUR → $PROGRAM_VER）"
           fi
+
+          # ── 版本化归档：一个版本号只允许一批字节 ────────────────────────────
+          # program-<version> 只建一次：这条**政策**用宿主的 --skip-existing 表达
+          # （提升到新通道时不重建归档），而「读线上 → 创建 → 覆盖 → 回读确认」的判据
+          # 仍只住 scripts/gh-release-upload.sh 一份。
+          # 但「跳过创建」不等于「跳过核对」：提升到新通道时，本轮**重新构建**出来的 zip
+          # 若与归档那份不是同一批字节，两个通道的设备就用同一个版本号装着两个不同的
+          # Program —— 与 ADR-0004 禁止的那件事只差"分布在两个通道"。所以归档在位时先比
+          # sha256（manifest 里那一格是构建脚本对落盘 zip 现算的，build-program-bundle.js:62）。
+          ADIR="$(mktemp -d)"
+          ARCRC=0
+          bash scripts/read-release-asset.sh program-archive-manifest "program-$PROGRAM_VER" program-manifest.json "$ADIR" || ARCRC=$?
+          case "$ARCRC" in
+            0)
+              OLD_SHA="$(node -p "require('$ADIR/program-manifest.json').sha256 || ''" 2>/dev/null || true)"
+              NEW_SHA="$(node -p "require('./release/program-manifest.json').sha256 || ''" 2>/dev/null || true)"
+              if [ -z "$OLD_SHA" ] || [ -z "$NEW_SHA" ]; then
+                echo "::error title=Program 字节对账::归档读到 sha256=${OLD_SHA:-空}、本轮算出 sha256=${NEW_SHA:-空} —— 看不清就不许把同号发出去。"
+                exit 1
+              fi
+              if [ "$OLD_SHA" != "$NEW_SHA" ]; then
+                echo "::error title=同版本内容已变::program-$PROGRAM_VER 的归档 zip 是 $OLD_SHA，本轮构建出来的是 $NEW_SHA。"
+                echo "::error::同号换字节正是设备「永不更新」的那个形状。请提升 programs/console/package.json 的 version 后重打 tag。"
+                exit 1
+              fi
+              echo "[ok] 归档在位且字节一致（${NEW_SHA:0:12}…）—— 本次只切通道指针"
+              ;;
+            10) echo "[archive] program-$PROGRAM_VER 还不存在 —— 本次建归档" ;;
+            *) echo "::error title=Program 字节对账::读归档 manifest 失败（原因见上一条）—— 看不清线上那份 zip 就不许发。"; exit 1 ;;
+          esac
 
           # ── 版本化归档（全局唯一一次）────────────────────────────────────
           # program-<version> 只创建一次。**从 canary 提升到 stable 时不再重建** ——
@@ -287,7 +354,7 @@ jobs:
         # 为什么必须有这一步：**GitHub 在目标网络不可达**（实测 github.com / raw.githubusercontent.com
         # 均失败），所以 Release 只能当**归档**，设备端真正读的是对象存储。
         # 缺配置就**硬失败** —— 发一个设备读不到的包，等于假装发布成功。
-        if: ${{ github.event.inputs.publish == 'true' || startsWith(github.ref, 'refs/tags/program-ota-') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/program-ota-') }}
         env:
           QINIU_AK: ${{ secrets.QINIU_AK }}
           QINIU_SK: ${{ secrets.QINIU_SK }}
