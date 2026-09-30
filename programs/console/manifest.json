@@ -19,7 +19,9 @@
   },
   "requires": [
     "bridge:storage",
-    "bridge:shell"
+    "bridge:shell",
+    "bridge:app_control",
+    "bridge:notification"
   ],
   "capabilities": [
     "state.read",

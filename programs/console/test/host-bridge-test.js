@@ -15,8 +15,10 @@
 //   H-4  真实 UDS 端到端：连上参考桥 → 握手协商 → 调用成功 / 能力门禁(-32001) / 未知方法(-32601)
 //   H-5  notify/browser 接线：容器内调用路由到桥；容器外/桥不可用 → 降级返回 false，不抛
 //   H-6  超时：桥不回包时 call() 按时返回 null，不挂死
+//   H-7  握手声明身份（program=包清单 id），且包清单 requires 覆盖 src 里每一处桥调用
 // ═══════════════════════════════════════════════════════════════════════════
 
+const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
 
@@ -136,6 +138,37 @@ async function main() {
   check('H-6 超时受控（<2000ms，不挂死）', dt < 2000, dt + 'ms');
   c2.close();
   await new Promise((res) => silent.close(res));
+
+  // H-7 握手身份 + 「声明覆盖调用」
+  // 定罪由来（2026-10-01）：.47 的客户端握手帧里没有 program，而壳侧授权表按包清单 name 查
+  // （AUD-G35）——未声明就只有 base，面板每一次桥调用都吃 -32001。此前 CI 从不把
+  // 「代码调的方法」与「清单声明的组」放在一起对，所以这条破口只能到真机才显形。
+  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf8'));
+  const frame = proto.handshakeRequest(1, ['bridge:shell'], manifest.id);
+  check('H-7 握手帧带 program（壳侧授权表的键）', frame.params.program === manifest.id, JSON.stringify(frame.params));
+  const auto = new hb.HostBridgeClient({ socketName: 'hb_absent_' + process.pid });
+  check('H-7 默认身份取自自己的包清单（不留第二处申报）', auto.program === manifest.id, String(auto.program));
+  check('H-7 默认 requires 取自包清单', JSON.stringify(auto.requires) === JSON.stringify(manifest.requires), JSON.stringify(auto.requires));
+  const METHODS = require(path.join(ROOT, '..', '..', 'container', 'engine', 'src', 'bridge', 'methods.js')).METHODS;
+  const declared = new Set(manifest.requires.map((t) => String(t).replace('bridge:', '')));
+  const used = new Set();
+  (function scan(dir) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === 'node_modules') continue;
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { scan(p); continue; }
+      if (!/\.js$/.test(e.name)) continue;
+      for (const m of fs.readFileSync(p, 'utf8').matchAll(/\bcall\(\s*'([a-z][a-zA-Z]*\.[a-zA-Z.]+)'/g)) used.add(m[1]);
+    }
+  })(path.join(ROOT, 'src'));
+  const unlisted = [...used].filter((n) => !METHODS[n]).sort();
+  check('H-7 调用的方法全部在桥方法表在册', unlisted.length === 0, '未在册: ' + unlisted.join(', '));
+  const undeclared = [...used].filter((n) => METHODS[n] && !declared.has(METHODS[n].group)).sort();
+  check('H-7 每个调用的组都已在包清单声明', undeclared.length === 0, '缺声明: ' + undeclared.join(', ') + '（读数: ' + [...used].sort().join(', ') + '）');
+  // 对照组（双向）：夹具里加一个未声明组的调用，判据必须把它判出来
+  const ctlUndeclared = ['ui.tap'].filter((n) => METHODS[n] && !declared.has(METHODS[n].group));
+  check('H-7 对照组：未声明组的调用会被判出', ctlUndeclared.length === 1, JSON.stringify(ctlUndeclared));
+  auto.close();
 
   const passed = results.filter(Boolean).length;
   const failed = results.length - passed;
