@@ -44,6 +44,11 @@ on:
       - 'scripts/publish-userland-manifest.js'
       - 'scripts/read-userland-entry.sh'
       - 'scripts/check-userland-manifest-drift.js'
+      # 钉值表与唯一的取数口（2026-10-01 定罪）：**改了「用哪批源码」就等于改了件的字节**，
+      #   而件不可复现时线上清单与仓内声明会从此指向两批源码 ⇒ drift 必红。这两颗不在 paths 里
+      #   就是 ENV-26 那个形状的另一个宿主：改了声明、CI 全绿、线上没人重发。
+      - 'scripts/userland-sources.json'
+      - 'scripts/fetch-pinned.sh'
       # 这份声明同时决定**入口路径**（形状门禁判哪颗）与随件下发的能力判据：改它却不重跑构建，
       #   就是「仓内声明」与「线上件」再次分家的入口（与下面 channel.json 同一条教训）。
       - 'scripts/userland-verify.json'

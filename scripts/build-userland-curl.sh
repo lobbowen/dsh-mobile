@@ -14,9 +14,6 @@ HERE=$(dirname "$0")
 cd "$HERE/.."
 ROOT_DIR=$(pwd)
 
-ZLIB_VERSION=1.3.2
-OPENSSL_VERSION=3.6.3
-CURL_VERSION=8.22.0
 ANDROID_API=23
 
 if [ -z "${CC:-}" ]; then echo "::error title=缺 CC::需要 NDK 的 clang"; exit 1; fi
@@ -35,13 +32,8 @@ DEPS="$ROOT_DIR/work/curl-deps"
 mkdir -p "$DEPS"
 echo "[curl] 编译 API=$ANDROID_API  CC=$CC"
 
-# ① zlib（静态）
-ZLIB_URLS="https://zlib.net/fossils/zlib-$ZLIB_VERSION.tar.gz https://github.com/madler/zlib/archive/refs/tags/v$ZLIB_VERSION.tar.gz"
-ZLIB_OK=0
-for u in $ZLIB_URLS; do
-  if curl -fsSL "$u" -o "$ROOT_DIR/work/zlib.tar.gz" && tar tzf "$ROOT_DIR/work/zlib.tar.gz" >/dev/null 2>&1; then ZLIB_OK=1; echo "[curl] zlib 源码来自 $u"; break; fi
-done
-[ "$ZLIB_OK" = "1" ] || { echo "::error title=zlib 取不到::所有来源都失败"; exit 1; }
+# ① zlib（静态）—— 源码只从钉值表取（scripts/fetch-pinned.sh）
+bash "$ROOT_DIR/scripts/fetch-pinned.sh" --pin zlib "$ROOT_DIR/work/zlib.tar.gz"
 rm -rf "$ROOT_DIR/work/zlib" && mkdir -p "$ROOT_DIR/work/zlib"
 tar xzf "$ROOT_DIR/work/zlib.tar.gz" -C "$ROOT_DIR/work/zlib" --strip-components=1
 cd "$ROOT_DIR/work/zlib"
@@ -50,9 +42,7 @@ make -j2 >/dev/null && make install >/dev/null
 echo "[curl] zlib 就位"
 
 # ② openssl（静态、no-ui-console：去掉控制台 UI 对 stdin/stderr 的引用）
-if ! curl -fsSL "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VERSION/openssl-$OPENSSL_VERSION.tar.gz" -o "$ROOT_DIR/work/openssl.tar.gz"; then
-  echo "::error title=openssl 取不到::openssl-$OPENSSL_VERSION"; exit 1; fi
-tar tzf "$ROOT_DIR/work/openssl.tar.gz" >/dev/null 2>&1 || { echo "::error title=openssl 源码不是 tar.gz::下载被墙或错误页"; exit 1; }
+bash "$ROOT_DIR/scripts/fetch-pinned.sh" --pin openssl "$ROOT_DIR/work/openssl.tar.gz"
 rm -rf "$ROOT_DIR/work/openssl" && mkdir -p "$ROOT_DIR/work/openssl"
 tar xzf "$ROOT_DIR/work/openssl.tar.gz" -C "$ROOT_DIR/work/openssl" --strip-components=1
 cd "$ROOT_DIR/work/openssl"
@@ -71,9 +61,9 @@ make install_sw >/dev/null
 echo "[curl] openssl 就位"
 
 # ③ curl（静态链 openssl/zlib；**不传 CA 路径**，交给运行期环境）
-if ! curl -fsSL "https://curl.se/download/curl-$CURL_VERSION.tar.gz" -o "$ROOT_DIR/work/curl.tar.gz"; then
-  echo "::error title=curl 取不到::curl-$CURL_VERSION"; exit 1; fi
-tar tzf "$ROOT_DIR/work/curl.tar.gz" >/dev/null 2>&1 || { echo "::error title=curl 源码不是 tar.gz::下载被墙或错误页"; exit 1; }
+# --version-file：件版本格由这次取数写（钉值表就是它的唯一事实源），脚本里不再抄一遍版本号。
+bash "$ROOT_DIR/scripts/fetch-pinned.sh" --pin curl "$ROOT_DIR/work/curl.tar.gz" \
+  --version-file "$ROOT_DIR/$OUT/curl.version"
 rm -rf "$ROOT_DIR/work/curl-src" && mkdir -p "$ROOT_DIR/work/curl-src"
 tar xzf "$ROOT_DIR/work/curl.tar.gz" -C "$ROOT_DIR/work/curl-src" --strip-components=1
 cd "$ROOT_DIR/work/curl-src"
@@ -117,5 +107,4 @@ fi
 cp "$CAND" "$ROOT_DIR/$OUT/bin/curl"
 chmod 0755 "$ROOT_DIR/$OUT/bin/curl"
 if [ -n "${LLVM_STRIP:-}" ] && [ -x "${LLVM_STRIP}" ]; then "$LLVM_STRIP" "$ROOT_DIR/$OUT/bin/curl" && echo "[curl] 已 strip"; else echo "::error title=没有 LLVM_STRIP::不许产出臃肿件"; exit 1; fi
-echo "$CURL_VERSION" > "$ROOT_DIR/$OUT/curl.version"
 echo "[curl] 产出 $(stat -c%s "$ROOT_DIR/$OUT/bin/curl") 字节"

@@ -23,30 +23,13 @@ fi
 OUT="${OUT:-dist}"
 mkdir -p "$OUT/bin" work
 
-PAGE=https://www.sqlite.org/download.html
-echo "[sqlite3] 取下载页 $PAGE"
-if ! curl -fsSL "$PAGE" -o work/download.html; then
-  echo "::error title=下载页取不到::$PAGE（网络/DNS/证书）"
-  exit 1
-fi
-BYTES=$(stat -c%s work/download.html)
-echo "[sqlite3] 下载页 $BYTES 字节"
-
-# 页面里是相对链接（2024/sqlite-amalgamation-XXXXXXX.zip），只匹配尾巴，两种写法都吃得下。
-REL=$(grep -oE '[0-9]{4}/sqlite-amalgamation-[0-9]{7}[.]zip' work/download.html | head -n 1 || true)
-if [ -z "$REL" ]; then
-  echo "::error title=找不到 amalgamation 链接::下载页里没有 [0-9]{4}/sqlite-amalgamation-[0-9]{7}.zip（页面结构变了？前 3 条 zip 链接如下）"
-  grep -oE '[A-Za-z0-9._/-]+[.]zip' work/download.html | head -n 3 || true
-  exit 1
-fi
-URL="https://www.sqlite.org/$REL"
-VER=$(echo "$REL" | sed -E 's#.*-([0-9]{7})[.]zip#\1#')
-echo "[sqlite3] 版本码 $VER <- $URL"
-
-if ! curl -fsSL "$URL" -o work/sqlite.zip; then
-  echo "::error title=amalgamation 取不到::$URL"
-  exit 1
-fi
+# 版本与源码都只从钉值表取（scripts/userland-sources.json 的 sqlite3 那一格）。
+# 旧写法是**从 sqlite.org 的下载页现刮**第一个 amalgamation 链接：那等于「仓内声明的是哪一版」
+#   由网络决定 —— 线上清单写着 3530400，而这一轮刮到哪一版是另一回事，drift 对账就会在
+#   「没有一个人改过代码」的轮次里红在 version 格上。升级 = 主动改表里那一格（与 npm/pnpm 同一条纪律）。
+echo "[sqlite3] 取源码（钉值表的 sqlite3 那一格）"
+bash "$ROOT_DIR/scripts/fetch-pinned.sh" --pin sqlite3 "$ROOT_DIR/work/sqlite.zip" \
+  --version-file "$ROOT_DIR/$OUT/sqlite3.version"
 echo "[sqlite3] 源码包 $(stat -c%s work/sqlite.zip) 字节"
 rm -rf work/sqlite
 mkdir -p work/sqlite
@@ -63,6 +46,5 @@ echo "[sqlite3] 源码树 $SRC"
 "$CC" -O2 -DNDEBUG -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_JSON1 \
   -o "$OUT/bin/sqlite3" "$SRC/shell.c" "$SRC/sqlite3.c" -lm -ldl
 
-echo "$VER" > "$OUT/sqlite3.version"
 SIZE=$(stat -c%s "$OUT/bin/sqlite3")
 echo "[sqlite3] 产出 $OUT/bin/sqlite3（$SIZE 字节）"

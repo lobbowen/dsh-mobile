@@ -21,9 +21,6 @@ HERE=$(dirname "$0")
 cd "$HERE/.."
 ROOT_DIR=$(pwd)
 
-GIT_VERSION=2.55.0
-SRC_URL=https://mirrors.kernel.org/pub/software/scm/git/git-${GIT_VERSION}.tar.xz
-
 if [ -z "${CC:-}" ]; then
   echo "::error title=缺 CC::需要 CC（aarch64-linux-android21-clang）"
   exit 1
@@ -32,11 +29,11 @@ fi
 OUT="${OUT:-dist}"
 mkdir -p "$ROOT_DIR/$OUT/bin" work
 
-echo "[git] 取源码 $SRC_URL"
-if ! curl -fsSL "$SRC_URL" -o work/git.tar.xz; then
-  echo "::error title=源码取不到::$SRC_URL"
-  exit 1
-fi
+# 源码只从钉值表取（scripts/fetch-pinned.sh）：件的字节身份由仓内声明决定，不由哪条镜像先答决定。
+# --version-file：件版本格由这次取数写，脚本里不再抄一遍版本号。
+echo "[git] 取源码（钉值表的 git 那一格）"
+bash "$ROOT_DIR/scripts/fetch-pinned.sh" --pin git "$ROOT_DIR/work/git.tar.xz" \
+  --version-file "$ROOT_DIR/$OUT/git.version"
 echo "[git] 源码包 $(stat -c%s work/git.tar.xz) 字节"
 rm -rf work/git-src && mkdir -p work/git-src
 if ! tar xJf work/git.tar.xz -C work/git-src --strip-components=1; then
@@ -51,9 +48,6 @@ echo "[git] 源码树就位"
 #   而 git **本体**仍动态链 libc —— 容器 Linux 语义靠 LD_PRELOAD，静态件会绕过整层
 #   （verify-userland-artifact.sh 的形态门禁就是钉这条）。
 DEPS="$ROOT_DIR/work/deps"
-ZLIB_VERSION=1.3.2
-OPENSSL_VERSION=3.6.3
-CURL_VERSION=8.22.0
 mkdir -p "$DEPS"
 TC_DIR=$(dirname "$CC")
 # ── 编译 API 提到 23 ────────────────────────────────────────────────────
@@ -77,20 +71,10 @@ fi
 echo "[git] NDK root = $ANDROID_NDK_ROOT"
 
 # ① zlib（curl 与 git 都要它）
-# 多来源 + 解包前先验 tar：zlib.net 是常见的不稳定源（CI 实证：同一 URL 上一轮成功、这一轮给回非 gzip 内容）。
-ZLIB_URLS="https://zlib.net/fossils/zlib-$ZLIB_VERSION.tar.gz https://github.com/madler/zlib/archive/refs/tags/v$ZLIB_VERSION.tar.gz"
-ZLIB_OK=0
-for u in $ZLIB_URLS; do
-  if curl -fsSL "$u" -o "$ROOT_DIR/work/zlib.tar.gz" && tar tzf "$ROOT_DIR/work/zlib.tar.gz" >/dev/null 2>&1; then
-    ZLIB_OK=1
-    echo "[git] zlib 源码来自 $u"
-    break
-  fi
-done
-if [ "$ZLIB_OK" != "1" ]; then
-  echo "::error title=zlib 取不到::所有来源都失败或内容不是 tar.gz"
-  exit 1
-fi
+# 来源与钉值同 scripts/userland-sources.json 那一格：多来源只服务于**镜像故障转移**，
+#   而换来源绝不等于换字节 —— 不合钉值就退 2，宁可不编译（件按版本长缓存，换一批没身份的字节
+#   上机就是「同一个号，两台设备两批真身」）。
+bash "$ROOT_DIR/scripts/fetch-pinned.sh" --pin zlib "$ROOT_DIR/work/zlib.tar.gz"
 rm -rf "$ROOT_DIR/work/zlib" && mkdir -p "$ROOT_DIR/work/zlib"
 tar xzf "$ROOT_DIR/work/zlib.tar.gz" -C "$ROOT_DIR/work/zlib" --strip-components=1
 cd "$ROOT_DIR/work/zlib"
@@ -101,12 +85,8 @@ ZLIB_LIBS=$(ls "$DEPS/lib" | tr "\n" " ")
 echo "[git] zlib 就位：$ZLIB_LIBS"
 
 # ② OpenSSL（静态 libssl/libcrypto；https 的 TLS 由它提供）
-if ! curl -fsSL "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VERSION/openssl-$OPENSSL_VERSION.tar.gz" -o "$ROOT_DIR/work/openssl.tar.gz"; then
-  echo "::error title=openssl 取不到::openssl-$OPENSSL_VERSION 源码"
-  exit 1
-fi
+bash "$ROOT_DIR/scripts/fetch-pinned.sh" --pin openssl "$ROOT_DIR/work/openssl.tar.gz"
 rm -rf "$ROOT_DIR/work/openssl" && mkdir -p "$ROOT_DIR/work/openssl"
-tar tzf "$ROOT_DIR/work/openssl.tar.gz" >/dev/null 2>&1 || { echo "::error title=openssl 源码不是 tar.gz::下载被墙或返回了错误页"; exit 1; }
 tar xzf "$ROOT_DIR/work/openssl.tar.gz" -C "$ROOT_DIR/work/openssl" --strip-components=1
 cd "$ROOT_DIR/work/openssl"
 # openssl 的 android 配置认 ANDROID_NDK_ROOT / ANDROID_NDK_HOME 与 ANDROID_API；
@@ -131,13 +111,9 @@ fi
 make install_sw >/dev/null
 echo "[git] openssl 就位：$(ls "$DEPS/lib" | grep -c "[.]a") 个 .a"
 
-# ③ libcurl（只留 http/https，静态）
-if ! curl -fsSL "https://curl.se/download/curl-$CURL_VERSION.tar.gz" -o "$ROOT_DIR/work/curl.tar.gz"; then
-  echo "::error title=curl 取不到::curl-$CURL_VERSION 源码"
-  exit 1
-fi
+# ③ libcurl（只留 http/https，静态）—— 与 curl 那件取同一颗钉值（同一批源码）
+bash "$ROOT_DIR/scripts/fetch-pinned.sh" --pin curl "$ROOT_DIR/work/curl.tar.gz"
 rm -rf "$ROOT_DIR/work/curl" && mkdir -p "$ROOT_DIR/work/curl"
-tar tzf "$ROOT_DIR/work/curl.tar.gz" >/dev/null 2>&1 || { echo "::error title=curl 源码不是 tar.gz::下载被墙或返回了错误页"; exit 1; }
 tar xzf "$ROOT_DIR/work/curl.tar.gz" -C "$ROOT_DIR/work/curl" --strip-components=1
 cd "$ROOT_DIR/work/curl"
 # openssl 的 install_sw 会装 .pc 文件；curl 的 Configure 靠 pkg-config 认它最稳
@@ -230,21 +206,18 @@ cd "$ROOT_DIR/work/git-src"
 
 cd "$ROOT_DIR/work/git-src"
 
-# ── Termux 的 bionic 补丁集（钉到它们的 commit，构建可复现）────────────────────────────
+# ── Termux 的 bionic 补丁集（每颗钉在钉值表里，键名 git-<补丁名>）────────────────────
 # 为什么必须打：git 上游按 Linux 假设写代码，安卓的 bionic 有几处不满足 ——
 #   · run-command.c：用了 pthread cancellation，bionic 没有（用 #ifndef __ANDROID__ 包起来）
-#   · config.mak.uname：去掉 HAVE_SYNC_FILE_RANGE（API 26 才有，我们 target 21）
+#   · config.mak.uname.patch：去掉 HAVE_SYNC_FILE_RANGE（API 26 才有，我们 target 21）
 #   · disable-fdsan / disable_daemon_syslog：安卓的 fdsan 与无 syslog 的实情
 #   · compat-posix.h / config.c / help.c / tempfile.c：其余 bionic 缺口
 # 补丁失败必须**硬红**：静默失败会得到一个「看着编过了、其实少一块」的 git。
-TERMUX_COMMIT=a897f5641358fad33d5d6e76c65335695b1da0fc
+# 名单与表里的 git-*.patch 键必须**集合相等**（container/engine/test/source-pin-test.js 判）：
+#   名单漏一颗 = 补丁没打上而 CI 不红；表多一颗 = 死格，改它没人重发。
 PATCHES="config.mak.uname.patch run-command.c.patch disable-fdsan.patch disable_daemon_syslog.patch compat-posix.h.patch config.c.patch help.c.patch tempfile.c.patch"
 for p in $PATCHES; do
-  URL="https://raw.githubusercontent.com/termux/termux-packages/$TERMUX_COMMIT/packages/git/$p"
-  if ! curl -fsSL "$URL" -o "$ROOT_DIR/work/$p"; then
-    echo "::error title=补丁取不到::$URL"
-    exit 1
-  fi
+  bash "$ROOT_DIR/scripts/fetch-pinned.sh" --pin "git-$p" "$ROOT_DIR/work/$p"
   if ! patch -p1 -i "$ROOT_DIR/work/$p"; then
     echo "::error title=补丁打不上::$p —— 上游 git 版本与 Termux 补丁集不匹配？"
     exit 1
@@ -352,7 +325,6 @@ if [ "$TREE" -gt 60 ]; then
   echo "::error title=件太大::${TREE} MiB —— 链接农场没生效？（bin/git $BINSIZE 字节）"
   exit 1
 fi
-echo "$GIT_VERSION" > "$ROOT_DIR/$OUT/git.version"
 SIZE=$(stat -c%s "$ROOT_DIR/$OUT/bin/git")
 SUBS=$(ls "$ROOT_DIR/$OUT/libexec/git-core" | wc -l)
 echo "[git] 产出 bin/git（$SIZE 字节），libexec/git-core $SUBS 项"
