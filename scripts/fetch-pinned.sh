@@ -69,13 +69,29 @@ if [ "${1:-}" = "--pin" ]; then
     die "钉值表这一格读不通：$KEY"
   fi
   { IFS= read -r WANT; IFS= read -r VER; mapfile -t URLS; } <<< "$META"
+elif [ "${1:-}" = "--time-base" ]; then
+  # 件里嵌的构建时间基准也住这张表，而表的读者必须只有本脚本一个（⑦ 那条判据）。
+  # 校验形状与「必须早于现在」都在这里判：钉在未来等于没钉（墙钟还没走到，重建每次都取 time()）。
+  if ! TB="$(node -e '
+    const path = require("node:path");
+    let tab;
+    try { tab = require(path.resolve(process.argv[1])); } catch (e) { console.error("钉值表读不出: " + e.message); process.exit(1); }
+    const v = tab.buildTimeEpoch;
+    if (!Number.isInteger(v) || v <= 0) { console.error("buildTimeEpoch 必须是正整数秒（现在: " + JSON.stringify(v) + "）"); process.exit(1); }
+    if (v * 1000 >= Date.now()) { console.error("buildTimeEpoch=" + v + " 不早于现在，钉不住墙钟"); process.exit(1); }
+    process.stdout.write(String(v));
+  ' "$TABLE")"; then
+    die "钉值表的 buildTimeEpoch 这一格读不通"
+  fi
+  echo "$TB"
+  exit 0
 elif [ $# -ge 3 ]; then
   OUT="${1:-}"
   WANT="${2:-}"
   shift 2
   URLS=("$@")
 else
-  die "用法: $0 --pin <键> <落点>  或  $0 <落点> <期望 sha256> <url> [url...]（参数少一个都不算数）"
+  die "用法: $0 --pin <键> <落点>  或  $0 --time-base  或  $0 <落点> <期望 sha256> <url> [url...]（参数少一个都不算数）"
 fi
 
 [ -n "$OUT" ] && [ -n "$WANT" ] && [ "${#URLS[@]}" -gt 0 ] \

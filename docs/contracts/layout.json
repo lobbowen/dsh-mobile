@@ -341,6 +341,7 @@
     "build-native-capabilities.sh": "L0",
     "build-userland-sqlite3.sh": "cross",
     "verify-userland-artifact.sh": "cross",
+    "verify-userland-build-date.sh": "cross",
     "package-userland.sh": "cross",
     "bionic-compat.c": "L0",
     "native-capabilities-fingerprint.sh": "cross",

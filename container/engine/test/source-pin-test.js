@@ -464,7 +464,7 @@ const PIECES = Object.keys(JSON.parse(fs.readFileSync(VERIFY, 'utf8')).criteria)
 // ---------------------------------------------------------------------------
 {
   const wfText = fs.readFileSync(WF, 'utf8');
-  const required = ['scripts/fetch-pinned.sh', 'scripts/userland-sources.json'];
+  const required = ['scripts/fetch-pinned.sh', 'scripts/userland-sources.json', 'scripts/verify-userland-build-date.sh'];
   const missing = pathsCover(wfText, required);
   check('⑧ build-userland 的 paths 覆盖钉值表与取数口（不在里面=改了源码来源而没有任何 job 会动，线上清单与仓内声明分家而 CI 全绿）',
     missing.length === 0, 'paths 缺：' + missing.join(', '));
@@ -524,6 +524,93 @@ const PIECES = Object.keys(JSON.parse(fs.readFileSync(VERIFY, 'utf8')).criteria)
     /用在赋值之前/.test(rootRootFindings('bash "$ROOT_DIR/f" x\nROOT_DIR=$(pwd)\n').finding));
   check('⑨ 对照组：只在注释里提 $ROOT_DIR 不算宿主（否则改注释也会红）',
     rootRootFindings('# 这里用 $ROOT_DIR 拼路径\necho hi\n').uses === false);
+}
+
+// ---------------------------------------------------------------------------
+//  ⑩ 件字节里的构建时间（ENV-32）：取 openssl 的构建口必须钉时间基准，且判据真能红
+// ---------------------------------------------------------------------------
+// 实据（2026-10-01 现读上游 openssl 3.6.3）：util/mkbuildinf.pl:19 是
+//   `my $date = gmtime($ENV{'SOURCE_DATE_EPOCH'} // time()) . " UTC";`，
+// 经 crypto/build.info:118 的 GENERATE[buildinf.h] 落成 `#define DATE "built on: …"`，
+// 再静态链进 curl/git 的件。墙钟进字节 ⇒ 同一版本号每次重建都是新 sha ⇒ 内容寻址的旧键留在桶里、
+// 设备按 sha 逐件比对会全体重下（drift 第 ② 格因此永远归不了零）。
+{
+  const VDATE = path.join(ROOT, 'scripts', 'verify-userland-build-date.sh');
+
+  // 纯函数：真脚本与合成样本走同一把尺子，否则对照组无从构造。注释里提及不算（判执行面）。
+  function timeBaseFindings(src) {
+    const body = stripComments(src);
+    if (!/--pin\s+openssl\b/.test(body)) return { uses: false };
+    const out = [];
+    if (!/SOURCE_DATE_EPOCH="\$\(bash "\$ROOT_DIR\/scripts\/fetch-pinned\.sh" --time-base\)"/.test(body)) {
+      out.push('没从钉值表取时间基准（SOURCE_DATE_EPOCH 缺省 ⇒ 件里嵌的是当时的墙钟）');
+    }
+    if (!/verify-userland-build-date\.sh/.test(body)) {
+      out.push('建完没判就交货（生成出来的那一行没人比对，「设过环境变量」不等于生效）');
+    }
+    return { uses: true, findings: out, ok: out.length === 0 };
+  }
+
+  const cBuilders = fs.readdirSync(path.join(ROOT, 'scripts'))
+    .filter((n) => n.startsWith('build-userland-') && n.endsWith('.sh'));
+  const cUsers = cBuilders.filter((n) => timeBaseFindings(
+    fs.readFileSync(path.join(ROOT, 'scripts', n), 'utf8')).uses);
+  const cBad = [];
+  for (const n of cUsers) {
+    for (const f of timeBaseFindings(fs.readFileSync(path.join(ROOT, 'scripts', n), 'utf8')).findings) cBad.push(n + '：' + f);
+  }
+  check('⑩ 每一颗取 openssl 源的构建口都钉了时间基准并判过生成行（少一颗就是那件的 sha 跟着钟走）',
+    cBad.length === 0, cBad.join(' ;; '));
+  check('⑩ 读数：命中面非零（0 个宿主=这把尺子空转）', cUsers.length >= 2, cUsers.join(','));
+
+  const cBoth = 'bash "$ROOT_DIR/scripts/fetch-pinned.sh" --pin openssl o.tar.gz\n'
+    + 'export SOURCE_DATE_EPOCH="$(bash "$ROOT_DIR/scripts/fetch-pinned.sh" --time-base)"\n'
+    + 'bash "$ROOT_DIR/scripts/verify-userland-build-date.sh" "$ROOT_DIR/work/openssl"\n';
+  check('⑩ 对照组：钉基准 + 判生成行两格都在 → 不误伤', timeBaseFindings(cBoth).ok === true);
+  check('⑩ 对照组：删掉取基准那一行就抓得到（上一条不是恒真）',
+    timeBaseFindings(cBoth.replace(/^export SOURCE_DATE_EPOCH.*$/m, '')).findings.length === 1);
+  check('⑩ 对照组：只设环境变量、建完不判 → 抓到',
+    /建完没判/.test(timeBaseFindings(cBoth.replace(/^bash.*verify-userland-build-date.*$/m, '')).findings.join('')));
+  check('⑩ 对照组：不取 openssl 的构建口（jq/sqlite3 那一类）不算宿主',
+    timeBaseFindings('bash "$ROOT_DIR/scripts/fetch-pinned.sh" --pin zlib z.tar.gz\n').uses === false);
+
+  // 判据本身双向跑：绿侧必须是钉住的那一行的形状，红侧要真红。
+  const cEpoch = JSON.parse(fs.readFileSync(TABLE, 'utf8')).buildTimeEpoch;
+  const cExpect = spawnSync('/bin/date', ['-u', '-d', '@' + cEpoch, '+%a %b %e %H:%M:%S %Y'],
+    { encoding: 'utf8', env: Object.assign({}, process.env, { LC_ALL: 'C' }) }).stdout.trim();
+  const cFx = uniq('ossrc');
+  fs.mkdirSync(path.join(cFx, 'include', 'internal'), { recursive: true });
+  const cHead = path.join(cFx, 'include', 'internal', 'buildinf.h');
+  const runVDate = () => spawnSync('/bin/bash', [VDATE, cFx], { encoding: 'utf8' });
+
+  fs.writeFileSync(cHead, '#define PLATFORM "platform: android-arm64"\n#define DATE "built on: ' + cExpect + ' UTC"\n');
+  const vg = runVDate();
+  check('⑩ 判据绿侧：件里是钉住的基准 → 过关', vg.status === 0, String(vg.stdout) + String(vg.stderr));
+
+  fs.writeFileSync(cHead, '#define DATE "built on: Thu Oct 01 05:00:00 2026 UTC"\n');
+  const vw = runVDate();
+  check('⑩ 判据红侧：件里是别的时刻（墙钟）→ 必须红，否则「钉了」与「没钉」在 CI 里长一个样', vw.status === 1);
+  check('⑩ 红侧要把两侧读数都打出来（只说不合格=下一轮还是猜）',
+    /实际=.*Thu Oct 01/.test(vw.stdout) && /期望=.*UTC/.test(vw.stdout), String(vw.stdout));
+
+  fs.writeFileSync(cHead, '#define DATE "built on: ' + cEpoch + ' UTC"\n');
+  check('⑩ 对照组：epoch 裸数混过年份不算钉住（判的是那一行的形状，不是里面有没有 2026）', runVDate().status === 1);
+
+  const cNone = uniq('osnone');
+  fs.mkdirSync(cNone, { recursive: true });
+  const vn = spawnSync('/bin/bash', [VDATE, cNone], { encoding: 'utf8' });
+  check('⑩ 红侧：抓不到构建信息头必须红 —— 把「找不到」当清白是空转门禁的入口（三态判据）',
+    vn.status === 1 && /找不到构建信息头/.test(String(vn.stdout) + String(vn.stderr)), String(vn.stdout) + String(vn.stderr));
+
+  const vBadTable = uniq('badtb');
+  fs.mkdirSync(path.join(vBadTable, 'scripts'), { recursive: true });
+  fs.copyFileSync(VDATE, path.join(vBadTable, 'scripts', 'verify-userland-build-date.sh'));
+  fs.copyFileSync(FETCH, path.join(vBadTable, 'scripts', 'fetch-pinned.sh'));
+  fs.writeFileSync(path.join(vBadTable, 'scripts', 'userland-sources.json'),
+    JSON.stringify({ buildTimeEpoch: Math.floor(Date.now() / 1000) + 86400, sources: {} }, null, 2));
+  const vt = spawnSync('/bin/bash', [path.join(vBadTable, 'scripts', 'verify-userland-build-date.sh'), cFx], { encoding: 'utf8' });
+  check('⑩ 对照组：把基准钉到未来（等于没钉）→ 读取口当场红，不静默放行',
+    vt.status !== 0 && /不早于现在/.test(String(vt.stdout) + String(vt.stderr)), String(vt.stdout) + String(vt.stderr));
 }
 
 finish();
