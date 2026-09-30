@@ -408,15 +408,15 @@ jobs:
           # ── 版本门禁（VERSION-GATE 3/4：判据 scripts/verify-apk-version-gate.sh）───────
           # 这条链路发的是**另一个 run** 的 APK，所以比较基准取那个 run 的提交里的清单（第 4 个参数），
           # 而不是本 workflow 自己 checkout 的那份 —— 否则发的包和读出的版本对不上，门禁成了自证。
-          # 只判滚动通道：显式指定的其它 tag 是人自己开的新地址，不覆盖任何已交付的东西。
+          # 现在**每个 tag 都过门禁**（以前只判滚动通道）：不为收紧回退判定，而为下面这两格事实 ——
+          # 新地址的门照样落「首次发布 → 显式放行」，但 VG_SRC_DIR 由此留下**那个包自己**的清单，
+          # 回执记账才有真数可记。拿本仓 checkout 的 version.json 给别的 run 的包记账，就是往账本
+          # 里写一个假下界（账本一旦被写假，取严的那一格反而比线上更宽松，正是要防的形状）。
           # VG_SRC_DIR 让门禁把**它判定读到的那份清单**留一份出来，下面直接上传那一份：
           # 「校验的清单」与「发布的清单」因此是同一个字节串，不是两次各自取数。
-          MANIFEST=""
-          if [ "$TAG" = "apk-latest" ]; then
-            VG_SRC_DIR=/tmp/channel-manifest \
-              bash scripts/check-apk-release-version.sh version.json "$TAG" explicit "${{ steps.get.outputs.run_id }}"
-            MANIFEST=/tmp/channel-manifest/version.json
-          fi
+          VG_SRC_DIR=/tmp/channel-manifest \
+            bash scripts/check-apk-release-version.sh version.json "$TAG" explicit "${{ steps.get.outputs.run_id }}"
+          MANIFEST=/tmp/channel-manifest/version.json
 
           # tag 固定（默认 apk-latest）：下载网址稳定，不必每轮去查新地址。
           # 「确保 Release 在 → 覆盖上传（含孤立资产回退）→ 回读确认字节数」全部在
@@ -426,7 +426,7 @@ jobs:
           # 资产名取 file 的 basename（`#` 后面只是 label），所以 MANIFEST 必须是门禁
           # 留出来的、真名叫 version.json 的那份文件；取数只在 check-apk-release-version.sh 一处。
           EXTRA=(/tmp/app-release.apk)
-          if [ -n "$MANIFEST" ]; then
+          if [ "$TAG" = "apk-latest" ]; then
             EXTRA+=("$MANIFEST")
             echo "[version] latest 清单将与 APK 同批覆盖（来源 run ${{ steps.get.outputs.run_id }}）"
           fi
@@ -437,6 +437,13 @@ jobs:
             --notes "Android 原生 Node 容器 APK。来源 run: ${{ steps.get.outputs.run_id }}" \
             --prune '^app-debug\.apk$' \
             "${EXTRA[@]}"
+          # ── 发布回执记账（VERSION-GATE 记账口 3/4）：排在投递成功之后，同 fast-apk 那条理由。
+          #    账本记的是「这个码已经从这个网址发出去了」，所以非滚动 tag 也要记 —— 有人从一次性
+          #    地址装了更高的码，滚动通道就不能再发更低的，而这条链不记就永远没人知道。
+          bash scripts/append-apk-receipt.sh release-admin-publish explicit "$MANIFEST" \
+            /tmp/app-release.apk \
+            "https://github.com/${{ github.repository }}/releases/download/${TAG}/app-release.apk" \
+            "${{ steps.get.outputs.run_id }}"
           echo
           echo "下载地址:"
           echo "https://github.com/${{ github.repository }}/releases/download/${TAG}/app-release.apk"
@@ -655,12 +662,11 @@ jobs:
           # repack 改的是包内字节（注入 libc++_shared.so）但**不换版本号**，所以这里比较的是
           # 「来源 run 那份清单」与线上：同版本在显式通道放行正是本条链路的正当用法（重投修复过的包），
           # 而把 latest 换成一个更旧的号仍然判红。清单同批同步，理由与 publish 模式那条一样。
-          MANIFEST=""
-          if [ "$TAG" = "apk-latest" ]; then
-            VG_SRC_DIR=/tmp/repack-manifest \
-              bash scripts/check-apk-release-version.sh version.json "$TAG" explicit "${{ steps.src.outputs.run_id }}"
-            MANIFEST=/tmp/repack-manifest/version.json
-          fi
+          # 每个 tag 都过取数（同 publish 那处改动的理由）：回执记账要的是**来源 run** 的清单，
+          # 而 repack 的产物字节与那个 run 的原包不同 —— 所以账里的 apk_sha 必须取重签那份（下面传的就是它）。
+          VG_SRC_DIR=/tmp/repack-manifest \
+            bash scripts/check-apk-release-version.sh version.json "$TAG" explicit "${{ steps.src.outputs.run_id }}"
+          MANIFEST=/tmp/repack-manifest/version.json
 
           # repack 换的是包内字节，但投出去必须用设备真正去读的那个**资产名**：
           # gh 的资产名取 file 的 basename（`#` 后面只是 label）—— 旧写法把
@@ -672,7 +678,7 @@ jobs:
           STAGE="$(mktemp -d)"
           cp /tmp/app-signed.apk "$STAGE/app-release.apk"
           EXTRA=("$STAGE/app-release.apk")
-          if [ -n "$MANIFEST" ]; then
+          if [ "$TAG" = "apk-latest" ]; then
             EXTRA+=("$MANIFEST")
             echo "[version] latest 清单将与重签包同批覆盖（来源 run ${{ steps.src.outputs.run_id }}）"
           fi
@@ -681,6 +687,12 @@ jobs:
             --notes "repack from run ${{ steps.src.outputs.run_id }}：注入 libc++_shared.so，修复 cannot locate symbol。" \
             --prune '^app-debug\.apk$' \
             "${EXTRA[@]}"
+          # ── 发布回执记账（VERSION-GATE 记账口 4/4）：记的是**这一步真正投出去的字节**（重签那份），
+          #    不是来源 run 的原包 —— 两个 sha 不同，而设备装到的是前者。
+          bash scripts/append-apk-receipt.sh release-admin-repack explicit "$MANIFEST" \
+            "$STAGE/app-release.apk" \
+            "https://github.com/${{ github.repository }}/releases/download/${TAG}/app-release.apk" \
+            "${{ steps.src.outputs.run_id }}"
           rm -rf "$STAGE"
 
       - name: Report to ci-ok

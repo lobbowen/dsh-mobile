@@ -801,6 +801,12 @@ jobs:
             --prune '^app-debug\.apk$' \
             "$STAGE/app-release.apk" version.json \
             || { echo "::error title=发布失败::上方宿主已说明哪一步没成 —— 不许把这一步当发布成功。"; exit 1; }
+          # ── 发布回执记账（VERSION-GATE 记账口 2/4）：排在投递成功之后，同 fast-apk 那条理由。
+          #    本步没有 set -e（见上），所以记账失败也要显式判 rc —— 账没记上就是这一轮没成。
+          bash scripts/append-apk-receipt.sh build-apk explicit version.json \
+            "$STAGE/app-release.apk" \
+            "https://github.com/${{ github.repository }}/releases/download/${TAG}/app-release.apk" \
+            || { echo "::error title=回执记账::上方宿主已说明为什么没记上 —— 本轮判红（下界不完整时，下一轮的门禁不可信）。"; exit 1; }
           rm -rf "$STAGE"
           echo "=== 发布完成 ==="
           echo "下载地址: https://github.com/${{ github.repository }}/releases/download/${TAG}/app-release.apk"

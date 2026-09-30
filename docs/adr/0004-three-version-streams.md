@@ -32,7 +32,7 @@
 
 | 流 | 门禁 | 拦的是 |
 |---|---|---|
-| OS | `scripts/verify-apk-version-gate.sh`（fast-apk / build-apk / release-admin 四个发布口共用）：回退硬红；同版本仅显式通道放行 | 已升级设备收不到新版本；同号换字节 |
+| OS | `scripts/verify-apk-version-gate.sh`（fast-apk / build-apk / release-admin 四个发布口共用）：回退硬红；同版本仅显式通道放行；线上读数取**两格并取严**（归档族/Release 清单 + 回执账本） | 已升级设备收不到新版本；同号换字节；参照物被人删小后门自动变松 |
 | Program | `program-ota` 发布前检查 `program-<version>` Release 是否已存在 → 已存在即硬红 | 版本复用导致设备永不更新 |
 | Runtime | 供给清单版本 + 哈希核验 | 运行时换字节而版本不变 |
 
@@ -41,6 +41,17 @@
 > 发布面读 `apk-latest` 的 `version.json` 资产，日常链读它自己写的 `v<versionName>` 归档族资产名
 > （`scripts/read-archived-shell-version.sh`）。日常链原先拿发布面别名当参照物，而它从不写那条 ⇒ 门每次落
 > 「首次发布」侧放行，从未比过任何一个数。
+>
+> 同日 DS-16 再补一条，它修正的是上面那句「取数按通道形状分两处」还**不够**：**线上那份参照物本身是可以被删的**，
+> 所以它不能是唯一下界。实测 2026-09-30 当天日常链的归档族从 44 掉到 34（6 个 `v<数字>` Release 消失，删除动作
+> 不在本仓任何代码里），门拿着变小了的参照物继续判绿。现在 OS 流的门禁吃**两格**：线上那一格（形状同上）+
+> 回执账本那一格（`ci-receipts` 分支上只追加的 `apk-receipts.log`，写入唯一入口 `scripts/append-apk-receipt.sh`、
+> 取数 `scripts/read-apk-receipts.sh`，四个发布口发布成功后各自记一笔，推送永不 `--force`），
+> 两格**取严**（按高的那格比）；「有一次发布没记上账」与「线上那格被删小」都必须是看得见的事。
+> 账本未起账时自动通道判红，起账只能由显式通道（`fast-*` tag / 人工触发）做一次——
+> 这与「不存在 / 取不到」的三态纪律是同一条（宿主：`scripts/read-release-asset.sh`，退 0=取到 / 10=确实没有 / 2=看不清，
+> 退 2 一律禁止发布，见 `docs/runbook/release.md` §6）：「没有」与「看不清」不许混成一个结局。
+
 
 ---
 

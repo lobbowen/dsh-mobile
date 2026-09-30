@@ -632,6 +632,8 @@ if (fs.existsSync(VGATE)) {
     return p;
   };
   const v8 = vk('new8.json', 8), v7 = vk('pub7.json', 7), v6 = vk('new6.json', 6), vSame = vk('same.json', 7);
+  // 账本那格的夹具：与线上格**分文件**，这样「取严按了哪一格」在断言里看得出来源。
+  const l7 = vk('ledger7.json', 7), l8 = vk('ledger8.json', 8), l6 = vk('ledger6.json', 6);
   const vBad = path.join(vTmp, 'bad.json');
   fs.writeFileSync(vBad, '{"shell":{"versionName":"7"}}');
   const vNotInt = path.join(vTmp, 'notint.json');
@@ -641,25 +643,27 @@ if (fs.existsSync(VGATE)) {
     return { rc: r.status === null ? -1 : r.status, out: String(r.stdout || '').trim(), err: String(r.stderr || '') };
   };
   // 参照物名是**必填第 4 格**（DS-14）：红点必须说清真比的是谁。所以下面每条都带标签。
-  const up = runV([v8, v7, 'auto', 'apk-latest']);
+  // 第 5 格（回执账本）也是必填；下面这批旧行一律喂「与线上同码」的账本 —— 两格一致是正常态，
+  // 这些行的判词就该与两源引入前完全相同（喂 '-' 会让它们改判，等于把改动藏进夹具）。
+  const up = runV([v8, v7, 'auto', 'apk-latest', l7]);
   check('版本门禁：前进放行并打出两端的数', up.rc === 0 && up.out.includes('版本前进（7 → 8）'), JSON.stringify(up));
   // 同版本这一格**只按通道分叉**，两侧都跑：只测「显式放行」就等于把自动通道的红写成了装饰。
-  const sameExplicit = runV([vSame, v7, 'explicit', 'apk-latest']);
+  const sameExplicit = runV([vSame, v7, 'explicit', 'apk-latest', l7]);
   check('版本门禁：同版本 + 显式通道放行（修复投递/重传是正当用途）',
     sameExplicit.rc === 0 && sameExplicit.out.includes('同版本重发'), JSON.stringify(sameExplicit));
-  const sameAuto = runV([vSame, v7, 'auto', 'apk-latest']);
+  const sameAuto = runV([vSame, v7, 'auto', 'apk-latest', l7]);
   check('版本门禁：同版本 + 自动通道判红（动了 APK 内容就必须 bump）',
     sameAuto.rc === 1 && sameAuto.err.includes('release.md'), JSON.stringify(sameAuto));
-  const backAuto = runV([v6, v7, 'auto', 'apk-latest']);
-  const backExplicit = runV([v6, v7, 'explicit', 'apk-latest']);
+  const backAuto = runV([v6, v7, 'auto', 'apk-latest', l7]);
+  const backExplicit = runV([v6, v7, 'explicit', 'apk-latest', l7]);
   check('版本门禁：回退两种通道都判红（不可逆，显式通道也不放过）',
     backAuto.rc === 1 && backExplicit.rc === 1
       && backAuto.err.includes('不可逆') && backExplicit.err.includes('不可逆'),
     JSON.stringify({ auto: backAuto.rc, explicit: backExplicit.rc }));
-  const firstExplicit = runV([v8, '-', 'explicit', 'archive']);
+  const firstExplicit = runV([v8, '-', 'explicit', 'archive', '-']);
   check('版本门禁：线上无读数 + 显式通道放行（首次发布）',
     firstExplicit.rc === 0 && firstExplicit.out.includes('显式通道放行'), JSON.stringify(firstExplicit));
-  const firstAuto = runV([v8, '-', 'auto', 'archive']);
+  const firstAuto = runV([v8, '-', 'auto', 'archive', '-']);
   check('版本门禁：线上无读数 + 自动通道判红（不许把「不知道线上是什么」发成正常）',
     firstAuto.rc === 1, JSON.stringify(firstAuto));
   // 2026-09-30 定罪的形状：红点里写死「apk-latest」，而实际参照物早已换掉 —— 读数会指着无关的
@@ -667,23 +671,78 @@ if (fs.existsSync(VGATE)) {
   check('版本门禁：无线上读数判红时点名**传入的**参照物（不复述成写死的通道名）',
     firstAuto.rc === 1 && firstAuto.err.includes('archive 上没有版本读数'), JSON.stringify(firstAuto));
   check('版本门禁：放行读数行也带参照物（否则日志里两条链路的读数长得一样）',
-    runV([v8, v7, 'auto', 'archive']).out.includes('参照物=archive'),
-    JSON.stringify(runV([v8, v7, 'auto', 'archive'])));
+    runV([v8, v7, 'auto', 'archive', l7]).out.includes('参照物=archive'),
+    JSON.stringify(runV([v8, v7, 'auto', 'archive', l7])));
   // 少一个参数必须落回「无从校验」，不许缺省成某个通道名（缺省值就是第二份真相）。
   check('版本门禁：不传参照物名 → 退 2（第 4 格没有缺省值）',
     runV([v8, v7, 'auto']).rc === 2 && runV([v8, v7, 'auto']).err.includes('用法'),
     JSON.stringify(runV([v8, v7, 'auto'])));
   // 退 2 = 「无从校验」，与退 1「判红」分开：调用方两种都不许发，但红点位置不同。
   check('版本门禁：本次清单缺 versionCode → 退 2（无从校验不放行）',
-    runV([vBad, v7, 'auto', 'apk-latest']).rc === 2, JSON.stringify(runV([vBad, v7, 'auto', 'apk-latest'])));
+    runV([vBad, v7, 'auto', 'apk-latest', l7]).rc === 2, JSON.stringify(runV([vBad, v7, 'auto', 'apk-latest', l7])));
   check('版本门禁：versionCode 非整数 → 退 2（字符串比较会把 10 判成小于 9）',
-    runV([vNotInt, v7, 'auto', 'apk-latest']).rc === 2, JSON.stringify(runV([vNotInt, v7, 'auto', 'apk-latest'])));
+    runV([vNotInt, v7, 'auto', 'apk-latest', l7]).rc === 2, JSON.stringify(runV([vNotInt, v7, 'auto', 'apk-latest', l7])));
   check('版本门禁：线上清单坏了 → 退 2（读数丢失不等于首次发布）',
-    runV([v8, vBad, 'explicit', 'apk-latest']).rc === 2, JSON.stringify(runV([v8, vBad, 'explicit', 'apk-latest'])));
+    runV([v8, vBad, 'explicit', 'apk-latest', l7]).rc === 2, JSON.stringify(runV([v8, vBad, 'explicit', 'apk-latest', l7])));
   check('版本门禁：本次清单文件不存在 → 退 2',
-    runV([path.join(vTmp, 'nope.json'), v7, 'auto', 'apk-latest']).rc === 2);
+    runV([path.join(vTmp, 'nope.json'), v7, 'auto', 'apk-latest', l7]).rc === 2);
   check('版本门禁：通道词不认 → 退 2（少一个通道就等于自动走放行那侧）',
-    runV([v8, v7, 'sometimes', 'apk-latest']).rc === 2);
+    runV([v8, v7, 'sometimes', 'apk-latest', l7]).rc === 2);
+
+  // ── 两格参照物（债表 DS-16）：线上那一格可以被删小，判据必须同时看回执账本 ──
+  // 这一批是 DS-16 定罪形状的直接复现：23:19Z 线上读到 44、23:52Z 只剩 34，门拿着变小了的
+  //   参照物继续绿。所以这里钉的不是「读了账本」，而是**不一致时按大的那格判、并按哪格必须说得出口**。
+  const strictBack = runV([vSame, v7, 'auto', 'archive', l8]);
+  check('两格取严：账本(8) 高于线上(7) 时按账本判，本次 7 落回退红',
+    strictBack.rc === 1 && strictBack.err.includes('不可逆'), JSON.stringify(strictBack));
+  check('两格取严：红点说清真按了哪一格（线上那格被删小时不许冒充按它比）',
+    strictBack.out.includes('参照物=回执账本') && strictBack.out.includes('高于线上清单的 7'),
+    JSON.stringify(strictBack));
+  // 对照组（反向）：同两格、本次码更高 → 必须放行。少了这条，上面两行只是「恒红」的装饰。
+  const strictUp = runV([v8, v7, 'auto', 'archive', l8]);
+  check('两格取严对照组：本次 8 恰等于取严后的 8 → 自动通道按同版本判红（不是按线上 7 判前进）',
+    strictUp.rc === 1 && strictUp.err.includes('release.md'), JSON.stringify(strictUp));
+  const v9 = vk('new9.json', 9);
+  check('两格取严对照组：本次 9 > 两格最高 8 → 放行且按账本读数打点',
+    runV([v9, v7, 'auto', 'archive', l8]).rc === 0
+      && runV([v9, v7, 'auto', 'archive', l8]).out.includes('版本前进（8 → 9）'),
+    JSON.stringify(runV([v9, v7, 'auto', 'archive', l8])));
+  // 线上比账本高 = 有一次发布没记账。取严仍按高的那格（不放过回退），但「账不全」必须红着看见。
+  const holeAuto = runV([v8, v7, 'auto', 'archive', l6]);
+  check('两格不一致（线上>账本）：自动通道判红 —— 下界不可信不许当正常继续发',
+    holeAuto.rc === 1 && holeAuto.err.includes('没记账'), JSON.stringify(holeAuto));
+  const holeExplicit = runV([v8, v7, 'explicit', 'archive', l6]);
+  check('两格不一致（线上>账本）：显式通道放行但把缺口留在日志里（取严按高的那格）',
+    holeExplicit.rc === 0 && holeExplicit.out.includes('不一致')
+      && holeExplicit.out.includes('版本前进（7 → 8）'), JSON.stringify(holeExplicit));
+  // 线上被删空而账本还在 —— DS-16 的主案发现场，这一格的分量就是「不许降回首次发布」。
+  const famEmpty = runV([v6, '-', 'auto', 'archive', l8]);
+  check('线上那格没有读数但账本记到 8：按账本比，落回退判红（不许冒充首次发布）',
+    famEmpty.rc === 1 && famEmpty.err.includes('不可逆')
+      && famEmpty.out.includes('不按首次发布放行'), JSON.stringify(famEmpty));
+  check('对照组：同样线上无读数、账本也无读数 → 红点改说「两处都没读数」（两种红不一样）',
+    firstAuto.rc === 1 && firstAuto.err.includes('回执账本也没起账'), JSON.stringify(firstAuto));
+  // 账本未起账（或被删）：自动通道不许只拿线上那一格发 —— 那正是会被删小的一格。
+  const noLedgerAuto = runV([v8, v7, 'auto', 'archive', '-']);
+  check('账本无读数 + 自动通道判红（分不清未起账与账本被删，就按看不清停）',
+    noLedgerAuto.rc === 1 && noLedgerAuto.err.includes('未起账或已被删'), JSON.stringify(noLedgerAuto));
+  const noLedgerExplicit = runV([v8, v7, 'explicit', 'archive', '-']);
+  check('账本无读数 + 显式通道放行（起账那一次）并打出警告',
+    noLedgerExplicit.rc === 0 && noLedgerExplicit.out.includes('回执账本还没有读数'),
+    JSON.stringify(noLedgerExplicit));
+  check('第 5 格没有缺省值：不传账本 → 退 2（缺省成「没账」就等于允许不发账过门）',
+    runV([v8, v7, 'auto', 'archive']).rc === 2
+      && runV([v8, v7, 'auto', 'archive']).err.includes('账本读数'),
+    JSON.stringify(runV([v8, v7, 'auto', 'archive'])));
+  check('账本文件读不出整数 → 退 2（坏账本不许降成「没发过」）',
+    runV([v8, v7, 'auto', 'archive', vBad]).rc === 2, JSON.stringify(runV([v8, v7, 'auto', 'archive', vBad])));
+  check('账本路径给了却不存在 → 退 2（给了路径就当事实读，读不到不是「没有」）',
+    runV([v8, v7, 'auto', 'archive', path.join(vTmp, 'no-ledger.json')]).rc === 2);
+  // 判据宿主不许认识账本的**住址**（分支名/文件名归取数宿主）：换住址时判据不必跟着改，
+  //   反之谁在判据里写死住址就是第二份真相（同 DS-14 的写死通道名）。
+  check('版本门禁宿主不硬编码账本住址（剥注释后零命中 ci-receipts / apk-receipts.log）',
+    !['ci-receipts', 'apk-receipts.log'].some((s) => stripHashComments(fs.readFileSync(VGATE, 'utf8')).includes(s)),
+    '住址只住 scripts/read-apk-receipts.sh 与 scripts/append-apk-receipt.sh');
 
   // ── DS-14 的空转形状必须在源码层就被抓住：判据宿主不许再出现写死的通道名 ──
   check('版本门禁宿主不再硬编码 apk-latest（剥注释后零命中）',
@@ -700,7 +759,7 @@ if (fs.existsSync(VGATE)) {
     check(`版本门禁接线：${f} 真的调用取数外壳`, VCALL.test(src), '找不到 bash scripts/check-apk-release-version.sh … "$TAG" 的调用行');
     check(`版本门禁内联复写清零：${f} 不再自己比 versionCode`,
       !/-lt\s+"\$PVC"|-eq\s+"\$PVC"|-lt\s+"\$VC"|-eq\s+"\$VC"/.test(src),
-      '同一判据出现第二份拷贝 = 缺陷（门禁法 §7.1）');
+      '同一判据出现第二份拷贝 = 缺陷（门禁法 §7 第 1 条）');
     // 「取来源 run 那份清单」也只能有一处：调用点自己抄一次 gh 取数，就会发出
     // 一份和门禁判定用不同源的清单（两次取数可以各自漂移）。出口是 VG_SRC_DIR。
     check(`版本门禁取数复写清零：${f} 不自己取线上/来源清单`,
@@ -727,6 +786,207 @@ if (fs.existsSync(VGATE)) {
   check('日常链门禁断言自证：旧写法（apk-latest + 写死 explicit）→ 判红',
     !DAILY_CALL.test('          TAG="apk-latest"\n          bash scripts/check-apk-release-version.sh version.json "$TAG" explicit'));
   fs.rmSync(vTmp, { recursive: true, force: true });
+}
+
+// ── 回执账本的两只宿主（债表 DS-16）：取数 scripts/read-apk-receipts.sh / 写入 scripts/append-apk-receipt.sh ──
+// 为什么这两处必须在 CI 里各跑一遍：这一格判据的全部效力都来自「账本里的数是真的、账是真的在记」。
+//   取数读歪 → 判据拿更弱的下界放行；写入悄悄不记（推送被拒、凭据不对、参数少一格）→ 账本慢慢落后于
+//   线上，而门看起来照绿。所以四种结局逐条判，写入侧还要钉「永不 force」「被拒就红」。
+//   假 git/假 gh 只在临时目录里活动：绝不碰真仓、真凭据、真网络。
+const LEDREAD = path.join(ROOT, 'scripts', 'read-apk-receipts.sh');
+const LEDWRITE = path.join(ROOT, 'scripts', 'append-apk-receipt.sh');
+check('回执账本取数宿主 scripts/read-apk-receipts.sh 存在', fs.existsSync(LEDREAD));
+check('回执账本写入宿主 scripts/append-apk-receipt.sh 存在', fs.existsSync(LEDWRITE));
+if (fs.existsSync(LEDREAD) && fs.existsSync(LEDWRITE)) {
+  const rTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-'));
+  const fakeBinL = path.join(rTmp, 'bin');
+  fs.mkdirSync(fakeBinL, { recursive: true });
+  const TRACE = path.join(rTmp, 'trace.log');
+  const CAP = path.join(rTmp, 'captured.log');
+  // 假 gh：LR_404=1 模拟「分支/文件不存在」的那类答法，LR_FAIL=1 模拟「这次没答上来」，
+  //   否则把 LR_BODY 指向的文件原样吐出去（= 账本正文）。
+  fs.writeFileSync(path.join(fakeBinL, 'gh'), [
+    '#!/usr/bin/env bash',
+    'set -u',
+    'if [ "${LR_404:-}" = 1 ]; then echo "gh: HTTP 404: Not Found" >&2; exit 1; fi',
+    'if [ "${LR_FAIL:-}" = 1 ]; then echo "gh: Bad credentials" >&2; exit 1; fi',
+    'cat "${LR_BODY:?假 gh 没给返回体}"',
+    '',
+  ].join('\n'), { mode: 0o755 });
+  // 假 git：把每次调用记进 TRACE，并按环境变量决定各子命令的成败；`add` 顺手把账本正文拷到 CAP。
+  //   这样既能验「记了什么」，也能验「有没有 force」「被拒之后是不是真的停了」。
+  fs.writeFileSync(path.join(fakeBinL, 'git'), [
+    '#!/usr/bin/env bash',
+    'set -u',
+    'while [ "${1:-}" = "-c" ]; do shift 2; done',
+    'echo "git $*" >> "${LR_TRACE:?假 git 没给 trace 文件}"',
+    'case "${1:-}" in',
+    '  ls-remote) exit "${GIT_LR:-0}" ;;',
+    '  fetch) exit "${GIT_FETCH:-0}" ;;',
+    '  checkout) exit "${GIT_CO:-0}" ;;',
+    '  add) cp apk-receipts.log "${LR_CAPTURE}" 2>/dev/null; exit 0 ;;',
+    '  commit) exit "${GIT_COMMIT:-0}" ;;',
+    '  push) exit "${GIT_PUSH:-0}" ;;',
+    '  *) exit 0 ;;',
+    'esac',
+    '',
+  ].join('\n'), { mode: 0o755 });
+  let lOutSeq = 0;
+  // 写入侧统一走这个壳：raw spawnSync 的字段是 `status`，直接写 `.rc` 会恒 undefined，
+  //   于是「退 2」那几条变成永远不会红的装饰（自己踩过的形状，这里当场钉住）。
+  const runW = (args, extra) => {
+    const r = spawnSync('bash', [LEDWRITE, ...args], { encoding: 'utf8', env: ledgerEnv(extra || {}) });
+    return { rc: r.status === null ? -1 : r.status, out: String(r.stdout || ''), err: String(r.stderr || '') };
+  };
+  const ledgerEnv = (extra) => ({
+    ...process.env,
+    PATH: fakeBinL + path.delimiter + process.env.PATH,
+    GITHUB_REPOSITORY: 'lobbowen/lobos',
+    GH_TOKEN: 'LR-FAKE-NOT-A-REAL-TOKEN',
+    LR_TRACE: TRACE,
+    LR_CAPTURE: CAP,
+    ...extra,
+  });
+  // 取数侧：每次换一个输出目录（共用会让「这次没落 version.json」被上一轮的文件喂绿）。
+  const lread = (extra) => {
+    const dir = path.join(rTmp, 'out-' + (++lOutSeq));
+    const r = spawnSync('bash', [LEDREAD, dir], { encoding: 'utf8', env: ledgerEnv(extra) });
+    return { rc: r.status === null ? -1 : r.status, out: String(r.stdout || ''), err: String(r.stderr || ''), dir };
+  };
+  const rec = (chain, name, code, run) => [
+    'RECEIPT',
+    'time    : 2026-09-30 12:00:00 UTC',
+    'chain   : ' + chain,
+    'channel : auto',
+    'shell   : ' + name + '+' + code,
+    'sha     : deadbeef',
+    'apk     : app-debug-' + name + '+' + code + '.apk',
+    'apk_sha : 0000000000000000000000000000000000000000000000000000000000000000',
+    'run     : ' + run,
+    'url     : https://github.com/lobbowen/lobos/releases/download/v' + name + '/x.apk',
+  ].join('\n');
+  const lbody = (txt) => {
+    const p = path.join(rTmp, 'body-' + (++lOutSeq) + '.log');
+    fs.writeFileSync(p, txt);
+    return p;
+  };
+
+  // 夹具故意把最高的那条放在**中间**：拿「第一条/最后一条」当最高的写法会在这里红。
+  const three = lbody([
+    '# APK 发布回执账本 —— 只追加',
+    rec('fast-apk', '1.1.11', 43, '111'),
+    rec('build-apk', '1.1.12', 45, '222'),
+    rec('release-admin-publish', '1.1.12', 44, '333'),
+  ].join('\n') + '\n');
+  const lhit = lread({ LR_BODY: three });
+  const lhitJson = JSON.parse(fs.readFileSync(path.join(lhit.dir, 'version.json'), 'utf8'));
+  check('账本取数：取到**全账最高**的 versionCode，并带出处（链路/run/行数）',
+    lhit.rc === 0 && lhitJson.shell.versionCode === 45 && lhitJson.shell.versionName === '1.1.12'
+      && lhitJson.sourceChain === 'build-apk' && lhitJson.sourceRun === '222' && lhitJson.sourceRows === 3,
+    JSON.stringify({ rc: lhit.rc, lhitJson }));
+  check('账本取数：落下的读数自带出处（分支/文件/链路/run），日志里能说清是谁记的',
+    lhit.rc === 0 && lhit.out.includes('最高 versionCode=45')
+      && lhitJson.sourceRef === 'ci-receipts' && lhitJson.sourceFile === 'apk-receipts.log'
+      && lhitJson.sourceChain === 'build-apk' && lhitJson.sourceRun === '222',
+    JSON.stringify({ rc: lhit.rc, out: lhit.out, lhitJson }));
+  const l404 = lread({ LR_404: '1' });
+  check('账本取数：分支/文件不存在 → 退 10 且不落 version.json（「尚未记账」交调用方按通道判）',
+    l404.rc === 10 && !fs.existsSync(path.join(l404.dir, 'version.json')), JSON.stringify(l404));
+  const lfails = lread({ LR_FAIL: '1', LR_BODY: three });
+  check('账本取数：gh 取不到 → 退 2 打 ::error（取数失败**不许**降级成「线上什么都没有」）',
+    lfails.rc === 2 && lfails.err.includes('::error') && !lfails.err.includes('尚未记账'), JSON.stringify(lfails));
+  const lempty = lread({ LR_BODY: lbody('# 只有表头，一行记录都没有\n') });
+  check('账本取数：文件在却读不出任何记录 → 退 2（被写坏的账本不等于没发过）',
+    lempty.rc === 2 && lempty.err.includes('::error'), JSON.stringify(lempty));
+  const lbroken = lread({
+    LR_BODY: lbody([rec('fast-apk', '1.1.12', 45, '111'), 'RECEIPT', 'chain   : fast-apk', 'shell   : notaversion'].join('\n')),
+  });
+  check('账本取数：记录条数 > 读得出的条数 → 退 2（无法排除缺的那条是最高的一版）',
+    lbroken.rc === 2 && lbroken.err.includes('看不清'), JSON.stringify(lbroken));
+  check('账本取数：不给输出目录 → 退 2（缺参数不许当成「账本空」）',
+    spawnSync('bash', [LEDREAD], { encoding: 'utf8', env: ledgerEnv({}) }).status === 2);
+
+  // 写入侧：参数齐 + 假 git 全成功 → 记账成功，且落下来的行形如取数宿主认识的样子。
+  const vj = path.join(rTmp, 'manifest.json');
+  fs.writeFileSync(vj, JSON.stringify({ shell: { versionName: '1.2.3', versionCode: 46 } }));
+  const apk = path.join(rTmp, 'app-release.apk');
+  fs.writeFileSync(apk, 'not-a-real-apk');
+  fs.writeFileSync(TRACE, '');
+  const lapkUrl = 'https://github.com/lobbowen/lobos/releases/download/apk-latest/app-release.apk';
+  const wOk = runW(['fast-apk', 'explicit', vj, apk, lapkUrl, '999'], { GIT_LR: '2' });
+  const trace = fs.readFileSync(TRACE, 'utf8');
+  const cap = fs.existsSync(CAP) ? fs.readFileSync(CAP, 'utf8') : '';
+  check('账本写入：分支不存在时建分支并追加，成功退 0',
+    wOk.rc === 0 && wOk.out.includes('已记账 fast-apk 1.2.3+46'), JSON.stringify(wOk));
+  check('账本写入：记的行含取数宿主认识的形状（RECEIPT + shell + chain + url + 两个 sha）',
+    /^RECEIPT$/m.test(cap) && /^shell   : 1\.2\.3\+46$/m.test(cap)
+      && /^chain   : fast-apk$/m.test(cap) && /^apk_sha : [0-9a-f]{64}$/m.test(cap)
+      && cap.includes(lapkUrl) && /^run     : 999$/m.test(cap), JSON.stringify(cap));
+  // 永不 force 是这条链的立身之本：force 一次就等于把已记的账抹掉，而账本正是唯一删不掉的参照物。
+  check('账本写入：推送永不 --force（force 一次=抹账，这条链要防的就是这件事）',
+    /git push/.test(trace) && !/git push[^\n]*--force/.test(trace), JSON.stringify(trace));
+  fs.writeFileSync(TRACE, '');
+  const wPush = runW(['fast-apk', 'auto', vj, apk, lapkUrl], { GIT_PUSH: '1' });
+  check('账本写入：推送被拒 → 退 1 打 ::error，不重试也不改 force（账没记上必须看得见）',
+    wPush.rc === 1 && wPush.err.includes('::error') && wPush.err.includes('没有')
+      && !/git push[^\n]*--force/.test(fs.readFileSync(TRACE, 'utf8')), JSON.stringify(wPush));
+  fs.writeFileSync(TRACE, '');
+  const wLs = runW(['fast-apk', 'auto', vj, apk, lapkUrl], { GIT_LR: '1' });
+  check('账本写入：ls-remote 失败的原因不是「分支不存在」→ 退 2 且**根本没推送**（看不清就不写）',
+    wLs.rc === 2 && !/git push/.test(fs.readFileSync(TRACE, 'utf8')), JSON.stringify({ wLs, trace: fs.readFileSync(TRACE, 'utf8') }));
+  const wBody = runW(['fast-apk', 'auto', vj, apk, lapkUrl], {});
+  check('账本写入：分支在、fetch 回来才发现账本文件不在 → 明说历史那部分已不可恢复',
+    wBody.rc === 0 && wBody.err.includes('已不可恢复'), JSON.stringify(wBody));
+  const badVj = path.join(rTmp, 'bad-manifest.json');
+  fs.writeFileSync(badVj, JSON.stringify({ shell: { versionName: '1.2.3', versionCode: '46-beta' } }));
+  check('账本写入：清单里 versionCode 不是整数 → 退 2（这种账记进去下一轮取数读不出数）',
+    runW(['fast-apk', 'auto', badVj, apk, lapkUrl], {}).rc === 2);
+  check('账本写入：通道词不认 → 退 2（少一个通道就等于自动走放行那侧）',
+    runW(['fast-apk', 'sometimes', vj, apk, lapkUrl], {}).rc === 2);
+  check('账本写入：没有 GH_TOKEN → 退 2 并明说「不要静默跳过这一步」',
+    (() => {
+      const e = ledgerEnv({});
+      delete e.GH_TOKEN;
+      const r = spawnSync('bash', [LEDWRITE, 'fast-apk', 'auto', vj, apk, lapkUrl], { encoding: 'utf8', env: e });
+      return r.status === 2 && String(r.stderr).includes('不要静默跳过');
+    })());
+  check('账本写入：少给网址 → 退 2（无网址的回执答不了「装到机器上那个包是哪次发布」）',
+    runW(['fast-apk', 'auto', vj, apk], {}).rc === 2);
+
+  // ── 接线：四条会投 APK 的链路必须都记账，且除它们之外不许有第二个写入口 ──
+  // 为什么钉「恰好这四个链点名」：少一条 = 那条链发的码永远进不了下界（DS-16 的原始破损形状）；
+  //   多一条（比如给 Program 包或固化件记账）= 拿没有 shell.versionCode 的产物写同一条账，
+  //   取数会读不出数而判「看不清」，把整道门拖成红。两类都是当场能判的。
+  const WFILES = { 'fast-apk.yml': 'fast-apk', 'build-apk.yml': 'build-apk', 'release-admin.yml': '' };
+  const ACALL = /^[^\S\n]*(?:if\s+!\s+)?bash\s+scripts\/append-apk-receipt\.sh\s+\S+\s+(?:"\$VCHANNEL"|explicit)\s+\S+/m;
+  for (const [f, chainName] of Object.entries(WFILES)) {
+    const src = fs.readFileSync(path.join(ROOT, '.github/workflows', f), 'utf8');
+    check(`记账接线：${f} 真的调用记账宿主`, ACALL.test(src), '找不到 bash scripts/append-apk-receipt.sh 的调用行');
+    if (chainName) {
+      check(`记账接线：${f} 的链点名是 ${chainName}（红点要说清真谁记的账）`,
+        new RegExp('append-apk-receipt\\.sh\\s+' + chainName + '\\b').test(src));
+    }
+  }
+  check('记账接线：release-admin 的 publish 与 repack 两条 job 各自记账（不是一条覆盖两条）',
+    (fs.readFileSync(path.join(ROOT, '.github/workflows/release-admin.yml'), 'utf8').match(/append-apk-receipt\.sh/g) || []).length === 2
+      && /append-apk-receipt\.sh\s+release-admin-publish/.test(fs.readFileSync(path.join(ROOT, '.github/workflows/release-admin.yml'), 'utf8'))
+      && /append-apk-receipt\.sh\s+release-admin-repack/.test(fs.readFileSync(path.join(ROOT, '.github/workflows/release-admin.yml'), 'utf8')));
+  // 其它发布链路（Program 包 / 固化运行时 / 能力件）没有 shell.versionCode 这一格，不许往这条账里写。
+  const otherWfs = fs.readdirSync(path.join(ROOT, '.github/workflows'))
+    .filter((f) => !Object.keys(WFILES).includes(f));
+  const outsiders = otherWfs.filter((f) => {
+    try { return fs.readFileSync(path.join(ROOT, '.github/workflows', f), 'utf8').includes('append-apk-receipt.sh'); }
+    catch { return false; }
+  });
+  check('记账入口只这四个链路点（非壳 APK 的发布链路不写这条账）',
+    outsiders.length === 0, '多出来的写入口: ' + outsiders.join(', '));
+  // 对照组自证：「只有注释提到宿主」不算接线 —— 这正是接线门禁不空转的前提。
+  check('记账接线断言自证：只有注释提及 → 判红',
+    !ACALL.test('  # 记账 scripts/append-apk-receipt.sh fast-apk "$VCHANNEL" version.json\n'));
+  check('记账接线断言自证：真调用行（显式通道字面量与变量两种写法）→ 放行',
+    ACALL.test('          bash scripts/append-apk-receipt.sh build-apk explicit version.json "$STAGE/app-release.apk" "$URL"')
+      && ACALL.test('          bash scripts/append-apk-receipt.sh fast-apk "$VCHANNEL" version.json "$VDIR/x.apk" "$URL"'));
+  fs.rmSync(rTmp, { recursive: true, force: true });
 }
 
 // ── 日常链参照物的取数宿主：scripts/read-archived-shell-version.sh（③ / 债表 DS-14）──
@@ -855,14 +1115,38 @@ if (fs.existsSync(RAV)) {
   const RAVCALL = /bash "\$\(dirname "\$0"\)\/read-archived-shell-version\.sh" "\$DIR"/;
   check('取数外壳接线：archive 参照物真的调 read-archived-shell-version.sh',
     RAVCALL.test(CHK_SRC), '找不到 bash "$(dirname "$0")/read-archived-shell-version.sh" "$DIR"');
-  check('取数外壳三态分派齐备（0 比 / 10 首次发布 / 其余退 2）',
+  check('取数外壳三态分派齐备（0 落读数 / 10 只留 '-' / 其余退 2）',
     /0\) OLD="\$DIR\/version\.json"/.test(CHK_SRC)
-      && /10\) echo "\[version\][^\n]*首次发布/.test(CHK_SRC)
+      && /10\) echo "\[version\][^\n]*那一格没有读数/.test(CHK_SRC)
       && /exit 2 ;;/.test(CHK_SRC),
-    '少一格就会把「看不清」咽成「首次发布」—— 正是 ③ 定罪的成因');
+    '少一格就会把「看不清」咽成「没有读数」—— 正是 ③ 定罪的成因');
   check('取数外壳把参照物名传到判据（第 4 格不是装饰）',
     /verify-apk-version-gate\.sh" "\$SRC" "\$OLD" "\$CHANNEL" "\$TAG"/.test(CHK_SRC),
     '判据的红点要说清真比的是谁');
+  // 账本那一格也必须由外壳真取真传：外壳不取，四个发布口就各抄一次 gh；外壳传 '-' 而不取，
+  //   等于把「没查过账」冒充成「账上没有」—— 那是 DS-16 定罪的同一个降级形状。
+  const LCALL = /bash "\$\(dirname "\$0"\)\/read-apk-receipts\.sh" "\$LDIR"/;
+  check('取数外壳接线：真的调 read-apk-receipts.sh 取账本读数',
+    LCALL.test(CHK_SRC), '找不到 bash "$(dirname "$0")/read-apk-receipts.sh" "$LDIR"');
+  check('取数外壳把账本读数传到判据（第 5 格不是装饰）',
+    /verify-apk-version-gate\.sh" "\$SRC" "\$OLD" "\$CHANNEL" "\$TAG" "\$LEDGER"/.test(CHK_SRC),
+    '两格一起交判据，取严与分派只住判据一处');
+  check('取数外壳接线断言自证：旧写法（只传四格）→ 判红',
+    !/verify-apk-version-gate\.sh" "\$SRC" "\$OLD" "\$CHANNEL" "\$TAG" "\$LEDGER"/
+      .test('bash "$(dirname "$0")/verify-apk-version-gate.sh" "$SRC" "$OLD" "$CHANNEL" "$TAG"'));
+  check('取数外壳账本三态分派齐备（0 落读数 / 10 留未起账 / 其余退 2）',
+    /0\) LEDGER="\$LDIR\/version\.json"/.test(CHK_SRC)
+      && /10\) echo "\[version\][^\n]*回执账本还没有记录/.test(CHK_SRC)
+      && /读回执账本失败[^\n]*不发布/.test(CHK_SRC),
+    '把「取不到账本」咽成「未起账」= 拿更弱的下界放行，正是本债要防的');
+  check('账本取数复写清零：判据宿主自己不碰 gh',
+    !/gh /.test(stripHashComments(fs.readFileSync(VGATE, 'utf8'))),
+    '判据只吃两份读数；在判据里取数就是第二份取数（门禁法 §7 第 1 条）');
+  check('账本住址只住两只宿主（外壳与判据都不认识分支名）',
+    !['ci-receipts', 'apk-receipts.log'].some((s) =>
+      stripHashComments(fs.readFileSync(path.join(ROOT, 'scripts/check-apk-release-version.sh'), 'utf8')).includes(s)
+      || stripHashComments(fs.readFileSync(VGATE, 'utf8')).includes(s)),
+    '换住址只改两只宿主；别处写死住址 = 第二份真相');
   fs.rmSync(aTmp, { recursive: true, force: true });
 }
 
