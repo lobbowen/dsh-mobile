@@ -478,4 +478,52 @@ const PIECES = Object.keys(JSON.parse(fs.readFileSync(VERIFY, 'utf8')).criteria)
     pathsCover(oneShort, required).join(',') === 'scripts/userland-sources.json');
 }
 
+// ---------------------------------------------------------------------------
+//  ⑨ 静态：拿 `$ROOT_DIR` 拼取数路径的脚本必须自己给它来源
+// ---------------------------------------------------------------------------
+// 实红出处：tag 轮 36766723667 与 main 校验轮 36766679501 都红在 sqlite3 —— 
+// `scripts/build-userland-sqlite3.sh: line 31: ROOT_DIR: unbound variable`。
+// 那颗件在 ④/⑤/⑦ 里全是合法的（键在表里、走钉值口、版本格由取数写），**缺的只是拼路径用的
+// 仓根没有来源**：`set -euo pipefail` 下它在第一处使用点就死。整类形状在本仓有 8 个宿主，
+// 所以判据要扫这一类，而不是只把我改坏的那一行改回去。
+{
+  // 纯函数：返回「用了却没来源／用在来源之前」的读数。注释里提及不算使用（判据钉执行面）。
+  function rootRootFindings(src) {
+    const lines = stripComments(src).split(String.fromCharCode(10));
+    let firstUse = -1;
+    let assign = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (firstUse < 0 && /\$\{?ROOT_DIR\b/.test(lines[i])) firstUse = i;
+      if (assign < 0 && /^\s*(?:export\s+)?ROOT_DIR=/.test(lines[i])) assign = i;
+    }
+    if (firstUse < 0) return { uses: false };
+    if (assign < 0) return { uses: true, finding: '用了 $ROOT_DIR 却没有一处赋值' };
+    if (assign > firstUse) return { uses: true, finding: '第一处使用在赋值之前（set -u 下当场 unbound）' };
+    return { uses: true, ok: true };
+  }
+
+  const scriptNames = fs.readdirSync(path.join(ROOT, 'scripts')).filter((n) => n.endsWith('.sh'));
+  const findings = [];
+  const users = [];
+  for (const n of scriptNames) {
+    const r = rootRootFindings(fs.readFileSync(path.join(ROOT, 'scripts', n), 'utf8'));
+    if (r.uses) users.push(n);
+    if (r.finding) findings.push(n + '：' + r.finding);
+  }
+  check('⑨ 拼取数路径的脚本每一颗都有自己的仓根来源（没有任何调用方 export ROOT_DIR，指望环境等于指望运气）',
+    findings.length === 0, findings.join(' ;; '));
+  check('⑨ 读数：命中面非零（0 个宿主=这把尺子空转）',
+    users.length >= 8, users.length + ' 个脚本用仓根拼路径：' + users.join(','));
+
+  check('⑨ 对照组：删掉 sqlite3 那行赋值就抓得到（证明上一条不是恒真）',
+    rootRootFindings(fs.readFileSync(path.join(ROOT, 'scripts', 'build-userland-sqlite3.sh'), 'utf8')
+      .replace(/^\s*(?:export\s+)?ROOT_DIR=.*$/m, '')).finding === '用了 $ROOT_DIR 却没有一处赋值');
+  check('⑨ 对照组：先赋值再使用 → 不误伤',
+    rootRootFindings('ROOT_DIR=$(pwd)\nbash "$ROOT_DIR/scripts/fetch-pinned.sh" --pin zlib x\n').ok === true);
+  check('⑨ 对照组：使用点在赋值之前 → 抓到',
+    /用在赋值之前/.test(rootRootFindings('bash "$ROOT_DIR/f" x\nROOT_DIR=$(pwd)\n').finding));
+  check('⑨ 对照组：只在注释里提 $ROOT_DIR 不算宿主（否则改注释也会红）',
+    rootRootFindings('# 这里用 $ROOT_DIR 拼路径\necho hi\n').uses === false);
+}
+
 finish();

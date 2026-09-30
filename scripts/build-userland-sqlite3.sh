@@ -14,6 +14,7 @@ set -euo pipefail
 
 HERE=$(dirname "$0")
 cd "$HERE/.."
+ROOT_DIR=$(pwd)   # 绝对仓根：下面 fetch-pinned 与 version 格都按它拼路径（本脚本会 cd，相对路径不可用）
 
 if [ -z "${CC:-}" ]; then
   echo "::error title=缺 CC::需要 CC（aarch64-linux-android21-clang）"
