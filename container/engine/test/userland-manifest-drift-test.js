@@ -118,7 +118,9 @@ check('⑧ revision 与线上相等 → 判红（同号换内容就是「版本�
 const gBack = runGate(write('g-back.json', man(4, [tool()])), write('g-online5.json', man(5, [tool()])));
 check('⑧ revision 倒退 → 判红', gBack.status === 1 && /线上已经是 5，本次要发 4/.test(gateOut(gBack)), gateOut(gBack).slice(-220));
 
-// ⑧-3 同 name@version 换字节：清单把旧对象盖掉，而长缓存里的设备仍按旧 sha 核验。
+// ⑧-3 同 name@version 换字节：件的字节身份从此没有凭据 —— 清单上那 12 位指纹与实际投出去的对象
+// 对不上，而**线上清单**与**仓内声明**指向两批源码（设备按 marker 里的 sha 比对，只会重下一颗
+// 来路不明的件）。这一格判的是「同一版本号只许一批字节」，它成立的前提是两边都有字节凭据。
 const gSha = runGate(write('g-sha.json', man(6, [tool({ sha256: 'c'.repeat(64) })])), write('g-online5.json', man(5, [tool()])));
 check('⑧ 同版本换 sha256 → 判红并点名那颗件',
   gSha.status === 1 && /npm@11\.19\.0 换了字节/.test(gateOut(gSha)), gateOut(gSha).slice(-260));
@@ -126,6 +128,20 @@ check('⑧ 同版本换 sha256 → 判红并点名那颗件',
 const gBump = runGate(write('g-bump.json', man(6, [tool({ version: '11.19.1', sha256: 'c'.repeat(64) })])), write('g-online5.json', man(5, [tool()])));
 check('⑧ 对照组：件自己提升版本并换字节 → 放行（否则正常的升级会被这道闸拦死）',
   gBump.status === 0, gateOut(gBump).slice(-220));
+
+// ⑧-3b 线上基线**不带 revision 凭据**（源码还没钉值那一代编出来的字节，无法重造也无法追责）时
+// 第 ② 格对它不判 —— 这是本次之后每份都必须带 revision 的理由，不是一把永久关掉的尺子。
+// 它必须自带读数：静默通过等于第 ② 格从没存在过。
+const gShaLegacy = runGate(write('g-sha-legacy.json', man(6, [tool({ sha256: 'c'.repeat(64) })])), write('g-online-legacy2.json', manifest([tool()])));
+check('⑧ 无凭据基线 + 同版本换 sha → 放行并把「这一格本次未比」打出来（首轮按 tag 发布就是这一档）',
+  gShaLegacy.status === 0 && /第 ② 格对它不判/.test(gateOut(gShaLegacy)) && /这一格本次未比/.test(gateOut(gShaLegacy)),
+  gateOut(gShaLegacy).slice(-260));
+check('⑧ 豁免只在无凭据基线上生效：同样两份输入只差线上那一格 revision，就必须从绿翻红（否则豁免=关掉第 ② 格）',
+  gSha.status === 1 && gShaLegacy.status === 0, JSON.stringify({ 有凭据: gSha.status, 无凭据: gShaLegacy.status }));
+// 无凭据基线上第 ① 格（单调）照判：按下界 0 计，倒退发不出来。
+const gLegacyBack = runGate(write('g-legacy-back.json', man(0, [tool()])), write('g-online-legacy3.json', manifest([tool()])));
+check('⑧ 无凭据基线不豁免第 ① 格：本次 revision 非法仍判红',
+  gLegacyBack.status === 1 && /revision 不是正整数/.test(gateOut(gLegacyBack)), gateOut(gLegacyBack).slice(-200));
 
 // ⑧-4 「线上还没有」与「看不清」必须分开（三态纪律，同 read-release-asset.sh 那一条）
 const gFirst = runGate(write('g-first.json', man(1, [tool()])), path.join(tmp, 'g-none.json'));

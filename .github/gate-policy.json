@@ -406,6 +406,12 @@
       ]
     },
     {
+      "file": "scripts/userland-sources.json",
+      "terms": [
+        "B-kernel"
+      ]
+    },
+    {
       "file": "container/engine/test/native-assets-test.js",
       "terms": [
         "B-path",

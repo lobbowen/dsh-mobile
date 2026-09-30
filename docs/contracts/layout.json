@@ -372,6 +372,8 @@
     "delivery-gate.js": "cross",
     "publish-userland-manifest.js": "cross",
     "check-userland-manifest-drift.js": "cross",
+    "userland-sources.json": "cross",
+    "fetch-pinned.sh": "cross",
     "build-userland-pnpm.sh": "cross",
     "build-userland-jq.sh": "cross",
     "userland-verify.json": "cross",

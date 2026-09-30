@@ -17,9 +17,6 @@ HERE=$(dirname "$0")
 cd "$HERE/.."
 ROOT_DIR=$(pwd)   # 绝对仓根：脚本中途会 cd 进源码树，后续一律用它拼路径
 
-JQ_VERSION=1.8.2
-REL_BASE=https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}
-
 if [ -z "${CC:-}" ]; then
   echo "::error title=缺 CC::需要 CC（aarch64-linux-android21-clang）"
   exit 1
@@ -36,27 +33,14 @@ for f in "$AR_BIN" "$RANLIB_BIN" "$READELF_BIN"; do
   [ -x "$f" ] || { echo "::error title=缺工具::$f 不存在"; exit 1; }
 done
 
-echo "[jq] 取 jq-$JQ_VERSION 源码包"
-if ! curl -fsSL "$REL_BASE/jq-$JQ_VERSION.tar.gz" -o work/jq.tar.gz; then
-  echo "::error title=源码包取不到::$REL_BASE/jq-$JQ_VERSION.tar.gz"
-  exit 1
-fi
-if ! curl -fsSL "$REL_BASE/sha256sum.txt" -o work/jq.sha256.txt; then
-  echo "::error title=校验和取不到::$REL_BASE/sha256sum.txt"
-  exit 1
-fi
-WANT=$(grep -E "jq-$JQ_VERSION[.]tar[.]gz" work/jq.sha256.txt | head -n 1 | awk '{print $1}' || true)
-if [ -z "$WANT" ]; then
-  echo "::error title=校验和里没有该文件::sha256sum.txt 里找不到 jq-$JQ_VERSION.tar.gz（上游改名了？）"
-  head -n 5 work/jq.sha256.txt || true
-  exit 1
-fi
-GOT=$(sha256sum work/jq.tar.gz | cut -d' ' -f1)
-if [ "$GOT" != "$WANT" ]; then
-  echo "::error title=源码包校验不过::sha256 $GOT ≠ 上游 $WANT"
-  exit 1
-fi
-echo "[jq] 源码包 $(stat -c%s work/jq.tar.gz) 字节，sha256 与上游一致"
+echo "[jq] 取源码（钉值表的 jq 那一格）"
+# 期望值为什么不能再从**同一个 release 目录**现读（旧写法）：那等于让被校验的对象自带校验值 ——
+#   上游整目录换一批字节，两边一起跟着换，比对照样绿。钉在 scripts/userland-sources.json 里，
+#   换字节就必须过一次仓内的改动（登记冻结时的双向读数：本机实测与该 release 公布的
+#   sha256sum.txt 同值 71b8d6e8f5fe…）。
+bash "$ROOT_DIR/scripts/fetch-pinned.sh" --pin jq "$ROOT_DIR/work/jq.tar.gz" \
+  --version-file "$ROOT_DIR/$OUT/jq.version"
+echo "[jq] 源码包 $(stat -c%s work/jq.tar.gz) 字节，逐字节等于仓内钉值"
 
 rm -rf work/jq && mkdir -p work/jq
 tar xzf work/jq.tar.gz -C work/jq --strip-components=1
@@ -139,6 +123,5 @@ if "$READELF_BIN" -d "$ROOT_DIR/$OUT/bin/jq" | grep -q 'libonig'; then
   "$READELF_BIN" -d "$ROOT_DIR/$OUT/bin/jq" | grep -i needed || true
   exit 1
 fi
-echo "$JQ_VERSION" > "$ROOT_DIR/$OUT/jq.version"
 SIZE=$(stat -c%s "$ROOT_DIR/$OUT/bin/jq")
 echo "[jq] 产出 $ROOT_DIR/$OUT/bin/jq（$SIZE 字节，无外部 libonig）"

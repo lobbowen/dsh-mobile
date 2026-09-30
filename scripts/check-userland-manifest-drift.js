@@ -20,8 +20,13 @@
 // `--immutable` 是**发布前**的那道闸（build-userland 的 manifest job 在上传之前跑它），判两件事：
 //   ① revision 必须严格大于线上那份 —— 同号再发一次，就等于「版本号没变而内容变了」，
 //      与 ADR-0004 要防的那条是同一句话；C 层唯一的单调判据就是这一格。
-//   ② 同一 name@version 的 sha256 不许换 —— 换了意味着同名件的 URL 被另一批字节盖掉，
-//      已被长缓存钉住的设备与清单上的哈希从此对不上。
+//   ② 同一 name@version 的 sha256 不许换 —— 件的键是**内容寻址**的（userland-<名>-<版本>-<sha前 12>
+//      -android-arm64.zip），换字节不会盖掉旧对象，设备侧的 marker 也按 sha 命中与否自己会重下；
+//      破的是**口径**：同一个版本号在两份清单里指向两批源码，凡按号说话的证据（债表、真机读数）
+//      从此失去所指 —— 这正是 ENV-26 那类「声明与线上分家」的号版形状。
+//      这一格只对**带正整数 revision 的线上基线**生效：没有这一格的历史清单是本方案之前的形状，
+//      它那一代的件在源码没钉值时编出来、字节无法重造，因此不构成「旧一批字节」的凭据。
+//      豁免只取到一次：发布器不带 revision 就抛错，之后线上每一份都带这一格。
 // 线上还没有清单（首次投放该通道）是**确实没有**，不是看不清：当作空表放行并打印这条读数。
 //
 //   env USERLAND_ONLINE_FILE：读本地文件当线上（CI 的自测走这条，不碰网）
@@ -123,6 +128,10 @@ function gate(online, onlineRevisionRaw, firstPublish) {
   // 旧清单（本方案之前的形状）没有 revision 格、或这条键上根本还没有清单：取严的下界都记作 0，
   // 并把这条读数**打出来**，不静默当通过 —— 首次按 tag 发布必须能过，而过了以后线上每份都带这一格。
   const onlineRevision = Number.isInteger(onlineRevisionRaw) ? onlineRevisionRaw : 0;
+  // 线上那份要能成为「旧字节」的凭据，必须自己带正整数 revision：
+  // 发布器没有这一格就抛错（scripts/publish-userland-manifest.js 的 revisionForManifest），
+  // 所以**这条豁免只能被本方案之前的那一份历史清单取到一次**，往后每份都严格生效 —— 它不是开关。
+  const baselineCredentialed = Number.isInteger(onlineRevisionRaw) && onlineRevisionRaw > 0;
   console.log('[gate] revision 线上=' + onlineRevision + ' 本次=' + localRevision
     + '，件 线上 ' + online.length + ' 颗 / 本次 ' + localTools.length + ' 颗（取自 ' + onlineFrom + '）');
   if (firstPublish) console.log('[gate] 这条键上还没有清单 —— 本次是该通道按新发布连投的第一份');
@@ -133,22 +142,31 @@ function gate(online, onlineRevisionRaw, firstPublish) {
     reds.push('revision 不单调：线上已经是 ' + onlineRevision + '，本次要发 ' + localRevision
       + ' —— 同号或倒退就是「版本号没变而内容变了」；把发布 tag 里的 revision 提上去重跑');
   }
-  for (const t of localTools) {
-    const got = byName.get(t.name);
-    // 线上没有的这颗是本次首次投放，没有旧字节可盖，直接跳过。
-    if (!got || got.version !== t.version) continue;
-    if (got.sha256 !== t.sha256) {
-      reds.push(t.name + '@' + t.version + ' 换了字节：线上 sha ' + String(got.sha256).slice(0, 12)
-        + '… 本次 ' + String(t.sha256).slice(0, 12)
-        + '… —— 件的 URL 按版本号命名，发清单就是把旧对象盖掉；而长缓存里的设备仍按旧 sha 核验，从此对不上。'
-        + '同一版本号只许一批字节：要么让打包可复现（锁定归档内 mtime），要么提升件的版本');
+  let checked = 0;
+  if (baselineCredentialed) {
+    for (const t of localTools) {
+      const got = byName.get(t.name);
+      // 线上没有的这颗是本次首次投放，没有旧字节可对，直接跳过。
+      if (!got || got.version !== t.version) continue;
+      checked++;
+      if (got.sha256 !== t.sha256) {
+        reds.push(t.name + '@' + t.version + ' 换了字节：线上 sha ' + String(got.sha256).slice(0, 12)
+          + '… 本次 ' + String(t.sha256).slice(0, 12)
+          + '… —— 件按内容寻址命名，所以这**不会**盖掉旧对象（设备按 sha 命中与否自己会重下， integrity 不破）；'
+          + '破的是口径：同一个号在两份清单里指向两批源码，凡按号说话的证据（债表、真机读数）从此失去所指。'
+          + '同一版本号只许一批字节：要么让构建可复现（源码钉值 + 归档内 mtime + 工具链），要么提升件的版本');
+      }
     }
+  } else {
+    console.log('[gate] 线上基线不带 revision 凭据 —— 那一代的件是**源码没钉值时**编出来的，字节无法重造，'
+      + '它不是「同一版本号的旧一批字节」的凭据，第 ② 格对它不判；本次投出的这份带 revision，从下一份起这一格严格生效');
   }
   if (reds.length) {
     for (const r of reds) console.log('[gate] ' + r);
     return fail(reds.length + ' 条不合格 —— 本次不投递', 'C 层发布闸门');
   }
-  console.log('[gate] 通过：revision 单调，' + localTools.length + ' 颗件里没有一颗在同版本下换字节');
+  console.log('[gate] 通过：revision 单调，同版本下比对的 ' + checked + ' 颗件没有一颗换字节'
+    + (baselineCredentialed ? '' : '（线上基线无凭据，这一格本次未比）'));
 }
 
 fetchOnline().then(({ buf, missing }) => {
