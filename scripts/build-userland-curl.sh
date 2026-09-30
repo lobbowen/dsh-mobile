@@ -53,10 +53,15 @@ export ANDROID_NDK_ROOT="${ANDROID_NDK_LATEST_HOME:-}"
 if [ -z "$ANDROID_NDK_ROOT" ]; then ANDROID_NDK_ROOT=$(cd "$TC_DIR/../../../../.." && pwd); fi
 export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
 echo "[curl] NDK root = $ANDROID_NDK_ROOT"
+# openssl 的 util/mkbuildinf.pl:19 写的是 `gmtime($ENV{SOURCE_DATE_EPOCH} // time())` —— 不给这一格
+# 就把构建时刻编进件里，同一版本号每次重建都是新 sha（债表 ENV-32）。基准只住钉值表。
+export SOURCE_DATE_EPOCH="$(bash "$ROOT_DIR/scripts/fetch-pinned.sh" --time-base)"
 if ! ./Configure android-arm64 -fPIC -D__ANDROID_API__=$ANDROID_API --prefix="$DEPS" --openssldir="$DEPS/ssl" no-shared no-tests no-ui-console > "$ROOT_DIR/work/openssl-configure.log" 2>&1; then
   echo "::error title=openssl Configure 失败::尾 30 行"; tail -n 30 "$ROOT_DIR/work/openssl-configure.log"; exit 1; fi
 if ! make -j2 build_libs > "$ROOT_DIR/work/openssl-build.log" 2>&1; then
   echo "::error title=openssl 编译失败::尾 30 行"; tail -n 30 "$ROOT_DIR/work/openssl-build.log"; exit 1; fi
+# 构建时间戳进了件字节 ⇒ 同名必换 sha（判据只看生成出来的那一行）。
+bash "$ROOT_DIR/scripts/verify-userland-build-date.sh" "$ROOT_DIR/work/openssl"
 make install_sw >/dev/null
 echo "[curl] openssl 就位"
 

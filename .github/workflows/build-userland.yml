@@ -37,6 +37,8 @@ on:
       - '.github/workflows/build-userland.yml'
       - 'scripts/build-userland-*.sh'
       - 'scripts/verify-userland-artifact.sh'
+      # 构建时间判据（ENV-32）：它决定 curl/git 两颗件的字节稳不稳，改它必须重跑一轮。
+      - 'scripts/verify-userland-build-date.sh'
       - 'scripts/package-userland.sh'
       # 清单发布器与它读的那格入口（2026-09-30 定罪 ENV-26）：aliases 的读写代码合进了 main，
       #   但这两个文件不在 paths 里 ⇒ **没有任何 job 会因为「声明怎么算」变了而动**，线上清单停在

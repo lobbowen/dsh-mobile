@@ -97,6 +97,9 @@ CFG_LOG="$ROOT_DIR/work/openssl-configure.log"
 # PATH 必须**导出**：openssl 的 Makefile 里 CC 是裸名（aarch64-linux-android21-clang），
 #   make 时若 PATH 里没有 NDK 的 bin，就是满屏 `Error 127`（上轮实证：apps/lib/*.o）。
 export PATH="$TC_DIR:$PATH"
+# openssl 的 util/mkbuildinf.pl:19 写的是 `gmtime($ENV{SOURCE_DATE_EPOCH} // time())` —— 不给这一格
+# 就把构建时刻编进件里，同一版本号每次重建都是新 sha（债表 ENV-32）。基准只住钉值表。
+export SOURCE_DATE_EPOCH="$(bash "$ROOT_DIR/scripts/fetch-pinned.sh" --time-base)"
 if ! ./Configure android-arm64 -fPIC -D__ANDROID_API__=$ANDROID_API --prefix="$DEPS" --openssldir="$DEPS/ssl" no-shared no-tests no-ui-console > "$CFG_LOG" 2>&1; then
   echo "::error title=openssl Configure 失败::下面是最后 30 行（真正的致命行在这里）"
   tail -n 30 "$CFG_LOG" || true
@@ -108,6 +111,8 @@ if ! make -j2 build_libs > "$BUILD_LOG" 2>&1; then
   tail -n 30 "$BUILD_LOG" || true
   exit 1
 fi
+# 构建时间戳进了件字节 ⇒ 同名必换 sha（债表 ENV-32，读取口 scripts/fetch-pinned.sh --time-base）。
+bash "$ROOT_DIR/scripts/verify-userland-build-date.sh" "$ROOT_DIR/work/openssl"
 make install_sw >/dev/null
 echo "[git] openssl 就位：$(ls "$DEPS/lib" | grep -c "[.]a") 个 .a"
 
