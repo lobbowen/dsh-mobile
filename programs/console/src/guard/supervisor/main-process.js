@@ -83,26 +83,29 @@ class MainProcess {
     };
   }
 
-  /** 安卓容器启动形态整备（仅契约在场时生效，PC 逐字不变）：
-   * ① 跑完全部原生件投放单元（ensureNativeUnits：依赖垫片、rg/pty/wasm 供给）；
-   * ② 在 node 与脚本入口之间注入 --expose-internals，位置必须在脚本前。
+  /** 安卓容器启动形态整备（仅容器形态生效，PC 逐字不变）：
+   * ① 按契约整备持久化启动命令（node 路径随覆盖安装自愈、模板裸名换成绝对入口）；
+   * ② 跑完全部原生件投放单元（ensureNativeUnits：依赖垫片、rg/pty/wasm 供给）；
+   * ③ 在 node 与脚本入口之间注入 --expose-internals，位置必须在脚本前。
    * 恒幂等：命令已含该 flag 不再重复插入；非 node 代跑形态（args[0] 非 .js）不动。 */
   _androidLaunchReady(command) {
     try {
-      const c = runtimeContract.read();
-      if (!c || !c.npmEntry) return command;
+      const c = runtimeContract.containerContract();
+      if (!c) return command;
       // 覆盖安装后 /data/app 随机段目录消失 → 持久化 command[0] 失效（ENOENT 冷静期
-      // 死循环，真机 2026-09-23）。契约是容器每次启动前重写的当前事实源，据此自愈。
-      // 入参 command 是调用方**先于本函数**求出的快照数组（nativeCommand 返回新数组），
-      // 自愈只改得到 config.command ⇒ 必须把修复结果同步回本轮快照，否则同一轮照用
-      // 死路径（真机 12:54 实证：自愈日志已打出新路径，5s 后 spawn 仍 ENOENT 旧路径）。
-      const snapNode = command[0];
-      const repaired = !!(this.nativeManager && typeof this.nativeManager.repairLaunchNodePath === 'function'
-        && this.nativeManager.repairLaunchNodePath() === true);
-      const curNode = this.config && Array.isArray(this.config.command) ? this.config.command[0] : null;
-      if (repaired && curNode && curNode !== snapNode) {
-        command = command.slice();
-        command[0] = curNode;
+      // 死循环，真机 2026-09-23）；跨 Program 版本留下的模板形态（command[1] 是裸名）
+      // 不是路径，binPath() 按 cwd 判存在性会把已装好的载荷报成 uninstalled。
+      // 契约是容器每次启动前重写的当前事实源，据此整备。
+      // 入参 command 是调用方**先于本函数**求出的快照数组（nativeCommand 返回新数组，
+      // 尾部还带本轮的 --patch/--port 覆盖层）⇒ 整备只改得到 config.command，必须按
+      // 整备后的 config 重算快照，否则同一轮照用死路径（真机 12:54 实证：自愈日志已
+      // 打出新路径，5s 后 spawn 仍 ENOENT 旧路径）。重算是幂等的：第二次整备判不出差异。
+      const m = this.nativeManager;
+      const repaired = !!(m && typeof m.repairLaunchNodePath === 'function' && m.repairLaunchNodePath() === true);
+      const rewrote = !!(m && typeof m.applyLaunchCommand === 'function' && m.applyLaunchCommand() === true);
+      if (repaired || rewrote) {
+        const r = this.spawnCommand();
+        if (Array.isArray(r) && r.length) command = r;
       }
       if (this.nativeManager && typeof this.nativeManager.ensureNativeUnits === 'function') {
         // 投放单元是**副作用**，不得有能力否决下面的 flag 注入：旧实现是五段裸调用
@@ -347,7 +350,7 @@ class MainProcess {
     // 2026-09-13（失效模式 g）：**带 ownerId** —— 与实例域 P1-3 的修法同规。
     // 按端口号无条件释放可能删掉**他人**的记录（若 oldPort 期间被别的 owner 重新登记）。
     // owner 必须与 ports.register('dsh-main', p) 写入的**完全一致**：那是 'system:' + role
-    // （ports.js:156），不是 'dsh-main'。写错会让释放变 no-op → 旧端口残留
+    // （见 ports.js register 内写入的 owner），不是 'dsh-main'。写错会让释放变 no-op → 旧端口残留
     // （由 test/main-port-rederive-test.js 捕获）。
     try { if (oldPort !== newPort) ports.release(oldPort, 'system:dsh-main'); } catch {}
     this.config.targetPort = newPort;

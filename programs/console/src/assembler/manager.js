@@ -251,7 +251,7 @@ class NativeManager {
       if (!npmRoot) { const inv = npmSpawn(this); const r = ex.runOut(inv.bin, inv.args.concat(['root', '-g']), { env: runtimeContract.npmEnv(process.env) }); if (r) npmRoot = r.trim(); }
     } catch {}
     // 启动命令写回放在 binPath 读取**之前**：清单应记录安装完成后的现行启动形态。
-    this._applyLaunchCommand(npmRoot);
+    this.applyLaunchCommand(npmRoot);
     // 投放单元跑一次并把结局随清单落盘：面板/取证在内核重启后仍能看到上次供给状态，
     // 不必等下一次 spawn 才把内存填回来。
     // 刚装完的这一轮必须重新核（覆盖安装/重装 dsh 会重建 node_modules，能力随时可能变）：
@@ -282,12 +282,12 @@ class NativeManager {
    *  60s 冷静期无限循环，面板永不可用）。runtime.json 契约由容器每次启动前用当前
    *  安装路径重写（NodeRuntimeService.writeRuntimeJson）⇒ 契约在场且其 nodePath
    *  存在、而 command[0] 不存在时，用契约值修复并回写。
-   *  门控与 _applyLaunchCommand 相同（npmEntry 在场=容器形态）；PC 逐字不变。
+   *  门控与 applyLaunchCommand 相同（容器形态判据见 runtime-contract.containerContract）；PC 逐字不变。
    *  脚本入口 cmd[1] 在 filesDir（覆盖安装保留），不随随机段失效，故不修。 */
   repairLaunchNodePath() {
     try {
-      const c = runtimeContract.read();
-      if (!c || !c.npmEntry) return false;
+      const c = runtimeContract.containerContract();
+      if (!c) return false;
       const cmd = this.config.command;
       if (!Array.isArray(cmd) || !cmd[0] || !path.isAbsolute(String(cmd[0]))) return false;
       if (fs.existsSync(String(cmd[0]))) return false;
@@ -302,37 +302,42 @@ class NativeManager {
     } catch { return false; }
   }
 
-  /** 安装/升级/回滚成功后把 config.command 落为**绝对形态**：
+  /** 把 config.command 落为**绝对形态**：
    * [契约 node（libnode.so）, <npmRoot>/<pkg> 的 bin 入口脚本绝对路径, 'web', '--no-open']
    * --no-open：dsh web 启动后会 spawn xdg-open/open 打开默认浏览器 —— 安卓无此命令，
    * 且面板本就由容器 WebView 呈现，URL 交给外部打开没有意义。
    * 为什么必须写回：绝对形态不依赖 ambient PATH，也不依赖 dsh 的 bin shim 能不能被内核
    * 直接 exec（我们的投放通路不保证那一份的权限位）。模板形态一旦落到 PATH 里没有
    * `node` 或 shim 起不来的机器上，`spawn → ENOENT → 60s 冷静期` 是无限循环。
-   * 只认容器契约形态（npmEntry 在场）；PC（无契约）行为逐字不变。解析失败静默
-   * 保留原命令（不变量 C2：绝不让已成功的安装因写回失败而报错）。 */
-  _applyLaunchCommand(npmRoot) {
+   * 为什么 spawn 前也要跑（不只安装完成时）：命令是**跨 Program 版本持久化**的，而
+   * binPath() 把 command[1] 当路径用；残留的模板形态（裸名 `dsh`）会按 cwd 判存在性，
+   * 把已装好的载荷报成 uninstalled。恒幂等：与现行命令逐字相同即 no-op。
+   * 解析失败静默保留原命令（不变量 C2：绝不让已成功的安装因写回失败而报错）。
+   * @returns {boolean} 本轮是否真的改写了命令（调用方据此刷新本轮快照） */
+  applyLaunchCommand(npmRoot) {
     try {
-      const c = runtimeContract.read();
-      if (!c || !c.npmEntry) return;
-      const root = npmRoot || this.npmRoot;
-      if (!root) return;
+      const c = runtimeContract.containerContract();
+      if (!c) return false;
+      const root = npmRoot || this.npmRoot || (this._manifest() || {}).npmRoot || null;
+      if (!root) return false;
       const pkgDir = path.join(root, this.config.packageName);
       const pj = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
       const b = pj.bin;
       const rel = typeof b === 'string' ? b : (b && (b.dsh || Object.values(b)[0])) || null;
-      if (!rel) return;
+      if (!rel) return false;
       const entry = path.resolve(pkgDir, String(rel));
-      if (!fs.existsSync(entry)) return;
+      if (!fs.existsSync(entry)) return false;
       const command = [c.nodePath || process.execPath, entry, 'web', '--no-open'];
       const prev = this.config.command;
-      if (Array.isArray(prev) && prev.join('\u0000') === command.join('\u0000')) return;
+      if (Array.isArray(prev) && prev.join('\u0000') === command.join('\u0000')) return false;
       this.config.command = command;
       if (this.persistCommand) this.persistCommand({ command });
       if (this.events) this.events.append('native_launch_command_persisted', { command });
       this.logger.info && this.logger.info('启动命令已写回: ' + command.join(' '));
+      return true;
     } catch (e) {
       this.logger.warn && this.logger.warn('启动命令写回失败（保留原命令）: ' + e.message);
+      return false;
     }
   }
 
@@ -340,10 +345,11 @@ class NativeManager {
    * node 代跑形态时返回 {bin, args}；否则 null（调用方退回 dsh 逻辑名）。 */
   dshCliInvocation() {
     try {
-      const c = runtimeContract.read();
-      if (!c || !c.npmEntry) return null;
+      const c = runtimeContract.containerContract();
+      if (!c) return null;
       // 消费侧同样先自愈：本方法可能在首次 spawn 修复前被插件域调用。
       this.repairLaunchNodePath();
+      this.applyLaunchCommand();
       const cmd = (this.config && this.config.command) || [];
       const entry = String(cmd[1] || '');
       if (cmd.length >= 2 && entry.endsWith('.js') && fs.existsSync(entry)) {
@@ -366,8 +372,8 @@ class NativeManager {
    * 注意 prefix 是**可空**返回件而非共同前置：$PREFIX 缺席只该挡住真正依赖它的单元
    * （rg/pty），否则旧 APK 契约（无 prefix 格）会把已在工作的 flock/narb 垫片一起判死。 */
   _unitContext(rootOverride) {
-    const c = runtimeContract.read();
-    if (!c || !c.npmEntry) return { skip: { status: 'skipped', reason: '非容器契约形态（无 runtime.json 或未写 npmEntry）' } };
+    const c = runtimeContract.containerContract();
+    if (!c) return { skip: { status: 'skipped', reason: '非容器形态（无 runtime.json 或契约无绝对 nodePath）' } };
     const root = rootOverride || this.npmRoot || (this._manifest() || {}).npmRoot || null;
     if (!root || !fs.existsSync(root)) return { skip: { status: 'blocked', reason: 'npm 全局根不可达: ' + (root || '未知') } };
     return { contract: c, root, prefix: c.prefix || null };
@@ -507,7 +513,7 @@ class NativeManager {
   /** 安卓容器自愈：给安装树里的 node-addon-require-builtin 投放 JS 垫片。
    * 根因与方案见 require-builtin-shim.js 头注释。幂等（已投放即 no-op），
    * 每次 spawn 前由守卫调用 —— 覆盖安装/内核升级后旧 dsh 不重装也能被修复。
-   * 前置同 _unitContext：只认容器契约形态（npmEntry 在场），PC 记 skipped 且树逐字不变；
+   * 前置同 _unitContext（容器形态判据见 runtime-contract.containerContract），PC 记 skipped 且树逐字不变；
    * 抛错只改结局为 failed，绝不让运行因自愈失败而中断（不变量 C2）。
    * @param {string} [rootOverride] 显式 npm 全局根（安装完成路径传入刚解析的值）
    * @returns {{status:string,reason:string|null,at:string}} 本轮结局（唯一出口） */
