@@ -95,7 +95,7 @@
 | Release `program-<version>` | `program-<v>.zip` · `program-manifest.json` | 版本化归档 |
 | Release `program-<channel>` | `program-manifest.json` · 本次 `program-<v>.zip` | 通道滚动归档（CI 版本前进门禁读这里） |
 | 对象存储 `userland/` | 各工具件（按 name/version 命名） | C 层件本体 |
-| 对象存储 `userland-<channel>/` | `userland-manifest.json` + 签名 | C 层内容清单（`revision` 单调） |
+| 对象存储 `userland-<channel>/` | 清单 + 签名（**远端对象键不在本文写死**：由通道锚 `container/app/src/main/assets/supply/channel.json` 的 `manifestName`/`sigName` 声明） | C 层内容清单（`revision` 单调） |
 
 > gh 的资产名**取上传文件的 basename**（`file#标签` 里 `#` 后面只是 label，不改名）。
 > 「确保 Release 在 → 覆盖上传 → 回读确认」只住 `scripts/gh-release-upload.sh`，四条 GitHub 投递链
