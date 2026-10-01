@@ -50,6 +50,7 @@ class PortRegistry {
     // os.homedir() 才是正确来源（统一处理 HOME / USERPROFILE 等差异）。
     this._file = (opts && opts.file) || path.join(require('../../platform/state-root').supervisorDir(), 'ports.json');
     this._records = new Map();   // port -> { port, role, owner, createdAt }
+    this._systemRoles = new Map(); // role -> port：本进程登记过的固定角色（固定端口冲突的唯一判据）
     this._allocLock = false;     // 分配互斥：isTaken(await) 窗口内并发调用必须串行
     // 物理池（可配置）：opts.pools 覆盖默认（config.portPools 注入）；键缺失回退默认。
     this._pools = Object.assign({}, DEFAULT_POOLS, (opts && opts.pools) || {});
@@ -140,19 +141,23 @@ class PortRegistry {
   }
 
   /* ═══════ 登记（固定 / 用户 / 动态）═══════ */
-  /** 登记固定端口（主DSH/API/中转等）。同端口已被其他固定角色占用 → 报错；
+  /** 登记固定端口（主DSH/API/中转等）。本进程已把该角色登记在同一端口上却换名来抢 → 报错；
    * user/动态记录（如实例 main 端口 = 主 DSH 端口）→ 固定端口权威覆盖。 */
   register(role, port) {
     const p = Number(port);
     if (!Number.isInteger(p) || p <= 0 || p > 65535) throw new Error('ports.register: 非法端口 ' + port);
     const existing = this._records.get(p);
-    if (existing) {
-      const existingFixed = String(existing.owner || '').startsWith('system:');
-      if (existingFixed && existing.role !== role) throw new Error('端口 ' + p + ' 已被 [' + existing.role + '] 占用，无法登记为 [' + role + ']');
-      // 覆盖 user/动态记录（固定端口权威；main 实例端口 = dsh-main 同一端口）
-      if (existing.owner && !existingFixed) this._records.delete(p);
+    // 冲突判据 = 本进程是否把**这个角色**登记在**这个端口**上（_systemRoles 只收本进程
+    // 登记过的固定角色），不比记录里的角色名。
+    // 为什么不能比名字：ports.json 跨 Program 版本持久化，旧版写出的固定角色名对新版只是
+    // 死账（那个端口没人听）。按名字比会在 Supervisor 构造里抛 —— 抛点早于异常处理器安装
+    // ⇒ 守卫静默 exit 1、面板整体起不来（真机 2026-10-01：旧账 lobos-main 撞新名 dsh-main）。
+    if (existing && existing.role !== role && this._systemRoles.get(existing.role) === p) {
+      throw new Error('端口 ' + p + ' 已被 [' + existing.role + '] 占用，无法登记为 [' + role + ']');
     }
+    // 覆盖 user/动态记录与旧版死账（固定端口权威；main 实例端口 = dsh-main 同一端口）
     this._records.set(p, { port: p, role, owner: 'system:' + role, createdAt: Date.now() });
+    this._systemRoles.set(role, p);
     this._save();
     return p;
   }

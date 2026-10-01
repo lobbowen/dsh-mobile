@@ -124,12 +124,38 @@ check('R-4 dist/index.js 用契约注入环境（PATH/prefix）', /runtimeContra
 const nm = fs.readFileSync(path.join(ROOT, 'src', 'assembler', 'manager.js'), 'utf8');
 check('R-4 manager.js 用契约解析 npm', /runtimeContract\.npmInvocation\(/.test(nm), 'ok');
 check('R-4 manager.js node 探测走契约', /runtimeContract\.nodeBin\(/.test(nm), 'ok');
-// 投放单元的 $PREFIX 只能来自契约：read() 在场 = _unitContext 走的是 runtime.json，
+// 投放单元的 $PREFIX 只能来自契约：containerContract() 在场 = _unitContext 走的是 runtime.json，
 // 不是进程环境（native-supply-gate 另有死词汇判据兜另一半）。
-check('R-4 manager.js 投放前置读契约', /runtimeContract\.read\(\)/.test(nm), 'ok');
+check('R-4 manager.js 投放前置读契约', /runtimeContract\.containerContract\(\)/.test(nm), 'ok');
 const ec = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'env-status.js'), 'utf8');
 check('R-4 env-status 用契约读 minNode', /runtime-contract/.test(ec), 'ok');
 check('R-4 env-status npm 探测走契约', /rc\.npmInvocation\(/.test(ec), 'ok');
+
+// R-8 容器形态判据（containerContract）：今天的容器把 npm 交给 C 清单按裸名供给、
+// 恒不写可选格 npmEntry，而 nodePath 是每次启动前必写的事实。判据取错一格，整台设备
+// 上的载荷会被报成未安装且原生件静默全停（.50 真机定罪）。
+const CF = path.join(SUP, 'runtime.json');
+fs.rmSync(CF, { force: true });
+check('R-8 无契约 → containerContract()=null', rc.containerContract() === null);
+fs.writeFileSync(CF, JSON.stringify({ schema: 2, writtenBy: 'test', nodePath: NODE, nodeBinDir: NODE_DIR, prefix: PREFIX_DIR, minNode: 'v24.21.0' }), null, 2);
+const cc = rc.containerContract();
+check('R-8 今天的容器契约（只有 nodePath，无 npmEntry）判容器形态', !!cc && cc.nodePath === NODE && cc.npmEntry === null, JSON.stringify(cc));
+fs.writeFileSync(CF, JSON.stringify({ schema: 2, writtenBy: 'test', nodePath: 'node', npmEntry: ENTRY }), null, 2);
+check('R-8 相对 nodePath（模板/污染值）不判容器形态', rc.containerContract() === null, JSON.stringify(rc.read()));
+fs.writeFileSync(CF, JSON.stringify({ schema: 2, writtenBy: 'test', nodePath: path.join(NODE_DIR, 'gone.so') }), null, 2);
+check('R-8 nodePath 指向不存在处仍是容器形态（覆盖安装后契约才是现行值）', !!rc.containerContract());
+fs.rmSync(CF, { force: true });
+// 死形态判据扫描：源码里任何 `!c.npmEntry` 都是把可选格当容器旗，一处都不许留。
+const scanRoot = path.join(ROOT, 'src');
+const badGate = [];
+(function walk(d) {
+  for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    const p = path.join(d, e.name);
+    if (e.isDirectory()) walk(p);
+    else if (e.name.endsWith('.js') && /!\s*[A-Za-z_$][\w$]*\.npmEntry/.test(fs.readFileSync(p, 'utf8'))) badGate.push(path.relative(ROOT, p));
+  }
+})(scanRoot);
+check('R-8 源码零处把 npmEntry 当形态判据', badGate.length === 0, badGate.join(' | '));
 
 process.env.HOME = savedHome; process.env.USERPROFILE = savedUp;
 delete process.env.LOBOS_SUPERVISOR_HOME;

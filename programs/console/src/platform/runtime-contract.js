@@ -60,6 +60,22 @@ function read() {
   };
 }
 
+/**
+ * 容器形态判据：契约在场且 nodePath 是绝对路径。
+ *
+ * 为什么不是 npmEntry：那是**可选**格（旧容器投 npm-cli.js 才写），今天的容器把 npm
+ * 交给 C 清单按裸名供给、恒不写它。用它当判据会把容器读成 PC —— 启动命令永不写回
+ * 绝对形态、原生件全记 skipped，而载荷其实早已装在机器上。
+ * nodePath 才是容器每次启动前必写的事实。存在性不校验：契约里的是现行值，
+ * 可能失效的是持久化命令里的旧路径（那是 repairLaunchNodePath 的判据）。
+ * @returns {object|null} 契约对象；非容器形态返回 null
+ */
+function containerContract() {
+  const c = read();
+  if (!c || !c.nodePath || !path.isAbsolute(String(c.nodePath))) return null;
+  return c;
+}
+
 /** node 可执行：契约优先（安卓下即 libnode.so 绝对路径）；缺失退回 fallback。 */
 function nodeBin(fallback) {
   const c = read();
@@ -138,4 +154,4 @@ function npmEnv(baseEnv) {
   return e;
 }
 
-module.exports = { SUPPORTED_SCHEMA, file, read, nodeBin, npmInvocation, npmEnv, withPath, prefixRoot };
+module.exports = { SUPPORTED_SCHEMA, file, read, containerContract, nodeBin, npmInvocation, npmEnv, withPath, prefixRoot };

@@ -221,6 +221,56 @@ function probeNative(entry) {
     check('S4c missing 事件与告警都打实际尝试的命令', ev.d.command === dead && warns.some((w) => w.indexOf('command missing: ' + dead) === 0), JSON.stringify([ev.d, warns]));
   }
 
+  // ── S4d 今天的容器形态（契约只有 nodePath，无 npmEntry）：命令整备与安装判决 ──
+  // 真机 2026-10-01 定罪：容器把 npm 交给 C 清单按裸名供给、不再写 npmEntry，而判据
+  // 取的是那一份可选格 ⇒ 已装好的载荷被报成 uninstalled、原生件全 skipped。
+  {
+    const root5 = path.join(TMP, 'npmroot5');
+    const pkgDir = path.join(root5, '@deepseek-ai', 'dsh');
+    fs.mkdirSync(path.join(pkgDir, 'lib'), { recursive: true });
+    fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.2.0-rc.2', bin: { dsh: 'lib/bin.js' } }));
+    const entry5 = path.join(pkgDir, 'lib', 'bin.js');
+    fs.writeFileSync(entry5, 'process.stdout.write("BOOT-OK\\n"); process.exit(0)');
+    fs.mkdirSync(path.join(TMP, 'stateD'), { recursive: true });
+    fs.writeFileSync(path.join(TMP, 'stateD', 'native-manifest.json'), JSON.stringify({ installedAt: new Date().toISOString(), version: '0.2.0-rc.2', binPath: 'dsh', npmRoot: root5, packageDir: pkgDir }));
+    // 树里放一颗真需要垫片的依赖：applied 是「本轮确实按容器形态跑了投放」的正证，
+    // 只断言「不再报旧原因」是空断言（旧串已从源码消失）。
+    const shimPkg = path.join(root5, 'node-addon-require-builtin');
+    fs.mkdirSync(path.join(shimPkg, 'lib'), { recursive: true });
+    fs.writeFileSync(path.join(shimPkg, 'lib', 'index.js'), THROWS);
+    const persistedD = [];
+    const cfgD = { command: ['node', 'dsh', 'web'], packageName: '@deepseek-ai/dsh', targetPort: 3080 };
+    const nmD = new NativeManager({ config: cfgD, logger: { info() {}, warn() {}, error() {} }, events: { append() {} }, stateDir: path.join(TMP, 'stateD'), persistCommand: (p) => persistedD.push(JSON.parse(JSON.stringify(p))) });
+    // 判据必须认这份契约（nodePath 在场、npmEntry 缺席）
+    fs.writeFileSync(contractFile, JSON.stringify({ schema: 2, nodePath: process.execPath, nodeBinDir: path.dirname(process.execPath), prefix: path.join(TMP, 'prefixD'), minNode: '24.21.0', writtenBy: 'test' }));
+    check('S4d 无 npmEntry 的容器契约仍是容器形态', !!runtimeContract.containerContract() && runtimeContract.containerContract().nodePath === process.execPath);
+    check('S4d 该契约下投放真跑到了（垫片 applied，无一格判非容器形态）', (() => {
+      const u = nmD.ensureNativeUnits();
+      const formSkipped = Object.values(u).filter((x) => /非容器形态/.test(x.reason || ''));
+      return Object.keys(u).length > 0 && formSkipped.length === 0 && u['require-builtin'].status === 'applied';
+    })(), JSON.stringify(nmD.nativeUnits));
+    check('S4d 启动命令按契约整备为绝对形态并回写', nmD.applyLaunchCommand() === true && JSON.stringify(cfgD.command) === JSON.stringify([process.execPath, entry5, 'web', '--no-open']) && persistedD.length === 1, JSON.stringify(cfgD.command));
+    check('S4d 二次调用幂等（no-op，不重复回写）', nmD.applyLaunchCommand() === false && persistedD.length === 1);
+    const stD = nmD.status();
+    check('S4d 已装载荷判 installed+executable（设备那三格）', stD.installed === true && stD.executable === true && stD.version === '0.2.0-rc.2' && stD.state === 'installed', JSON.stringify({ installed: stD.installed, executable: stD.executable, version: stD.version, state: stD.state }));
+    const fd = makeFake(path.join(TMP, 'dshD.log'), { n: 0 });
+    fd.config = { dshLogFile: path.join(TMP, 'dshD.log'), startTimeoutMs: 5000, command: ['node', 'dsh', 'web'], targetPort: 3080 };
+    fd.nativeManager = new NativeManager({ config: fd.config, logger: { info() {}, warn() {}, error() {} }, events: { append() {} }, stateDir: path.join(TMP, 'stateD') });
+    const cd = fd._androidLaunchReady(fd.spawnCommand());
+    check('S4d 未重装也能起：spawn 前整备出 node 代跑形态并注入 flag', JSON.stringify(cd) === JSON.stringify([process.execPath, '--expose-internals', entry5, 'web', '--no-open', '--port', '3080']), JSON.stringify(cd));
+    // 反向对照（判据不许空转）：契约缺席（PC）⇒ 命令逐字不动、无 flag、单元全按非容器形态停手
+    fs.rmSync(contractFile, { force: true });
+    const cfgE = { command: ['node', 'dsh', 'web'], packageName: '@deepseek-ai/dsh', targetPort: 3080 };
+    const nmE = new NativeManager({ config: cfgE, logger: { info() {}, warn() {}, error() {} }, events: { append() {} }, stateDir: path.join(TMP, 'stateD') });
+    check('S4d 无契约（PC）→ 整备判 false 且命令逐字不变', nmE.applyLaunchCommand() === false && JSON.stringify(cfgE.command) === JSON.stringify(['node', 'dsh', 'web']));
+    const uE = nmE.ensureNativeUnits();
+    check('S4d 无契约（PC）→ 每格都判非容器形态（对照组必须红在那一格）', Object.keys(uE).length > 0 && Object.values(uE).every((x) => x.status === 'skipped' && /非容器形态/.test(x.reason || '')), JSON.stringify(nmE.nativeUnits));
+    const fe = makeFake(path.join(TMP, 'dshE.log'), { n: 0 });
+    fe.config = { dshLogFile: path.join(TMP, 'dshE.log'), startTimeoutMs: 5000, command: ['node', 'dsh', 'web'], targetPort: 3080 };
+    check('S4d 无契约（PC）→ _androidLaunchReady 原样返回（不注入 flag）', JSON.stringify(fe._androidLaunchReady(fe.spawnCommand())) === JSON.stringify(['node', 'dsh', 'web', '--port', '3080']));
+    writeContract();
+  }
+
   // ── S5 非零退出取证：本轮 startup-*.log 尾部进 dsh_exited，旧报告不顶缸 ──
   const dshHome = path.join(TMP, 'dsh-home');
   fs.mkdirSync(path.join(dshHome, 'logs'), { recursive: true });
