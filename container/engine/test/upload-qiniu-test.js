@@ -1,28 +1,13 @@
 'use strict';
 
-// 投放口唯一宿主（scripts/upload-qiniu.js）的行为自测 + 回潮门禁。
-//
-// ============================================================================
-//  为什么要有这个测试
-// ============================================================================
-//  「投放成功」这句话原先由上传应答（七牛收了 200）来支撑，而设备读的是 CDN 域名。
-//  2026-09-29 实证过两次这两种事实分岔：
-//    ① commit 88192be4（2026-09-28，大件改分片上传）删掉了文件末尾的 `main().catch(...)`，脚本被
-//       调用时什么都不做还退 0 —— program-ota / build-userland 的五个投放口此后每次照旧打印
-//       「通道已更新」，CI 全绿，而线上一件都没换（今天回读：userland-canary 的清单仍停在
-//       2026.09.27.119，新键 userland-manifest-2.json 直接 404，设备装不上新内核）。
-//    ② 同一次改写把分片路径写成了「首块 mkblk、其余每块 bput 续进同一 ctx」，而七牛《分片上传 v1》
-//       规定块 ≤ 4 MB、mkfile 按顺序组装的是**块**的 ctx —— 那样第二块就顶破 4 MB 且 ctx 列表重复；
-//       加上 PER_ATTEMPT_MS 声明在使用点之后（TDZ），这条路径一旦被调用必红。
-//       它【从未真跑过】，正是因为 ①：入口没了，写错的代码连报错的机会都没有。
-//  这两条都不是「网络不稳」，是**判据空转**：没有一次回读，就没有任何东西证明设备读得到。
-//  回读比对现在住在本脚本里（两条上传路径汇于一点），所以它的判红能力必须能被证伪。
-//
-//  本文件盯两件事，全跑在进程内假七牛上（不碰网络、不碰真凭据）：
-//    ① 行为：上传→回读→逐字节比对，每一条出口（生效 / 取不到 / 内容不符 / 4xx / 5xx 重试）
-//       都有对照组能红。分片路径单独端到端跑一次，假服务端照 v1 判块上限与 ctx 顺序，
-//       所以 ② 那两类写法在这里必红。
-//    ② 回潮：投放口不许在 workflow 里自带只打印不判红的 curl 自证；每个调用点必须给回读锚。
+// 投放口唯一宿主（scripts/upload-qiniu.js）的行为自测 + 回潮门禁，全跑在进程内假七牛上
+// （不碰网络、不碰真凭据）。盯两件事：
+//   ① 行为：上传应答不等于投放生效，「设备读得到」只能由回读逐字节比对给出 —— 所以每条出口
+//      （生效 / 取不到 / 内容不符 / 4xx / 5xx 重试）都必须有对照组能红。分片路径按七牛
+//      《分片上传 v1》：块 ≤ 4 MiB、mkfile 按序组装**块**的 ctx、不用 bput 续片。
+//   ② 回潮：回读判据只有这一个宿主 —— workflow 里不许自带只打印不判红的自证回读，
+//      每个调用点必须给 QINIU_PUBLIC_BASE；脚本末尾的入口调用必须存在，静默退 0 的投放口
+//      比报错的更坏。
 // ============================================================================
 
 const fs = require('fs');
@@ -199,7 +184,7 @@ function run(args, env) {
   r = await run([smallFile, 'userland-canary/manifest.json'], { QINIU_PUBLIC_BASE: '' });
   check('缺 QINIU_PUBLIC_BASE ⇒ 退 2 且一次都不上传', r.status === 2 && state.uploadHits === 0, 'status=' + r.status + ' uploadHits=' + state.uploadHits);
 
-  // ---- 判红必须双向：线上 404（①那次事故的原样）----
+  // ---- 判红必须双向：线上 404 ----
   resetState();
   state.publicMode = 'absent';
   r = await run([smallFile, 'userland-canary/manifest.json']);
@@ -233,7 +218,7 @@ function run(args, env) {
   check('上传 5xx 后重试成功 ⇒ 退 0', r.status === 0, 'status=' + r.status + ' err=' + (r.stderr || '').slice(0, 200));
   check('上传 5xx 确实重试了（不是一次失败就退）', state.requestHits === 2 && state.uploadHits === 1, 'requests=' + state.requestHits + ' ok=' + state.uploadHits);
 
-  // ---- 分片路径端到端（②那次 TDZ 事故的现场）----
+  // ---- 分片路径端到端（>8 MiB 才走这条）----
   resetState();
   r = await run([bigFile, 'userland/git/git-tree.zip', '--cache-control=31536000']);
   check('分片上传退 0（>8 MiB 走 mkblk/mkfile）', r.status === 0, 'status=' + r.status + ' err=' + (r.stderr || '').slice(0, 240));
@@ -270,7 +255,7 @@ function run(args, env) {
   check('投放口存在且不为零（调用点被扫描到才谈得上门禁）', callSites.length >= 5, '调用点=' + callSites.length);
   check('每个 upload-qiniu 调用点都自带回读锚 QINIU_PUBLIC_BASE', anchorless.length === 0, '缺锚: ' + anchorless.join(','));
   check('workflow 里不得再出现只打印不判红的自证回读', inlineProbe.length === 0, '残留: ' + inlineProbe.join(','));
-  check('入口调用钉在脚本末尾（①那次事故的直接判据）', /main\(\)\.catch\(/.test(stripComments(fs.readFileSync(HOST_SCRIPT, 'utf8'))));
+  check('入口调用钉在脚本末尾（静默退 0 的投放口比报错的更坏）', /main\(\)\.catch\(/.test(stripComments(fs.readFileSync(HOST_SCRIPT, 'utf8'))));
 
   uploadSrv.close(); cdnSrv.close();
   finish();

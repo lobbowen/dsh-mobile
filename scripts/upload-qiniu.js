@@ -13,7 +13,7 @@
 //
 // QINIU_PUBLIC_BASE 不是可选项：上传应答只证明**七牛收了**，不证明**设备读得到**。
 // 判「投放生效」的唯一办法是回读设备会用的那个 URL 并逐字节比对，所以它住在本脚本里，
-// 每个投放口都躲不过（写进 workflow 的教训见文件末尾）。
+// 每个投放口都躲不过；workflow 里不许另写只打印不判红的自证回读。
 // ============================================================================
 
 const fs = require('node:fs');
@@ -72,8 +72,8 @@ async function main() {
 
   const buf = fs.readFileSync(local);
   const B64URLSTR = (s) => B64URL(Buffer.from(s, 'utf8'));
-  // 必须在使用者之前声明：post() 读 PER_ATTEMPT_MS，而 88192be4 把它留在大件路径的 return 之后 ——
-  // 于是分片上传从第一块起就撞 TDZ，并被自己的重试循环报成「网络失败」。
+  // post() 读 PER_ATTEMPT_MS，所以这两颗常量必须在它之前声明：写在后面会撞 TDZ，
+  // 并被分片路径自己的重试循环报成「网络失败」。
   const ATTEMPTS = 3;
   const PER_ATTEMPT_MS = 900000;
 
@@ -191,11 +191,4 @@ async function main() {
   await verifyPublic();
 }
 
-// ---------------------------------------------------------------------------
-//  入口。别再把这一行删掉：commit 88192be4（2026-09-28 大件改分片）删了它之后，脚本被
-//  调用时【什么都不做还退 0】—— program-ota / build-userland 的五个投放口每次照旧打印
-//  「通道已更新」且 CI 全绿，而线上一件都没换：今天回读 userland-canary 的清单仍停在
-//  2026.09.27.119，新键 userland-manifest-2.json 直接 404，设备永远装不上新内核。
-//  「有没有真的跑」这条判据住在 container/engine/test/upload-qiniu-test.js。
-// ---------------------------------------------------------------------------
 main().catch((e) => { console.error('[qiniu] FATAL ' + (e && e.message)); process.exit(1); });
