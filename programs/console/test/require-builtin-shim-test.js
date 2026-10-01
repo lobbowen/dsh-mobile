@@ -233,11 +233,10 @@ function probeNative(entry) {
     fs.writeFileSync(entry5, 'process.stdout.write("BOOT-OK\\n"); process.exit(0)');
     fs.mkdirSync(path.join(TMP, 'stateD'), { recursive: true });
     fs.writeFileSync(path.join(TMP, 'stateD', 'native-manifest.json'), JSON.stringify({ installedAt: new Date().toISOString(), version: '0.2.0-rc.2', binPath: 'dsh', npmRoot: root5, packageDir: pkgDir }));
-    // 树里放一颗真需要垫片的依赖：applied 是「本轮确实按容器形态跑了投放」的正证，
-    // 只断言「不再报旧原因」是空断言（旧串已从源码消失）。
-    const shimPkg = path.join(root5, 'node-addon-require-builtin');
-    fs.mkdirSync(path.join(shimPkg, 'lib'), { recursive: true });
-    fs.writeFileSync(path.join(shimPkg, 'lib', 'index.js'), THROWS);
+    // 树里放一颗真需要垫片的依赖（走文件里的 mkPkg：定位判据要的是包目录里的 package.json）：
+    // applied 是「本轮确实按容器形态跑了投放」的正证，只断言「不再报旧原因」是空断言
+    //（旧串已从源码消失）。
+    mkPkg(path.join(root5, 'node-addon-require-builtin'), 'lib/index.js', THROWS);
     const persistedD = [];
     const cfgD = { command: ['node', 'dsh', 'web'], packageName: '@deepseek-ai/dsh', targetPort: 3080 };
     const nmD = new NativeManager({ config: cfgD, logger: { info() {}, warn() {}, error() {} }, events: { append() {} }, stateDir: path.join(TMP, 'stateD'), persistCommand: (p) => persistedD.push(JSON.parse(JSON.stringify(p))) });
@@ -254,7 +253,7 @@ function probeNative(entry) {
     const stD = nmD.status();
     check('S4d 已装载荷判 installed+executable（设备那三格）', stD.installed === true && stD.executable === true && stD.version === '0.2.0-rc.2' && stD.state === 'installed', JSON.stringify({ installed: stD.installed, executable: stD.executable, version: stD.version, state: stD.state }));
     const fd = makeFake(path.join(TMP, 'dshD.log'), { n: 0 });
-    fd.config = { dshLogFile: path.join(TMP, 'dshD.log'), startTimeoutMs: 5000, command: ['node', 'dsh', 'web'], targetPort: 3080 };
+    fd.config = { dshLogFile: path.join(TMP, 'dshD.log'), startTimeoutMs: 5000, command: ['node', 'dsh', 'web'], packageName: '@deepseek-ai/dsh', targetPort: 3080 };
     fd.nativeManager = new NativeManager({ config: fd.config, logger: { info() {}, warn() {}, error() {} }, events: { append() {} }, stateDir: path.join(TMP, 'stateD') });
     const cd = fd._androidLaunchReady(fd.spawnCommand());
     check('S4d 未重装也能起：spawn 前整备出 node 代跑形态并注入 flag', JSON.stringify(cd) === JSON.stringify([process.execPath, '--expose-internals', entry5, 'web', '--no-open', '--port', '3080']), JSON.stringify(cd));
@@ -266,7 +265,9 @@ function probeNative(entry) {
     const uE = nmE.ensureNativeUnits();
     check('S4d 无契约（PC）→ 每格都判非容器形态（对照组必须红在那一格）', Object.keys(uE).length > 0 && Object.values(uE).every((x) => x.status === 'skipped' && /非容器形态/.test(x.reason || '')), JSON.stringify(nmE.nativeUnits));
     const fe = makeFake(path.join(TMP, 'dshE.log'), { n: 0 });
-    fe.config = { dshLogFile: path.join(TMP, 'dshE.log'), startTimeoutMs: 5000, command: ['node', 'dsh', 'web'], targetPort: 3080 };
+    // 对照组也要带齐真配置（packageName 在场）：否则「命令没动」可能只是缺键抛错，
+    // 而不是判据把它挡住了。
+    fe.config = { dshLogFile: path.join(TMP, 'dshE.log'), startTimeoutMs: 5000, command: ['node', 'dsh', 'web'], packageName: '@deepseek-ai/dsh', targetPort: 3080 };
     check('S4d 无契约（PC）→ _androidLaunchReady 原样返回（不注入 flag）', JSON.stringify(fe._androidLaunchReady(fe.spawnCommand())) === JSON.stringify(['node', 'dsh', 'web', '--port', '3080']));
     writeContract();
   }
