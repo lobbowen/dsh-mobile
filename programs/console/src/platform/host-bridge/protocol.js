@@ -35,9 +35,15 @@ function notification(method, params) {
   return { jsonrpc: '2.0', method, params: params || {} };
 }
 
-/** 握手：内核连接后主动发 bridge.handshake{ protocol, requires }。 */
-function handshakeRequest(id, requires) {
-  return request(id, 'bridge.handshake', { protocol: PROTOCOL_VERSION, requires: requires || [] });
+/** 握手：Program 连接后主动发 bridge.handshake{ protocol, program, requires }。
+ *  program 是本 Program 的身份（源清单 id，打包后成为包清单 name）：壳按它查授权表
+ *  （AUD-G35），不声明或声明得与包清单不符 → 只有 base，所有组调用一律 -32001。 */
+function handshakeRequest(id, requires, program) {
+  return request(id, 'bridge.handshake', {
+    protocol: PROTOCOL_VERSION,
+    program: program || null,
+    requires: requires || [],
+  });
 }
 
 /** 协商能力：requires（bridge:* 组令牌）与容器实际可用分组的交集/差集。 */

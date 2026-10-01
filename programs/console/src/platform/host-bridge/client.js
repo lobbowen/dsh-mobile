@@ -5,18 +5,20 @@
 // 内核跑在安卓容器（L0）里，所有**设备能力**（通知、打开浏览器、应用控制、UI 自动化、
 // Device Policy…）都由容器层的 HostBridge 承担。本模块是内核唯一的桥客户端：
 //
-// 内核（:node 进程） --connect--> HostBridge（Kotlin HostBridgeService / Android Service）
+// 内核（node 进程） --connect--> HostBridge（Kotlin HostBridgeService / Android Service）
 //
 // ## 传输
 //
 // Linux **抽象命名空间** Unix 域套接字：path = '\0' + socketName（前导 NUL 字节）。
-// 容器侧 `LocalServerSocket("dsh_hostbridge")` 即抽象命名空间套接字，Node 22 原生支持
-// `net.connect('\0dsh_hostbridge')`（已实测连通）。**严禁 TCP**（控制面不经网络暴露，见 BASE_SPEC §8）。
+// 容器侧 `LocalServerSocket("lobos_hostbridge")` 即抽象命名空间套接字，Node 22 原生支持
+// `net.connect('\0lobos_hostbridge')`（已实测连通）。**严禁 TCP**（控制面不经网络暴露，见 BASE_SPEC §8）。
 //
 // ## 协议
 //
-// JSON-RPC 2.0，换行分隔的 JSON 帧。连接后内核先发 `bridge.handshake{protocol,requires}`，
+// JSON-RPC 2.0，换行分隔的 JSON 帧。连接后内核先发 `bridge.handshake{protocol,program,requires}`，
 // 容器回 `{protocol,capabilities,groups}`（协商结果）。之后 `call(method,params)`。
+// `program` 是本 Program 的身份：壳侧授权表按它判（不声明=只有 base）。默认从自己的包清单读，
+// 与容器/壳两侧的实现同一份契约 —— 内核不因此新增任何申报格或桥方法。
 //
 // ## 不变量（与内核「可降级运行」契约一致）
 //
@@ -25,12 +27,14 @@
 // · 断线自动重连（下一次调用时惰性重连），避免内核因容器重启而需要自己重启。
 // · 超时（默认 15s）视为失败，**绝不挂死内核事件循环**。
 //
-// socket 名来源：`LOBOS_BRIDGE_SOCKET` 环境变量（容器启动内核时注入）；默认 'dsh_hostbridge'。
+// socket 名来源：`LOBOS_BRIDGE_SOCKET` 环境变量（容器启动内核时注入）；默认 'lobos_hostbridge'。
 
+const fs = require('node:fs');
 const net = require('node:net');
+const path = require('node:path');
 const { PROTOCOL_VERSION, ERROR_CODES, request, notification, handshakeRequest } = require('./protocol');
 
-const DEFAULT_SOCKET = 'dsh_hostbridge';
+const DEFAULT_SOCKET = 'lobos_hostbridge';
 const DEFAULT_TIMEOUT_MS = 15000;
 
 /** 抽象命名空间路径：前导 NUL + 名称。 */
@@ -38,18 +42,37 @@ function abstractPath(name) {
   return '\0' + name;
 }
 
+/**
+ * 本 Program 自己的包清单：握手身份（id）与能力声明（requires）的事实源。
+ * 读不到就是空身份 —— 桥不可用时内核照常降级，这里不另造第二个声明处。
+ */
+let _own = null;
+function ownManifest() {
+  if (_own) return _own;
+  try {
+    const m = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', '..', 'manifest.json'), 'utf8'));
+    _own = { program: m.id || null, requires: Array.isArray(m.requires) ? m.requires : [] };
+  } catch (_e) {
+    _own = { program: null, requires: [] };
+  }
+  return _own;
+}
+
 class HostBridgeClient {
   /**
    * @param {object} [o]
-   * - socketName?: 抽象命名空间名（默认 env LOBOS_BRIDGE_SOCKET 或 'dsh_hostbridge'）
-   * - requires?: string[] 期望的 bridge:* 组令牌（握手协商用）
+   * - socketName?: 抽象命名空间名（默认 env LOBOS_BRIDGE_SOCKET 或 'lobos_hostbridge'）
+   * - program?: 握手身份，默认取自己包清单的 id
+   * - requires?: string[] 期望的 bridge:* 组令牌（握手协商用），默认取包清单的 requires
    * - timeoutMs?: 单次调用超时
    * - onLog?: (msg:string)=>void
    */
   constructor(o) {
     o = o || {};
+    const own = ownManifest();
     this.socketName = o.socketName || process.env.LOBOS_BRIDGE_SOCKET || DEFAULT_SOCKET;
-    this.requires = o.requires || [];
+    this.program = o.program === undefined ? own.program : o.program;
+    this.requires = o.requires || own.requires;
     this.timeoutMs = o.timeoutMs || DEFAULT_TIMEOUT_MS;
     this.onLog = o.onLog || (() => {});
     this._sock = null;
@@ -170,7 +193,7 @@ class HostBridgeClient {
       this.onLog('host-bridge: connect failed ' + (e && e.code || e));
       return null;
     }
-    const resp = await this._send(handshakeRequest(++this._seq, this.requires));
+    const resp = await this._send(handshakeRequest(++this._seq, this.requires, this.program));
     if (!resp || !resp.result) {
       this.onLog('host-bridge: handshake failed');
       return null;
