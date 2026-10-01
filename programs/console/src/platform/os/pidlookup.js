@@ -113,11 +113,11 @@ function readCmdline(pid) {
   } catch { return null; }
 }
 
-/** 判断进程命令行是否匹配 LOBOS 特征。 */
-function isLobosCmdline(pid) {
+/** 判断进程命令行是否匹配 DSH 特征。 */
+function isDshCmdline(pid) {
   const cmd = readCmdline(pid);
   if (!cmd) return false;
-  return /(^|\s)(node|.*lobos.*)(\s|$)/i.test(cmd) && /lobos/i.test(cmd);
+  return /(^|\s)(node|.*dsh.*)(\s|$)/i.test(cmd) && /dsh/i.test(cmd);
 }
 
 /** 「按命令行模式匹配进程」：返回 [{pid, cmdline}]，pattern 按**子串**匹配。
@@ -143,7 +143,7 @@ function pgrepList(pattern) {
 function normCmdline(s) { return String(s || '').replace(/\\/g, '/'); }
 
 module.exports = {
-  findListeningPid, isAlive, readCmdline, normCmdline, isLobosCmdline, pgrepList,
+  findListeningPid, isAlive, readCmdline, normCmdline, isDshCmdline, pgrepList,
   // 输出纯解析器（生产代码直接调用，非平行实现）：使其可在任意宿主上穷举验证
   parseProcNetTcpInodes, parseSsPid,
 };

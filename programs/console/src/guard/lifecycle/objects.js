@@ -31,7 +31,7 @@ const DESIRED = ['running', 'stopped'];
 /** 受管对象类型表（显式、稳定；不造通用 CRD）。future 扩展经 registerKind 声明能力。 */
 /** 已删除的类型（勿回潮）：'sandbox-instance'（沙箱实例域已整体移除，内核 Android-only 单主干）。 */
 const MANAGED_KINDS = {
-  lobos:              { label: '原生 LOBOS',       startable: true, guardable: true },
+  dsh:              { label: '原生 DSH',       startable: true, guardable: true },
   'router-daemon':  { label: '智能路由 daemon', startable: true, guardable: true },
   plugin:           { label: '插件（聚合）',    startable: false, guardable: false },
 };
@@ -159,7 +159,7 @@ class ManagedRegistry {
           ownership: o.ownership,
           phase: o.phase, backoffLevel: o.backoffLevel,
           backoffUntil: (o.backoffUntil && o.backoffUntil > Date.now()) ? o.backoffUntil : null,
-          // B2 归一：崩溃保护字段随目录持久化（主 LOBOS 崩溃计数/窗跨守卫重启保持），不再只落 state.json
+          // B2 归一：崩溃保护字段随目录持久化（主 DSH 崩溃计数/窗跨守卫重启保持），不再只落 state.json
           restartCount: Number.isInteger(o.restartCount) ? o.restartCount : 0,
           crashWindowStart: o.crashWindowStart || null,
           crashWindowRestarts: Number.isInteger(o.crashWindowRestarts) ? o.crashWindowRestarts : 0,
@@ -298,7 +298,7 @@ class ManagedRegistry {
   /**
    * 唯一心跳（R3 C3-1 基础设施）：遍历目录项，对已挂 adapter 的对象执行 observe() 并写入实然。
    * 本层只做「观测收集」（实然→lastObserved）；收敛/启停(apply/stop/退避)由各类型 adapter 的驱动
-   * 开关逐步启用（daemon→lobos→sandbox，见 REDESIGN-R3-execution-plan）。节流经 ownership.meta.tickEvery
+   * 开关逐步启用（daemon→dsh→sandbox，见 REDESIGN-R3-execution-plan）。节流经 ownership.meta.tickEvery
    * （1=每拍；6≈30s daemon 语义）。单对象异常隔离。
    * @param {number} [intervalMs] 心跳拍宽（默认 5000）
    * @returns {{ observed: string[], errors: string[] }}

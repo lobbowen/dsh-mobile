@@ -109,7 +109,7 @@ function describe() {
  * 包根用 `package.json` 验证。
  *
  * 同类缺陷：`settings-view.js` 的 `_vcsRoot()` 曾用 `path.resolve(__dirname, '..')`
- * 并注释「= lobos-supervisor/」；但 §7.6 拆分后 `__dirname` 变为 `src/guard/supervisor/`，
+ * 并注释「= dsh-supervisor/」；但 §7.6 拆分后 `__dirname` 变为 `src/guard/supervisor/`，
  * 该表达式实际得到 `src/guard/` —— 注释与行为已经不符，
  * 导致「排除嵌套 .git」的判据作用在错误的目录上。
  *

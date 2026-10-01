@@ -11,7 +11,7 @@
 //   G9-c 执行器 killSignal 默认 SIGKILL（SIGTERM 对挂起进程可能无效）
 //   G9-d 执行器必须 windowsHide / maxBuffer / 默认超时
 //   G9-e 自证：注释里的调用不算、真调用算数、跨行调用配对完整
-// 扫描与注释剥离的唯一实现住 program/test/_scan.js（门禁法①/③）。
+// 扫描与注释剥离的唯一实现住 kernel/test/_scan.js（门禁法①/③）。
 
 const fs = require('node:fs');
 const path = require('node:path');

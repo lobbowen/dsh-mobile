@@ -53,11 +53,18 @@ function skips(dir, name) {
   if (!ignoreSeg.has(name)) return false;
   return !(name === 'dist' && !fs.existsSync(path.join(dir, 'package.json')));
 }
+// 第三方 Program 树整棵出局（策略数据 guestSurface.paths，理由写在那条 note 里）。
+// 判据是**仓根相对路径的前缀**，不是目录名 —— 同名目录长在主干里照样扫。
+const guestPaths = (policy.guestSurface && policy.guestSurface.paths) || [];
+function inGuest(relPath) {
+  return guestPaths.some((g) => relPath === g.replace(/\/+$/, '') || relPath.startsWith(g));
+}
 function walk(dir) {
   let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
   for (const e of ents) {
     if (skips(dir, e.name)) continue;
     const p = path.join(dir, e.name);
+    if (inGuest(rel(p))) continue;
     if (e.isDirectory()) { walk(p); continue; }
     if (!e.isFile() || !isTextFile(p)) continue;
     const relPath = rel(p);

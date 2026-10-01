@@ -3,9 +3,9 @@
 // 域：统一生命周期 API（status/lifecycle/healthz/readyz/events）。
 const { isInternalEvent } = require('../platform/loghub');
 
-// R3 C3-5a：旧 /start|/stop|/restart 路由删除（前端已无引用）——main 启停唯一入口 /lifecycle/lobos/{start|stop|restart}。
+// R3 C3-5a：旧 /start|/stop|/restart 路由删除（前端已无引用）——main 启停唯一入口 /lifecycle/dsh/{start|stop|restart}。
 function owns(pathname) {
-  return pathname === '/status' || pathname.startsWith('/lifecycle') || pathname === '/healthz' || pathname === '/readyz' || pathname === '/events' || pathname.startsWith('/logs') || pathname === '/metrics' || pathname === '/session/stop' || pathname === '/session/status' || pathname === '/lobos/access';
+  return pathname === '/status' || pathname.startsWith('/lifecycle') || pathname === '/healthz' || pathname === '/readyz' || pathname === '/events' || pathname.startsWith('/logs') || pathname === '/metrics' || pathname === '/session/stop' || pathname === '/session/status' || pathname === '/dsh/access';
 }
 
 function handle(ctx) {
@@ -16,21 +16,21 @@ function handle(ctx) {
       return send(200, sup.statusSummary());
     }
 
-    // ══ LOBOS 访问入口（2026-09-23 真机反馈：手机小屏面板看不到进入 LOBOS 的入口）══
-    // GET /lobos/access → { ok, url }：带令牌的 LOBOS Web 直连 URL（面板「进入 LOBOS」按钮消费）。
-    // 令牌是 LOBOS 会话凭据 → 下发只认 identity.loopback（与 api/index.js「token 下发/豁免
+    // ══ DSH 访问入口（2026-09-23 真机反馈：手机小屏面板看不到进入 DSH 的入口）══
+    // GET /dsh/access → { ok, url }：带令牌的 DSH Web 直连 URL（面板「进入 DSH」按钮消费）。
+    // 令牌是 DSH 会话凭据 → 下发只认 identity.loopback（与 api/index.js「token 下发/豁免
     // 一律消费 identity.loopback」同一契约）；非回环（局域网/FRP 通道）访问者得 403。
-    // 主机固定 127.0.0.1（令牌本就捕获自 lobos 打印的回环 URL，token.js parseLobosTokenLine
+    // 主机固定 127.0.0.1（令牌本就捕获自 dsh 打印的回环 URL，token.js parseDshTokenLine
     // 只认 127.0.0.1）；端口唯一事实源 = config.targetPort（随 _applyMainPort 重推导跟随），
     // 绝不硬编码 3080。
-    if (req.method === 'GET' && pathname === '/lobos/access') {
-      if (!identity.loopback) return send(403, { ok: false, error: 'LOBOS 访问令牌仅对本机回环下发' });
+    if (req.method === 'GET' && pathname === '/dsh/access') {
+      if (!identity.loopback) return send(403, { ok: false, error: 'DSH 访问令牌仅对本机回环下发' });
       const token = tokOf('main');
-      if (!token) return send(409, { ok: false, error: '尚未捕获 LOBOS 访问令牌（LOBOS 可能仍在启动，稍后重试）' });
+      if (!token) return send(409, { ok: false, error: '尚未捕获 DSH 访问令牌（DSH 可能仍在启动，稍后重试）' });
       return send(200, { ok: true, url: 'http://127.0.0.1:' + sup.config.targetPort + '/?token=' + token });
     }
 
-    // ══ 会话生命周期（契约（docs/components/program-android-plan.md） §3/§4）══
+    // ══ 会话生命周期（契约（docs/components/kernel-android-plan.md） §3/§4）══
     // GET  /session/status → { sessionState }：会话态唯一读取口（INV-S4）。
     // POST /session/stop   → 进入 stopping，停全部被管对象，置 stopped 并回执（INV-S2）。
     //   **守卫不停止自己**；容器（APK / Android Service）收到本回执后停止守卫进程（契约 §4.1）。
@@ -69,10 +69,10 @@ function handle(ctx) {
         if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, { ok: false, error: 'cross-origin request rejected' }); }
         const lc = lm.get(id);
         if (!lc) return send(404, { error: '模块未注册: ' + id });
-        // main(lobos) 启停收敛到统一生命周期入口（2026-09 归一化：不再直通 supervisor.setDesired，
-        // 经 lm.start/stop/restart → adapters lobos 的 start/stop → setDesired/requestRestart，
+        // main(dsh) 启停收敛到统一生命周期入口（2026-09 归一化：不再直通 supervisor.setDesired，
+        // 经 lm.start/stop/restart → adapters dsh 的 start/stop → setDesired/requestRestart，
         // 动作申报进 lifecycleManager（审计/事件），形状经 snapshot 补 desired/phase 保持一致）。
-        if (id === 'lobos' && sup && (action === 'start' || action === 'stop' || action === 'restart')) {
+        if (id === 'dsh' && sup && (action === 'start' || action === 'stop' || action === 'restart')) {
           const act = action === 'start' ? lm.start(id)
             : action === 'stop' ? lm.stop(id, 'user')
             : lm.restart(id);
@@ -134,7 +134,7 @@ function handle(ctx) {
       return send(200, { seq, events: list });
     }
 
-    // 系统日志框架（P1b）：/logs/tail?stream=guard|router|lan|lobos|upgrade&n= 排障日志尾部；
+    // 系统日志框架（P1b）：/logs/tail?stream=guard|router|lan|dsh|upgrade&n= 排障日志尾部；
     // 注：原 /logs/events-tail 已删除（见下方 P3 说明）——事件尾部读统一走 GET /events。
     if (req.method === 'GET' && pathname === '/logs/tail') {
       const u = new URL(req.url, 'http://localhost');
@@ -161,8 +161,8 @@ function handle(ctx) {
       return send(200, sup.eventHub.metrics());
     }
 
-  // R3 C3-5a：旧 /start|/stop|/restart 路由已删除——main 启停唯一入口 /lifecycle/lobos/{start|stop|restart}
-  // （语义保持见上方 lobos 直通分支；其它模块启停 /lifecycle/{id}/{action}）。
+  // R3 C3-5a：旧 /start|/stop|/restart 路由已删除——main 启停唯一入口 /lifecycle/dsh/{start|stop|restart}
+  // （语义保持见上方 dsh 直通分支；其它模块启停 /lifecycle/{id}/{action}）。
   // 域内未匹配(方法/子路径) → 全局兜底语义(与单文件时代一致)
   if (req.method === 'GET' || req.method === 'POST') return send(404, { error: 'not found', path: pathname });
   return send(405, { error: 'method not allowed' });

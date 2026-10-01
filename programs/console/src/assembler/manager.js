@@ -1,6 +1,6 @@
 'use strict';
 
-// 原生 the Agent（原生 LOBOS）生命周期管理器 —— 原生 LOBOS 的唯一管理门面。
+// 原生 DeepSeek Harness（原生 DSH）生命周期管理器 —— 原生 DSH 的唯一管理门面。
 // 职责（完整生命周期，单通道）：安装状态探测 / 版本检测 / 安装 / 升级（先停后装、验证、回滚）/ 卸载。
 // 状态机（安装态）：uninstalled → installing → installed → uninstalling → uninstalled；
 // 升级态（upgradeState，正交于安装态）：idle → restarting → verifying → done | failed（失败含 rolling_back → failed）。
@@ -43,9 +43,9 @@ class NativeManager {
     this.dist = opts.dist || null;          // 统一分发：镜像源适配 + 版本获取
     this.events = opts.events || null;
     this.logger = opts.logger || console;
-    this.stateDir = opts.stateDir;          // ~/.lobos/supervisor
+    this.stateDir = opts.stateDir;          // ~/.dsh/supervisor
     this.manifestFile = path.join(this.stateDir, 'native-manifest.json');
-    this.lobosHome = path.join(os.homedir(), AGENT.homeDirName); // 被管控 Agent 的数据目录（守卫数据另置）
+    this.dshHome = path.join(os.homedir(), AGENT.homeDirName); // 被管控 Agent 的数据目录（守卫数据另置）
     this.npmRoot = opts.npmRoot || null;    // npm 全局根（测试可注入隔离目录）
     // 能力核验（与投放结局正交）：null = 本轮还没核过 —— 与 nativeUnits 同一个口径，
     // 绝不从 manifest 回填上一进程的结论（把「不知道」伪装成「正常」是第二种假绿）。
@@ -62,10 +62,10 @@ class NativeManager {
     // 故：把 npm 可执行做成构造期可注入依赖，测试才能在**结构上**
     // 保证不触碰真实 npm（而不是依赖环境巧合）。
     this._npmBin = opts.npmBin || null;
-    this.hooks = opts.hooks || {};          // 守卫生命周期钩子（supervisor 注入）：升级需停/起 LOBOS 时回调
+    this.hooks = opts.hooks || {};          // 守卫生命周期钩子（supervisor 注入）：升级需停/起 DSH 时回调
     this.tasks = opts.tasks || null;        // 统一安装/更新任务注册表（持久化历史 + 统一 API）
     // 启动命令写回的持久化回调（supervisor 注入 persistConfigPatch）：
-    // 装完 lobos 后 config.command 必须落盘，否则守卫重启回到模板形态 → 永远拉不起。
+    // 装完 dsh 后 config.command 必须落盘，否则守卫重启回到模板形态 → 永远拉不起。
     this.persistCommand = opts.persistCommand || null;
     // 升级状态机字段（idle | installing | restarting | verifying | rolling_back | done | failed）
     this.upgradeState = 'idle';
@@ -233,9 +233,9 @@ class NativeManager {
   }
 
   /** 记录安装清单。
-   * dataPaths 语义（2026-09 审计修正）：卸载时是否连带删除 ~/.lobos 用户数据目录。
+   * dataPaths 语义（2026-09 审计修正）：卸载时是否连带删除 ~/.dsh 用户数据目录。
    * - 默认不认领：调用方未显式传 dataPaths 时为空数组（卸载只卸 npm 包，保留用户数据）；
-   * - 仅全新安装且 ~/.lobos 无既有 LOBOS 数据时，install() 才传 dataPaths（见 install）；
+   * - 仅全新安装且 ~/.dsh 无既有 DSH 数据时，install() 才传 dataPaths（见 install）；
    * - 升级/回滚调用本方法时传既有 manifest 的 dataPaths（保留首装认领，不覆盖/不新增）。
    * @param {string} version
    * @param {string[]|undefined} dataPaths 卸载时删除的数据路径（默认 []） */
@@ -254,7 +254,7 @@ class NativeManager {
     this._applyLaunchCommand(npmRoot);
     // 投放单元跑一次并把结局随清单落盘：面板/取证在内核重启后仍能看到上次供给状态，
     // 不必等下一次 spawn 才把内存填回来。
-    // 刚装完的这一轮必须重新核（覆盖安装/重装 lobos 会重建 node_modules，能力随时可能变）：
+    // 刚装完的这一轮必须重新核（覆盖安装/重装 dsh 会重建 node_modules，能力随时可能变）：
     // 走 ensureNativeUnits 的第二个参数，而不是在它之后再补一轮 —— 每格一个有界子进程，
     // 重复跑就是把开销挂在安装路径上换同一个结论。
     const units = this.ensureNativeUnits(npmRoot, true);
@@ -268,19 +268,19 @@ class NativeManager {
       binPath: bin || null,
       npmRoot,
       packageDir: pkgDir || null,
-      lobosHome: this.lobosHome,
+      dshHome: this.dshHome,
       nativeUnits: units,
       nativeCaps: caps,
-      // 只保留显式/继承认领的数据路径；绝不默认写入 ~/.lobos 全部用户数据（防误删凭据/会话）
+      // 只保留显式/继承认领的数据路径；绝不默认写入 ~/.dsh 全部用户数据（防误删凭据/会话）
       dataPaths: claim || [],
     });
   }
 
-  /* ═══════ 启动命令写回 + lobos CLI 调用形态（安卓容器）═══════ */
+  /* ═══════ 启动命令写回 + dsh CLI 调用形态（安卓容器）═══════ */
   /** 覆盖安装自愈：config.command[0] 若是指向 /data/app 随机段的绝对 libnode.so，
    *  覆盖安装后该目录整体消失（实测 2026-09-23：spawn pid=undefined + ENOENT，
    *  60s 冷静期无限循环，面板永不可用）。runtime.json 契约由容器每次启动前用当前
-   *  安装路径重写（RuntimeService.writeRuntimeJson）⇒ 契约在场且其 nodePath
+   *  安装路径重写（NodeRuntimeService.writeRuntimeJson）⇒ 契约在场且其 nodePath
    *  存在、而 command[0] 不存在时，用契约值修复并回写。
    *  门控与 _applyLaunchCommand 相同（npmEntry 在场=容器形态）；PC 逐字不变。
    *  脚本入口 cmd[1] 在 filesDir（覆盖安装保留），不随随机段失效，故不修。 */
@@ -304,9 +304,9 @@ class NativeManager {
 
   /** 安装/升级/回滚成功后把 config.command 落为**绝对形态**：
    * [契约 node（libnode.so）, <npmRoot>/<pkg> 的 bin 入口脚本绝对路径, 'web', '--no-open']
-   * --no-open：lobos web 启动后会 spawn xdg-open/open 打开默认浏览器 —— 安卓无此命令，
+   * --no-open：dsh web 启动后会 spawn xdg-open/open 打开默认浏览器 —— 安卓无此命令，
    * 且面板本就由容器 WebView 呈现，URL 交给外部打开没有意义。
-   * 为什么必须写回：绝对形态不依赖 ambient PATH，也不依赖 lobos 的 bin shim 能不能被内核
+   * 为什么必须写回：绝对形态不依赖 ambient PATH，也不依赖 dsh 的 bin shim 能不能被内核
    * 直接 exec（我们的投放通路不保证那一份的权限位）。模板形态一旦落到 PATH 里没有
    * `node` 或 shim 起不来的机器上，`spawn → ENOENT → 60s 冷静期` 是无限循环。
    * 只认容器契约形态（npmEntry 在场）；PC（无契约）行为逐字不变。解析失败静默
@@ -320,7 +320,7 @@ class NativeManager {
       const pkgDir = path.join(root, this.config.packageName);
       const pj = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
       const b = pj.bin;
-      const rel = typeof b === 'string' ? b : (b && (b.lobos || Object.values(b)[0])) || null;
+      const rel = typeof b === 'string' ? b : (b && (b.dsh || Object.values(b)[0])) || null;
       if (!rel) return;
       const entry = path.resolve(pkgDir, String(rel));
       if (!fs.existsSync(entry)) return;
@@ -336,9 +336,9 @@ class NativeManager {
     }
   }
 
-  /** lobos CLI 调用形态（插件域共用主干形态）：config.command 已是写回后的
-   * node 代跑形态时返回 {bin, args}；否则 null（调用方退回 lobos 逻辑名）。 */
-  lobosCliInvocation() {
+  /** dsh CLI 调用形态（插件域共用主干形态）：config.command 已是写回后的
+   * node 代跑形态时返回 {bin, args}；否则 null（调用方退回 dsh 逻辑名）。 */
+  dshCliInvocation() {
     try {
       const c = runtimeContract.read();
       if (!c || !c.npmEntry) return null;
@@ -455,7 +455,7 @@ class NativeManager {
     res.at = new Date().toISOString();
     const prev = this.nativeCaps;
     this.nativeCaps = res;
-    // 事件条件必须是「**任一格结论变了**」，不能只看 overall —— 真机定罪（2026-09-28，program .40）：
+    // 事件条件必须是「**任一格结论变了**」，不能只看 overall —— 真机定罪（2026-09-28，kernel .40）：
     //   投放前那一拍与投放后那一拍 overall 都是 false（都因 env-python3 红），
     //   于是投放后判据由「清单尚未取回」变成真结论时**一行事件都不写** ⇒ 面板永远停在旧读数。
     const sig = (r) => Object.keys(r.units || {}).sort().map((k) => k + '=' + String(r.units[k].ok)).join(',');
@@ -480,7 +480,7 @@ class NativeManager {
     if (!this._supplyUnitsCache) {
       try {
         const t = require('./supply-table.json');
-        // units（lobos 平台件差集）+ envUnits（C 层共享开发环境清单）**都要核验**：
+        // units（dsh 平台件差集）+ envUnits（C 层共享开发环境清单）**都要核验**：
         // 只读 units 会让 C 层条目在面板上永远没有三态（真机定罪 2026-09-27）。
         this._supplyUnitsCache = (t.units || []).concat(t.envUnits || []);
       } catch (e) {
@@ -506,7 +506,7 @@ class NativeManager {
 
   /** 安卓容器自愈：给安装树里的 node-addon-require-builtin 投放 JS 垫片。
    * 根因与方案见 require-builtin-shim.js 头注释。幂等（已投放即 no-op），
-   * 每次 spawn 前由守卫调用 —— 覆盖安装/内核升级后旧 lobos 不重装也能被修复。
+   * 每次 spawn 前由守卫调用 —— 覆盖安装/内核升级后旧 dsh 不重装也能被修复。
    * 前置同 _unitContext：只认容器契约形态（npmEntry 在场），PC 记 skipped 且树逐字不变；
    * 抛错只改结局为 failed，绝不让运行因自愈失败而中断（不变量 C2）。
    * @param {string} [rootOverride] 显式 npm 全局根（安装完成路径传入刚解析的值）
@@ -521,8 +521,8 @@ class NativeManager {
     }
   }
 
-  /** 安卓容器自愈：给安装树里的 @agent-ai/node-addon-system 投放 flock 垫片
-   * （真 flock(2) 走 APK jniLibs 的 liblobosflock.so，根因见 flock-shim.js 头注释）。
+  /** 安卓容器自愈：给安装树里的 @deepseek-ai/node-addon-system 投放 flock 垫片
+   * （真 flock(2) 走 APK jniLibs 的 libdshflock.so，根因见 flock-shim.js 头注释）。
    * 前置 = _unitContext（容器契约形态）**且** 容器递来了 LOBOS_FLOCK_NATIVE。
    * 契约在场却没这个键只可能是容器漏装配（内核模式的 env 由 GuestAdapter 单点给出）
    * ⇒ 记 blocked 并报警，树不动。幂等；抛错只改结局。 */
@@ -554,18 +554,18 @@ class NativeManager {
     }
   }
 
-  /** Android 走 sharp 的 wasm 回退：把 @img/sharp-wasm32 补给 LOBOS 树（真实依赖，非替代实现）。
-   * 前置：容器契约 + LOBOS 树内确有 sharp。幂等；结局一律进 _unitOutcome。
+  /** Android 走 sharp 的 wasm 回退：把 @img/sharp-wasm32 补给 DSH 树（真实依赖，非替代实现）。
+   * 前置：容器契约 + DSH 树内确有 sharp。幂等；结局一律进 _unitOutcome。
    * 注：投放成功 ≠ 能力可用 —— 这一格报了 applied 也不代表 sharp 取得到绑定；
    * 能力结论只由供给表 verify + verifyNativeCapabilities 给（真机 2026-09-26 的定罪原文）。
    * @param {string} [rootOverride] 显式 npm 全局根 */
   ensureSharpWasm(rootOverride) {
     const ctx = this._unitContext(rootOverride);
     if (ctx.skip) return this._unitOutcome('sharp-image', ctx.skip.status, ctx.skip.reason);
-    const lobosDir = path.join(ctx.root, this.config.packageName);
-    if (!fs.existsSync(lobosDir)) return this._unitOutcome('sharp-image', 'skipped', '安装树内无 ' + this.config.packageName);
+    const dshDir = path.join(ctx.root, this.config.packageName);
+    if (!fs.existsSync(dshDir)) return this._unitOutcome('sharp-image', 'skipped', '安装树内无 ' + this.config.packageName);
     try {
-      const r = require('./sharp-wasm').ensureSharpWasm(lobosDir, {
+      const r = require('./sharp-wasm').ensureSharpWasm(dshDir, {
         npmInvocation: npmSpawn(this),
         tmpdir: this.stateDir,
         env: runtimeContract.npmEnv(process.env),
@@ -577,32 +577,32 @@ class NativeManager {
   }
 
   /** 把容器构建的 pty.node 投到 node-pty 的 loader 查找位（prebuilds/android-arm64/）。
-   * 前置：容器契约 + LOBOS 树内确有 node-pty + 契约 prefix 格下的 lib/pty.node。幂等。
+   * 前置：容器契约 + DSH 树内确有 node-pty + 契约 prefix 格下的 lib/pty.node。幂等。
    * prefix 为 null 时把 null 交给 impl —— 它判 blocked，本方法不猜路径。 */
   ensureNodePtyPrebuild(rootOverride) {
     const ctx = this._unitContext(rootOverride);
     if (ctx.skip) return this._unitOutcome('node-pty', ctx.skip.status, ctx.skip.reason);
-    const lobosDir = path.join(ctx.root, this.config.packageName);
+    const dshDir = path.join(ctx.root, this.config.packageName);
     const src = platformArtifacts.resolve(ctx, 'pty');
     try {
-      const r = require('./node-pty-prebuild').ensureNodePtyPrebuild(lobosDir, src);
+      const r = require('./node-pty-prebuild').ensureNodePtyPrebuild(dshDir, src);
       return this._unitOutcome('node-pty', r.status, r.status === 'applied' ? r.path : (r.reason || null));
     } catch (e) {
       return this._unitOutcome('node-pty', 'failed', e.message);
     }
   }
 
-  /** 卸载时拟删除的 LOBOS 用户数据路径（仅当本 supervisor 是干净 ~/.lobos 的首装者才认领）。
-   * 语义：~/.lobos 无任何既有 LOBOS 数据时，本安装视为主权安装——卸载连带清理数据；
+  /** 卸载时拟删除的 DSH 用户数据路径（仅当本 supervisor 是干净 ~/.dsh 的首装者才认领）。
+   * 语义：~/.dsh 无任何既有 DSH 数据时，本安装视为主权安装——卸载连带清理数据；
    * 若已存在 sessions/storages/profiles/settings.yaml/.credentials.yaml 等用户数据，
    * 视为既有环境（可能由用户手动/其它工具建立），卸载只卸 npm 包，绝不删用户数据。 */
   _claimDataPaths() {
-    const paths = AGENT.dataPaths.map((p) => path.join(this.lobosHome, p));
-    // 任一 LOBOS 数据已存在（无论是否来自本 supervisor）→ 不认领
+    const paths = AGENT.dataPaths.map((p) => path.join(this.dshHome, p));
+    // 任一 DSH 数据已存在（无论是否来自本 supervisor）→ 不认领
     for (const p of paths) {
       try { if (fs.existsSync(p)) return []; } catch { return []; }
     }
-    // supervisor 自身目录（~/.lobos/supervisor）不算 LOBOS 用户数据，忽略
+    // supervisor 自身目录（~/.dsh/supervisor）不算 DSH 用户数据，忽略
     return paths;
   }
 
@@ -673,13 +673,13 @@ class NativeManager {
     return { ok: true };
   }
 
-  /** 原生 LOBOS 目标端口（从 healthUrl 或配置提取）。 */
+  /** 原生 DSH 目标端口（从 healthUrl 或配置提取）。 */
   _targetPort() {
     try { return Number(new URL(this.config.healthUrl).port) || null; } catch { return null; }
   }
 
   // _mainUnit()（systemd 托管单元名）已删：安卓内核无系统服务管理器，
-  // 原生 LOBOS 由内核直接 spawn/adopt，健康验证只按端口+稳定期（dist.waitPortHealthy）。
+  // 原生 DSH 由内核直接 spawn/adopt，健康验证只按端口+稳定期（dist.waitPortHealthy）。
 
   /* ═══════ 安装（统一任务模型）═══════ */
   async install(version) {
@@ -698,7 +698,7 @@ class NativeManager {
     this.installLog = [];
     let task = null;
     if (this.tasks) {
-      task = this.tasks.begin('native', 'install', { id: 'main', name: '原生 the Agent' }, { to: version || null, createdBy: 'user' });
+      task = this.tasks.begin('native', 'install', { id: 'main', name: '原生 DeepSeek Harness' }, { to: version || null, createdBy: 'user' });
       this.tasks.start(task.id);
     }
     let target = version;
@@ -722,7 +722,7 @@ class NativeManager {
       if (task) this.tasks.fail(task.id, res.error);
       return { ok: false, error: res.error, output: res.output };
     }
-    // 卸载数据认领：仅首装（manifest 尚不存在）尝试；~/.lobos 已有用户数据时不认领（防误删既有数据/凭据）
+    // 卸载数据认领：仅首装（manifest 尚不存在）尝试；~/.dsh 已有用户数据时不认领（防误删既有数据/凭据）
     const isFirstInstall = !this._manifest();
     this._recordManifest(target, isFirstInstall ? this._claimDataPaths() : []);
     const ver = this.installedVersion();
@@ -783,7 +783,7 @@ class NativeManager {
     if (this.upgradeLog.length > 60) this.upgradeLog.splice(0, this.upgradeLog.length - 60);
   }
 
-  /** 一键升级（统一任务模型）：先停 LOBOS → 安装 → 验证 → 失败自动回滚。 */
+  /** 一键升级（统一任务模型）：先停 DSH → 安装 → 验证 → 失败自动回滚。 */
   async upgrade(requestedVersion) {
     if (this.tasks && this.tasks.isBusy('native', 'main')) return { ok: false, error: '已有任务在进行中' };
     if (this.busy()) return { ok: false, error: 'upgrade already in progress (state=' + this.upgradeState + ')' };
@@ -808,7 +808,7 @@ class NativeManager {
     let task = null;
     if (this.tasks) {
       const oldV = this.installedVersion();
-      task = this.tasks.begin('native', 'upgrade', { id: 'main', name: '原生 the Agent' }, { from: oldV, to: requestedVersion || null, createdBy: 'user' });
+      task = this.tasks.begin('native', 'upgrade', { id: 'main', name: '原生 DeepSeek Harness' }, { from: oldV, to: requestedVersion || null, createdBy: 'user' });
       this.tasks.start(task.id);
       this._activeTaskId = task.id;
     }
@@ -826,8 +826,8 @@ class NativeManager {
       if (task) this.tasks.log(task.id, '目标版本 ' + target);
       if (!oldV) {
         if (this.events) this.events.append('upgrade_fresh_install', { to: target });
-        this._appendUpgradeLog('未检测到已安装的 the Agent，执行全新安装：' + target);
-        if (task) this.tasks.log(task.id, '未检测到已安装的 the Agent，执行全新安装：' + target);
+        this._appendUpgradeLog('未检测到已安装的 DeepSeek Harness，执行全新安装：' + target);
+        if (task) this.tasks.log(task.id, '未检测到已安装的 DeepSeek Harness，执行全新安装：' + target);
       } else if (semverCompare(target, oldV) <= 0) {
         this.upgradeState = 'done';
         this.upgradeFinishedAt = new Date().toISOString();
@@ -840,15 +840,15 @@ class NativeManager {
       if (this.events) this.events.append('upgrade_started', { from: oldV, to: target });
       this._appendUpgradeLog('升级 ' + oldV + ' → ' + target);
       if (task) this.tasks.log(task.id, '升级 ' + oldV + ' → ' + target);
-      // 第一步：先停 LOBOS（含接管实例），期间守卫暂停自动拉起
-      if (this.hooks.isLobosActive && this.hooks.isLobosActive()) {
+      // 第一步：先停 DSH（含接管实例），期间守卫暂停自动拉起
+      if (this.hooks.isDshActive && this.hooks.isDshActive()) {
         this.upgradeState = 'restarting';
-        this._appendUpgradeLog('停止 LOBOS 以便安全安装…');
-        if (this.events) this.events.append('upgrade_stopping_lobos', {});
+        this._appendUpgradeLog('停止 DSH 以便安全安装…');
+        if (this.events) this.events.append('upgrade_stopping_dsh', {});
         if (task) {
-          const s = this.tasks.step(task.id, '停止 LOBOS');
+          const s = this.tasks.step(task.id, '停止 DSH');
           this.tasks.stepState(task.id, this.tasks.get(task.id).steps.indexOf(s), 'running');
-          this.tasks.log(task.id, '停止 LOBOS 以便安全安装…');
+          this.tasks.log(task.id, '停止 DSH 以便安全安装…');
         }
         // 先停后装：等待旧进程真正退出（spawn 模式下 SIGTERM 后需确认 exit）再继续安装
         if (this.hooks.stopForUpgrade) await this.hooks.stopForUpgrade();
@@ -869,26 +869,26 @@ class NativeManager {
       if (!(this.hooks.desiredRunning && this.hooks.desiredRunning())) {
         this.upgradeState = 'done';
         this.upgradeFinishedAt = new Date().toISOString();
-        this._appendUpgradeLog('LOBOS 期望状态为 stopped；下次 start 将使用新版本。');
+        this._appendUpgradeLog('DSH 期望状态为 stopped；下次 start 将使用新版本。');
         if (this.events) this.events.append('upgrade_done', { from: oldV, to: target, note: 'desired=stopped' });
-        if (task) { this.tasks.log(task.id, 'LOBOS 期望状态为 stopped；下次 start 将使用新版本'); this.tasks.succeed(task.id); }
+        if (task) { this.tasks.log(task.id, 'DSH 期望状态为 stopped；下次 start 将使用新版本'); this.tasks.succeed(task.id); }
         this._activeTaskId = null;
         if (this.hooks.resumeAfterUpgrade) this.hooks.resumeAfterUpgrade();
         return { ok: true, result: 'installed', from: oldV, to: target };
       }
       // 第三步：拉起新版本并内联验证（仿沙箱逻辑：不再依赖守卫 onTick——
       // 守卫 guardian=false 时 onTick 被 gate return 跳过，健康验证永不触发）。
-      // 验证失败 → 内联自动回滚，保证 LOBOS 永远可用。
+      // 验证失败 → 内联自动回滚，保证 DSH 永远可用。
       this.upgradeState = 'verifying';
       if (task) { const s = this.tasks.step(task.id, '拉起并验证'); this.tasks.stepState(task.id, this.tasks.get(task.id).steps.indexOf(s), 'running'); }
-      this._appendUpgradeLog('重新拉起 LOBOS，等待健康验证…');
-      if (task) this.tasks.log(task.id, '重新拉起 LOBOS，等待健康验证…');
-      // 触发守卫重新拉起 LOBOS（异步，不等待）
+      this._appendUpgradeLog('重新拉起 DSH，等待健康验证…');
+      if (task) this.tasks.log(task.id, '重新拉起 DSH，等待健康验证…');
+      // 触发守卫重新拉起 DSH（异步，不等待）
       if (this.hooks.resumeAfterUpgrade) this.hooks.resumeAfterUpgrade();
       // 内联等待端口 + 稳定期
       const port = this._targetPort();
       if (!port) {
-        const msg = '无法确定原生 LOBOS 端口（healthUrl 缺失）';
+        const msg = '无法确定原生 DSH 端口（healthUrl 缺失）';
         this.upgradeState = 'failed';
         this.upgradeError = msg;
         if (task) this.tasks.fail(task.id, msg);
@@ -904,7 +904,7 @@ class NativeManager {
         if (this.events) this.events.append('upgrade_done', { from: oldV, to: target });
         if (task) { this.tasks.log(task.id, '健康验证通过，升级完成（' + oldV + ' → ' + target + '）'); this.tasks.succeed(task.id); }
         this._activeTaskId = null;
-        if (this.hooks.notify) this.hooks.notify('LOBOS 升级完成', oldV + ' → ' + target);
+        if (this.hooks.notify) this.hooks.notify('DSH 升级完成', oldV + ' → ' + target);
         return { ok: true, result: 'upgraded', from: oldV, to: target };
       }
       // 验证失败：内联自动回滚
@@ -950,7 +950,7 @@ class NativeManager {
         this.upgradeFinishedAt = new Date().toISOString();
         this._appendUpgradeLog('回滚也失败了！请人工检查 npm 全局目录。');
         if (this.events) this.events.append('upgrade_rollback_failed', {});
-        if (this.hooks.notify) this.hooks.notify('LOBOS 升级失败', '回滚也失败，请立即人工检查 npm 全局目录');
+        if (this.hooks.notify) this.hooks.notify('DSH 升级失败', '回滚也失败，请立即人工检查 npm 全局目录');
         if (taskId && this.tasks) this.tasks.fail(taskId, '回滚也失败：' + this.upgradeError, { meta: { rolledBack: false, rollbackFailed: true } });
         if (this.hooks.resumeAfterUpgrade) this.hooks.resumeAfterUpgrade();
         return;
@@ -967,10 +967,10 @@ class NativeManager {
       this.upgradeState = 'failed';
       this.upgradeFinishedAt = new Date().toISOString();
       if (cur === this.oldVersion) this._appendUpgradeLog('磁盘仍是旧版本，无需回滚。');
-      if (this.hooks.notify) this.hooks.notify('LOBOS 升级失败', err.message);
+      if (this.hooks.notify) this.hooks.notify('DSH 升级失败', err.message);
       if (taskId && this.tasks) this.tasks.fail(taskId, err.message, { meta: { rolledBack: false } });
     }
-    if (this.hooks.desiredRunning && this.hooks.desiredRunning()) this._appendUpgradeLog('恢复启动 LOBOS（当前磁盘版本）。');
+    if (this.hooks.desiredRunning && this.hooks.desiredRunning()) this._appendUpgradeLog('恢复启动 DSH（当前磁盘版本）。');
     if (this.hooks.resumeAfterUpgrade) this.hooks.resumeAfterUpgrade();
     this._activeTaskId = null;
   }
@@ -1006,10 +1006,10 @@ class NativeManager {
     // （由新增的行为测试 K-d 抓出：升级中 uninstall 返回了 ok:true。）
     if (this.busy()) return { ok: false, error: '升级进行中，无法卸载（state=' + this.upgradeState + '）' };
 
-    // 先停运行中的 LOBOS：运行进程中直接删包/数据文件会懒加载崩溃；且 desired=running 时守卫会
+    // 先停运行中的 DSH：运行进程中直接删包/数据文件会懒加载崩溃；且 desired=running 时守卫会
     // 用已删的 bin 反复重启（ENOENT crash loop）。通过升级 hold 语义让守卫卸载期间不自动拉起。
-    if (this.hooks && this.hooks.isLobosActive && this.hooks.isLobosActive()) {
-      this._appendUpgradeLog('停止运行中的 the Agent…');
+    if (this.hooks && this.hooks.isDshActive && this.hooks.isDshActive()) {
+      this._appendUpgradeLog('停止运行中的 DeepSeek Harness…');
       if (this.hooks.stopForUpgrade) await this.hooks.stopForUpgrade();
     }
     const m = this._manifest();
@@ -1021,7 +1021,7 @@ class NativeManager {
     };
     let task = null;
     if (this.tasks) {
-      task = this.tasks.begin('native', 'uninstall', { id: 'main', name: '原生 the Agent' }, { from: this.installedVersion(), createdBy: 'user' });
+      task = this.tasks.begin('native', 'uninstall', { id: 'main', name: '原生 DeepSeek Harness' }, { from: this.installedVersion(), createdBy: 'user' });
       this.tasks.start(task.id);
       this.tasks.log(task.id, '卸载 ' + this.config.packageName);
     }
@@ -1029,7 +1029,7 @@ class NativeManager {
     if (this.events) this.events.append('native_uninstall_started', {});
     try {
     // npm uninstall 异步执行：同步 execFileSync 会冻结整个守卫（tick/API 全挂），必须避免
-    // 关键：注入 --prefix（与 install/_recordManifest 一致）——否则测试/自定义环境会真实卸载宿主全局 LOBOS
+    // 关键：注入 --prefix（与 install/_recordManifest 一致）——否则测试/自定义环境会真实卸载宿主全局 DSH
     const uninstallArgs = ['uninstall', '-g'];
     if (this.npmRoot) uninstallArgs.push('--prefix', this.npmRoot);
     uninstallArgs.push(this.config.packageName);

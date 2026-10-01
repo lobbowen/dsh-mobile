@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 'use strict';
 
-// 原生件供给门禁：真机上 npm 装不到的 lobos 平台件，每一项必须有归宿；registry 现实一变就红。
+// 原生件供给门禁：真机上 npm 装不到的 dsh 平台件，每一项必须有归宿；registry 现实一变就红。
 //
-// 缺这个门禁的代价已经付过一次：lobos 的平台可选依赖按 os/cpu 过滤，真机装不到的那几项
+// 缺这个门禁的代价已经付过一次：dsh 的平台可选依赖按 os/cpu 过滤，真机装不到的那几项
 // 只存在于人脑和注释里，于是「libnode 无 RUNPATH 让 run_code 全灭」和「九个平台件没人认领」
-// 这类事只能在真机上炸。lobos 还会自升级，升级换依赖时红在 CI 是唯一能提前显形的地方。
+// 这类事只能在真机上炸。dsh 还会自升级，升级换依赖时红在 CI 是唯一能提前显形的地方。
 //
 // 双向对账（与 native-assets 同源的道理）：
 //   现场缺、表里没有   ⇒ 红：新原生件无人供给，就是下一次工具静默消失
@@ -27,8 +27,8 @@ const ROOT = path.join(__dirname, '..');
 
 /** impl 路径解析：内核内相对优先，其次仓内相对（C 的实现在 APK 侧，不在内核里）。 */
 function implPath(u) {
-  const inProgram = path.join(ROOT, u.impl);
-  if (fs.existsSync(inProgram)) return inProgram;
+  const inKernel = path.join(ROOT, u.impl);
+  if (fs.existsSync(inKernel)) return inKernel;
   return path.join(ROOT, '..', '..', u.impl);
 }const REPO_ROOT = path.join(ROOT, '..', '..');
 const NATIVE_DIR = path.join(ROOT, 'src', 'assembler');
@@ -158,7 +158,7 @@ if (table) {
   // 被禁的判据形状：以「文件/目录在场」作结论。注意这是**判据层**的禁令，
   // 投放实现里 existsSync 是正当的幂等检查 —— 所以扫的是 verify.node，不是 impl。
   const FILE_SHAPED = /existsSync|statSync|readFileSync|readdirSync|realpathSync|lstatSync/;
-  const MARKER = /LOBOS_PROBE_PASS/;
+  const MARKER = /DSH_PROBE_PASS/;
   let executableCriteria = 0;
   for (const u of units) {
     const v = u.verify;
@@ -176,14 +176,14 @@ if (table) {
       check('判据须写明什么算通: ' + u.id, typeof v.criterion === 'string' && v.criterion.length >= 15);
       // 判据不得由「文件在不在」得出 —— 那正是被证伪的那种绿。对照组先行：
       // 正则若连明显的 existsSync 写法都匹配不上，这条规则就是永不红的死规则。
-      check('对照组：文件在场判据能命中被禁写法', FILE_SHAPED.test("if (fs.existsSync(target)) process.stdout.write('LOBOS_PROBE_PASS')"), 'hit');
+      check('对照组：文件在场判据能命中被禁写法', FILE_SHAPED.test("if (fs.existsSync(target)) process.stdout.write('DSH_PROBE_PASS')"), 'hit');
       const shaped = FILE_SHAPED.exec(v.node);
       check('判据不以文件在场作结论: ' + u.id, !shaped, shaped ? '命中 ' + shaped[0] : '');
       // 空转判据：脚本从不失败（没有 throw / exit(1) 通路）就恒打标记，等于没装锁。
       check('判据有失败出口: ' + u.id, /throw|process\.exit/.test(v.node),
         '没有 throw 也没有非零退出 = 任何状态都算通过');
       check('判据打通过标记: ' + u.id, MARKER.test(v.node));
-      const markerCount = (v.node.match(/LOBOS_PROBE_PASS/g) || []).length;
+      const markerCount = (v.node.match(/DSH_PROBE_PASS/g) || []).length;
       check('通过标记只出现一次（多处=有一条路径不打标记也算过）: ' + u.id, markerCount === 1, markerCount + ' 处');
       // 判据是数据，CI 从不执行它（它跑在设备上），于是连解析都没人做过：一个括号写错的格子
       // 到设备上只会读成 false/null，把「判据自己坏了」误报成「能力坏了」。
@@ -216,14 +216,14 @@ if (table) {
   for (const f of fs.readdirSync(NATIVE_DIR)) {
     if (!/\.(js|json)$/.test(f)) continue;
     const src = fs.readFileSync(path.join(NATIVE_DIR, f), 'utf8');
-    const hits = (src.match(/LOBOS_PROBE_PASS/g) || []).length;
+    const hits = (src.match(/DSH_PROBE_PASS/g) || []).length;
     const allowed = markerOwners.includes(f);
     if (allowed) continue;
     check('通过标记不在归属文件之外复写: ' + f, hits === 0, hits + ' 处');
   }
   for (const f of markerOwners) {
     check('标记归属文件确实在打标（零命中=判据接线被拆）: ' + f,
-      fs.readFileSync(path.join(NATIVE_DIR, f), 'utf8').includes('LOBOS_PROBE_PASS'));
+      fs.readFileSync(path.join(NATIVE_DIR, f), 'utf8').includes('DSH_PROBE_PASS'));
   }
   // 接线自证：manager 必须把核验结论作为**第二个**出口摊开（status + 清单），
   // 而不是只存在内存里等人发现。缺任一处 = 结论又在人脑里。
@@ -275,7 +275,7 @@ if (table) {
   //   本体（bits）归 B 种子 / C 内容 / npm 树；落位规则与能力判据归 E（本目录的 supply-table.json）。
   const D2_DIR = path.join(ROOT, 'src', 'd2');
   check('D2 平台件库在场（pieces.json + artifacts.js）',
-    fs.existsSync(path.join(D2_DIR, 'pieces.json')) && fs.existsSync(path.join(D2_DIR, 'artifacts.js')), 'program/src/d2/');
+    fs.existsSync(path.join(D2_DIR, 'pieces.json')) && fs.existsSync(path.join(D2_DIR, 'artifacts.js')), 'kernel/src/d2/');
   check('D2 不再住 E 的目录（assembler/platform-artifacts.js 必须已迁走）',
     !fs.existsSync(path.join(NATIVE_DIR, 'platform-artifacts.js')), 'assembler/ 里还有 D2 的文件');
   let d2 = null;
@@ -304,7 +304,7 @@ if (table) {
       /require\('\.\.\/d2\/artifacts'\)/.test(mgrSrc),
     'manager 未接 D2');
 
-  // ── C 层：共享开发环境清单（与上面「lobos 的平台件差集」分开，语义不同）──
+  // ── C 层：共享开发环境清单（与上面「dsh 的平台件差集」分开，语义不同）──
   // 为什么单列：开发环境是**一层**（共享、与产品无关），它的完整度要能被机器读出来；
   // 缺件要如实登记（含到期豁免），而不是等 agent 跑到一半才发现「这台没有 git」。
   const envUnits = table.envUnits || [];
@@ -400,18 +400,13 @@ check('被检平台安装计划可得', !!host.names, host.err || '');
 if (ref.names && host.names && table) {
   check('参照计划规模合理（探针没解析出空集合）', ref.names.size > 100 && host.names.size > 100,
     ref.names.size + ' vs ' + host.names.size);
-  // 对照：一个已知按平台分发的包，必须在参照侧带变体出现、在被检侧那个变体消失，
-  // 同时它的父包仍在被检计划里 —— 后一条堵的是「被检计划被裁空」：npm 整体罢工或被检
-  // 平台解析失败时，两侧都只剩公共包，差集会伪装成「无缺口」而全绿。
-  // 「多了」那一侧（被检独有项）今天不钉包名：0.2.0-rc.2 闭包实测被检独有项为 0——
-  // 闭包里没有任何包发 android-arm64 变体，钉一个不存在的名字等于让门禁对空气作证。
-  // 那一侧由下面两条现场判据承担：独有项未登记⇒红、登记了但现场已无⇒红（koffi 今天就红过一次）。
+  // 对照：一个已知按平台分发的包必须在参照侧出现、在被检侧消失、并被换成被检侧变体。
+  // 对照组要双向 —— 只查「少了」不查「多了」，npm 若整体罢工也照样绿。
   const ctl = table.probeControl || {};
-  check('表带探针对照（缺则无法自证）', !!ctl.referencePackage && !!ctl.familyPackage, JSON.stringify(ctl));
+  check('表带探针对照（缺则无法自证）', !!ctl.referencePackage && !!ctl.hostPackage, JSON.stringify(ctl));
   check('对照成立：参照变体在参照计划中', ref.names.has(ctl.referencePackage), ctl.referencePackage);
   check('对照成立：参照变体不在被检计划中', !host.names.has(ctl.referencePackage));
-  check('对照成立：父包仍在被检计划中（被检计划没被裁空）', host.names.has(ctl.familyPackage), ctl.familyPackage);
-  check('对照组：父包锚换成计划里没有的名字会红', !host.names.has(ctl.familyPackage + '-not-published'), '');
+  check('对照成立：被检变体在被检计划中', host.names.has(ctl.hostPackage), ctl.hostPackage);
 
   const missing = [...ref.names].filter((n) => !host.names.has(n)).sort();
   const extra = [...host.names].filter((n) => !ref.names.has(n)).sort();
@@ -455,8 +450,8 @@ if (ref.names && host.names && table) {
   const failed = results.filter((x) => !x);
 // ── 口径对账：定稿的运行时/工具清单 ↔ 登记表每格（防「位置漂了」再发生）────────────
 // 由来（2026-09-28 用户复核）：我把 npm 摆进种子组、把 shell 写成 runtime、把 node/go/java 的 layer
-//   写成 seed —— 与 docs/contracts/layout.json 的 C.shape 明文口径冲突，且与登记表自己的 envKinds
-//   定义（supply-table.json 末段，kind 词汇表）自相矛盾。这条规则把口径变成机检：清单里每一项都必须在册、且 kind 对得上。
+//   写成 seed —— 与 docs/contracts/layout.json 的 C.shape 明文口径冲突，且与登记表自己第 386 行
+//   的定义自相矛盾。这条规则把口径变成机检：清单里每一项都必须在册、且 kind 对得上。
 // 匹配容错：文档写 python，格是 env-python3/bin=python3 —— 按前缀认，不要求逐字相同。
 try {
   const layout = JSON.parse(fs.readFileSync(path.join(ROOT, '..', '..', 'docs', 'contracts', 'layout.json'), 'utf8'));

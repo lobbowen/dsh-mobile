@@ -1,7 +1,7 @@
 'use strict';
 
-// 插件市场索引服务：实时聚合 npm + GitHub 的 the Agent 插件。
-// 权威判定：包/仓库声明 lobos.bundle 才视为 LOBOS 插件。
+// 插件市场索引服务：实时聚合 npm + GitHub 的 DeepSeek Harness 插件。
+// 权威判定：包/仓库声明 dsh.bundle 才视为 DSH 插件。
 // 分类基于 keywords + 描述启发；来源标注 npm / github / community。
 // 缓存到磁盘，TTL 刷新，保证"一直最新"。
 
@@ -17,7 +17,7 @@ const INDEX_FILE = 'plugin-market-cache.json';
 
 // 分类关键词启发
 const CATEGORIES = {
-  '官方生态': ['@agent-ai', 'agent-harness官方', 'official'],
+  '官方生态': ['@deepseek-ai', 'deepseek-harness官方', 'official'],
   '免费模型源': ['free-provider', 'free-vision', 'opus', 'codex', 'openrouter', 'provider', 'subscription', 'chatgpt', 'gemini', 'claude'],
   '工具增强': ['tool', 'bash', 'fs', 'edit', 'search', 'web', 'browser', 'vision', 'vision-proxy', 'computer-use', 'shell'],
   '记忆管理': ['memory', 'memo', 'context', 'mnemon', 'auto-memory', 'knowledge', 'memos'],
@@ -44,7 +44,7 @@ function classify(pkg) {
 function getJson(url, timeoutMs = 10000, redirectsLeft = 5) {
   return new Promise((resolve, reject) => {
     const mod = url.startsWith('https') ? https : http;
-    const options = { headers: { 'User-Agent': 'lobos-supervisor-market', 'Accept': 'application/json' } };
+    const options = { headers: { 'User-Agent': 'dsh-supervisor-market', 'Accept': 'application/json' } };
     const req = mod.get(url, options, (res) => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
         res.resume();
@@ -219,10 +219,10 @@ class PluginMarket {
     return this._cache;
   }
 
-  /** npm 源：搜 agent-harness 受限 lobos，逐个检测 lobos.bundle。 */
+  /** npm 源：搜 deepseek-harness 受限 dsh，逐个检测 dsh.bundle。 */
   async indexNpm() {
     const out = [];
-    const queries = ['keywords:agent-harness', 'keywords:lobos-bundle', 'keywords:lobos-plugin'];
+    const queries = ['keywords:deepseek-harness', 'keywords:dsh-bundle', 'keywords:dsh-plugin'];
     const allNames = new Set();
     for (const query of queries) {
       try {
@@ -240,7 +240,7 @@ class PluginMarket {
     }
     const names = [...allNames];
     this.logger.info && this.logger.info('npm candidates: ' + names.length);
-    // 并行验证 lobos.bundle
+    // 并行验证 dsh.bundle
     const batch = 8;
     for (let i = 0; i < names.length; i += batch) {
       // P2-8：预算耗尽即停止发起新批次（已采集的部分照常返回）。
@@ -248,7 +248,7 @@ class PluginMarket {
       const slice = names.slice(i, i + batch);
       await Promise.all(slice.map(async (name) => {
         const meta = await this.safeFetchLatest(name);
-        if (meta && meta.lobos && meta.lobos.bundle) {
+        if (meta && meta.dsh && meta.dsh.bundle) {
           out.push({
             name,
             version: meta.version,
@@ -282,10 +282,10 @@ class PluginMarket {
     } catch { return null; }
   }
 
-  /** GitHub 源：搜 topic:lobos-plugin + agent-harness，逐个验证 lobos.bundle。 */
+  /** GitHub 源：搜 topic:dsh-plugin + deepseek-harness，逐个验证 dsh.bundle。 */
   async indexGithub() {
     const out = [];
-    const topics = ['lobos-plugin', 'agent-harness'];
+    const topics = ['dsh-plugin', 'deepseek-harness'];
     const seen = new Set();
     for (const topic of topics) {
       try {
@@ -295,11 +295,11 @@ class PluginMarket {
           if (seen.has(r.full_name)) continue;
           seen.add(r.full_name);
           const text = (r.full_name + ' ' + (r.description || '')).toLowerCase();
-          if (!text.includes('lobos') && !text.includes('agent-harness') && !text.includes('agent harness')) continue;
+          if (!text.includes('dsh') && !text.includes('deepseek-harness') && !text.includes('deepseek harness')) continue;
           // 略过官方本体仓库（不是可选插件）
-          if (r.full_name === 'agent-ai/agent-harness') continue;
+          if (r.full_name === 'deepseek-ai/deepseek-harness') continue;
           const meta = await this.safeRepoPkg(r.full_name);
-          if (meta && meta.lobos && meta.lobos.bundle) {
+          if (meta && meta.dsh && meta.dsh.bundle) {
             const pkgName = meta.name || r.name;
             out.push({
               name: pkgName,
@@ -320,7 +320,7 @@ class PluginMarket {
     return out;
   }
 
-  /** 抓取 GitHub 仓库 package.json（raw）验证 lobos.bundle。 */
+  /** 抓取 GitHub 仓库 package.json（raw）验证 dsh.bundle。 */
   async safeRepoPkg(fullName) {
     for (const branch of ['master', 'main']) {
       try { return await rawGet(fullName + '/' + branch + '/package.json', true, 8000); } catch {}
@@ -328,11 +328,11 @@ class PluginMarket {
     return null;
   }
 
-  /** 社区列表：抓 awesome-lobos-plugin README 白名单（官方社区维护的精选）。 */
+  /** 社区列表：抓 awesome-dsh-plugin README 白名单（官方社区维护的精选）。 */
   async indexCommunity() {
     const out = [];
     try {
-      const md = await rawGet('awesome-lobos-plugin/awesome-lobos-plugin/main/README.md', false, 30000);
+      const md = await rawGet('awesome-dsh-plugin/awesome-dsh-plugin/main/README.md', false, 30000);
       // 提取 npm 包名（- 或 [` 开头的 包名）+ GitHub 全名
       const re = /\[([^\]|]+)\]\(https:\/\/(?:www\.)?(?:npmjs\.com\/package\/([\w@\/.-]+)|github\.com\/([\w.-]+\/[\w.-]+))\)/g;
       const links = [];
@@ -348,13 +348,13 @@ class PluginMarket {
           try {
             if (npmName) {
               const meta = await this.safeFetchLatest(npmName);
-              if (meta && meta.lobos && meta.lobos.bundle && !seenName.has(npmName)) {
+              if (meta && meta.dsh && meta.dsh.bundle && !seenName.has(npmName)) {
                 seenName.add(npmName);
                 out.push({ name: npmName, version: meta.version || null, description: (meta.description || label || '').slice(0, 200), author: pickAuthor(meta), homepage: meta.homepage || null, repository: meta.repository && meta.repository.url || null, keywords: meta.keywords || [], stars: 0, source: 'community', hasBundle: true });
               }
             } else if (ghName) {
               const meta = await this.safeRepoPkg(ghName);
-              if (meta && meta.lobos && meta.lobos.bundle && !seenName.has(ghName)) {
+              if (meta && meta.dsh && meta.dsh.bundle && !seenName.has(ghName)) {
                 seenName.add(ghName);
                 out.push({ name: meta.name || ghName, version: meta.version || null, description: (meta.description || label || '').slice(0, 200), author: ghName.split('/')[0], homepage: null, repository: 'https://github.com/' + ghName, keywords: meta.keywords || [], stars: 0, source: 'community', hasBundle: true });
               }
@@ -387,7 +387,7 @@ async function rawGet(pathPart, isJson, timeoutMs = 15000) {
 function getText(url, timeoutMs = 8000, redirectsLeft = 5) {
   return new Promise((resolve, reject) => {
     const mod = url.startsWith('https') ? https : http;
-    const options = { headers: { 'User-Agent': 'lobos-supervisor-market' } };
+    const options = { headers: { 'User-Agent': 'dsh-supervisor-market' } };
     const req = mod.get(url, options, (res) => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
         res.resume();

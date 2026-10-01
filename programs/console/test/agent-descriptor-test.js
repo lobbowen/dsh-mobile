@@ -18,7 +18,7 @@ check('dataPaths 非空数组', Array.isArray(d.dataPaths) && d.dataPaths.length
 check('protectedPackages 非空数组', Array.isArray(d.protectedPackages) && d.protectedPackages.length > 0);
 check('android.launchFlags 是字符串数组（产品声明启动参数，内核不自持）',
   Array.isArray(d.android && d.android.launchFlags) && d.android.launchFlags.every((x) => typeof x === 'string'));
-check('android.launchFlags 含 --expose-internals（lobos app-boot 硬 require 内部模块）',
+check('android.launchFlags 含 --expose-internals（dsh app-boot 硬 require 内部模块）',
   Array.isArray(d.android && d.android.launchFlags) && d.android.launchFlags.includes('--expose-internals'));
 check('未知 id 抛错（不静默回退）', (() => { try { agent.load('__nope__'); return false; } catch { return true; } })());
 
@@ -36,11 +36,11 @@ const offenders = [];
     for (const line of t.split(String.fromCharCode(10))) {
       const s = line.trim();
       if (s.startsWith('//') || s.startsWith('*')) continue;
-      if (/['"]@agent-ai\/lobos['"]/.test(line)) offenders.push(path.relative(ROOT, p) + ' :: ' + s.slice(0, 80));
+      if (/['"]@deepseek-ai\/dsh['"]/.test(line)) offenders.push(path.relative(ROOT, p) + ' :: ' + s.slice(0, 80));
     }
   }
 })(path.join(ROOT, 'src'));
-check('src 无硬编码的 @agent-ai/lobos 字面量', offenders.length === 0, offenders.join(' | '));
+check('src 无硬编码的 @deepseek-ai/dsh 字面量', offenders.length === 0, offenders.join(' | '));
 
 const failed = results.filter((x) => !x);
 console.log(String.fromCharCode(10) + '结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');

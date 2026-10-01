@@ -36,7 +36,7 @@ const freePort = () => new Promise((res) => { const s = http.createServer(); s.l
     const ctl = createRouterCtlServer({ events: de, logger: null });
     await new Promise((r) => ctl.listen(ctlPort, '127.0.0.1', r));
     const ge = new Events(path.join(TMP, 'guard.events.log'), 1 << 20, { process: 'guard' });
-    const hub = new EventHub({ stateDir: path.join(TMP, 's1'), aggBase: 'state', guardEvents: ge, guardLogFile: '', lobosLogFile: '', upgradeLogFile: '', daemonLogs: {}, ctlPorts: { router: ctlPort, lan: 0 }, eventsMaxBytes: 1 << 20, logger: { debug() {}, warn() {} } });
+    const hub = new EventHub({ stateDir: path.join(TMP, 's1'), aggBase: 'state', guardEvents: ge, guardLogFile: '', dshLogFile: '', upgradeLogFile: '', daemonLogs: {}, ctlPorts: { router: ctlPort, lan: 0 }, eventsMaxBytes: 1 << 20, logger: { debug() {}, warn() {} } });
     ge.attachHub(hub);
     ge.append('spawned', { pid: 9 });
     for (let i = 0; i < 8; i++) await hub.sync(); // 首拉建基线（应不含 router_old）
@@ -51,22 +51,22 @@ const freePort = () => new Promise((res) => { const s = http.createServer(); s.l
   // 2) internal 判定与默认过滤（时间线只显示业务事件）
   {
     const ge = new Events(path.join(TMP, 'guard2.events.log'), 1 << 20, { process: 'guard' });
-    const hub = new EventHub({ stateDir: path.join(TMP, 's2'), aggBase: 'state', guardEvents: ge, guardLogFile: '', lobosLogFile: '', upgradeLogFile: '', daemonLogs: {}, ctlPorts: {}, eventsMaxBytes: 1 << 20, logger: { debug() {} } });
+    const hub = new EventHub({ stateDir: path.join(TMP, 's2'), aggBase: 'state', guardEvents: ge, guardLogFile: '', dshLogFile: '', upgradeLogFile: '', daemonLogs: {}, ctlPorts: {}, eventsMaxBytes: 1 << 20, logger: { debug() {} } });
     ge.attachHub(hub);
-    ge.append('shadow_lobos_action', { diff: false });
-    ge.append('managed_object_updated', { kind: 'lobos' });
+    ge.append('shadow_dsh_action', { diff: false });
+    ge.append('managed_object_updated', { kind: 'dsh' });
     ge.append('running', { pid: 1 });
     const all = hub.read(0, 20);
-    check('internal 判定+打标', isInternalEvent('shadow_lobos_action') && isInternalEvent('managed_object_updated') && !isInternalEvent('running')
-      && all.find((e) => e.type === 'shadow_lobos_action').internal === true && all.find((e) => e.type === 'running').internal === false);
+    check('internal 判定+打标', isInternalEvent('shadow_dsh_action') && isInternalEvent('managed_object_updated') && !isInternalEvent('running')
+      && all.find((e) => e.type === 'shadow_dsh_action').internal === true && all.find((e) => e.type === 'running').internal === false);
     check('默认过滤后只剩业务事件', all.filter((e) => !e.internal).map((e) => e.type).join(',') === 'running');
   }
   // 2a) 守卫监督簿记名单 internal + readVisible 对历史行(internal 缺失)类型兜底
   {
     const ge = new Events(path.join(TMP, 'guard2a.events.log'), 1 << 20, { process: 'guard' });
-    const hub = new EventHub({ stateDir: path.join(TMP, 's2a'), aggBase: 'state', guardEvents: ge, guardLogFile: '', lobosLogFile: '', upgradeLogFile: '', daemonLogs: {}, ctlPorts: {}, eventsMaxBytes: 1 << 20, logger: { debug() {} } });
+    const hub = new EventHub({ stateDir: path.join(TMP, 's2a'), aggBase: 'state', guardEvents: ge, guardLogFile: '', dshLogFile: '', upgradeLogFile: '', daemonLogs: {}, ctlPorts: {}, eventsMaxBytes: 1 << 20, logger: { debug() {} } });
     ge.attachHub(hub);
-    check('内部簿记名单: guardian_action/router_daemon_supervised/orphan_audit', isInternalEvent('guardian_action') && isInternalEvent('router_daemon_supervised') && isInternalEvent('orphan_audit') && !isInternalEvent('lan_lobos_token_updated'));
+    check('内部簿记名单: guardian_action/router_daemon_supervised/orphan_audit', isInternalEvent('guardian_action') && isInternalEvent('router_daemon_supervised') && isInternalEvent('orphan_audit') && !isInternalEvent('lan_dsh_token_updated'));
     ge.append('guardian_action', { resource: 'lan' });
     ge.append('lan_cookie_exchanged', { id: 'main' });
     const all = hub.read(0, 20);
@@ -80,7 +80,7 @@ const freePort = () => new Promise((res) => { const s = http.createServer(); s.l
   // 2b) 事件人性化：裸类型业务事件注入可读中文 message（不改源事件/源文件）
   {
     const ge = new Events(path.join(TMP, 'guard-hum.events.log'), 1 << 20, { process: 'guard' });
-    const hub = new EventHub({ stateDir: path.join(TMP, 'shum'), aggBase: 'state', guardEvents: ge, guardLogFile: '', lobosLogFile: '', upgradeLogFile: '', daemonLogs: {}, ctlPorts: {}, eventsMaxBytes: 1 << 20, logger: { debug() {} } });
+    const hub = new EventHub({ stateDir: path.join(TMP, 'shum'), aggBase: 'state', guardEvents: ge, guardLogFile: '', dshLogFile: '', upgradeLogFile: '', daemonLogs: {}, ctlPorts: {}, eventsMaxBytes: 1 << 20, logger: { debug() {} } });
     ge.attachHub(hub);
     ge.append('lan_cookie_exchanged', { id: 'main', via: 'refresh' });
     ge.append('spawned', { pid: 9 });
@@ -110,7 +110,7 @@ const freePort = () => new Promise((res) => { const s = http.createServer(); s.l
   {
     const ge = new Events(path.join(TMP, 'guard3.events.log'), 1 << 20, { process: 'guard' });
     fs.writeFileSync(path.join(TMP, 'g.log'), 'a\nb\n');
-    const hub = new EventHub({ stateDir: path.join(TMP, 's3'), aggBase: 'state', guardEvents: ge, guardLogFile: path.join(TMP, 'g.log'), lobosLogFile: '', upgradeLogFile: '', daemonLogs: { router: path.join(TMP, 'r.log'), lan: path.join(TMP, 'l.log') }, ctlPorts: {}, eventsMaxBytes: 1 << 20, logger: { debug() {} } });
+    const hub = new EventHub({ stateDir: path.join(TMP, 's3'), aggBase: 'state', guardEvents: ge, guardLogFile: path.join(TMP, 'g.log'), dshLogFile: '', upgradeLogFile: '', daemonLogs: { router: path.join(TMP, 'r.log'), lan: path.join(TMP, 'l.log') }, ctlPorts: {}, eventsMaxBytes: 1 << 20, logger: { debug() {} } });
     ge.attachHub(hub);
     ge.append('spawned', { pid: 1 });
     ge.append('running', { pid: 1 });

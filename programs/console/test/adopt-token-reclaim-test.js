@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
-// adopt 令牌接管回归测试（2026-09）：守卫重启后接管的主 LOBOS 不是本守卫 spawn 的（无 stdout 管道），
-// 启动令牌只打印在旧守卫已断开的管道里 → 永久不可达 → 远程控制（relay 换 lobos-auth cookie）401。
+// adopt 令牌接管回归测试（2026-09）：守卫重启后接管的主 DSH 不是本守卫 spawn 的（无 stdout 管道），
+// 启动令牌只打印在旧守卫已断开的管道里 → 永久不可达 → 远程控制（relay 换 dsh-auth cookie）401。
 // 验证 _maybeReclaimAdoptToken 的观察窗语义：
 //   1) adopt + 主令牌空置 → 先启动观察窗，窗口过后才受控重建一次（countCrash:false）；
 //   2) 重建只触发一次（_tokenReclaimTried 防循环）；
@@ -34,13 +34,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function buildSupervisor(overrides = {}) {
   const { Supervisor } = require(path.join(ROOT, 'src', 'supervisor'));
   const cfg = {
-    command: ['node', '/nonexistent/bin/lobos', 'web'],
+    command: ['node', '/nonexistent/bin/dsh', 'web'],
     healthUrl: 'http://127.0.0.1:28000/',
     apiHost: '127.0.0.1', apiPort: 28001,
     stateFile: path.join(TMP, 'state.json'),
     logFile: path.join(TMP, 'events.log'),
     supervisorLogFile: path.join(TMP, 'sup.log'),
-    lobosLogFile: path.join(TMP, 'lobos.log'),
+    dshLogFile: path.join(TMP, 'dsh.log'),
     upgradeLogFile: path.join(TMP, 'upg.log'),
     ...overrides,
   };
@@ -55,7 +55,7 @@ async function main() {
     const sup = buildSupervisor({ tokenReclaimGraceMs: 120 });
     const restarts = [];
     sup._beginRestart = (reason, opts) => restarts.push({ reason, opts });
-    // 模拟：守卫重启后 adopt 了旧守卫 spawn 的主 LOBOS（无 stdout 管道、令牌不可达）
+    // 模拟：守卫重启后 adopt 了旧守卫 spawn 的主 DSH（无 stdout 管道、令牌不可达）
     sup.phase = 'RUNNING';
     sup.adopted = true;
     sup.adoptedPid = 99999;

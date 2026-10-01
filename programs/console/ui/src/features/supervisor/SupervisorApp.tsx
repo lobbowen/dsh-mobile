@@ -4,7 +4,7 @@
  * 以内核 HTTP API（同源 http://127.0.0.1:<apiPort>）为后端的 5 域管理面板：
  *   AppShell(web) → AppLayout(sidebar) → Toolbar(页标题) → ContentArea(页) → StatusBar
  * 数据：supervisorStore 统一 2s 轮询快照；页面只读消费 + 动作经 supervisorApi。
- * 说明：这是 lobos-supervisor 的"管家面板"；skiff 清理工具 App 是另一个独立宿主，
+ * 说明：这是 dsh-supervisor 的"管家面板"；skiff 清理工具 App 是另一个独立宿主，
  *       两者各自挂载（main.tsx 按宿主/路由选择）。
  * ============================================================================
  */
@@ -16,7 +16,7 @@ import {
 } from "../../framework/layout";
 import { CheckCircle2, Menu, Plus, Trash2 } from "lucide-react";
 import { Button } from "../../framework/ui";
-import skiffLogo from "../../assets/lobos-logo.svg";
+import skiffLogo from "../../assets/dsh-logo.svg";
 import { supervisorStore, useSupervisorData } from "../../services/supervisor";
 import { SUPERVISOR_NAV, type SupervisorViewKey } from "./nav";
 
@@ -28,8 +28,8 @@ const RouterPage = lazy(() => import("./RouterPage").then((m) => ({ default: m.R
 const TasksPage = lazy(() => import("./TasksPage").then((m) => ({ default: m.TasksPage })));
 const SettingsPage = lazy(() => import("./SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const PAGE_META: Record<SupervisorViewKey, { title: string; sub: string }> = {
-  overview: { title: "控制面板", sub: "the Agent 运行状态与升级" },
-  plugins: { title: "插件商店", sub: "Agent 生态插件商店与已装管理" },
+  overview: { title: "控制面板", sub: "DeepSeek Harness 运行状态与升级" },
+  plugins: { title: "插件商店", sub: "DeepSeek 生态插件商店与已装管理" },
   router: { title: "智能路由", sub: "多供应商 Key 轮换代理 · 按官方套餐规则自动判定额度" },
   tasks: { title: "任务中心", sub: "全部安装 / 升级 / 卸载 / 更新操作的任务状态与历史" },
   settings: { title: "设置", sub: "访问方式与关于" },
@@ -63,7 +63,7 @@ export function SupervisorApp() {
   const meta = PAGE_META[view];
   const phase = status?.phase;
   const sessionState = status?.sessionState;
-  const running = Boolean(status?.lobosPid);
+  const running = Boolean(status?.dshPid);
 
   // 面板由内核同源托管（浏览器 / 容器 WebView 打开同一地址），纯 web 内容铺满，不自绘窗口栏。
   return (
@@ -73,7 +73,7 @@ export function SupervisorApp() {
         onCloseSidebar={closeSidebar}
         sidebar={
           <AppSidebar
-            brand={{ logo: skiffLogo, title: "LOBOS-SUP", slogan: "the Agent 管家" }}
+            brand={{ logo: skiffLogo, title: "DSH-SUP", slogan: "DeepSeek Harness 管家" }}
             items={items}
           />
         }
@@ -143,12 +143,12 @@ export function SupervisorApp() {
               ) : online && running ? (
                 <span className="inline-flex items-center gap-1.5 text-xs leading-tight text-muted-foreground">
                   <span className="size-1.5 rounded-full bg-status-ok" />
-                  LOBOS 管家运行中{phase ? " · " + phase : ""}
+                  DSH 管家运行中{phase ? " · " + phase : ""}
                 </span>
               ) : online ? (
                 <span className="inline-flex items-center gap-1.5 text-xs leading-tight text-muted-foreground">
                   <span className="size-1.5 rounded-full bg-muted-foreground/50" />
-                  LOBOS 管家已停止{phase ? " · " + phase : ""}
+                  DSH 管家已停止{phase ? " · " + phase : ""}
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1.5 text-xs leading-tight text-muted-foreground">

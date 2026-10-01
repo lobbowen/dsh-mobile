@@ -14,7 +14,7 @@ function expandHome(p) {
   return p;
 }
 
-// 产品状态根（独立于 LOBOS 的 ~/.lobos）——单一事实源 = platform/state-root.js。
+// 产品状态根（独立于 DSH 的 ~/.dsh）——单一事实源 = platform/state-root.js。
 // 进程内固定：避免运行中环境变化导致状态目录半途切换。
 const SUP = require('./state-root').supervisorDir();
 
@@ -49,7 +49,7 @@ const DEFAULTS = {
   logFile: path.join(SUP, 'events', 'guard.events.log'),
   eventsMaxBytes: 5 * 1024 * 1024,
   supervisorLogFile: path.join(SUP, 'log', 'guard.log'),
-  lobosLogFile: path.join(SUP, 'log', 'lobos.log'),
+  dshLogFile: path.join(SUP, 'log', 'dsh.log'),
   upgradeLogFile: path.join(SUP, 'log', 'upgrade.log'),
   logLevel: 'info',
   logMaxBytes: 5 * 1024 * 1024,
@@ -65,7 +65,7 @@ const DEFAULTS = {
   //
   // 完整目录与探测规格**不在这里** —— 它们是**壳**的产物：
   // 用户在装壳那刻机器上没有内核，壳必须先完成镜像选择才能装内核，
-  // 故「镜像源管理」的所有权在壳，经 ~/.lobos/supervisor/registry.json 投放，
+  // 故「镜像源管理」的所有权在壳，经 ~/.dsh/supervisor/registry.json 投放，
   // 内核由 domains/dist 的 DistributionManager 读取（见 platform/registry-contract.js）。
   //
   // 此处仅保留 2 条，覆盖「契约不可用时也能跑」这一底线（不变量 C2）：
@@ -96,7 +96,7 @@ function normalize(raw) {
   cfg.stateFile = expandHome(cfg.stateFile);
   cfg.logFile = expandHome(cfg.logFile);
   cfg.supervisorLogFile = expandHome(cfg.supervisorLogFile);
-  cfg.lobosLogFile = expandHome(cfg.lobosLogFile);
+  cfg.dshLogFile = expandHome(cfg.dshLogFile);
   cfg.upgradeLogFile = expandHome(cfg.upgradeLogFile);
   // healthUrl 非法直接 fail-fast（静默降级会让探测永远失败且难排查）
   let u;
@@ -109,7 +109,7 @@ function normalize(raw) {
   cfg.targetPort = Number(u.port || (u.protocol === 'https:' ? 443 : 80));
   // 配置键迁移（2026-09）：switcherAutoStart（旧）→ routerAutostart（新）；旧键仍被尊重直到文件收敛
   if ((raw || {}).routerAutostart === undefined && (raw || {}).switcherAutoStart !== undefined) cfg.routerAutostart = raw.switcherAutoStart === true; // RC6：判 raw（DEFAULTS 已填 cfg），死分支复活
-  // 动态端口注册：command 里的 --port/-p 是 LOBOS 实际启动参数（用户改端口时最真实）——
+  // 动态端口注册：command 里的 --port/-p 是 DSH 实际启动参数（用户改端口时最真实）——
   // 若 command 指定了端口，以其为准覆盖 healthUrl 端口（用户使用场景各异，绝不硬编码 3080）
   const cmdPort = extractPortFromCommand(cfg.command);
   if (cmdPort !== null) cfg.targetPort = cmdPort;

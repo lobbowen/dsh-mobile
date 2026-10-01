@@ -37,22 +37,22 @@ const fakePorts = {
   const reg = new ManagedRegistry({ file, logger: null, events: { append: (t, d) => events.push(t) }, ports: fakePorts });
 
   // 1. 注册
-  const lobos = reg.register({ kind: 'lobos', id: 'main', name: '主实例', desired: 'running', guardian: true, ownership: { ports: [{ role: 'lobos-main', port: 3080 }], rootPath: '/home/u/.lobos', processMode: 'spawn' } });
-  check('注册 lobos 返回目录项', !!lobos && lobos.id === 'main' && lobos.phase === 'stopped');
+  const dsh = reg.register({ kind: 'dsh', id: 'main', name: '主实例', desired: 'running', guardian: true, ownership: { ports: [{ role: 'dsh-main', port: 3080 }], rootPath: '/home/u/.dsh', processMode: 'spawn' } });
+  check('注册 dsh 返回目录项', !!dsh && dsh.id === 'main' && dsh.phase === 'stopped');
   const inst = reg.register({ kind: 'router-daemon', id: 'router', name: '智能路由 daemon', desired: 'running', guardian: false, ownership: { ports: [{ role: 'router-ctl', port: 3300 }], rootPath: '/data/router', processMode: 'daemon' } });
   check('注册 router daemon', !!inst);
   check('查询 list 顺序', reg.list().map(o => o.id).join(',') === 'main,router');
   check('byKind', reg.byKind('router-daemon').length === 1);
-  check('get', reg.get('main').kind === 'lobos');
-  check('kind 能力', MANAGED_KINDS.lobos.guardable === true && MANAGED_KINDS.plugin.startable === false);
+  check('get', reg.get('main').kind === 'dsh');
+  check('kind 能力', MANAGED_KINDS.dsh.guardable === true && MANAGED_KINDS.plugin.startable === false);
   check('PHASES 唯一词表', JSON.stringify(PHASES) === JSON.stringify(['stopped','installing','starting','running','draining','backoff','failed','restarting']));
   check('DESIRED', DESIRED.length === 2);
 
   // 2. 非法输入
   let threw = 0;
   try { reg.register({ kind: 'nope', id: 'x' }); } catch { threw++; }
-  try { reg.register({ kind: 'lobos', id: 'main' }); } catch { threw++; } // 重复
-  try { reg.register({ kind: 'lobos' }); } catch { threw++; } // 无 id
+  try { reg.register({ kind: 'dsh', id: 'main' }); } catch { threw++; } // 重复
+  try { reg.register({ kind: 'dsh' }); } catch { threw++; } // 无 id
   check('非法 kind/重复/缺 id 均拒绝', threw === 3);
 
   // 3. update（应然申报）
@@ -92,15 +92,15 @@ const fakePorts = {
   // 事件在独立文件实例上验证（避免多实例共享主 file 相互覆盖）
   const evtFile = path.join(TMP, 'evt-objects.json');
   const regEvt = new ManagedRegistry({ file: evtFile, logger: null, events: { append: (t) => events.push(t) } });
-  regEvt.register({ kind: 'lobos', id: 'tmp-evt' });
+  regEvt.register({ kind: 'dsh', id: 'tmp-evt' });
   regEvt.unregister('tmp-evt');
   check('注销事件', events.filter(e => e === 'managed_object_removed').length >= 1);
   const reg3 = new ManagedRegistry({ file, logger: null });
   check('注销后持久化生效(重启不再现)', reg3.count() === 1 && !reg3.get('main'));
 
   // 7. adapter 挂接
-  reg.registerAdapter('lobos', { observe: () => ({ ok: true }) });
-  check('adapter 可挂接/读取', !!reg.adapter('lobos'));
+  reg.registerAdapter('dsh', { observe: () => ({ ok: true }) });
+  check('adapter 可挂接/读取', !!reg.adapter('dsh'));
   let athrew = 0;
   try { reg.registerAdapter('nope', {}); } catch { athrew++; }
   check('未知类型 adapter 拒绝', athrew === 1);
@@ -112,7 +112,7 @@ const fakePorts = {
   hb.register({ kind: 'router-daemon', id: 's1' });
   hb.register({ kind: 'router-daemon', id: 's2', ownership: { meta: { tickEvery: 6 } } }); // 节流对象
   hb.registerAdapter('router-daemon', { observe: (e) => { observeCount++; if (e.id === 's1') return { ok: true }; throw new Error('boom'); } });
-  hb.register({ kind: 'lobos', id: 'm' }); // 无 adapter
+  hb.register({ kind: 'dsh', id: 'm' }); // 无 adapter
   const r1 = await hb.heartbeat(1000);
   check('heartbeat 观测到 ok 对象', r1.observed.indexOf('s1') >= 0);
   check('heartbeat 抛错对象不进 observed', r1.observed.indexOf('s2') < 0);

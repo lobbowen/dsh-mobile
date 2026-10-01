@@ -23,7 +23,7 @@ function capsOf(objectKind) {
  * 注册全部模块到 LifecycleManager（supervisor.start 时调用）。统一启停/状态视图用；
  * 周期拉起不在此（守卫 daemon 监督 tick / 实例 watchdog+guardian）。
  * @param {LifecycleManager} mgr
- * @param {object} deps 现有模块对象 { router, lobos(supervisor自身), pluginManager }
+ * @param {object} deps 现有模块对象 { router, dsh(supervisor自身), pluginManager }
  */
 function registerAll(mgr, deps) {
   const { router, supervisor, pluginManager } = deps;
@@ -58,33 +58,33 @@ function registerAll(mgr, deps) {
     mgr.register(rlc);
   }
 
-  // ── 2. the Agent（主 LOBOS）——守卫监管的核心对象 ──
+  // ── 2. DeepSeek Harness（主 DSH）——守卫监管的核心对象 ──
   if (supervisor) {
-    // guardian 不在此写死：原生 LOBOS 守护开关(默认关, 持久化 lobos-main.json)由用户在面板控制，
-    // 注册时从 supervisor 读当前值，此后经 _syncLobosLifecycleView 从 A 平面(lobos-main.json)持续同步——
+    // guardian 不在此写死：原生 DSH 守护开关(默认关, 持久化 dsh-main.json)由用户在面板控制，
+    // 注册时从 supervisor 读当前值，此后经 _syncDshLifecycleView 从 A 平面(dsh-main.json)持续同步——
     // 2026-09 收敛定稿：守护=跟开关走，与沙箱同语义，B 平面不持有独立守护策略。
-    const lobosGuardian = (supervisor && typeof supervisor.mainGuardian === 'function')
+    const dshGuardian = (supervisor && typeof supervisor.mainGuardian === 'function')
       ? supervisor.mainGuardian() : false;
-    const lobos = new ManagedLifecycle({
-      id: 'lobos',
-      ...capsOf('lobos'),
-      guardian: lobosGuardian,
-      kind: 'lobos',
-      name: 'the Agent',
+    const dsh = new ManagedLifecycle({
+      id: 'dsh',
+      ...capsOf('dsh'),
+      guardian: dshGuardian,
+      kind: 'dsh',
+      name: 'DeepSeek Harness',
       logger,
       start: async () => supervisor.setDesired ? supervisor.setDesired('running') : { ok: false, error: 'unsupported' },
       restart: async () => supervisor.requestRestart ? supervisor.requestRestart() : { ok: false, error: 'unsupported' },
       stop: async () => supervisor.setDesired ? supervisor.setDesired('stopped') : { ok: false, error: 'unsupported' },
       status: () => supervisor.statusSummary ? supervisor.statusSummary() : null,
     });
-    mgr.register(lobos);
-    // LOBOS 的生命周期由守卫自身 tick 监管（唯一监管权）；lifecycleManager 的 lobos 项是视图镜像——
-    // 同步守卫当前 desired/phase（守卫启动时若 desired=running 则 lobos 项反映运行中）。
-    if (supervisor.desired === 'running') lobos.wantRunning();
+    mgr.register(dsh);
+    // DSH 的生命周期由守卫自身 tick 监管（唯一监管权）；lifecycleManager 的 dsh 项是视图镜像——
+    // 同步守卫当前 desired/phase（守卫启动时若 desired=running 则 dsh 项反映运行中）。
+    if (supervisor.desired === 'running') dsh.wantRunning();
     const ph = String(supervisor.phase || '');
-    if (ph === 'RUNNING') { lobos._setPhase('running'); lobos.healthy = true; lobos.startedAt = lobos.startedAt || new Date().toISOString(); }
-    else if (ph === 'STARTING' || ph === 'RESTARTING' || ph === 'BACKOFF') { lobos._setPhase('starting'); }
-    lobos._monitoring = true; // LOBOS 纳管（守卫 tick 对 desired=running 的 LOBOS 负责拉起——本就是守卫职责）
+    if (ph === 'RUNNING') { dsh._setPhase('running'); dsh.healthy = true; dsh.startedAt = dsh.startedAt || new Date().toISOString(); }
+    else if (ph === 'STARTING' || ph === 'RESTARTING' || ph === 'BACKOFF') { dsh._setPhase('starting'); }
+    dsh._monitoring = true; // DSH 纳管（守卫 tick 对 desired=running 的 DSH 负责拉起——本就是守卫职责）
   }
 
   // ── 3. 插件管理（插件生命周期聚合）──

@@ -11,13 +11,13 @@
   },
   "agent": {
     "package": "@deepseek-ai/dsh",
-    "version": "0.2.0-rc.2",
+    "version": "0.1.7-rc.2",
     "versionRule": "registry 的 dist-tags 与 versions 全集取语义最高版，不是 latest tag"
   },
   "probeControl": {
-    "why": "探针必须能自证生效：npm 忽略 --os/--cpu 时两份计划相同、差集会空转成「无缺口」。锚钉 @vscode/ripgrep：它在参照平台发了 linux-x64 变体、在被检平台一个变体都不发（0.2.0-rc.2 闭包 2026-10-01 实测：参照 519 项、被检 511 项、被检侧独有项 0，闭包内没有任何包发 android-arm64 变体）。所以「多了」那一侧不钉包名——钉一个不存在的包名等于让门禁对空气作证；那一侧改由两条现场判据承担：父包仍须在被检计划里（证明被检计划不是被裁空的假计划），以及被检侧真出现独有项时必须登记（deviceInstalls 差集，2026-10-01 就是它把已消失的 koffi-android-arm64 打了红）。旧锚 @koromix/koffi 两侧随上游换版一起没了，留着它这道门就只会红在假事实上。",
-    "familyPackage": "@vscode/ripgrep",
-    "referencePackage": "@vscode/ripgrep-linux-x64"
+    "why": "探针必须能自证生效：这个包在参照平台有变体、在被检平台换成另一个变体，两侧都要对上，否则 npm 忽略 --os/--cpu 时差集会空转成「无缺口」",
+    "referencePackage": "@koromix/koffi-linux-x64",
+    "hostPackage": "@koromix/koffi-android-arm64"
   },
   "probe": {
     "node": {
@@ -27,8 +27,8 @@
     },
     "npm": {
       "version": "11.19.0",
-      "shippedBy": "container/app/src/main/assets/node-versions.json#npm",
-      "shippedByWhy": "设备上那份 npm 的版本只有一个源：assets/node-versions.json 的 npm 格。C 层那颗 npm 件由 scripts/build-userland-npm.sh 读同一格产出（scripts/read-node-versions.sh npm 是唯一读取口），CI 的 console job 也按同一格装探针 npm —— 表锚必须等于它。旧写法指 scripts/stage-npm-assets.sh（APK 内置 npm 的投放脚本），那份脚本已随「npm 归口到 C 层供给、APK 侧不留 npm 面」删除；留着它等于让表锚去对一个不再存在的宿主。",
+      "shippedBy": "scripts/stage-npm-assets.sh#NPM_VER",
+      "shippedByWhy": "设备上跑的就是 APK 里那份 npm：NodeProvisioner.ensureNpm 按 assets/npm/version.txt 解到 files/npm/<ver>/，内核经 runtime.json 的 npmEntry 用 libnode.so 代跑。表锚必须等于投放脚本钉的那份，CI 也按表锚装探针 —— 两处一变另一处没跟上就红。",
       "why": "探针必须用设备上那份 npm：npm 10 静默忽略 --os/--cpu，差集会空转成「无缺口」。CI runner（setup-node 22 → node v22.23.2 / npm 10.9.8）实测两份计划各 575 项、两侧差集皆空，正是双向对照组要拦的那种绿"
     }
   },
@@ -40,7 +40,7 @@
     "seed": "由 L0 容器自举种子投放（PrefixProvisioner 播到 $PREFIX）；与产品无关，C 层的地板"
   },
   "verifyLegend": {
-    "why": "投放结局（applied/already/blocked/failed）只回答「我们动过手没有」，不回答「用户能不能用」。真机 2026-09-26 的 sharp 就是被这两个词糊过去的：@img/sharp-wasm32 确在依赖树内（环境报告 §4.2）、单元报 applied，而 sharp 取不到绑定、read_image 全灭。所以每格另立 verify：一段交给**被检那份 node** 跑的 JS，打出 LOBOS_PROBE_PASS 且退 0 才算通。执行器只有一个（src/assembler/capability-probe.js）。",
+    "why": "投放结局（applied/already/blocked/failed）只回答「我们动过手没有」，不回答「用户能不能用」。真机 2026-09-26 的 sharp 就是被这两个词糊过去的：@img/sharp-wasm32 确在依赖树内（环境报告 §4.2）、单元报 applied，而 sharp 取不到绑定、read_image 全灭。所以每格另立 verify：一段交给**被检那份 node** 跑的 JS，打出 DSH_PROBE_PASS 且退 0 才算通。执行器只有一个（src/assembler/capability-probe.js）。",
     "states": "true=探针退 0 且带标记；false=探针跑起来了而判据不过（能力坏了）；null=探针没条件跑或该格待做/不适用 —— 未知绝不算通过",
     "shapes": "verify 三选一：{criterion, node}（可执行判据）/ {criterion, deferred:{followUp,verifiedAt,expiresAt}}（判据待做，按豁免同样到期即红）/ {notApplicable}（处置本身不需要核验，须写明为什么）"
   },
@@ -55,7 +55,7 @@
       ],
       "verify": {
         "criterion": "以 dsh 站的同一个位置（cwd=Agent 包目录）require 出 NARB，并用它真取回一个模块的 API",
-        "node": "const m=require('node-addon-require-builtin'); if(typeof m.requireBuiltin!=='function') throw new Error('入口没导出 requireBuiltin'); const mod=m.requireBuiltin('module'); if(!mod||typeof mod.createRequire!=='function') throw new Error('requireBuiltin(module) 没给回可用的 module API'); process.stdout.write('LOBOS_PROBE_PASS')"
+        "node": "const m=require('node-addon-require-builtin'); if(typeof m.requireBuiltin!=='function') throw new Error('入口没导出 requireBuiltin'); const mod=m.requireBuiltin('module'); if(!mod||typeof mod.createRequire!=='function') throw new Error('requireBuiltin(module) 没给回可用的 module API'); process.stdout.write('DSH_PROBE_PASS')"
       },
       "why": "该包的 loader 在非 linux/darwin/win32 下算出 android-arm64 并在 require 时即抛；垫片回退 createRequire + --expose-internals"
     },
@@ -69,9 +69,9 @@
       ],
       "verify": {
         "criterion": "APK 里那份原生桥真能 dlopen、导出 tryLock，并对一个真 fd 加上锁（垫片与探针问的是同一个入口，判据不会各说各话）",
-        "node": "const fs=require('node:fs'); const p=process.env.LOBOS_FLOCK_NATIVE; if(!p) throw new Error('容器未递 LOBOS_FLOCK_NATIVE'); const mod={exports:{}}; process.dlopen(mod,p); if(!mod.exports||typeof mod.exports.tryLock!=='function') throw new Error('原生桥没导出 tryLock'); const fd=fs.openSync(process.execPath,'r'); mod.exports.tryLock(fd,(errno)=>{ fs.closeSync(fd); if(errno!==0) throw new Error('flock(2) 返回 errno='+errno); process.stdout.write('LOBOS_PROBE_PASS') });"
+        "node": "const fs=require('node:fs'); const p=process.env.LOBOS_FLOCK_NATIVE; if(!p) throw new Error('容器未递 LOBOS_FLOCK_NATIVE'); const mod={exports:{}}; process.dlopen(mod,p); if(!mod.exports||typeof mod.exports.tryLock!=='function') throw new Error('原生桥没导出 tryLock'); const fd=fs.openSync(process.execPath,'r'); mod.exports.tryLock(fd,(errno)=>{ fs.closeSync(fd); if(errno!==0) throw new Error('flock(2) 返回 errno='+errno); process.stdout.write('DSH_PROBE_PASS') });"
       },
-      "why": "bionic 无 flock 的 Node 绑定路径；改走 APK jniLibs 里的 liblobosflock.so 真 flock(2)"
+      "why": "bionic 无 flock 的 Node 绑定路径；改走 APK jniLibs 里的 libdshflock.so 真 flock(2)"
     },
     {
       "id": "ripgrep",
@@ -83,7 +83,7 @@
       ],
       "verify": {
         "criterion": "require.resolve 得出来（与 dsh-tool-fs-search 同一条解析式）**且**那份 rg 真被 exec 起来、--version 退 0",
-        "node": "const cp=require('node:child_process'); const rg=require.resolve('@vscode/ripgrep-android-arm64/bin/rg'); const out=cp.execFileSync(rg,['--version'],{encoding:'utf8'}); const head=String(out).split('\\n')[0].trim(); if(!/ripgrep\\s+\\d/.test(head)) throw new Error('--version 首行不像 ripgrep：'+head); process.stdout.write('LOBOS_PROBE_PASS '+head+' <- '+rg)"
+        "node": "const cp=require('node:child_process'); const rg=require.resolve('@vscode/ripgrep-android-arm64/bin/rg'); const out=cp.execFileSync(rg,['--version'],{encoding:'utf8'}); const head=String(out).split('\\n')[0].trim(); if(!/ripgrep\\s+\\d/.test(head)) throw new Error('--version 首行不像 ripgrep：'+head); process.stdout.write('DSH_PROBE_PASS '+head+' <- '+rg)"
       },
       "why": "@vscode/ripgrep 按 @vscode/ripgrep-<platform>-<arch>/bin/rg 解析，造该平台包并指向 $PREFIX/bin/rg，替代逐字节补丁"
     },
@@ -98,7 +98,7 @@
       ],
       "verify": {
         "criterion": "require('sharp') 不抛、sharp.versions.vips 有值，并真的把一张 8x8 图编成 PNG 字节 —— 件在树里不算数（真机 2026-09-26 就是这么被糊的）",
-        "node": "const sharp=require('sharp'); const v=sharp.versions||{}; if(!v.vips) throw new Error('sharp 加载了但 versions.vips 为空 = 绑定没进来'); sharp({create:{width:8,height:8,channels:3,background:{r:1,g:2,b:3}}}).png().toBuffer().then((b)=>{ if(!b||b.length<8) throw new Error('PNG 输出异常：'+(b&&b.length)); process.stdout.write('LOBOS_PROBE_PASS vips='+v.vips+' bytes='+b.length); },(e)=>{ process.stderr.write(String((e&&e.message)||e)); process.exit(1); });"
+        "node": "const sharp=require('sharp'); const v=sharp.versions||{}; if(!v.vips) throw new Error('sharp 加载了但 versions.vips 为空 = 绑定没进来'); sharp({create:{width:8,height:8,channels:3,background:{r:1,g:2,b:3}}}).png().toBuffer().then((b)=>{ if(!b||b.length<8) throw new Error('PNG 输出异常：'+(b&&b.length)); process.stdout.write('DSH_PROBE_PASS vips='+v.vips+' bytes='+b.length); },(e)=>{ process.stderr.write(String((e&&e.message)||e)); process.exit(1); });"
       },
       "why": "registry 无 @img/sharp-android-arm64；wasm32 变体内含 libvips，是唯一与宿主 CPU 无关的通路"
     },
@@ -110,7 +110,7 @@
       "hostExcludes": [],
       "verify": {
         "criterion": "require('node-pty') 用 /system/bin/sh 起一个真 PTY、跑一条命令并读到退出码（测的是 PTY 层本身）",
-        "node": "const pty = require('node-pty'); const p = pty.spawn('/system/bin/sh', ['-c', 'echo PTY-OK; exit 7'], { name: 'xterm-256color', cols: 80, rows: 24, cwd: process.cwd(), env: process.env }); let out = '', code = null, done = false; const finish = () => { if (done) return; done = true; clearTimeout(timer);   if (out.indexOf('PTY-OK') < 0) { console.error('PTY 没读到命令输出: ' + JSON.stringify(out.slice(0, 160))); process.exit(1); }   if (code !== 7) { console.error('PTY 退出码读不到或不对: ' + code); process.exit(1); }   process.stdout.write('LOBOS_PROBE_PASS 真 PTY：起得来、命令跑得动、退出码读得到 (rc=' + code + ')');   process.exit(0); }; const timer = setTimeout(() => { console.error('PTY 8s 未退出: ' + JSON.stringify(out.slice(0, 160))); process.exit(1); }, 8000); p.onData((d) => { out += d; }); p.onExit((e) => { code = e.exitCode; finish(); });"
+        "node": "const pty = require('node-pty'); const p = pty.spawn('/system/bin/sh', ['-c', 'echo PTY-OK; exit 7'], { name: 'xterm-256color', cols: 80, rows: 24, cwd: process.cwd(), env: process.env }); let out = '', code = null, done = false; const finish = () => { if (done) return; done = true; clearTimeout(timer);   if (out.indexOf('PTY-OK') < 0) { console.error('PTY 没读到命令输出: ' + JSON.stringify(out.slice(0, 160))); process.exit(1); }   if (code !== 7) { console.error('PTY 退出码读不到或不对: ' + code); process.exit(1); }   process.stdout.write('DSH_PROBE_PASS 真 PTY：起得来、命令跑得动、退出码读得到 (rc=' + code + ')');   process.exit(0); }; const timer = setTimeout(() => { console.error('PTY 8s 未退出: ' + JSON.stringify(out.slice(0, 160))); process.exit(1); }, 8000); p.onData((d) => { out += d; }); p.onExit((e) => { code = e.exitCode; finish(); });"
       },
       "why": "node-pty 包本身能装上，缺的是 prebuilds/android-arm64/pty.node —— 闭包 diff 看不见这类缺口，只能靠本表显式登记",
       "criterionWhy": "P-T 终端批次落地（2026-09-27）：判据从 deferred 转正 —— 真起 PTY、真跑命令、真读退出码；不再只看「包装上了没有」（sharp 那一格的教训）。"
@@ -118,20 +118,18 @@
     {
       "id": "koffi-ffi",
       "capability": "FFI（dsh 仅在 win32 分支调用）",
-      "disposition": "waived",
-      "waiver": {
-        "followUp": "触发重判的条件：dsh 在非 win32 分支出现 koffi 调用点，或上游重新发布 android 变体",
-        "verifiedAt": "2026-10-01",
-        "expiresAt": "2026-12-31"
-      },
+      "disposition": "npm-auto",
       "hostExcludes": [
         "@koromix/koffi-linux-x64"
       ],
-      "evidence": "0.2.0-rc.2 闭包实测（2026-10-01 探针）：参照计划有 @koromix/koffi-linux-x64，被检计划里任何 koffi 变体都没有——上游这一版不发 android-arm64。旧记录写的「上游发了 android-arm64 变体且被检计划确实装了它」连同那次 readelf 读数一起随上游换版失效",
+      "deviceInstalls": [
+        "@koromix/koffi-android-arm64"
+      ],
+      "evidence": "上游发了 android-arm64 变体且被检计划确实装了它（这一条由本门禁的 deviceInstalls 差集当场证伪）；readelf 实测其 koffi.node NEEDED 只有 libm/libdl/libc，带 napi_register_module_v1。dsh 侧全部 koffi 调用点都在 process.platform === 'win32' 分支内，android 永不触达",
       "verify": {
         "notApplicable": "调用点全在 win32 分支，android 永不触达：验它等于验一个用不到的能力，占了格子反而掩盖真缺口"
       },
-      "why": "真机装不到 koffi 原生绑定，是缺口；但 dsh 全部调用点在 win32 分支、android 永不触达，补供没有对象，故按已知缺口豁免而非谎称 npm 会自动装上"
+      "why": "上游有 android 变体且会被自动安装，且调用点 android 永不触达，故无需供给动作"
     },
     {
       "id": "sherpa-speech",
@@ -174,7 +172,7 @@
       "hostExcludes": [],
       "verify": {
         "criterion": "用 APK 自带的那份 node 建一个内存库、写一行、读回来 —— 编译期没启用 SQLite 就在第一步就抛，不该等人去敲命令",
-        "node": "const s=require('node:sqlite'); const D=s.DatabaseSync||s.Database; if(!D) throw new Error('node:sqlite 里没有构造子（这份 node 未编入 SQLite 或改了导出名）'); const db=new D(':memory:'); db.exec('CREATE TABLE t(a)'); db.prepare('INSERT INTO t VALUES (?)').run(41); const row=db.prepare('SELECT a FROM t').get(); db.close(); if(!row||Number(row.a)!==41) throw new Error('回读不符：'+JSON.stringify(row)); process.stdout.write('LOBOS_PROBE_PASS node='+process.versions.node)"
+        "node": "const s=require('node:sqlite'); const D=s.DatabaseSync||s.Database; if(!D) throw new Error('node:sqlite 里没有构造子（这份 node 未编入 SQLite 或改了导出名）'); const db=new D(':memory:'); db.exec('CREATE TABLE t(a)'); db.prepare('INSERT INTO t VALUES (?)').run(41); const row=db.prepare('SELECT a FROM t').get(); db.close(); if(!row||Number(row.a)!==41) throw new Error('回读不符：'+JSON.stringify(row)); process.stdout.write('DSH_PROBE_PASS node='+process.versions.node)"
       },
       "why": "用的是 node:sqlite 内置模块，成不成取决于我们那份交叉编译是否启用 SQLite；闭包 diff 看不见，必须由真机探针定罪"
     },
@@ -185,9 +183,9 @@
       "hostExcludes": [],
       "verify": {
         "criterion": "在 app home 落一个脚本和一份自带 ELF，各 exec 一次并读到自己的输出；对照组是 /system/bin/sh 本身 —— 对照组起不来就整格红，不许把 spawn 坏了读成 exec 被禁",
-        "node": "const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process'); const base=process.env.LOBOS_SUPERVISOR_HOME; if(!base) throw new Error('容器未递 LOBOS_SUPERVISOR_HOME：本格量的是 app home 能不能 exec，没有 app home 就无从落件'); const d=path.join(base,'.exec-domain-probe'); fs.mkdirSync(d,{recursive:true}); const bad=(r)=>((r.error&&r.error.code)||('rc='+r.status+' err='+String(r.stderr||'').slice(0,120))); const dom=(r)=>String(r.stdout||'').split('\\n')[0].trim(); try{ const ctl=cp.spawnSync('/system/bin/sh',['-c','cat /proc/self/attr/current; echo; echo CTL_OK'],{encoding:'utf8',timeout:10000}); if(!String(ctl.stdout||'').includes('CTL_OK')) throw new Error('对照组失效：连 /system/bin/sh 都起不来（'+bad(ctl)+'），本格读数不可解释'); const sh=path.join(d,'p.sh'); fs.writeFileSync(sh,'#!/system/bin/sh\\ncat /proc/self/attr/current; echo; echo SCRIPT_OK\\n'); fs.chmodSync(sh,0o755); const r1=cp.spawnSync(sh,[],{encoding:'utf8',timeout:10000}); if(!String(r1.stdout||'').includes('SCRIPT_OK')) throw new Error('exec app home 脚本 fail: '+bad(r1)); const bin=path.join(d,'p.bin'); fs.copyFileSync('/system/bin/sh',bin); fs.chmodSync(bin,0o755); const r2=cp.spawnSync(bin,['-c','echo BIN_OK'],{encoding:'utf8',timeout:10000}); if(!String(r2.stdout||'').includes('BIN_OK')) throw new Error('exec app home 自带 ELF fail: '+bad(r2)); process.stdout.write('LOBOS_PROBE_PASS 域='+dom(ctl)+' exec 后域='+dom(r1)); } finally{ fs.rmSync(d,{recursive:true,force:true}); }"
+        "node": "const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process'); const base=process.env.LOBOS_SUPERVISOR_HOME; if(!base) throw new Error('容器未递 LOBOS_SUPERVISOR_HOME：本格量的是 app home 能不能 exec，没有 app home 就无从落件'); const d=path.join(base,'.exec-domain-probe'); fs.mkdirSync(d,{recursive:true}); const bad=(r)=>((r.error&&r.error.code)||('rc='+r.status+' err='+String(r.stderr||'').slice(0,120))); const dom=(r)=>String(r.stdout||'').split('\\n')[0].trim(); try{ const ctl=cp.spawnSync('/system/bin/sh',['-c','cat /proc/self/attr/current; echo; echo CTL_OK'],{encoding:'utf8',timeout:10000}); if(!String(ctl.stdout||'').includes('CTL_OK')) throw new Error('对照组失效：连 /system/bin/sh 都起不来（'+bad(ctl)+'），本格读数不可解释'); const sh=path.join(d,'p.sh'); fs.writeFileSync(sh,'#!/system/bin/sh\\ncat /proc/self/attr/current; echo; echo SCRIPT_OK\\n'); fs.chmodSync(sh,0o755); const r1=cp.spawnSync(sh,[],{encoding:'utf8',timeout:10000}); if(!String(r1.stdout||'').includes('SCRIPT_OK')) throw new Error('exec app home 脚本 fail: '+bad(r1)); const bin=path.join(d,'p.bin'); fs.copyFileSync('/system/bin/sh',bin); fs.chmodSync(bin,0o755); const r2=cp.spawnSync(bin,['-c','echo BIN_OK'],{encoding:'utf8',timeout:10000}); if(!String(r2.stdout||'').includes('BIN_OK')) throw new Error('exec app home 自带 ELF fail: '+bad(r2)); process.stdout.write('DSH_PROBE_PASS 域='+dom(ctl)+' exec 后域='+dom(r1)); } finally{ fs.rmSync(d,{recursive:true,force:true}); }"
       },
-      "why": "这条能力此前只有一个手工脚本（domain-probe.js，无任何调用点）加一份 2026-09-23 在 targetSdk=34 上取的旧基线 —— 判据靠人记得跑就等于没有判据。exec 落在 app_data_file 上，与本进程同域同 uid，所以 Agent 的 run_code 子进程走不走得通由这一格说了算。link(2) 不在本格量：容器给 Agent 进程注入了 liblobosposix 的 LD_PRELOAD 用户态替代（container/native/d1/），在本进程里测 link 量到的是垫片而不是系统事实。"
+      "why": "这条能力此前只有一个手工脚本（kernel/tools/domain-probe.js，无任何调用点）加一份 2026-09-23 在 targetSdk=34 上取的旧基线 —— 判据靠人记得跑就等于没有判据。exec 落在 app_data_file 上，与本进程同域同 uid，所以 Agent 的 run_code 子进程走不走得通由这一格说了算。link(2) 不在本格量：容器给 Agent 进程注入了 libdshposix 的 LD_PRELOAD 用户态替代（container/native/d1/），在本进程里测 link 量到的是垫片而不是系统事实。"
     }
   ],
   "envUnits": [
@@ -199,9 +197,9 @@
       "hostExcludes": [],
       "verify": {
         "criterion": "/tmp 下的 open + mkdir + stat + unlink 全部落到 $TMPDIR —— 缺一片即红（真机定罪过 one-surface 假绿）",
-        "node": "const fs=require('node:fs'),path=require('node:path'); const b='lobos-tmp-probe-'+process.pid, dir=process.env.TMPDIR; if(!dir) throw new Error('TMPDIR 未设'); try{ fs.writeFileSync('/tmp/'+b,'ok'); if(fs.readFileSync(path.join(dir,b),'utf8')!=='ok') throw new Error('open 未落到 TMPDIR'); fs.mkdirSync('/tmp/'+b+'-d'); if(!fs.statSync('/tmp/'+b+'-d').isDirectory()) throw new Error('mkdir/stat 未落到 TMPDIR'); fs.unlinkSync('/tmp/'+b); if(fs.existsSync(path.join(dir,b))) throw new Error('unlink 未生效'); fs.rmdirSync('/tmp/'+b+'-d'); process.stdout.write('LOBOS_PROBE_PASS open+mkdir+stat+unlink 全落 '+dir); }catch(e){ try{fs.unlinkSync('/tmp/'+b);}catch(_){} try{fs.rmdirSync('/tmp/'+b+'-d');}catch(_){} throw e; }"
+        "node": "const fs=require('node:fs'),path=require('node:path'); const b='dsh-tmp-probe-'+process.pid, dir=process.env.TMPDIR; if(!dir) throw new Error('TMPDIR 未设'); try{ fs.writeFileSync('/tmp/'+b,'ok'); if(fs.readFileSync(path.join(dir,b),'utf8')!=='ok') throw new Error('open 未落到 TMPDIR'); fs.mkdirSync('/tmp/'+b+'-d'); if(!fs.statSync('/tmp/'+b+'-d').isDirectory()) throw new Error('mkdir/stat 未落到 TMPDIR'); fs.unlinkSync('/tmp/'+b); if(fs.existsSync(path.join(dir,b))) throw new Error('unlink 未生效'); fs.rmdirSync('/tmp/'+b+'-d'); process.stdout.write('DSH_PROBE_PASS open+mkdir+stat+unlink 全落 '+dir); }catch(e){ try{fs.unlinkSync('/tmp/'+b);}catch(_){} try{fs.rmdirSync('/tmp/'+b+'-d');}catch(_){} throw e; }"
       },
-      "why": "安卓根文件系统只读且 SELinux 不给 app 在 / 下建目录，Linux 习惯的硬编码 /tmp 必然失败；容器经 liblobosposix 在整张路径 syscall 面上把 /tmp 前缀重写到 $TMPDIR（**默认生效**，不依赖会被 LOBOS 剥掉的 LOBOS_* 开关），本格由设备端探针核验落点。（**归属 D1**：这是 Linux 语义兑现层的件，不是 C 层共享供给 —— 原先借 shared 表达，等于没有家。）",
+      "why": "安卓根文件系统只读且 SELinux 不给 app 在 / 下建目录，Linux 习惯的硬编码 /tmp 必然失败；容器经 libdshposix 在整张路径 syscall 面上把 /tmp 前缀重写到 $TMPDIR（**默认生效**，不依赖会被 DSH 剥掉的 DSH_* 开关），本格由设备端探针核验落点。（**归属 D1**：这是 Linux 语义兑现层的件，不是 C 层共享供给 —— 原先借 shared 表达，等于没有家。）",
       "kind": "check"
     },
     {
@@ -211,11 +209,11 @@
       "layer": "d1",
       "disposition": "runtime-check",
       "required": false,
-      "carrier": "jniLibs(liblobosposix.so)",
+      "carrier": "jniLibs(libdshposix.so)",
       "why": "安卓没有 /usr/bin/env、没有 /usr/bin/<x>、没有 /bin/sh，而生态大量程序按这些绝对路径写 shebang（npm 生成的 bin shim、pip 的 console script、我们自己的脚本）。 缺约定的后果是「exec 一个脚本 → 内核找解释器 ENOENT → 调用方以为脚本不存在」，于是我们此前给每个工具手写 `#!/system/bin/sh` 包装 —— 那是**补偿层**。 本格判据它是否真被兑现：D1 的 exec-path.c（termux-exec 同族）在 execve 前按**调用方 PATH** 解析 shebang 解释器与标准绝对路径。 注意：判据同时报出 /usr/bin/env 在本机是否存在 —— 若本机本就有它，这一格的通过不能归功于 shim（不自证清白）。（**归属 D1**：这是 Linux 语义兑现层的件，不是 C 层共享供给 —— 原先借 shared 表达，等于没有家。）",
       "verify": {
         "criterion": "两个形状的脚本都必须真跑起来：#!/usr/bin/env bash 与 #!/bin/sh（不是只看文件在不在）",
-        "node": "const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process'); const dir=process.env.TMPDIR||os.tmpdir(); const envAbsent=!fs.existsSync('/usr/bin/env'); const a=path.join(dir,'lobos-shebang-env-'+process.pid+'.sh'), b=path.join(dir,'lobos-shebang-sh-'+process.pid+'.sh'); const mk=(p,body)=>{fs.writeFileSync(p,body+'\\n',{mode:0o755});fs.chmodSync(p,0o755);}; mk(a,'#!/usr/bin/env bash\\necho LOBOS_SHEBANG_ENV_OK'); mk(b,'#!/bin/sh\\necho LOBOS_SHEBANG_SH_OK'); const run=(p)=>{const r=cp.spawnSync(p,[],{encoding:'utf8'});return {out:String(r.stdout||'').trim(),err:String(r.stderr||'').trim(),code:r.status,error:r.error?r.error.message:null};}; const ra=run(a), rb=run(b); try{fs.unlinkSync(a);}catch(_){}try{fs.unlinkSync(b);}catch(_){} if(ra.out.indexOf('LOBOS_SHEBANG_ENV_OK')<0||rb.out.indexOf('LOBOS_SHEBANG_SH_OK')<0){console.error('shebang 未兑现：/usr/bin/env 形态='+JSON.stringify(ra)+' /bin/sh 形态='+JSON.stringify(rb)+'（/usr/bin/env 于本机'+(envAbsent?'不存在':'存在')+'）');process.exit(1);} process.stdout.write('LOBOS_PROBE_PASS shebang 兑现：#!/usr/bin/env bash 与 #!/bin/sh 都能跑（/usr/bin/env 于本机'+(envAbsent?'不存在 ⇒ 是 shim 在起作用':'存在 ⇒ 本格对它无证明力')+'）');"
+        "node": "const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process'); const dir=process.env.TMPDIR||os.tmpdir(); const envAbsent=!fs.existsSync('/usr/bin/env'); const a=path.join(dir,'dsh-shebang-env-'+process.pid+'.sh'), b=path.join(dir,'dsh-shebang-sh-'+process.pid+'.sh'); const mk=(p,body)=>{fs.writeFileSync(p,body+'\\n',{mode:0o755});fs.chmodSync(p,0o755);}; mk(a,'#!/usr/bin/env bash\\necho DSH_SHEBANG_ENV_OK'); mk(b,'#!/bin/sh\\necho DSH_SHEBANG_SH_OK'); const run=(p)=>{const r=cp.spawnSync(p,[],{encoding:'utf8'});return {out:String(r.stdout||'').trim(),err:String(r.stderr||'').trim(),code:r.status,error:r.error?r.error.message:null};}; const ra=run(a), rb=run(b); try{fs.unlinkSync(a);}catch(_){}try{fs.unlinkSync(b);}catch(_){} if(ra.out.indexOf('DSH_SHEBANG_ENV_OK')<0||rb.out.indexOf('DSH_SHEBANG_SH_OK')<0){console.error('shebang 未兑现：/usr/bin/env 形态='+JSON.stringify(ra)+' /bin/sh 形态='+JSON.stringify(rb)+'（/usr/bin/env 于本机'+(envAbsent?'不存在':'存在')+'）');process.exit(1);} process.stdout.write('DSH_PROBE_PASS shebang 兑现：#!/usr/bin/env bash 与 #!/bin/sh 都能跑（/usr/bin/env 于本机'+(envAbsent?'不存在 ⇒ 是 shim 在起作用':'存在 ⇒ 本格对它无证明力')+'）');"
       }
     },
     {
@@ -223,9 +221,9 @@
       "capability": "bash（底座自举种子：$PREFIX/bin/bash）—— 不是运行时",
       "layer": "seed",
       "disposition": "seed",
-      "why": "由 L0 PrefixProvisioner 把 libbash.so 播到 $PREFIX/bin/bash；缺件时 LOBOS 的 bash 工具与所有子进程全灭。**归属 B 层（底座种子），不是 C 层运行时**——定稿口径里运行时只有 node·python·go·java（docs/contracts/layout.json deliveryLayers.C.shape）。判据：bash -c 真跑 + 一个 #!/bin/sh 脚本真跑（顺带交叉验证 D1 的 exec-path 兑现）。",
+      "why": "由 L0 PrefixProvisioner 把 libbash.so 播到 $PREFIX/bin/bash；缺件时 DSH 的 bash 工具与所有子进程全灭。**归属 B 层（底座种子），不是 C 层运行时**——定稿口径里运行时只有 node·python·go·java（docs/contracts/layout.json deliveryLayers.C.shape）。判据：bash -c 真跑 + 一个 #!/bin/sh 脚本真跑（顺带交叉验证 D1 的 exec-path 兑现）。",
       "verify": {
-        "node": "const cp=require('node:child_process'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'); const a=cp.spawnSync('bash',['-c','echo SHELL_OK'],{encoding:'utf8'}); if(a.error||a.status!==0||!/SHELL_OK/.test(a.stdout||'')){console.error('bash 起不来: '+((a.error&&a.error.message)||String(a.stderr||'').slice(0,120)));process.exit(1)} const d=fs.mkdtempSync(path.join(process.env.TMPDIR||os.tmpdir(),'lobos-sh-')); const f=path.join(d,'s.sh');fs.writeFileSync(f,'#!/bin/sh\\necho SH_OK\\n');fs.chmodSync(f,0o755); const b=cp.spawnSync(f,[],{encoding:'utf8'}); if(b.status!==0||!/SH_OK/.test(b.stdout||'')){console.error('shebang 脚本跑不起来: '+String(b.stderr||'').slice(0,160));process.exit(1)} process.stdout.write('LOBOS_PROBE_PASS shell 可用（bash -c 与 #!/bin/sh 脚本都真跑通）');"
+        "node": "const cp=require('node:child_process'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'); const a=cp.spawnSync('bash',['-c','echo SHELL_OK'],{encoding:'utf8'}); if(a.error||a.status!==0||!/SHELL_OK/.test(a.stdout||'')){console.error('bash 起不来: '+((a.error&&a.error.message)||String(a.stderr||'').slice(0,120)));process.exit(1)} const d=fs.mkdtempSync(path.join(process.env.TMPDIR||os.tmpdir(),'dsh-sh-')); const f=path.join(d,'s.sh');fs.writeFileSync(f,'#!/bin/sh\\necho SH_OK\\n');fs.chmodSync(f,0o755); const b=cp.spawnSync(f,[],{encoding:'utf8'}); if(b.status!==0||!/SH_OK/.test(b.stdout||'')){console.error('shebang 脚本跑不起来: '+String(b.stderr||'').slice(0,160));process.exit(1)} process.stdout.write('DSH_PROBE_PASS shell 可用（bash -c 与 #!/bin/sh 脚本都真跑通）');"
       },
       "bin": "bash",
       "required": false,
@@ -239,7 +237,7 @@
       "disposition": "seed",
       "why": "Node 是 init 赖以启动的运行时，由 NativeAssetRegistry 的 libnode.so 经 jniLibs 落地；无它整机无 OS。**归属 C 层运行时（shared）**——node·python·go·java 是运行时；它同时是 B 层的自举种子（内核自己靠它启动），所以交付方式仍是随 APK 冻结（L0），但身份不与底座种子混为一谈。",
       "verify": {
-        "node": "const cp=require('node:child_process'); const r=cp.spawnSync(process.execPath,['-e','process.stdout.write(String(1+1))'],{encoding:'utf8'}); if(r.status!==0||String(r.stdout||'').trim()!=='2'){console.error('被检 node 真跑失败: '+String(r.stderr||'').slice(0,160));process.exit(1)} process.stdout.write('LOBOS_PROBE_PASS node 可用（'+process.version+'，真算 1+1=2）');"
+        "node": "const cp=require('node:child_process'); const r=cp.spawnSync(process.execPath,['-e','process.stdout.write(String(1+1))'],{encoding:'utf8'}); if(r.status!==0||String(r.stdout||'').trim()!=='2'){console.error('被检 node 真跑失败: '+String(r.stderr||'').slice(0,160));process.exit(1)} process.stdout.write('DSH_PROBE_PASS node 可用（'+process.version+'，真算 1+1=2）');"
       },
       "bin": "node",
       "required": true,
@@ -254,7 +252,7 @@
       "disposition": "seed",
       "why": "npm 是纯 JS，随 APK assets 投放、由 libnode.so 代跑，经 runtime.json 的 npmEntry 交给内核。**归属 C 层工具（shared）**，与 git/pnpm/jq/sqlite3 同级——不是运行时，也不属底座种子。（当前交付方式仍是随 APK 冻结，那是发布维的事；『工具应由环境自己装、自更新』这条尚未兑现，见表内 why 的记账。）",
       "verify": {
-        "node": "const cp=require('node:child_process'),fs=require('node:fs'),path=require('node:path'); let e=process.env.LOBOS_NPM_ENTRY||null; if(!e){try{const h=process.env.LOBOS_SUPERVISOR_HOME;const j=JSON.parse(fs.readFileSync(path.join(h,'supervisor','runtime.json'),'utf8'));e=j.npmEntry||(j.npm&&j.npm.entry)||null}catch(_){e=null}} if(!e||!fs.existsSync(e)){console.error('契约没给出可用的 npm 入口: '+e);process.exit(1)} const r=cp.spawnSync(process.execPath,[e,'--version'],{encoding:'utf8'}); if(r.status!==0){console.error('npm 起不来: '+String(r.stderr||'').slice(0,160));process.exit(1)} process.stdout.write('LOBOS_PROBE_PASS npm 可用（'+String(r.stdout||'').trim()+'）');"
+        "node": "const cp=require('node:child_process'),fs=require('node:fs'),path=require('node:path'); let e=process.env.DSH_NPM_ENTRY||null; if(!e){try{const h=process.env.LOBOS_SUPERVISOR_HOME;const j=JSON.parse(fs.readFileSync(path.join(h,'supervisor','runtime.json'),'utf8'));e=j.npmEntry||(j.npm&&j.npm.entry)||null}catch(_){e=null}} if(!e||!fs.existsSync(e)){console.error('契约没给出可用的 npm 入口: '+e);process.exit(1)} const r=cp.spawnSync(process.execPath,[e,'--version'],{encoding:'utf8'}); if(r.status!==0){console.error('npm 起不来: '+String(r.stderr||'').slice(0,160));process.exit(1)} process.stdout.write('DSH_PROBE_PASS npm 可用（'+String(r.stdout||'').trim()+'）');"
       },
       "bin": "npm",
       "required": true,
@@ -266,7 +264,7 @@
       "capability": "pnpm（dsh 插件管理链路）",
       "layer": "shared",
       "disposition": "supplied-by-us",
-      "impl": "container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt",
+      "impl": "container/app/src/main/java/io/github/lobbowen/dshmobile/runtime/SupplyProvisioner.kt",
       "why": "dsh-plugin-manager 调用 pnpm；安卓无 /usr/bin/env，npm 生成的 bin shim 不可 execve，故由 C 层机制装到共享 $PREFIX 并自写 sh 入口。件表（版本/包/大小/哈希）住 **C 自己的签名清单**，内核只留通道锚 + 信任根 + 机制 —— 加件/升级只发清单，内核不动。",
       "verify": {
         "delegated": "判据随件下发：C 的清单 tools[].verify（发布侧副本 scripts/userland-verify.json）。内核只留判定框架，不认识具体工具。"
@@ -287,7 +285,7 @@
       "bin": "git",
       "required": false,
       "kind": "tool",
-      "impl": "container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt",
+      "impl": "container/app/src/main/java/io/github/lobbowen/dshmobile/runtime/SupplyProvisioner.kt",
       "carrier": "$PREFIX(经 C 的签名清单投放)"
     },
     {
@@ -300,10 +298,10 @@
         "verifiedAt": "2026-09-27",
         "expiresAt": "2026-12-26"
       },
-      "why": "【产品形态·2026-09-27 校正】python 是**运行时**，按本 OS 的形态必须**打进 APK**（与 node 同理：运行时是环境本体，不是可下载的工具）。   切分：可执行/可 dlopen 的进 **jniLibs**（nativeLibraryDir 是 W^X 下唯一可 execve/dlopen 的通道）：`libpython3.14.so`、需要 dlopen 的扩展模块、以及一个 launcher（同 liblobosptyprobe.so 形态）；   **纯数据**（stdlib 的 .py、site-packages）走 assets 解到 files/ —— jniLibs 不背全部体积。走 jniLibs 后**不依赖 app 数据目录的 exec 域**，targetSdk 29+ 亦可用。 【事实·官方】CPython 文档《Using Python on Android》：安卓无系统级安装、无控制台，「唯一方式是嵌入式（native app 嵌 libpython）」；   官方每版发 `python-<ver>-aarch64-linux-android.tar.gz`（\"Android embeddable package\"），最新稳定 **3.14.7（2026-08-05）**，aarch64 包 **21.4 MiB**（22,477,276 B，实测 Content-Length）；3.15 仍 rc（2026-09-01 rc2）。 【事实·官方】CPython 自 3.13 起把 Android 列为受支持平台（PEP 738），目标三元组 aarch64-linux-android，配套 wheel 走 cibuildwheel。 【移植要点·Termux 真机配方，作参考】无 /dev/ptc、无 wcsftime/ftime/faccessat(AT_EACCESS)、--with-system-ffi/expat、--enable-loadable-sqlite-extensions、little_endian_double、强制 posix 信号量；   Termux 还关 link/linkat（安卓无硬链接）—— **本容器 D1 已兑现 link(2)，这一条不必照抄**。依赖件：openssl、libffi、libexpat、zlib、libbz2、liblzma、libsqlite、ncurses/readline、zstd、gdbm。 【版本策略】地板 = **3.14**（当前最新稳定系列）；随 APK 冻结发布，精确补丁版由**壳版本**决定（不再由通道清单决定）。 【已知限制】官方文档列明安卓上标准库有 notable omissions and restrictions（API availability 指南），能力承诺须真机实测后才给。",
+      "why": "【产品形态·2026-09-27 校正】python 是**运行时**，按本 OS 的形态必须**打进 APK**（与 node 同理：运行时是环境本体，不是可下载的工具）。   切分：可执行/可 dlopen 的进 **jniLibs**（nativeLibraryDir 是 W^X 下唯一可 execve/dlopen 的通道）：`libpython3.14.so`、需要 dlopen 的扩展模块、以及一个 launcher（同 libdshptyprobe.so 形态）；   **纯数据**（stdlib 的 .py、site-packages）走 assets 解到 files/ —— jniLibs 不背全部体积。走 jniLibs 后**不依赖 app 数据目录的 exec 域**，targetSdk 29+ 亦可用。 【事实·官方】CPython 文档《Using Python on Android》：安卓无系统级安装、无控制台，「唯一方式是嵌入式（native app 嵌 libpython）」；   官方每版发 `python-<ver>-aarch64-linux-android.tar.gz`（\"Android embeddable package\"），最新稳定 **3.14.7（2026-08-05）**，aarch64 包 **21.4 MiB**（22,477,276 B，实测 Content-Length）；3.15 仍 rc（2026-09-01 rc2）。 【事实·官方】CPython 自 3.13 起把 Android 列为受支持平台（PEP 738），目标三元组 aarch64-linux-android，配套 wheel 走 cibuildwheel。 【移植要点·Termux 真机配方，作参考】无 /dev/ptc、无 wcsftime/ftime/faccessat(AT_EACCESS)、--with-system-ffi/expat、--enable-loadable-sqlite-extensions、little_endian_double、强制 posix 信号量；   Termux 还关 link/linkat（安卓无硬链接）—— **本容器 D1 已兑现 link(2)，这一条不必照抄**。依赖件：openssl、libffi、libexpat、zlib、libbz2、liblzma、libsqlite、ncurses/readline、zstd、gdbm。 【版本策略】地板 = **3.14**（当前最新稳定系列）；随 APK 冻结发布，精确补丁版由**壳版本**决定（不再由通道清单决定）。 【已知限制】官方文档列明安卓上标准库有 notable omissions and restrictions（API availability 指南），能力承诺须真机实测后才给。",
       "verify": {
         "criterion": "python3 起得来、真算一段并读回结果，且版本不低于地板 3.14（不是只看 --version）",
-        "node": "const cp = require('node:child_process'); const r = cp.spawnSync('python3', ['-c', 'import sys; print(\".\".join(map(str, sys.version_info[:3]))); print(1+1)'], { encoding: 'utf8' }); if (r.error) { console.error('python3 起不来: ' + r.error.message); process.exit(1); } if (r.status !== 0) { console.error('python3 非零退出 rc=' + r.status + ' err=' + String(r.stderr || '').slice(0, 160)); process.exit(1); } const lines = String(r.stdout || '').trim().split('\\n'); const ver = (lines[0] || '').trim(); const sum = (lines[1] || '').trim(); if (sum !== '2') { console.error('python3 算不对: ' + JSON.stringify(sum)); process.exit(1); } const seg = ver.split('.').map(function (x) { return parseInt(x, 10) || 0; }); const meetsFloor = (seg[0] > 3) || (seg[0] === 3 && (seg[1] || 0) >= 14); if (!meetsFloor) { console.error('python3 低于地板 3.14: ' + ver); process.exit(1); } process.stdout.write('LOBOS_PROBE_PASS python3 可用（' + ver + ' >= 3.14，1+1=2）');"
+        "node": "const cp = require('node:child_process'); const r = cp.spawnSync('python3', ['-c', 'import sys; print(\".\".join(map(str, sys.version_info[:3]))); print(1+1)'], { encoding: 'utf8' }); if (r.error) { console.error('python3 起不来: ' + r.error.message); process.exit(1); } if (r.status !== 0) { console.error('python3 非零退出 rc=' + r.status + ' err=' + String(r.stderr || '').slice(0, 160)); process.exit(1); } const lines = String(r.stdout || '').trim().split('\\n'); const ver = (lines[0] || '').trim(); const sum = (lines[1] || '').trim(); if (sum !== '2') { console.error('python3 算不对: ' + JSON.stringify(sum)); process.exit(1); } const seg = ver.split('.').map(function (x) { return parseInt(x, 10) || 0; }); const meetsFloor = (seg[0] > 3) || (seg[0] === 3 && (seg[1] || 0) >= 14); if (!meetsFloor) { console.error('python3 低于地板 3.14: ' + ver); process.exit(1); } process.stdout.write('DSH_PROBE_PASS python3 可用（' + ver + ' >= 3.14，1+1=2）');"
       },
       "bin": "python3",
       "required": false,
@@ -365,7 +363,7 @@
       "bin": "jq",
       "required": false,
       "kind": "tool",
-      "impl": "container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt",
+      "impl": "container/app/src/main/java/io/github/lobbowen/dshmobile/runtime/SupplyProvisioner.kt",
       "carrier": "$PREFIX(经 C 的签名清单投放)"
     },
     {
@@ -377,7 +375,7 @@
       "verify": {
         "delegated": "判据随件下发：C 的清单 tools[].verify（发布侧副本 scripts/userland-verify.json）。内核只留判定框架，不认识具体工具。"
       },
-      "impl": "container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt",
+      "impl": "container/app/src/main/java/io/github/lobbowen/dshmobile/runtime/SupplyProvisioner.kt",
       "bin": "sqlite3",
       "required": false,
       "kind": "tool"
@@ -392,7 +390,7 @@
       "carrier": "jniLibs(libripgrep.so) → $PREFIX/bin（走 B 层种子路径）",
       "why": "双重身份：**能力上属 C 层工具**（定稿 C.shape 的工具清单里有 rg），**交付上走 B 层种子**（PrefixProvisioner 从 jniLibs 播到 $PREFIX/bin/rg）。两者不矛盾：种子是交付路径，工具是身份。判据真跑一次搜索。",
       "verify": {
-        "node": "const cp=require('node:child_process'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'); const d=fs.mkdtempSync(path.join(process.env.TMPDIR||os.tmpdir(),'lobos-rg-')); const f=path.join(d,'a.txt');fs.writeFileSync(f,'needle\\n'); const r=cp.spawnSync('rg',['-n','needle',f],{encoding:'utf8'}); if(r.error||r.status!==0||!/needle/.test(r.stdout||'')){console.error('rg 真跑失败: '+((r.error&&r.error.message)||String(r.stderr||'').slice(0,140)));process.exit(1)} process.stdout.write('LOBOS_PROBE_PASS rg 可用（真搜到 needle）');"
+        "node": "const cp=require('node:child_process'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'); const d=fs.mkdtempSync(path.join(process.env.TMPDIR||os.tmpdir(),'dsh-rg-')); const f=path.join(d,'a.txt');fs.writeFileSync(f,'needle\\n'); const r=cp.spawnSync('rg',['-n','needle',f],{encoding:'utf8'}); if(r.error||r.status!==0||!/needle/.test(r.stdout||'')){console.error('rg 真跑失败: '+((r.error&&r.error.message)||String(r.stderr||'').slice(0,140)));process.exit(1)} process.stdout.write('DSH_PROBE_PASS rg 可用（真搜到 needle）');"
       }
     },
     {
@@ -408,7 +406,7 @@
       "verify": {
         "delegated": "判据随件下发：C 的清单 tools[].verify（发布侧副本 scripts/userland-verify.json，curl 那条真打 HTTPS）。"
       },
-      "impl": "container/app/src/main/java/lobos/runtime/SupplyProvisioner.kt"
+      "impl": "container/app/src/main/java/io/github/lobbowen/dshmobile/runtime/SupplyProvisioner.kt"
     },
     {
       "id": "env-coreutils",

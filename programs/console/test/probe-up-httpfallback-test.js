@@ -2,7 +2,7 @@
 
 // 探针 up 语义回归（android.5，真机 2026-09-23 实锤）：
 // 安卓 SELinux 禁 untrusted_app 读 /proc/net/tcp 与 ss netlink → findListeningPid 恒 null，
-// 健康的 lobos（HTTP 正常应答）被 L1 判离线 → 30s start_timeout 反复误杀 → 重启循环。
+// 健康的 dsh（HTTP 正常应答）被 L1 判离线 → 30s start_timeout 反复误杀 → 重启循环。
 // 修复语义：up = 端口可连 且（pid 反查到 或 HTTP 健康应答）。
 // 设备形态用 monitor.probe 的 findListeningPid 注入点伪造（安全门禁 A：禁 patch 模块导出）。
 
@@ -29,11 +29,11 @@ async function main() {
   ok(r1.listening === true && r1.pid === null, 'S1 前置：端口可连且 pid 不可见（设备形态成立）');
   ok(r1.up === true && r1.httpOk === true && r1.httpStatus === 200, 'S1 HTTP 活应答独立支撑在线判定（up=true）');
 
-  // S2: HTTP 401（lobos 真机形态：/ 受认证保护）→ up=true
+  // S2: HTTP 401（dsh 真机形态：/ 受认证保护）→ up=true
   const srv401 = http.createServer((req, res) => { res.writeHead(401); res.end('auth'); });
   const p2 = await listen(srv401);
   const r2 = await monitor.probe('127.0.0.1', p2, { healthUrl: 'http://127.0.0.1:' + p2 + '/', httpTimeoutMs: 1500, findListeningPid: NO_PID });
-  ok(r2.up === true && r2.httpStatus === 401, 'S2 401=服务在线（lobos 启动 URL 打出后守卫能收敛 RUNNING）');
+  ok(r2.up === true && r2.httpStatus === 401, 'S2 401=服务在线（dsh 启动 URL 打出后守卫能收敛 RUNNING）');
 
   // S3: TCP 可连但 HTTP 不应答（假死）→ up=false，假死识别能力零损伤
   const srvDead = net.createServer((sock) => { sock.on('error', () => {}); });

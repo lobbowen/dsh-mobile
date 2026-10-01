@@ -2,9 +2,9 @@
 
 // SIGTERM desired 契约（P1-4 验收门）：
 //  守卫被 SIGTERM/SIGINT 停止（systemd stop/重启、升级守卫）后，
-//  LOBOS 期望状态（desired）必须保持不变——「守卫退出不动 LOBOS」是硬约束。
-//  旧实现 shutdown → stopAll → lobos.stop → setDesired('stopped') 依赖 exit 竞态，
-//  行为不确定；RC2 修复后 stopAll 默认 exclude lobos，语义由契约保证。
+//  DSH 期望状态（desired）必须保持不变——「守卫退出不动 DSH」是硬约束。
+//  旧实现 shutdown → stopAll → dsh.stop → setDesired('stopped') 依赖 exit 竞态，
+//  行为不确定；RC2 修复后 stopAll 默认 exclude dsh，语义由契约保证。
 // 用法：node test/sigterm-desired-test.js
 
 const fs = require('node:fs');
@@ -15,10 +15,9 @@ const { spawn } = require('node:child_process');
 // 端口手工分配在安全段（避开 OS ephemeral 与生产池）；跨文件不撞号靠人工规划，T1 兜底。
 
 const ROOT = path.join(__dirname, '..');
-// 入口不写死文件名：壳拉起的是 manifest.json 声明的那份 entry，测试必须跑同一份。
-const CLI = path.join(ROOT, require(path.join(ROOT, 'manifest.json')).entry);
+const CLI = path.join(ROOT, 'bin', 'panel');
 const MOCK = path.join(ROOT, 'test', 'mock-target.js');
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'lobos-sigterm-'));
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-sigterm-'));
 let passed = 0, failed = 0;
 function check(name, cond, extra = '') {
   if (cond) { passed++; console.log('  PASS ' + name); }
@@ -32,11 +31,11 @@ const cfg = {
   crashWindowMs: 28192, crashBurst: 5, backoff: [1500, 3000, 6000],
   apiHost: '127.0.0.1', apiPort: 28190, stateFile: path.join(TMP, 'state.json'),
   logFile: path.join(TMP, 'events.log'), supervisorLogFile: path.join(TMP, 'guard.log'),
-  lobosLogFile: path.join(TMP, 'lobos.log'), upgradeLogFile: path.join(TMP, 'up.log'),
+  dshLogFile: path.join(TMP, 'dsh.log'), upgradeLogFile: path.join(TMP, 'up.log'),
 };
 const cfgPath = path.join(TMP, 'cfg.json');
 fs.writeFileSync(cfgPath, JSON.stringify(cfg));
-fs.writeFileSync(path.join(TMP, 'lobos-main.json'), JSON.stringify({ guardian: true }));
+fs.writeFileSync(path.join(TMP, 'dsh-main.json'), JSON.stringify({ guardian: true }));
 
 function api(port, method, p) {
   return new Promise((resolve) => {
@@ -53,29 +52,29 @@ async function waitStatus(pred, timeoutMs = 12000) {
 }
 function startDaemon() {
   return spawn('node', [CLI, 'daemon', '-c', cfgPath], {
-    env: { ...process.env, LOBOS_SUPERVISOR_CONFIG: cfgPath, LOBOS_SUPERVISOR_LOCK_FILE: path.join(TMP, 'guard.lock') },
+    env: { ...process.env, DSH_SUPERVISOR_CONFIG: cfgPath, DSH_SUPERVISOR_LOCK_FILE: path.join(TMP, 'guard.lock') },
     stdio: 'ignore',
   });
 }
 
 async function main() {
   const d1 = startDaemon();
-  const s1 = await waitStatus((x) => x.phase === 'RUNNING' && x.lobosPid);
-  check('首守卫拉起 LOBOS', !!s1, JSON.stringify(s1));
-  const pid = s1 && s1.lobosPid;
+  const s1 = await waitStatus((x) => x.phase === 'RUNNING' && x.dshPid);
+  check('首守卫拉起 DSH', !!s1, JSON.stringify(s1));
+  const pid = s1 && s1.dshPid;
 
   d1.kill('SIGTERM'); // systemd stop/守卫升级路径
   await sleep(1200);
 
   const d2 = startDaemon();
-  const s2 = await waitStatus((x) => x.lobosPid === pid, 12000);
-  check('新守卫接管原实例（adopted）', !!s2 && s2.lobosPid === pid, JSON.stringify(s2));
+  const s2 = await waitStatus((x) => x.dshPid === pid, 12000);
+  check('新守卫接管原实例（adopted）', !!s2 && s2.dshPid === pid, JSON.stringify(s2));
   check('SIGTERM 后 desired 保持 running（P1-4 契约）', !!s2 && s2.desired === 'running', s2 && JSON.stringify({ desired: s2.desired, phase: s2.phase }));
 
   // 稳定窗口：确认收敛循环不因 shutdown 残留意图翻转 desired
   await sleep(2000);
   const s3 = await api(28190, 'GET', '/status');
-  check('稳定窗口 desired 仍 running', s3.desired === 'running', JSON.stringify({ desired: s3.desired, phase: s3.phase, pid: s3.lobosPid }));
+  check('稳定窗口 desired 仍 running', s3.desired === 'running', JSON.stringify({ desired: s3.desired, phase: s3.phase, pid: s3.dshPid }));
 
   d2.kill('SIGKILL');
   try { if (pid) process.kill(pid, 'SIGKILL'); } catch {}

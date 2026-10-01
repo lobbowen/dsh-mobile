@@ -3,8 +3,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // 统一生命周期抽象（ManagedLifecycle）—— 归一化架构核心（2026-09 用户定稿）。
 //
-// 定位：所有模块（LOBOS / 实例 / 智能路由 / 反代实例 / 远程控制 / 插件）的生命周期
-// 统一收敛到同一个抽象。LOBOSSUP（守卫）是「监测者」：通过 LifecycleManager 看每个
+// 定位：所有模块（DSH / 实例 / 智能路由 / 反代实例 / 远程控制 / 插件）的生命周期
+// 统一收敛到同一个抽象。DSHSUP（守卫）是「监测者」：通过 LifecycleManager 看每个
 // 模块的状态，按策略监测/拉起；模块各自独立生命周期——守卫重启 ≠ 模块重启。
 //
 // 关键语义：
@@ -30,8 +30,8 @@ const { PHASES } = require('./objects');
 class ManagedLifecycle {
   /**
    * @param {object} opts
-   * - id: 模块唯一标识（如 'lobos' / 'router' / 'router.proxy.<keyId>' / 'inst.<id>' / 'lan'）
-   * - kind: 模块类别（'lobos' | 'router' | 'proxy-instance' | 'instance' | 'lan' | 'plugin'）
+   * - id: 模块唯一标识（如 'dsh' / 'router' / 'router.proxy.<keyId>' / 'inst.<id>' / 'lan'）
+   * - kind: 模块类别（'dsh' | 'router' | 'proxy-instance' | 'instance' | 'lan' | 'plugin'）
    * - name: 显示名
    * - logger / events：可选（日志与事件总线）
    * - start(ctx)：async —— 启动该模块（由生命周期管理器调用）
@@ -62,7 +62,7 @@ class ManagedLifecycle {
     this.error = null;            // 最近一次错误
     this.startedAt = null;
     this.restartCount = 0;        // 守卫代其拉起的累计次数（守护动作侧 +1）
-    // 守护开关：true=健康异常时守卫自动拉起（router/lan/lobos 由 adapters 置 true）；false=仅观测不自动拉起。
+    // 守护开关：true=健康异常时守卫自动拉起（router/lan/dsh 由 adapters 置 true）；false=仅观测不自动拉起。
     // guardable=false 的模块**恒为 false**（能力锁，不依赖调用方自律）。
     this.guardian = this.guardable && opts.guardian === true;
     this._monitoring = false;     // 是否纳入统一启停管理

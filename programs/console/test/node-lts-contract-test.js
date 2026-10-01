@@ -8,7 +8,7 @@
 //
 // `ui/src/services/supervisor/types.ts` 的 NodeLtsStatus 声明了
 // `latestLts` / `ltsName` / `updateAvailable` 三个字段，
-// 而内核 `guard/supervisor/settings-view.js.nodeLtsStatus()` **从不产出**它们
+// 而内核 `guard/supervisor/settings-view.js::nodeLtsStatus()` **从不产出**它们
 // （该实现明确「不做远端查询」，避免守卫启动依赖网络）。
 // 于是 `OverviewPage.tsx` 的「可更新到 vX LTS」整块是**不可达死分支**，
 // 而 tsc/eslint/build 都**不会**报错（读的是已声明的可选字段）。

@@ -34,21 +34,21 @@ const SURFACE = [
   { path: '/logs/export',    methods: ['GET'],  domain: 'lifecycle', category: 'operational', consumers: ['审计/离线备份'], note: '审计：聚合流 JSONL 导出（离线备份/合规留痕）' },
   { path: '/lifecycle',      methods: ['GET'],  domain: 'lifecycle', category: 'public',      consumers: ['UI'], note: '模块生命周期一览（=/lifecycle/status）' },
   { path: '/lifecycle/status', methods: ['GET'], domain: 'lifecycle', category: 'public',     consumers: ['UI'], note: '同上（显式别名）' },
-  { path: '/lobos/access',     methods: ['GET'],  domain: 'lifecycle', category: 'public',      consumers: ['UI(OverviewPage 进入LOBOS)'], note: '带令牌 LOBOS Web 直连 URL（仅回环下发，令牌=会话凭据）' },
+  { path: '/dsh/access',     methods: ['GET'],  domain: 'lifecycle', category: 'public',      consumers: ['UI(OverviewPage 进入DSH)'], note: '带令牌 DSH Web 直连 URL（仅回环下发，令牌=会话凭据）' },
 
   // ── 守卫/设置域（guard.js）──
-  { path: '/changelog',            methods: ['GET'],  domain: 'guard', category: 'public',      consumers: ['UI(AboutCard)'], note: 'LOBOS 更新日志（text/plain）' },
+  { path: '/changelog',            methods: ['GET'],  domain: 'guard', category: 'public',      consumers: ['UI(AboutCard)'], note: 'DSH 更新日志（text/plain）' },
   { path: '/guard/changelog',      methods: ['GET'],  domain: 'guard', category: 'public',      consumers: ['UI(AboutCard)'], note: '管家更新日志（CHANGELOG.md）' },
   { path: '/guard/version',        methods: ['GET'],  domain: 'guard', category: 'public',      consumers: ['UI(AboutCard)'], note: '本地版本（无网络 I/O）' },
   { path: '/guard/version/check',  methods: ['POST'], domain: 'guard', category: 'public',      consumers: ['UI(AboutCard, 源码形态)'], note: 'git 上游检查（源码部署形态更新通道）' },
   { path: '/ports',                methods: ['GET'],  domain: 'guard', category: 'public',      consumers: ['UI(PortPanel)'], note: '端口视图（聚合三注册表）' },
-  { path: '/env/lobos',              methods: ['GET'],  domain: 'guard', category: 'public',      consumers: ['README 文档化（外部脚本）'], note: 'LOBOS 本体安装/纳管判定（bin/binOk/managed/phase）' },
+  { path: '/env/dsh',              methods: ['GET'],  domain: 'guard', category: 'public',      consumers: ['README 文档化（外部脚本）'], note: 'DSH 本体安装/纳管判定（bin/binOk/managed/phase）' },
   { path: '/env/status',           methods: ['GET'],  domain: 'guard', category: 'public',      consumers: ['UI(OverviewPage 环境卡)'], note: '环境 + 平台能力矩阵 + catalog' },
   { path: '/env/node-lts',         methods: ['GET'],  domain: 'guard', category: 'public',      consumers: ['UI(OverviewPage)'], note: 'Node 当前 vs 官方最新 LTS' },
   { path: '/settings/access-key',  methods: ['GET', 'POST'], domain: 'guard', category: 'public', consumers: ['UI(AccessCard)'], note: '访问密钥' },
   { path: '/settings/lan',         methods: ['GET', 'POST'], domain: 'guard', category: 'public', consumers: ['UI(AccessCard)'], note: '面板局域网访问开关' },
 
-  // ── 原生 LOBOS（native.js）──
+  // ── 原生 DSH（native.js）──
   { path: '/native/status',       methods: ['GET'],  domain: 'native', category: 'public', consumers: ['UI(OverviewPage)', 'CLI(status)'], note: '安装状态 + 版本 + 升级状态机' },
   { path: '/native/check-update', methods: ['POST'], domain: 'native', category: 'public', consumers: ['UI(OverviewPage)'], note: '触发版本检查' },
   { path: '/native/install',      methods: ['POST'], domain: 'native', category: 'public', consumers: ['UI(OverviewPage)', 'CLI'], note: '异步安装（202）' },

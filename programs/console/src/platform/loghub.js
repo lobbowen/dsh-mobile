@@ -36,17 +36,17 @@ function humaneMsg(type, data) {
   switch (type) {
     case 'lan_cookie_exchanged': return who + ' 远程会话 cookie 已刷新';
     case 'lan_cookie_failed': return who + ' 远程会话 cookie 换取失败' + (d.error ? '：' + d.error : '');
-    case 'lobos_token_captured': return who + ' LOBOS 令牌已捕获';
-    case 'lobos_token_missing': return who + ' LOBOS 令牌缺失，等待捕获';
+    case 'dsh_token_captured': return who + ' DSH 令牌已捕获';
+    case 'dsh_token_missing': return who + ' DSH 令牌缺失，等待捕获';
     case 'inst_added': return '新增沙箱实例：' + (d.id || '?');
     case 'inst_removed': return '删除沙箱实例：' + (d.id || '?');
     case 'inst_started': return '沙箱实例已启动：' + (d.id || '?');
     case 'inst_stopped': return '沙箱实例已停止：' + (d.id || '?');
     case 'inst_failed': return '沙箱实例失败：' + (d.reason || d.lastError || d.error || '?');
-    case 'upgrader_started': return '开始升级 LOBOS' + (d.version ? ' 至 ' + d.version : '');
-    case 'upgrader_done': return 'LOBOS 升级完成' + (d.version ? '，当前 ' + d.version : '');
-    case 'upgrader_failed': return 'LOBOS 升级失败：' + (d.error || '未知原因');
-    case 'upgrade_installed': return 'LOBOS ' + (d.version || '?') + ' 已安装';
+    case 'upgrader_started': return '开始升级 DSH' + (d.version ? ' 至 ' + d.version : '');
+    case 'upgrader_done': return 'DSH 升级完成' + (d.version ? '，当前 ' + d.version : '');
+    case 'upgrader_failed': return 'DSH 升级失败：' + (d.error || '未知原因');
+    case 'upgrade_installed': return 'DSH ' + (d.version || '?') + ' 已安装';
     case 'adopt_token_reclaim_started': return (d.pid ? '接管实例 pid ' + d.pid : '接管实例') + ' 令牌不可达，进入受控重建';
     case 'api_failed': return 'API 请求失败：' + (d.error || d.message || '未知');
     default: return null;
@@ -111,7 +111,7 @@ class EventHub {
    * @param {object} opts
    * - stateDir: 守卫状态目录（聚合流/水位落此）
    * - guardEvents: 守卫 Events 实例（源之一）
-   * - guardLogFile / lobosLogFile / upgradeLogFile: 守卫侧运行日志（/logs/tail 用）
+   * - guardLogFile / dshLogFile / upgradeLogFile: 守卫侧运行日志（/logs/tail 用）
    * - daemonLogs: { router: '.../log/router-daemon.log' }
    * - ctlPorts: { router: 43107 }
    * - logger: 可选
@@ -123,7 +123,7 @@ class EventHub {
     this.aggBase = opts.aggBase || 'state';
     this.guardEvents = opts.guardEvents || null;
     this.guardLogFile = opts.guardLogFile || null;
-    this.lobosLogFile = opts.lobosLogFile || null;
+    this.dshLogFile = opts.dshLogFile || null;
     this.upgradeLogFile = opts.upgradeLogFile || null;
     // 装配键契约：外部（supervisor LogCore.init / 测试）用短键 { router }；内部源标识用长键
     // ('router-daemon'，SOURCES)。这里统一映射，避免『键不匹配→ctlPorts[长键]=undefined→
@@ -328,7 +328,7 @@ class EventHub {
     const file = {
       guard: this.guardLogFile,
       router: (this.daemonLogs && this.daemonLogs.router) || null,
-      lobos: this.lobosLogFile,
+      dsh: this.dshLogFile,
       upgrade: this.upgradeLogFile,
     }[stream];
     return tailFile(file, n);

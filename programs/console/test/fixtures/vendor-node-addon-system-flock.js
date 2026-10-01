@@ -20,7 +20,7 @@ function loadBinding() {
         filename = join(report.header.glibcVersionRuntime ? 'glibc' : 'musl', filename);
     }
     const require = createRequire(import.meta.url);
-    const manifest = require.resolve(`@agent-ai/node-addon-system-${platform}-${arch}/package.json`);
+    const manifest = require.resolve(`@deepseek-ai/node-addon-system-${platform}-${arch}/package.json`);
     binding = require(join(dirname(manifest), 'bin', filename));
     return binding;
 }

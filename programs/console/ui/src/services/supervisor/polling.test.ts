@@ -26,7 +26,7 @@ function emptyResponse(body: object): Response {
 /** 心跳真实消费的端点（与 polling.ts syncAll 一致：status / router / providers / ports）
  *  ⚠ 已删除的端点（勿回潮）：/instances、/lan-access、/lan/frp —— 实例管理与远程控制域已整体移除。 */
 const baseEndpoints: Record<string, object> = {
-  "/status": { phase: "RUNNING", lobosPid: 1 },
+  "/status": { phase: "RUNNING", dshPid: 1 },
   "/router/status": { running: false, usage: {} },
   "/router/providers": { presets: [], providers: [], proxyApps: [] },
   "/ports": { records: [] },

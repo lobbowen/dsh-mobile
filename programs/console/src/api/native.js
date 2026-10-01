@@ -1,6 +1,6 @@
 'use strict';
 
-// 域：原生 LOBOS 生命周期 API（唯一通道）。
+// 域：原生 DSH 生命周期 API（唯一通道）。
 function owns(pathname) {
   return pathname.startsWith('/native/');
 }
@@ -8,7 +8,7 @@ function owns(pathname) {
 function handle(ctx) {
   const { sup, req, res, pathname, identity, send, collectBody, originAllowed, tokOf } = ctx;
 
-    // 原生 LOBOS 生命周期（唯一通道）：状态(含版本) / 检测更新 / 安装 / 升级 / 卸载
+    // 原生 DSH 生命周期（唯一通道）：状态(含版本) / 检测更新 / 安装 / 升级 / 卸载
     if (req.method === 'GET' && pathname === '/native/status') {
       return send(200, {
         ...(sup.nativeManager ? sup.nativeManager.status() : { installed: false }),
@@ -60,11 +60,11 @@ function handle(ctx) {
       collectBody(req, res, 4096, (body) => {
         try {
           const j = body ? JSON.parse(body) : {};
-          if (sup.patchLobosMain && typeof sup.patchLobosMain === 'function') {
-            const r = sup.patchLobosMain(j);
+          if (sup.patchDshMain && typeof sup.patchDshMain === 'function') {
+            const r = sup.patchDshMain(j);
             return send(r && r.ok === false ? 400 : 200, r);
           }
-          return send(500, { ok: false, error: '守卫未实现 patchLobosMain' });
+          return send(500, { ok: false, error: '守卫未实现 patchDshMain' });
         } catch (e) { return send(400, { ok: false, error: e.message }); }
       });
       return;

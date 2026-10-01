@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 'use strict';
 
-// NARB JS 垫片 + --expose-internals 注入回归（2026-09-22，真机 lobos 秒退 exit:1 零输出）：
-// lobos ≥0.1.5-rc.2 在 app-boot 硬 require node-addon-require-builtin（无 android-arm64
+// NARB JS 垫片 + --expose-internals 注入回归（2026-09-22，真机 dsh 秒退 exit:1 零输出）：
+// dsh ≥0.1.5-rc.2 在 app-boot 硬 require node-addon-require-builtin（无 android-arm64
 // 预编译件，安装走 --ignore-scripts 也不产本地件）→ boot 必死。守卫在 spawn 前幂等
-// 投放 JS 垫片并注入 --expose-internals；非零退出时收集 lobos startup-*.log 崩溃报告尾部。
+// 投放 JS 垫片并注入 --expose-internals；非零退出时收集 dsh startup-*.log 崩溃报告尾部。
 // 本测试同时验证：垫片投放/幂等/真实 node 子进程的 requireBuiltin 语义（含原生委派
 // 零损伤路径）、契约门控（PC 无契约行为逐字不变）、spawn 命令注入、startup 报告取证。
 
@@ -19,7 +19,7 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined ? '  ← ' + x : '')); };
 
 const shimMod = require(path.join(ROOT, 'src', 'assembler', 'require-builtin-shim'));
-const SHIM_MARKER = 'lobos-console-panel:narb-js-shim:v1';
+const SHIM_MARKER = 'dsh-android-kernel:narb-js-shim:v1';
 
 const THROWS = 'throw new Error("No usable native binding found (simulated)")';
 const NATIVE_OK = 'module.exports = { requireBuiltin: (id) => "NATIVE:" + id, isAllowedInternalId: () => true, getNativeBindingInfo: () => ({ abi: "node-v9" }) }';
@@ -48,11 +48,11 @@ function probeNative(entry) {
   // ── S1 ensureShim：定位（扁平 + @scope 嵌套）、投放、备份、幂等 ──
   const root1 = path.join(TMP, 'npmroot1');
   const flat = mkPkg(path.join(root1, 'node-addon-require-builtin'), 'lib/index.js', THROWS);
-  const nested = mkPkg(path.join(root1, '@agent-ai/lobos-app-boot/node_modules/node-addon-require-builtin'), 'index.js', THROWS);
+  const nested = mkPkg(path.join(root1, '@deepseek-ai/dsh-app-boot/node_modules/node-addon-require-builtin'), 'index.js', THROWS);
   let r = shimMod.ensureShim(root1);
   check('S1 两份副本（扁平+嵌套）都被投放', r.found === 2 && r.results.filter((x) => x.status === 'applied').length === 2, JSON.stringify(r.results));
   check('S1 垫片入口带版本戳', fs.readFileSync(flat, 'utf8').includes(SHIM_MARKER) && fs.readFileSync(nested, 'utf8').includes(SHIM_MARKER));
-  check('S1 原实现备份逐字保留', fs.readFileSync(path.join(path.dirname(flat), 'index.lobos-orig.js'), 'utf8') === THROWS);
+  check('S1 原实现备份逐字保留', fs.readFileSync(path.join(path.dirname(flat), 'index.dsh-orig.js'), 'utf8') === THROWS);
   const after = fs.readFileSync(flat, 'utf8');
   r = shimMod.ensureShim(root1);
   check('S1 二次调用幂等（already，不重复套娃）', r.results.every((x) => x.status === 'already') && fs.readFileSync(flat, 'utf8') === after);
@@ -70,7 +70,7 @@ function probeNative(entry) {
   const { NativeManager } = require(path.join(ROOT, 'src', 'assembler', 'manager.js'));
   const runtimeContract = require(path.join(ROOT, 'src', 'platform', 'runtime-contract'));
   const events3 = [];
-  const nmConfig = { command: ['node', 'lobos', 'web'], packageName: '@agent-ai/lobos', targetPort: 3080 };
+  const nmConfig = { command: ['node', 'dsh', 'web'], packageName: '@deepseek-ai/dsh', targetPort: 3080 };
   const nm = new NativeManager({ config: nmConfig, logger: { info() {}, warn() {}, error() {} }, events: { append: (n, d) => events3.push({ n, d }) }, stateDir: path.join(TMP, 'state3'), npmRoot: root1 });
   fs.rmSync(runtimeContract.file(), { force: true });
   check('S3 无契约（PC）→ skipped 且结局上表', (() => {
@@ -107,10 +107,10 @@ function probeNative(entry) {
   // 本根里没有 ⇒ skipped —— 两种「不投」的语义不许混（混了就分不清缺口与不支持）。
   check('S3 契约缺 prefix 格 → ripgrep blocked、node-pty skipped（无该依赖）',
     nm.nativeUnits.ripgrep.status === 'blocked' && nm.nativeUnits['node-pty'].status === 'skipped', JSON.stringify(nm.nativeUnits));
-  nmConfig.command = [process.execPath, flat, 'web', '--no-open'];  const inv = nm.lobosCliInvocation();
-  check('S3 lobosCliInvocation 代跑形态带 flag', !!inv && inv.args[0] === '--expose-internals' && inv.args[1] === flat, JSON.stringify(inv || null));
+  nmConfig.command = [process.execPath, flat, 'web', '--no-open'];  const inv = nm.dshCliInvocation();
+  check('S3 dshCliInvocation 代跑形态带 flag', !!inv && inv.args[0] === '--expose-internals' && inv.args[1] === flat, JSON.stringify(inv || null));
   fs.rmSync(contractFile, { force: true });
-  check('S3 无契约 → lobosCliInvocation 退回 null（PC 逐字不变）', nm.lobosCliInvocation() === null);
+  check('S3 无契约 → dshCliInvocation 退回 null（PC 逐字不变）', nm.dshCliInvocation() === null);
 
   // ── S3b 覆盖安装自愈（真机 2026-09-23：/data/app 随机段目录随重装消失，
   //    持久化 command[0] 变死路径 → ENOENT 60s 冷静期死循环）──
@@ -119,14 +119,14 @@ function probeNative(entry) {
   fs.mkdirSync(path.dirname(liveSo), { recursive: true }); fs.writeFileSync(liveSo, '#!/x');
   const persisted = [];
   const evb = [];
-  const mkb = (cmd) => new NativeManager({ config: { command: cmd, packageName: '@agent-ai/lobos', targetPort: 3080 }, logger: { info() {}, warn() {}, error() {} }, events: { append: (n, d) => evb.push({ n, d }) }, stateDir: path.join(TMP, 'state3b'), persistCommand: (p) => persisted.push(JSON.parse(JSON.stringify(p))) });
+  const mkb = (cmd) => new NativeManager({ config: { command: cmd, packageName: '@deepseek-ai/dsh', targetPort: 3080 }, logger: { info() {}, warn() {}, error() {} }, events: { append: (n, d) => evb.push({ n, d }) }, stateDir: path.join(TMP, 'state3b'), persistCommand: (p) => persisted.push(JSON.parse(JSON.stringify(p))) });
   const nmPc = mkb([staleSo, flat, 'web', '--no-open']);
   check('S3b 无契约（PC）→ 绝不改命令', nmPc.repairLaunchNodePath() === false && nmPc.config.command[0] === staleSo && persisted.length === 0);
   writeContract(); // nodePath = process.execPath（存在）
   const nm1 = mkb([staleSo, flat, 'web', '--no-open']);
   check('S3b 死绝对路径 + 契约 nodePath 在场 → 修复+回写+记事件', nm1.repairLaunchNodePath() === true && nm1.config.command[0] === process.execPath && persisted.length === 1 && JSON.stringify(persisted[0].command) === JSON.stringify([process.execPath, flat, 'web', '--no-open']) && evb.some((e) => e.n === 'native_launch_node_repaired' && e.d.from === staleSo && e.d.to === process.execPath), JSON.stringify(evb.map((e) => e.n)));
   check('S3b 二次调用幂等（路径已存活）', nm1.repairLaunchNodePath() === false && persisted.length === 1);
-  const nm2 = mkb(['node', 'lobos', 'web']);
+  const nm2 = mkb(['node', 'dsh', 'web']);
   check('S3b 裸名/相对命令（PC 模板）不动', nm2.repairLaunchNodePath() === false && nm2.config.command[0] === 'node');
   const nm3 = mkb([liveSo, flat, 'web', '--no-open']);
   check('S3b command[0] 仍存在 → 不动', nm3.repairLaunchNodePath() === false && nm3.config.command[0] === liveSo);
@@ -135,7 +135,7 @@ function probeNative(entry) {
   nm4.repairLaunchNodePath();
   check('S3b 契约 nodePath 也失效 → 回退 process.execPath（本进程镜像即容器实际解释器）', nm4.config.command[0] === process.execPath);
   writeContract();
-  check('S3b lobosCliInvocation 消费前同批自愈', (() => { const nm5 = mkb([staleSo, flat, 'web', '--no-open']); const i5 = nm5.lobosCliInvocation(); return i5 && i5.bin === process.execPath && nm5.config.command[0] === process.execPath; })());
+  check('S3b dshCliInvocation 消费前同批自愈', (() => { const nm5 = mkb([staleSo, flat, 'web', '--no-open']); const i5 = nm5.dshCliInvocation(); return i5 && i5.bin === process.execPath && nm5.config.command[0] === process.execPath; })());
   fs.rmSync(contractFile, { force: true });
 
   // ── S4 Supervisor._startProcess：spawn 前自愈 + flag 注入（makeFake 形态）──
@@ -144,20 +144,20 @@ function probeNative(entry) {
   const { Supervisor } = require(path.join(ROOT, 'src', 'supervisor'));
   check('_androidLaunchReady 已注入 Supervisor.prototype', typeof Supervisor.prototype._androidLaunchReady === 'function');
   check('_collectStartupReports 已注入 Supervisor.prototype', typeof Supervisor.prototype._collectStartupReports === 'function');
-  const makeFake = (lobosLogFile, shimCalls) => {
+  const makeFake = (dshLogFile, shimCalls) => {
     const events = [];
     const fake = Object.create(Supervisor.prototype);
-    fake.config = { lobosLogFile, startTimeoutMs: 5000, command: ['stub'] };
+    fake.config = { dshLogFile, startTimeoutMs: 5000, command: ['stub'] };
     fake.events = { append: (n, d) => events.push({ n, d }) };
     fake.log = events;
     fake.logger = { info() {}, warn() {}, error() {} };
     fake.nativeManager = { status: () => ({ installed: true, binPath: 'x' }), ensureNativeUnits: () => { shimCalls.n++; return {}; } };
     fake.tokenService = { feedLine: () => {} };
-    fake.lobosWriter = { write: () => {} };
+    fake.dshWriter = { write: () => {} };
     fake.notify = () => {};
     fake.writeState = () => {};
     fake._actNote = () => {};
-    fake._reapOrphanLobosLocks = () => [];
+    fake._reapOrphanDshLocks = () => [];
     fake._beginRestart = () => {};
     fake._stopping = false;
     let child = null; let phase = 'STOPPED';
@@ -169,23 +169,23 @@ function probeNative(entry) {
     fake._mMissingNotified = () => false; fake._mSetMissingNotified = () => {};
     return fake;
   };
-  const entryJs = path.join(TMP, 'fake-lobos-entry.js');
+  const entryJs = path.join(TMP, 'fake-dsh-entry.js');
   fs.writeFileSync(entryJs, 'process.stdout.write("BOOT-OK\\n"); process.exit(0)');
   const shimCalls = { n: 0 };
 
   // PC 形态（无契约）：命令逐字不变、不调用自愈
-  const f0 = makeFake(path.join(TMP, 'lobos0.log'), shimCalls);
+  const f0 = makeFake(path.join(TMP, 'dsh0.log'), shimCalls);
   f0.spawnCommand = () => [process.execPath, entryJs, 'web', '--no-open'];
   const same = f0._androidLaunchReady(f0.spawnCommand());
   check('S4 无契约 → 命令原样 + 不触自愈', same[1] === entryJs && shimCalls.n === 0, JSON.stringify(same));
 
   writeContract();
-  const f1 = makeFake(path.join(TMP, 'lobos1.log'), shimCalls);
+  const f1 = makeFake(path.join(TMP, 'dsh1.log'), shimCalls);
   f1.spawnCommand = () => [process.execPath, entryJs, 'web', '--no-open'];
   // ── S4b 本轮快照同步（真机 12:54 实证：自愈日志已打出新路径，同一轮 spawn 仍吃修复前快照）──
   {
-    const cfgB = { lobosLogFile: path.join(TMP, 'lobosB.log'), startTimeoutMs: 5000, command: [staleSo, entryJs, 'web', '--no-open'] };
-    const fb = makeFake(cfgB.lobosLogFile, { n: 0 });
+    const cfgB = { dshLogFile: path.join(TMP, 'dshB.log'), startTimeoutMs: 5000, command: [staleSo, entryJs, 'web', '--no-open'] };
+    const fb = makeFake(cfgB.dshLogFile, { n: 0 });
     fb.config = cfgB;
     fb.nativeManager = new NativeManager({ config: cfgB, logger: { info() {}, warn() {}, error() {} }, events: { append() {} }, stateDir: path.join(TMP, 'stateB') });
     const cb = fb._androidLaunchReady(fb.spawnCommand());
@@ -201,46 +201,46 @@ function probeNative(entry) {
     throw new Error('超时等待: ' + label);
   };
   await f1._startProcess();
-  await waitFor(() => f1.log.some((e) => e.n === 'lobos_exited'), 8000, 'lobos_exited(S4)');
+  await waitFor(() => f1.log.some((e) => e.n === 'dsh_exited'), 8000, 'dsh_exited(S4)');
   const spawnEv = f1.log.find((e) => e.n === 'spawn');
   check('S4 实际 spawn 命令带 flag', spawnEv.d.command[1] === '--expose-internals' && spawnEv.d.command[2] === entryJs, JSON.stringify(spawnEv.d.command));
-  check('S4 注入 flag 后子进程正常启动退出码 0', f1.log.find((e) => e.n === 'lobos_exited').d.code === 0);
+  check('S4 注入 flag 后子进程正常启动退出码 0', f1.log.find((e) => e.n === 'dsh_exited').d.code === 0);
 
   // ── S4c ENOENT 取证恒打**实际 execve 的那条命令**（真机 12:54：missing 日志读 config.command，
   //    与本轮真正尝试的路径不一致，把排查指向了错误路径）──
   {
     const dead = path.join(TMP, 'dead-dir', 'libnode.so');
     const warns = [];
-    const fc = makeFake(path.join(TMP, 'lobosC.log'), { n: 0 });
-    fc.config = { lobosLogFile: path.join(TMP, 'lobosC.log'), startTimeoutMs: 5000, command: [dead, entryJs, 'web'] };
+    const fc = makeFake(path.join(TMP, 'dshC.log'), { n: 0 });
+    fc.config = { dshLogFile: path.join(TMP, 'dshC.log'), startTimeoutMs: 5000, command: [dead, entryJs, 'web'] };
     fc.logger = { info() {}, warn: (m) => warns.push(String(m)), error() {} };
     fc.spawnCommand = () => fc.config.command.slice();
     await fc._startProcess();
-    await waitFor(() => fc.log.some((e) => e.n === 'lobos_command_missing'), 8000, 'lobos_command_missing(S4c)');
-    const ev = fc.log.find((e) => e.n === 'lobos_command_missing');
+    await waitFor(() => fc.log.some((e) => e.n === 'dsh_command_missing'), 8000, 'dsh_command_missing(S4c)');
+    const ev = fc.log.find((e) => e.n === 'dsh_command_missing');
     check('S4c missing 事件与告警都打实际尝试的命令', ev.d.command === dead && warns.some((w) => w.indexOf('command missing: ' + dead) === 0), JSON.stringify([ev.d, warns]));
   }
 
-  // ── S5 非零退出取证：本轮 startup-*.log 尾部进 lobos_exited，旧报告不顶缸 ──
-  const lobosHome = path.join(TMP, 'lobos-home');
-  fs.mkdirSync(path.join(lobosHome, 'logs'), { recursive: true });
-  const stale = path.join(lobosHome, 'logs', 'startup-stale.log');
+  // ── S5 非零退出取证：本轮 startup-*.log 尾部进 dsh_exited，旧报告不顶缸 ──
+  const dshHome = path.join(TMP, 'dsh-home');
+  fs.mkdirSync(path.join(dshHome, 'logs'), { recursive: true });
+  const stale = path.join(dshHome, 'logs', 'startup-stale.log');
   fs.writeFileSync(stale, 'STALE-REPORT-MUST-NOT-APPEAR');
   const back = new Date(Date.now() - 3600e3);
   fs.utimesSync(stale, back, back);
-  process.env.LOBOS_HOME = lobosHome;
-  const entryCrash = path.join(TMP, 'fake-lobos-crash.js');
+  process.env.DSH_HOME = dshHome;
+  const entryCrash = path.join(TMP, 'fake-dsh-crash.js');
   fs.writeFileSync(entryCrash, `const fs=require('node:fs'),p=require('node:path');
-fs.mkdirSync(p.join(${JSON.stringify(lobosHome)},'logs'),{recursive:true});
-fs.writeFileSync(p.join(${JSON.stringify(lobosHome)},'logs','startup-'+Date.now()+'-uuid.log'),'BOOT-STAGE: host preparation failed\\nDETAIL-MARKER-XYZ\\n');
+fs.mkdirSync(p.join(${JSON.stringify(dshHome)},'logs'),{recursive:true});
+fs.writeFileSync(p.join(${JSON.stringify(dshHome)},'logs','startup-'+Date.now()+'-uuid.log'),'BOOT-STAGE: host preparation failed\\nDETAIL-MARKER-XYZ\\n');
 process.exit(1);`);
-  const f2 = makeFake(path.join(TMP, 'lobos2.log'), shimCalls);
+  const f2 = makeFake(path.join(TMP, 'dsh2.log'), shimCalls);
   f2.spawnCommand = () => [process.execPath, entryCrash, 'web'];
   await f2._startProcess();
-  await waitFor(() => f2.log.some((e) => e.n === 'lobos_exited'), 8000, 'lobos_exited(S5)');
-  const ex5 = f2.log.find((e) => e.n === 'lobos_exited');
+  await waitFor(() => f2.log.some((e) => e.n === 'dsh_exited'), 8000, 'dsh_exited(S5)');
+  const ex5 = f2.log.find((e) => e.n === 'dsh_exited');
   const reports = ex5.d.startupReports || [];
-  check('S5 本轮崩溃报告尾部进 lobos_exited', reports.length === 1 && reports[0].tail.some((l) => l.includes('DETAIL-MARKER-XYZ')), JSON.stringify(reports.map((x) => x.file)));
+  check('S5 本轮崩溃报告尾部进 dsh_exited', reports.length === 1 && reports[0].tail.some((l) => l.includes('DETAIL-MARKER-XYZ')), JSON.stringify(reports.map((x) => x.file)));
   check('S5 旧报告（mtime 早于本轮）不顶缸', !JSON.stringify(reports).includes('STALE'));
   const ex5b = reports[0] && reports[0].tail.some((l) => l.includes('host preparation failed'));
   check('S5 报告内容完整可读（含 boot 阶段行）', !!ex5b);

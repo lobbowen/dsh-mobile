@@ -4,7 +4,7 @@
 // 收敛系统内全部「安装 / 升级 / 卸载 / 更新」操作到同一个任务模型：
 // - 统一状态机：pending → running → succeeded|failed|skipped|canceled
 // - 明确状态：任何时刻任务都有可观测状态 + step 级进度 + 有界日志
-// - 持久化历史：~/.lobos/supervisor/tasks.json，守卫重启后仍可查看
+// - 持久化历史：~/.dsh/supervisor/tasks.json，守卫重启后仍可查看
 // - 各业务模块（native/instance/plugin/router）只保留执行逻辑，
 // 任务生命周期统一交给本注册表。
 
@@ -23,7 +23,7 @@ function taskId() {
 class TaskRegistry {
   /**
    * @param {object} opts
-   * - stateDir: 状态目录（~/.lobos/supervisor），tasks.json 落于此
+   * - stateDir: 状态目录（~/.dsh/supervisor），tasks.json 落于此
    * - logger: 可选日志器
    * - events: 可选事件总线（append('task_created'|'task_state'|...)）
    */

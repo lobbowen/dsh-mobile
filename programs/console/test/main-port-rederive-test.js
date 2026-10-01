@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
-// 原生 LOBOS 端口运行时再推导回归（2026-09 修复）：mock LOBOS 以 --port N 运行（用户改端口），
-// 守卫配置端口无监听但进程在跑 -> _findManagedLobosPort 推真实端口 -> _applyMainPort 更正注册。
+// 原生 DSH 端口运行时再推导回归（2026-09 修复）：mock DSH 以 --port N 运行（用户改端口），
+// 守卫配置端口无监听但进程在跑 -> _findManagedDshPort 推真实端口 -> _applyMainPort 更正注册。
 
 const path = require('node:path');
 const os = require('node:os');
@@ -12,7 +12,7 @@ const { spawn } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'main-port-'));
-const MOCK = path.join(ROOT, 'test', 'fixtures', 'lobos-mock.js');
+const MOCK = path.join(ROOT, 'test', 'fixtures', 'dsh-mock.js');
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined ? '  ← ' + x : '')); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -32,7 +32,7 @@ const freePort = () => new Promise((res) => { const s = http.createServer(); s.o
     stateFile: path.join(TMP, 'state.json'),
     logFile: path.join(TMP, 'events.log'),
     supervisorLogFile: path.join(TMP, 'sup.log'),
-    lobosLogFile: path.join(TMP, 'lobos.log'),
+    dshLogFile: path.join(TMP, 'dsh.log'),
     upgradeLogFile: path.join(TMP, 'upg.log'),
     probeIntervalMs: 5000, probeTimeoutMs: 2000,
   };
@@ -41,13 +41,13 @@ const freePort = () => new Promise((res) => { const s = http.createServer(); s.o
   await new Promise((resolve) => { const t0 = Date.now(); const t = () => { http.get({ host: '127.0.0.1', port: realPort, path: '/', timeout: 500 }, (s) => { s.resume(); resolve(); }).on('error', () => { if (Date.now() - t0 > 5000) resolve(); else setTimeout(t, 150); }); }; t(); });
   const sup = new Supervisor(cfg, cfgPath);
   // 概念清分(2026-09-06)：main 是守卫核心服务，不再登记为沙箱实例；端口唯一事实源 = config.targetPort。
-  const found = sup._findManagedLobosPort();
+  const found = sup._findManagedDshPort();
   check('从进程推导出真实端口 ' + realPort, found && found.port === realPort, JSON.stringify(found));
   const applied = sup._applyMainPort(found.port, found.pid);
   check('应用真实端口成功', applied === true, String(applied));
   check('config.targetPort 已更正', sup.config.targetPort === realPort, String(sup.config.targetPort));
-  check('lobos-main 注册已更正', ports.get('lobos-main') === realPort, String(ports.get('lobos-main')));
-  const mainView = (sup.lobosMainView && typeof sup.lobosMainView === 'function') ? sup.lobosMainView() : null;
+  check('dsh-main 注册已更正', ports.get('dsh-main') === realPort, String(ports.get('dsh-main')));
+  const mainView = (sup.dshMainView && typeof sup.dshMainView === 'function') ? sup.dshMainView() : null;
   check('main(守卫核心视图)端口已跟随', !!mainView && mainView.port === realPort, JSON.stringify(mainView && mainView.port));
   check('healthUrl 已跟随', String(sup.config.healthUrl).indexOf(':' + realPort) >= 0, sup.config.healthUrl);
   try { child.kill('SIGKILL'); } catch {}

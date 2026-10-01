@@ -10,7 +10,7 @@
 // 必须写明「什么算通」，CI 能逐条看见，改判据要改表，改动即暴露。
 //
 // 探针跑在**被检的那份 node** 的子进程里，不在本进程 require：一个坏的原生绑定可能直接
-// abort 宿主（node 进程一倒，面板与取证一起没了，而那正是我们要观察的现场）。
+// abort 宿主（:node 一倒，面板与取证一起没了，而那正是我们要观察的现场）。
 //
 // 三态口径与设备自检/诊断一致（未知绝不算通过）：
 //   true  —— 子进程退 0 **且** stdout 带通过标记
@@ -23,7 +23,7 @@ const ex = require('../platform/exec');
 const AGENT = require('../platform/agent').load();
 
 /** 通过标记：判据脚本必须显式打出来。只退 0 不算通过 —— 脚本被改空、被截断都会退 0。 */
-const PASS = 'LOBOS_PROBE_PASS';
+const PASS = 'DSH_PROBE_PASS';
 
 /** 探针默认超时：设备 node 冷启动 + 一次 libvips wasm 初始化的量级，留足但不无限等。 */
 const PROBE_TIMEOUT_MS = 30000;

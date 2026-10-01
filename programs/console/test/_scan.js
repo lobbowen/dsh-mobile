@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-// program 测试的共享源码扫描工具（**唯一实现**，门禁法①/③）。
+// kernel 测试的共享源码扫描工具（**唯一实现**，门禁法①/③）。
 // 字符串感知的注释剥离 + 括号配对的调用提取，供扫描式门禁复用。
 // （历史：这两段曾内嵌在 exec-bounded-gate-test.js 里。）
 

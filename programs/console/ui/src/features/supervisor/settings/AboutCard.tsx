@@ -2,7 +2,7 @@
  * 设置 — 关于卡（产品信息，放设置页最底部）
  *
  * Android 内核的产品构成（2026-09 去耦）：
- *   · 内核（本仓 program/，运行于冻结 APK 容器 Node 运行时）
+ *   · 内核（本仓 kernel/，运行于冻结 APK 容器 Node 运行时）
  *   · 容器（APK：Node 运行时 + HostBridge + OTA，冻结不随内核升级）
  * 内核版本线独立呈现；**内核自身只提供版本读取**，安装/升级由容器 OTA 执行
  * （单写入者契约：/self-update/apply|restart-guard 已下架 = 410）。
@@ -13,7 +13,7 @@ import { RefreshCw } from "lucide-react";
 import { Button } from "../../../framework/ui";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../../../framework/ui/dialog";
 import { supervisorApi } from "../../../services/supervisor";
-import { hasHostBridge, requestPanelUpdate } from "../../../services/supervisor/panelUpdateBridge";
+import { hasHostBridge, requestKernelUpdate } from "../../../services/supervisor/panelUpdateBridge";
 import { useSupervisorAction } from "../useSupervisorAction";
 import { Card, CardTitle, Pill } from "../widgets";
 import { cn } from "../../../framework/utils";
@@ -30,7 +30,7 @@ type VerInfo = {
   commit?: string;
 };
 
-const PRODUCT_NAME = "the Agent 内核";
+const PRODUCT_NAME = "DeepSeek Harness 内核";
 const PRODUCT_DESC =
   "运行于安卓容器内的系统级内核：负责启动、存活监测与故障自动重启被监管目标，" +
   "提供生命周期管理、智能路由与插件/分发运维面板。内核由容器 OTA 升级，自身不写自身。";
@@ -41,17 +41,17 @@ const fmt = (s?: string | null) => (s ? String(s).replace(/^v/i, "") : "—");
 export function AboutCard() {
   const [ver, setVer] = useState<VerInfo | null>(null);          // 内核
   const [logOpen, setLogOpen] = useState(false);
-  const [logKind, setLogKind] = useState<"lobos" | "guard">("lobos");
+  const [logKind, setLogKind] = useState<"dsh" | "guard">("dsh");
   const [logText, setLogText] = useState("");
   const { busy, run } = useSupervisorAction();
 
   // 更新日志：按需拉取文本，失败给出明确提示而非静默。
-  const openLog = useCallback(async (kind: "lobos" | "guard") => {
+  const openLog = useCallback(async (kind: "dsh" | "guard") => {
     setLogKind(kind);
     setLogText("");
     setLogOpen(true);
     try {
-      const text = kind === "lobos" ? await supervisorApi.lobosChangelog() : await supervisorApi.guardChangelog();
+      const text = kind === "dsh" ? await supervisorApi.dshChangelog() : await supervisorApi.guardChangelog();
       setLogText(text || "（无内容）");
     } catch (e) {
       setLogText("加载失败：" + String(e));
@@ -90,7 +90,7 @@ export function AboutCard() {
     if (!hasHostBridge()) { toast.error("内核更新由安卓容器执行：请在容器面板中操作。"); return; }
     if (!window.confirm("发现内核新版本 " + fmt(ver?.latest) + "，是否立即更新？\n\n内核将由安卓容器安装，并自动重启内核进程。")) return;
     await run("upd", async () => {
-      const r = await requestPanelUpdate();
+      const r = await requestKernelUpdate();
       if (!r.ok) { toast.error(r.error || "更新失败"); return; }
       const v = fmt(r.version || ver?.latest);
       if (r.restartUncertain) toast.warning("内核已更新至 " + v + "，但内核进程可能未自动重启，请手动确认。");
@@ -137,8 +137,8 @@ export function AboutCard() {
         </p>
         {/* 更新日志入口（后端 /changelog 与 /guard/changelog） */}
         <div className="flex items-center gap-2 border-t border-border/60 pt-3">
-          <Button size="chip" variant="outline" onClick={() => void openLog("lobos")}>
-            LOBOS 更新日志
+          <Button size="chip" variant="outline" onClick={() => void openLog("dsh")}>
+            DSH 更新日志
           </Button>
           <Button size="chip" variant="outline" onClick={() => void openLog("guard")}>
             内核更新日志
@@ -148,7 +148,7 @@ export function AboutCard() {
       <Dialog open={logOpen} onOpenChange={setLogOpen}>
         <DialogContent className="max-w-[560px]">
           <DialogHeader>
-            <DialogTitle>{logKind === "lobos" ? "the Agent 更新日志" : "内核更新日志"}</DialogTitle>
+            <DialogTitle>{logKind === "dsh" ? "DeepSeek Harness 更新日志" : "内核更新日志"}</DialogTitle>
           </DialogHeader>
           <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/60 bg-muted/30 p-3 text-xs leading-relaxed text-foreground">
             {logText || "加载中…"}

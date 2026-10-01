@@ -4,7 +4,7 @@
 // LogCore —— 每进程唯一日志/事件核心（历史设计文档）。
 //
 // 定位：platform 层一等原语。每进程（守卫 / router-daemon）进程入口调用一次
-// LogCore.init(...)，此后统一经 LogCore.get() 消费 logger/events/lobosWriter/hub。
+// LogCore.init(...)，此后统一经 LogCore.get() 消费 logger/events/dshWriter/hub。
 // 消灭散落 new Events/createLogger/Rotator/LineBuffer（守卫侧另有 EventHub 汇聚）。
 //
 // 单例语义：Node 模块缓存天然按「进程」——同一进程内 require 得到同一实例；
@@ -28,7 +28,7 @@ class LogCore {
    *  - eventFile: 本进程事件文件
    *  - stateDir / aggBase: EventHub 聚合流目录与唯一基名（守卫侧）
    *  - logLevel / logMaxBytes / eventsMaxBytes: 保留/大小
-   *  - lobosLogFile / upgradeLogFile: 守卫侧被管目标/升级输出（仅守卫）
+   *  - dshLogFile / upgradeLogFile: 守卫侧被管目标/升级输出（仅守卫）
    *  - ctlPorts / daemonLogs: 守卫侧 daemon ctl 拉尾与日志路径（供 /logs/tail）
    */
   constructor(opts) {
@@ -41,7 +41,7 @@ class LogCore {
       process: this.process,
     });
     this.events = new Events(o.eventFile, o.eventsMaxBytes, { process: this.process });
-    this.lobosWriter = o.lobosLogFile ? new Rotator(o.lobosLogFile, o.logMaxBytes) : null;
+    this.dshWriter = o.dshLogFile ? new Rotator(o.dshLogFile, o.logMaxBytes) : null;
     // 守卫侧 EventHub 汇聚（guard 事件 push 零延迟 + daemon ctl 拉尾）；非守卫进程 hub=null。
     if (o.enableHub === true && o.stateDir) {
       try {
@@ -57,7 +57,7 @@ class LogCore {
           aggBase: o.aggBase || 'state',
           guardEvents: this.events,
           guardLogFile: o.logFile,
-          lobosLogFile: o.lobosLogFile,
+          dshLogFile: o.dshLogFile,
           upgradeLogFile: o.upgradeLogFile,
           daemonLogs: o.daemonLogs || {},
           ctlPorts: o.ctlPorts || {},

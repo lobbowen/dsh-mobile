@@ -5,7 +5,7 @@
 // 因此把守卫放这里 = 连"直接调用单个测试文件"也被拦住。
 // 守卫的唯一实现住 scripts/require-ci.js（require 即触发，非 CI 环境 exit 86）。
 // 不在本文件重写第二份 —— 同一判据只许一处实现（门禁法①）。
-require('../../../scripts/require-ci.js');
+require('../../scripts/require-ci.js');
 
 // 测试隔离预载（跨平台，不依赖 shell 的 export/set 语法）。
 //   为每个测试进程注入独立的产品状态根：LOBOS_SUPERVISOR_HOME=<temp>。
@@ -16,5 +16,5 @@ const os = require('node:os');
 const path = require('node:path');
 
 if (!process.env.LOBOS_SUPERVISOR_HOME || !String(process.env.LOBOS_SUPERVISOR_HOME).trim()) {
-  process.env.LOBOS_SUPERVISOR_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'lobos-test-'));
+  process.env.LOBOS_SUPERVISOR_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-test-'));
 }

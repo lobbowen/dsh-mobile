@@ -18,7 +18,7 @@ const os = require('node:os');
 const fs = require('node:fs');
 
 const HOME = os.homedir();
-const CONFIG_PATH = process.env.LOBOS_SUPERVISOR_CONFIG || path.join(require('../../platform/state-root').supervisorDir(), 'config.json');
+const CONFIG_PATH = process.env.DSH_SUPERVISOR_CONFIG || path.join(require('../../platform/state-root').supervisorDir(), 'config.json');
 
 function loadConfig() {
   const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));

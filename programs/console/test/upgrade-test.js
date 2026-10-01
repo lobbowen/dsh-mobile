@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// 升级模块离线测试：mock registry + fake installer，不碰真实 npm 与真实 LOBOS。
+// 升级模块离线测试：mock registry + fake installer，不碰真实 npm 与真实 DSH。
 // 覆盖：版本检查 / 一键升级全链路（安装→计划内重启→健康验证）/ 已是最新跳过 / 安装失败报错。
 
 const fs = require('node:fs');
@@ -12,10 +12,10 @@ const { spawn } = require('node:child_process');
 // 端口手工分配在安全段（避开 OS ephemeral 与生产池）；跨文件不撞号靠人工规划，T1 兜底。
 
 const ROOT = path.join(__dirname, '..');
-const CLI = path.join(ROOT, require(path.join(ROOT, 'manifest.json')).entry);
+const CLI = path.join(ROOT, 'bin', 'panel');
 const MOCK = path.join(__dirname, 'mock-target.js');
 const FAKE = path.join(__dirname, 'fake-npm.js');
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'lobos-upg-test-'));
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-upg-test-'));
 
 let passed = 0;
 let failed = 0;
@@ -105,7 +105,7 @@ async function waitUpgrade(port, pred, timeoutMs = 28221) {
 
 function makePkgJson(version) {
   const p = path.join(TMP, `pkg-${Math.random().toString(36).slice(2)}.json`);
-  fs.writeFileSync(p, JSON.stringify({ name: '@agent-ai/lobos', version }, null, 2));
+  fs.writeFileSync(p, JSON.stringify({ name: '@deepseek-ai/dsh', version }, null, 2));
   return p;
 }
 
@@ -128,9 +128,9 @@ function makeConfig(apiPort, targetPort, regPort, pkgJson, overrides = {}) {
     stateFile: path.join(TMP, `state-${apiPort}.json`),
     logFile: path.join(TMP, `events-${apiPort}.log`),
     supervisorLogFile: path.join(TMP, `supervisor-${apiPort}.log`),
-    lobosLogFile: path.join(TMP, `lobos-${apiPort}.log`),
+    dshLogFile: path.join(TMP, `dsh-${apiPort}.log`),
     upgradeLogFile: path.join(TMP, `upgrade-${apiPort}.log`),
-    packageName: '@agent-ai/lobos',
+    packageName: '@deepseek-ai/dsh',
     registries: [`http://127.0.0.1:${regPort}`],
     updateCheckIntervalMs: 3600000,
     initialCheckDelayMs: 20000,
@@ -152,12 +152,12 @@ process.on('exit', () => {
   } catch {}
 });
 
-  // 场景前提：守护开（升级时 LOBOS 在运行，面板给升级用户的默认形态）。
-  // lobos-main.json 与 stateFile 同目录；RC2 后升级恢复还叠加 upgrade-resume 意图。
-  try { fs.writeFileSync(path.join(path.dirname(cfg.stateFile), 'lobos-main.json'), JSON.stringify({ guardian: true })); } catch {}
+  // 场景前提：守护开（升级时 DSH 在运行，面板给升级用户的默认形态）。
+  // dsh-main.json 与 stateFile 同目录；RC2 后升级恢复还叠加 upgrade-resume 意图。
+  try { fs.writeFileSync(path.join(path.dirname(cfg.stateFile), 'dsh-main.json'), JSON.stringify({ guardian: true })); } catch {}
 
   const child = spawn('node', [CLI, 'daemon', '-c', cfgPath], {
-    env: { ...process.env, LOBOS_SUPERVISOR_CONFIG: cfgPath, LOBOS_SUPERVISOR_LOCK_FILE: path.join(TMP, 'guard-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.lock'), ...env },
+    env: { ...process.env, DSH_SUPERVISOR_CONFIG: cfgPath, DSH_SUPERVISOR_LOCK_FILE: path.join(TMP, 'guard-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.lock'), ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let out = '';
@@ -195,20 +195,20 @@ async function main() {
   check('updateAvailable=true', !!(v && v.updateAvailable));
 
   console.log('== U2: 一键升级全链路 ==');
-  // 前提：升级前 LOBOS 已 RUNNING（"进程已替换"断言需要 before pid；也消除首拍竞态）
-  await waitStatus(3940, (x) => x.phase === 'RUNNING' && x.lobosPid, 15000);
+  // 前提：升级前 DSH 已 RUNNING（"进程已替换"断言需要 before pid；也消除首拍竞态）
+  await waitStatus(3940, (x) => x.phase === 'RUNNING' && x.dshPid, 15000);
   const before = await api(3940, 'GET', '/status');
   await api(3940, 'POST', '/native/upgrade');
   const st = await waitUpgrade(3940, (x) => x.state === 'done' || x.state === 'failed');
   check('升级终态=done', st && st.state === 'done', JSON.stringify(st && st.state));
   const pkgAfter = JSON.parse(fs.readFileSync(pkgA, 'utf8'));
   check('package.json 版本已切换到 2.0.0', pkgAfter.version === '2.0.0', pkgAfter.version);
-  const after = await waitStatus(3940, (x) => x.phase === 'RUNNING' && x.lobosPid);
-  check('升级后 LOBOS 恢复 RUNNING', !!after);
+  const after = await waitStatus(3940, (x) => x.phase === 'RUNNING' && x.dshPid);
+  check('升级后 DSH 恢复 RUNNING', !!after);
   check(
-    'LOBOS 进程已被替换（新版本生效）',
-    after && before.lobosPid !== null && after.lobosPid !== before.lobosPid,
-    `${before.lobosPid} -> ${after && after.lobosPid}`
+    'DSH 进程已被替换（新版本生效）',
+    after && before.dshPid !== null && after.dshPid !== before.dshPid,
+    `${before.dshPid} -> ${after && after.dshPid}`
   );
   check('计划内重启不计入崩溃窗口', after && after.restartCount === (before.restartCount || 0), `restartCount=${after && after.restartCount}`);
 
@@ -219,20 +219,20 @@ async function main() {
   const pkg3 = JSON.parse(fs.readFileSync(pkgA, 'utf8'));
   check('版本保持 2.0.0', pkg3.version === '2.0.0', pkg3.version);
 
-  console.log('== U4: 安装失败 → 报错且不影响运行中的 LOBOS ==');
+  console.log('== U4: 安装失败 → 报错且不影响运行中的 DSH ==');
   await startRegistry(3951, '3.0.0');
   const pkgB = makePkgJson('1.0.0');
   const cfgB = makeConfig(3942, 3943, 3951, pkgB);
   const dB = startDaemon(cfgB, { FAKE_MODE: 'fail', FAKE_PKG_JSON: pkgB });
-  await waitStatus(3942, (x) => x.phase === 'RUNNING' && x.lobosPid);
-  const pidBefore = (await api(3942, 'GET', '/status')).lobosPid;
+  await waitStatus(3942, (x) => x.phase === 'RUNNING' && x.dshPid);
+  const pidBefore = (await api(3942, 'GET', '/status')).dshPid;
   await api(3942, 'POST', '/native/upgrade');
   const st4 = await waitUpgrade(3942, (x) => x.state === 'failed' || x.state === 'done', 30000);
   check('失败终态=failed', st4 && st4.state === 'failed', JSON.stringify(st4 && st4.state));
   const pkgBAfter = JSON.parse(fs.readFileSync(pkgB, 'utf8'));
   check('失败后 package.json 未被破坏', pkgBAfter.version === '1.0.0', pkgBAfter.version);
-  const s4 = await waitStatus(3942, (x) => x.phase === 'RUNNING' && x.lobosPid && x.lobosPid !== pidBefore, 20000);
-  check('失败后 LOBOS 以旧版本恢复运行（新进程）', !!s4, pidBefore + ' -> ' + (s4 && s4.lobosPid));
+  const s4 = await waitStatus(3942, (x) => x.phase === 'RUNNING' && x.dshPid && x.dshPid !== pidBefore, 20000);
+  check('失败后 DSH 以旧版本恢复运行（新进程）', !!s4, pidBefore + ' -> ' + (s4 && s4.dshPid));
   await killDaemon(dB);
 
   await killDaemon(dA);

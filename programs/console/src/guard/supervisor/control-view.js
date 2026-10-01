@@ -192,7 +192,7 @@ class ControlView {
       ctlPort: this._routerCtlPort(),
       cmdMark: 'router-daemon',
       identityFile: path.join(dir, 'router-daemon.identity.json'),
-      spawnEnv: () => ({ LOBOS_SUPERVISOR_CONFIG: cfgPath }),
+      spawnEnv: () => ({ DSH_SUPERVISOR_CONFIG: cfgPath }),
       logger: this.logger,
       events: this.events,
     });

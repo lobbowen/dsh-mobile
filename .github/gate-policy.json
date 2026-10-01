@@ -318,6 +318,12 @@
       "A-grant-claim-do"
     ]
   },
+  "guestSurface": {
+    "note": "品牌门禁**不管** programs/ 这棵树（2026-10-01 用户裁定）。这里是第三方 Program 应用（console / dsh / pi）自己的外部坐标：包名、命令名、数据目录、User-Agent 由被管控载荷写死，不是我们的品牌残留。逐字还原 .47 之后，dsh / deepseek / DSH_ / kernel 等词在面板树内是它的**真契约**——把它们当成违例去改，等于让面板去装一个不存在的包、找一个不存在的目录（实证：.49 把命令名 lobos 当 PATH 名用，binPath/executable 恒假，装机成功却报 uninstalled）。作用域按**仓根锚定**，不做同名目录段匹配：主干里若长出叫 programs 的目录仍照常扫（gate-scan.js 对 dist 的同一教训——按目录名一律放行等于开一扇不进门禁的门）。",
+    "paths": [
+      "programs/"
+    ]
+  },
   "delivery": {
     "note": "交付面门禁（scripts/delivery-gate.js）的废止身份词表 —— 按 id 引用上面同一份 terms，不在脚本里另写一份。判据：这些词出现在**线上已发布**的清单/资产内容里即红。",
     "terms": [

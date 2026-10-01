@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // 内核更新单写入者门禁（Android 版）—— 单写入者 = 安卓容器 OTA，内核「零自更新面」。
 //
-// ## 契约（见 docs/components/program-android-plan.md）
+// ## 契约（见 docs/components/kernel-android-plan.md）
 // 内核（本仓产物）由**安卓容器 OTA** 安装/升级/重启，是内核代码的**唯一写入者**。
 // 内核自身不分发、不安装、不重启自己；因此它既没有自更新写端点，也没有自更新只读端点
 // （没有"自己的新版本"可查 —— 版本号由容器 OTA 侧持有）。
@@ -43,8 +43,7 @@ const guard = read('src/api/guard.js');
 const surface = read('src/api/surface.js');
 const settings = read('src/guard/supervisor/settings-view.js');
 const sup = codeOnly(read('src/supervisor.js'));
-// 入口按 Program 描述符取，不写死文件名：壳拉起的那份就是 manifest.json 的 entry。
-const cli = read(require(path.join(ROOT, 'manifest.json')).entry);
+const cli = read('bin/panel');
 const about = read('ui/src/features/supervisor/settings/AboutCard.tsx');
 const client = read('ui/src/services/supervisor/client.ts');
 const bridge = read('ui/src/services/supervisor/panelUpdateBridge.ts');
@@ -78,7 +77,7 @@ check('KU-5 CLI 不请求 /self-update/*', !/self-update\//.test(cli), 'ok');
 // ── KU-6：面板请容器 OTA 执行（而非调内核写端点）──
 check('KU-6 桥协议版本 = 1', /BRIDGE_PROTOCOL_VERSION = 1/.test(bridge), 'ok');
 check('KU-6 请求类型为 lobos:panel-update-request', /lobos:panel-update-request/.test(bridge), 'ok');
-check('KU-6 AboutCard 用 requestPanelUpdate', /requestPanelUpdate/.test(about), 'ok');
+check('KU-6 AboutCard 用 requestKernelUpdate', /requestKernelUpdate/.test(about), 'ok');
 check('KU-6 AboutCard 无内核自更新调用', !/selfUpdateApply|selfUpdateRestart|selfUpdateStatus/.test(about), 'ok');
 check('KU-6 client 无自更新方法', !/selfUpdateApply|selfUpdateRestart|selfUpdateStatus/.test(client), 'ok');
 

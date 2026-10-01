@@ -94,13 +94,13 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 /** 按 models.dev 单价估算一次调用的费用（$）。
  * entry = { model, promptTokens, completionTokens, pricing? }；pricing 为转发时快照的 officialPricing/全局索引。
  * 单价缺失（未同步/未知模型）→ 0（不虚报费用）。
- * 模型名归一化：反代/直连可能带供应商前缀（agent/agent-v4-flash）→ 去前缀查索引。 */
+ * 模型名归一化：反代/直连可能带供应商前缀（deepseek/deepseek-v4-flash）→ 去前缀查索引。 */
 function estimateCost(entry) {
   const pricing = entry && entry.pricing;
   if (!pricing || typeof pricing !== 'object') return 0;
   let pr = pricing[entry.model];
   if (!pr || typeof pr !== 'object') {
-    // 尝试去前缀（agent/agent-v4-flash → agent-v4-flash）
+    // 尝试去前缀（deepseek/deepseek-v4-flash → deepseek-v4-flash）
     const slash = String(entry.model || '').indexOf('/');
     const bare = slash > 0 ? String(entry.model).slice(slash + 1) : null;
     if (bare) pr = pricing[bare];
@@ -167,8 +167,8 @@ const forwardMethods = {
     let model = 'unknown', streamRequested = false, bodyJson = null;
     try { bodyJson = JSON.parse(body.toString('utf8')); } catch {}
     if (bodyJson) { if (typeof bodyJson.model === 'string') model = bodyJson.model; if (bodyJson.stream === true) streamRequested = true; }
-    // 诊断（2026-09 LOBOS 0.1.2 截断排查）：请求摘要——记录调用方特征（UA/认证头形态，不记敏感值）
-    // 与模型/流模式，供对照「LOBOS 更新前后请求差异」；level=debug 避免刷屏（按需可提 info）
+    // 诊断（2026-09 DSH 0.1.2 截断排查）：请求摘要——记录调用方特征（UA/认证头形态，不记敏感值）
+    // 与模型/流模式，供对照「DSH 更新前后请求差异」；level=debug 避免刷屏（按需可提 info）
     try {
       if (this.logger && this.logger.debug) {
         const ua = String(req.headers['user-agent'] || '').slice(0, 80);
@@ -324,7 +324,7 @@ const forwardMethods = {
       if (completed) return;
       completed = true;
       decInflight();
-      // 诊断（2026-09 会话中断排查）：流式请求上游正常 end 但流尾缺 [DONE]（LOBOS 报
+      // 诊断（2026-09 会话中断排查）：流式请求上游正常 end 但流尾缺 [DONE]（DSH 报
       // "Upstream stream ended before terminal chunk"）→ 记录流尾供定位（Command 截断 vs 转发丢失）
       if (meta.streamRequested) {
         try {
@@ -381,7 +381,7 @@ const forwardMethods = {
       if (ur.readableEnded) return; // 上游已正常结束（finishOK 已触发或即将触发）
       completed = true;
       decInflight();
-      // 诊断（2026-09 会话中断排查）：记录客户端(LOBOS)主动断开——此前完全静默，无法区分中断源
+      // 诊断（2026-09 会话中断排查）：记录客户端(DSH)主动断开——此前完全静默，无法区分中断源
       if (this.logger && this.logger.warn) this.logger.warn('[stream] CLIENT-ABORT key=' + maskKey(acc.key) + ' bytesSent=' + bytes + ' upstreamReadableEnded=' + !!ur.readableEnded + ' content=' + JSON.stringify((tailText || '').slice(0, 400)));
       destroyUpstream();
     });
