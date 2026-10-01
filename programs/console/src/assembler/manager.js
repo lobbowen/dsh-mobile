@@ -522,7 +522,7 @@ class NativeManager {
   }
 
   /** 安卓容器自愈：给安装树里的 @deepseek-ai/node-addon-system 投放 flock 垫片
-   * （真 flock(2) 走 APK jniLibs 的 libdshflock.so，根因见 flock-shim.js 头注释）。
+   * （真 flock(2) 走 APK jniLibs 的 liblobosflock.so，根因见 flock-shim.js 头注释）。
    * 前置 = _unitContext（容器契约形态）**且** 容器递来了 LOBOS_FLOCK_NATIVE。
    * 契约在场却没这个键只可能是容器漏装配（内核模式的 env 由 GuestAdapter 单点给出）
    * ⇒ 记 blocked 并报警，树不动。幂等；抛错只改结局。 */

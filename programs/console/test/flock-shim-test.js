@@ -4,7 +4,7 @@
 // flock 原生垫片回归（2026-09-23，真机「发消息 → 本轮运行失败 flock is not supported
 // on android-arm64」）：dsh 会话持久化硬依赖 @deepseek-ai/node-addon-system/flock 的
 // tryLockExclusive（真 flock(2) 排他锁），上游无 android-arm64 预编译件。修复=CI NDK
-// 现编 libdshflock.so 进 jniLibs + 容器递 LOBOS_FLOCK_NATIVE + 守卫幂等投放垫片。
+// 现编 liblobosflock.so 进 jniLibs + 容器递 LOBOS_FLOCK_NATIVE + 守卫幂等投放垫片。
 // 本测试验证：投放/备份/幂等/定位（扁平+嵌套）、真实 node 子进程的 ESM 垫片语义
 // （errno→错误面逐字一致、原生不可用时逐字委派原始实现）、manager 双重门控
 // （契约 × LOBOS_FLOCK_NATIVE）、spawn 前自愈接线。安全门禁 A：只经 env/文件注入，

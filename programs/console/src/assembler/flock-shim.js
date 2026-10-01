@@ -10,7 +10,7 @@
 // 发消息即「本轮运行失败 flock is not supported on android-arm64」。
 //
 // 解法（与 require-builtin-shim 同一模式）：fast-apk CI 用 NDK 把 vendor 自带的
-// src/flock.c（BSD-3，见 docs/components/native.md）编成 libdshflock.so 放进
+// src/flock.c（BSD-3，见 docs/components/native.md）编成 liblobosflock.so 放进
 // jniLibs → 容器经 LOBOS_FLOCK_NATIVE 环境变量把 nativeLibraryDir 路径递给守卫 →
 // 守卫在安装前/spawn 前幂等把安装树里的 lib/flock.js 替换为 JS 垫片：
 // LOBOS_FLOCK_NATIVE 可 dlopen 时走真 flock(2)（错误面与 vendor 逐字一致），
@@ -27,7 +27,7 @@ const TARGET_REL = path.join('lib', 'flock.js');
 function shimSource() {
   return `/* ${SHIM_MARKER} —— 守卫投放；勿手改（重装 dsh 后会被重新覆盖）。
    vendor 原始 flock.js 备份于同目录 ${ORIG_BASENAME}：
-   LOBOS_FLOCK_NATIVE（APK jniLibs 里 NDK 现编的 libdshflock.so）可加载时走真
+   LOBOS_FLOCK_NATIVE（APK jniLibs 里 NDK 现编的 liblobosflock.so）可加载时走真
    flock(2)，否则动态 import 原始实现逐字委派 —— 原生支持的平台语义不变。 */
 import { createRequire } from 'node:module';
 import { getSystemErrorName } from 'node:util';

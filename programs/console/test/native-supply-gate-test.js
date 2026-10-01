@@ -158,7 +158,7 @@ if (table) {
   // 被禁的判据形状：以「文件/目录在场」作结论。注意这是**判据层**的禁令，
   // 投放实现里 existsSync 是正当的幂等检查 —— 所以扫的是 verify.node，不是 impl。
   const FILE_SHAPED = /existsSync|statSync|readFileSync|readdirSync|realpathSync|lstatSync/;
-  const MARKER = /DSH_PROBE_PASS/;
+  const MARKER = /LOBOS_PROBE_PASS/;
   let executableCriteria = 0;
   for (const u of units) {
     const v = u.verify;
@@ -176,14 +176,14 @@ if (table) {
       check('判据须写明什么算通: ' + u.id, typeof v.criterion === 'string' && v.criterion.length >= 15);
       // 判据不得由「文件在不在」得出 —— 那正是被证伪的那种绿。对照组先行：
       // 正则若连明显的 existsSync 写法都匹配不上，这条规则就是永不红的死规则。
-      check('对照组：文件在场判据能命中被禁写法', FILE_SHAPED.test("if (fs.existsSync(target)) process.stdout.write('DSH_PROBE_PASS')"), 'hit');
+      check('对照组：文件在场判据能命中被禁写法', FILE_SHAPED.test("if (fs.existsSync(target)) process.stdout.write('LOBOS_PROBE_PASS')"), 'hit');
       const shaped = FILE_SHAPED.exec(v.node);
       check('判据不以文件在场作结论: ' + u.id, !shaped, shaped ? '命中 ' + shaped[0] : '');
       // 空转判据：脚本从不失败（没有 throw / exit(1) 通路）就恒打标记，等于没装锁。
       check('判据有失败出口: ' + u.id, /throw|process\.exit/.test(v.node),
         '没有 throw 也没有非零退出 = 任何状态都算通过');
       check('判据打通过标记: ' + u.id, MARKER.test(v.node));
-      const markerCount = (v.node.match(/DSH_PROBE_PASS/g) || []).length;
+      const markerCount = (v.node.match(/LOBOS_PROBE_PASS/g) || []).length;
       check('通过标记只出现一次（多处=有一条路径不打标记也算过）: ' + u.id, markerCount === 1, markerCount + ' 处');
       // 判据是数据，CI 从不执行它（它跑在设备上），于是连解析都没人做过：一个括号写错的格子
       // 到设备上只会读成 false/null，把「判据自己坏了」误报成「能力坏了」。
@@ -216,14 +216,14 @@ if (table) {
   for (const f of fs.readdirSync(NATIVE_DIR)) {
     if (!/\.(js|json)$/.test(f)) continue;
     const src = fs.readFileSync(path.join(NATIVE_DIR, f), 'utf8');
-    const hits = (src.match(/DSH_PROBE_PASS/g) || []).length;
+    const hits = (src.match(/LOBOS_PROBE_PASS/g) || []).length;
     const allowed = markerOwners.includes(f);
     if (allowed) continue;
     check('通过标记不在归属文件之外复写: ' + f, hits === 0, hits + ' 处');
   }
   for (const f of markerOwners) {
     check('标记归属文件确实在打标（零命中=判据接线被拆）: ' + f,
-      fs.readFileSync(path.join(NATIVE_DIR, f), 'utf8').includes('DSH_PROBE_PASS'));
+      fs.readFileSync(path.join(NATIVE_DIR, f), 'utf8').includes('LOBOS_PROBE_PASS'));
   }
   // 接线自证：manager 必须把核验结论作为**第二个**出口摊开（status + 清单），
   // 而不是只存在内存里等人发现。缺任一处 = 结论又在人脑里。
@@ -400,13 +400,18 @@ check('被检平台安装计划可得', !!host.names, host.err || '');
 if (ref.names && host.names && table) {
   check('参照计划规模合理（探针没解析出空集合）', ref.names.size > 100 && host.names.size > 100,
     ref.names.size + ' vs ' + host.names.size);
-  // 对照：一个已知按平台分发的包必须在参照侧出现、在被检侧消失、并被换成被检侧变体。
-  // 对照组要双向 —— 只查「少了」不查「多了」，npm 若整体罢工也照样绿。
+  // 对照：一个已知按平台分发的包，必须在参照侧带变体出现、在被检侧那个变体消失，
+  // 同时它的父包仍在被检计划里 —— 后一条堵的是「被检计划被裁空」：npm 整体罢工或被检
+  // 平台解析失败时，两侧都只剩公共包，差集会伪装成「无缺口」而全绿。
+  // 「多了」那一侧（被检独有项）今天不钉包名：0.2.0-rc.2 闭包实测被检独有项为 0——
+  // 闭包里没有任何包发 android-arm64 变体，钉一个不存在的名字等于让门禁对空气作证。
+  // 那一侧由下面两条现场判据承担：独有项未登记⇒红、登记了但现场已无⇒红（koffi 今天就红过一次）。
   const ctl = table.probeControl || {};
-  check('表带探针对照（缺则无法自证）', !!ctl.referencePackage && !!ctl.hostPackage, JSON.stringify(ctl));
+  check('表带探针对照（缺则无法自证）', !!ctl.referencePackage && !!ctl.familyPackage, JSON.stringify(ctl));
   check('对照成立：参照变体在参照计划中', ref.names.has(ctl.referencePackage), ctl.referencePackage);
   check('对照成立：参照变体不在被检计划中', !host.names.has(ctl.referencePackage));
-  check('对照成立：被检变体在被检计划中', host.names.has(ctl.hostPackage), ctl.hostPackage);
+  check('对照成立：父包仍在被检计划中（被检计划没被裁空）', host.names.has(ctl.familyPackage), ctl.familyPackage);
+  check('对照组：父包锚换成计划里没有的名字会红', !host.names.has(ctl.familyPackage + '-not-published'), '');
 
   const missing = [...ref.names].filter((n) => !host.names.has(n)).sort();
   const extra = [...host.names].filter((n) => !ref.names.has(n)).sort();

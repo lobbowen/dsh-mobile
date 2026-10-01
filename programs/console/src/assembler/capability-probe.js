@@ -23,7 +23,7 @@ const ex = require('../platform/exec');
 const AGENT = require('../platform/agent').load();
 
 /** 通过标记：判据脚本必须显式打出来。只退 0 不算通过 —— 脚本被改空、被截断都会退 0。 */
-const PASS = 'DSH_PROBE_PASS';
+const PASS = 'LOBOS_PROBE_PASS';
 
 /** 探针默认超时：设备 node 冷启动 + 一次 libvips wasm 初始化的量级，留足但不无限等。 */
 const PROBE_TIMEOUT_MS = 30000;

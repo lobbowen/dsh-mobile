@@ -4,7 +4,7 @@
   "pieces": [
     {
       "id": "rg",
-      "libName": "libdshrg.so",
+      "libName": "liblobosrg.so",
       "upstream": "可执行名 rg（dsh 的 glob/grep 直接 exec 它）",
       "delivery": "apk-seed",
       "placedAt": "prefix-bin",
@@ -14,7 +14,7 @@
     },
     {
       "id": "pty",
-      "libName": "libdshpty.so",
+      "libName": "liblobospty.so",
       "upstream": "node-pty 的 prebuilds/android-arm64/pty.node（两种落点：$PREFIX/lib 与产品树）",
       "delivery": "apk-seed",
       "placedAt": "prefix-lib",
@@ -24,7 +24,7 @@
     },
     {
       "id": "flock-native",
-      "libName": "libdshflock.so",
+      "libName": "liblobosflock.so",
       "upstream": "无上游名：以环境变量 LOBOS_FLOCK_NATIVE 指向的原生库",
       "delivery": "native-lib",
       "placedAt": "env",
