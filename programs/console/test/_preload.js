@@ -16,5 +16,5 @@ const os = require('node:os');
 const path = require('node:path');
 
 if (!process.env.LOBOS_SUPERVISOR_HOME || !String(process.env.LOBOS_SUPERVISOR_HOME).trim()) {
-  process.env.LOBOS_SUPERVISOR_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'lobos-test-'));
+  process.env.LOBOS_SUPERVISOR_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-test-'));
 }

@@ -36,13 +36,13 @@ const check = (name, cond, extra) => { results.push({ name, ok: !!cond, extra })
     stateFile: path.join(stateDir, 'state.json'),
     logFile: path.join(stateDir, 'events.log'),
     supervisorLogFile: path.join(stateDir, 'supervisor.log'),
-    lobosLogFile: path.join(stateDir, 'lobos.log'),
+    dshLogFile: path.join(stateDir, 'dsh.log'),
     upgradeLogFile: path.join(stateDir, 'upgrade.log'),
   };
   const cfgPath = path.join(TMP, 'cfg.json');
   fs.writeFileSync(cfgPath, JSON.stringify(cfg));
-  // main(原生主干)元数据：守卫核心存储 lobos-main.json（Android 内核只剩 guardian 守护开关）
-  fs.writeFileSync(path.join(stateDir, 'lobos-main.json'), JSON.stringify({ guardian: true }));
+  // main(原生主干)元数据：守卫核心存储 dsh-main.json（Android 内核只剩 guardian 守护开关）
+  fs.writeFileSync(path.join(stateDir, 'dsh-main.json'), JSON.stringify({ guardian: true }));
   // 起 mock 在 targetPort（main 的目标）上
   const mockMain = spawn('node', [MOCK, String(targetPort)], { stdio: 'ignore' });
   // 确定性就绪等待：轮询 mock HTTP 探活（替代固定 900ms——负载下可能未就绪即断言导致抖动失败）
@@ -58,14 +58,14 @@ const check = (name, cond, extra) => { results.push({ name, ok: !!cond, extra })
   check('mock 目标就绪（就绪轮询）', rdyMain, JSON.stringify({ main: rdyMain }));
 
   const sup = new Supervisor(cfg, cfgPath);
-  // main 为守卫核心服务：视图经 lobosMainView()（Android 内核无沙箱实例数组）
-  const instMain = sup.lobosMainView();
+  // main 为守卫核心服务：视图经 dshMainView()（Android 内核无沙箱实例数组）
+  const instMain = sup.dshMainView();
   check('main(守卫核心视图)存在且 guardian 已持久化', !!instMain && instMain.guardian === true, JSON.stringify(instMain && { id: instMain.id, guardian: instMain.guardian }));
 
   // 2. 端口注册表：固定端口登记 + 动态分配避开
   const ports = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'ports')).shared;
   sup._registerFixedPorts();
-  check('固定端口已登记', ports.get('lobos-main') === targetPort && ports.get('supervisor-api') === apiPort);
+  check('固定端口已登记', ports.get('dsh-main') === targetPort && ports.get('supervisor-api') === apiPort);
   const relayPort = await ports.allocate('proxyInstance');
   // 2026-09 池重构：动态池选址避开 OS 动态端口范围（Linux ip_local_port_range=32768-60999），
   // 落 IANA User 段低位（默认 managed 池 20000-23999）。断言按「逻辑段所属池区间」而非旧硬编码。

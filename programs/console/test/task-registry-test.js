@@ -23,13 +23,13 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'task-reg-test-'));
 async function main() {
   // ── 场景 1：创建与状态流转 ──
   const reg = new TaskRegistry({ stateDir: TMP });
-  const t = reg.begin('native', 'upgrade', { id: 'main', name: '原生 LOBOS' }, { from: '0.1.1', to: '0.1.2' });
+  const t = reg.begin('native', 'upgrade', { id: 'main', name: '原生 DSH' }, { from: '0.1.1', to: '0.1.2' });
   check('创建任务为 pending', t.state === 'pending', t.state);
   check('isBusy 识别 pending', reg.isBusy('native', 'main') === true);
   check('current 返回任务', reg.current('native', 'main') && reg.current('native', 'main').id === t.id);
   reg.start(t.id);
   check('start → running', reg.get(t.id).state === 'running');
-  const s1 = reg.step(t.id, '停止 LOBOS');
+  const s1 = reg.step(t.id, '停止 DSH');
   reg.stepState(t.id, reg.get(t.id).steps.indexOf(s1), 'running');
   reg.stepState(t.id, reg.get(t.id).steps.indexOf(s1), 'done');
   reg.log(t.id, '安装中…');
@@ -46,7 +46,7 @@ async function main() {
   reg.start(t2.id);
   reg.fail(t2.id, 'npm 退出码 1');
   check('fail → failed + error', reg.get(t2.id).state === 'failed' && reg.get(t2.id).error === 'npm 退出码 1');
-  const t3 = reg.begin('native', 'upgrade', { id: 'main', name: '原生 LOBOS' }, {});
+  const t3 = reg.begin('native', 'upgrade', { id: 'main', name: '原生 DSH' }, {});
   reg.start(t3.id);
   reg.skip(t3.id, '已是最新');
   check('skip → skipped', reg.get(t3.id).state === 'skipped');
@@ -68,7 +68,7 @@ async function main() {
   // ── 场景 4：MAX_TASKS 清理 ──
   const reg3 = new TaskRegistry({ stateDir: fs.mkdtempSync(path.join(os.tmpdir(), 'task-reg-test2-')) });
   for (let i = 0; i < 220; i++) {
-    const x = reg3.begin('native', 'install', { id: 'main', name: '原生 LOBOS' }, {});
+    const x = reg3.begin('native', 'install', { id: 'main', name: '原生 DSH' }, {});
     reg3.start(x.id);
     reg3.succeed(x.id);
   }
@@ -83,7 +83,7 @@ async function main() {
     const TMP2 = fs.mkdtempSync(path.join(os.tmpdir(), 'task-xproc-'));
     const guard = new TaskRegistry({ stateDir: TMP2 });   // 模拟守卫进程
     const daemon = new TaskRegistry({ stateDir: TMP2 });  // 模拟 router-daemon 进程
-    const g1 = guard.begin('native', 'install', { id: 'main', name: '原生 LOBOS' }, {});
+    const g1 = guard.begin('native', 'install', { id: 'main', name: '原生 DSH' }, {});
     guard.start(g1.id);
     const d1 = daemon.begin('proxy-app', 'update', { id: 'app1', name: 'Proxy' }, {});
     daemon.start(d1.id);
@@ -92,7 +92,7 @@ async function main() {
     check('跨进程：守卫与 daemon 的任务都留在磁盘（旧实现只剩后者）',
       kinds.indexOf('native/install') >= 0 && kinds.indexOf('proxy-app/update') >= 0, kinds.join(','));
     // 反向：同 id 必须以本方为准（不能出现重复条目）
-    const g2 = guard.begin('native', 'upgrade', { id: 'main', name: '原生 LOBOS' }, {});
+    const g2 = guard.begin('native', 'upgrade', { id: 'main', name: '原生 DSH' }, {});
     guard.start(g2.id);
     const disk2 = JSON.parse(fs.readFileSync(path.join(TMP2, 'tasks.json'), 'utf8'));
     const ids = disk2.tasks.map((x) => x.id);

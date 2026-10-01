@@ -45,7 +45,7 @@ class PortRegistry {
   constructor(opts) {
     // 2026-09-11 修复（K7）：原为 `process.env.HOME || '/tmp'` ——
     // 早期曾先读 process.env.HOME：无 HOME 的环境（如服务化启动）会落到 /tmp 等盘根临时目录，
-    // 与其它状态文件**不在同一目录**：state.json 在 %USERPROFILE%\.lobos\supervisor\，
+    // 与其它状态文件**不在同一目录**：state.json 在 %USERPROFILE%\.dsh\supervisor\，
     // ports.json 却在 \tmp\。后果：端口记录与守卫状态分裂，卸载/迁移时残留。
     // os.homedir() 才是正确来源（统一处理 HOME / USERPROFILE 等差异）。
     this._file = (opts && opts.file) || path.join(require('../../platform/state-root').supervisorDir(), 'ports.json');
@@ -140,8 +140,8 @@ class PortRegistry {
   }
 
   /* ═══════ 登记（固定 / 用户 / 动态）═══════ */
-  /** 登记固定端口（主LOBOS/API/中转等）。同端口已被其他固定角色占用 → 报错；
-   * user/动态记录（如实例 main 端口 = 主 LOBOS 端口）→ 固定端口权威覆盖。 */
+  /** 登记固定端口（主DSH/API/中转等）。同端口已被其他固定角色占用 → 报错；
+   * user/动态记录（如实例 main 端口 = 主 DSH 端口）→ 固定端口权威覆盖。 */
   register(role, port) {
     const p = Number(port);
     if (!Number.isInteger(p) || p <= 0 || p > 65535) throw new Error('ports.register: 非法端口 ' + port);
@@ -149,7 +149,7 @@ class PortRegistry {
     if (existing) {
       const existingFixed = String(existing.owner || '').startsWith('system:');
       if (existingFixed && existing.role !== role) throw new Error('端口 ' + p + ' 已被 [' + existing.role + '] 占用，无法登记为 [' + role + ']');
-      // 覆盖 user/动态记录（固定端口权威；main 实例端口 = lobos-main 同一端口）
+      // 覆盖 user/动态记录（固定端口权威；main 实例端口 = dsh-main 同一端口）
       if (existing.owner && !existingFixed) this._records.delete(p);
     }
     this._records.set(p, { port: p, role, owner: 'system:' + role, createdAt: Date.now() });

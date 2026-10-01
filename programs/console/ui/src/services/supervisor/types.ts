@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * supervisor 宿主 — 领域类型（对齐 lobos-supervisor HTTP API 实契约）
+ * supervisor 宿主 — 领域类型（对齐 dsh-supervisor HTTP API 实契约）
  * ============================================================================
  * 来源：src/presentation/api.js 全路由 + ui/（core.js / views-* / app.js）消费字段 + 线上抽样。
  * 只放纯数据类型，不含任何实现。
@@ -8,7 +8,7 @@
  */
 
 // ── /status ──────────────────────────────────────────────
-export type LobosPhase =
+export type DshPhase =
   | "RUNNING" | "STOPPED" | "STARTING" | "RESTARTING"
   | "BACKOFF" | "OBSERVED" | string;
 
@@ -47,7 +47,7 @@ export interface NativeCapsReport {
   at?: string;
 }
 
-export interface NativeLobosStatus {
+export interface NativeDshStatus {
   installed: boolean;
   version?: string | null;
   binPath?: string | null;
@@ -63,7 +63,7 @@ export interface NativeLobosStatus {
   nativeCaps?: NativeCapsReport | null;
 }
 
-export interface LobosVersionInfo {
+export interface DshVersionInfo {
   installed?: string;
   latest?: string;
   updateAvailable?: boolean;
@@ -90,13 +90,13 @@ export type SessionState = "starting" | "running" | "stopping" | "stopped" | "fa
 
 export interface SupervisorStatus {
   desired?: "running" | "stopped";
-  phase?: LobosPhase;
+  phase?: DshPhase;
   sessionState?: SessionState;
   guardVersion?: string;
-  /** 原生 LOBOS 主干视图（/status 随快照下发）：守护开关与运行态的唯一数据源。 */
+  /** 原生 DSH 主干视图（/status 随快照下发）：守护开关与运行态的唯一数据源。 */
   main?: MainInstance | null;
-  lobosPid?: number | null;
-  lobosPort?: number | null;
+  dshPid?: number | null;
+  dshPort?: number | null;
   adopted?: boolean;
   guardPid?: number;
   lastProbeAt?: string | null;
@@ -107,15 +107,15 @@ export interface SupervisorStatus {
   lastFailure?: string | null;
   upgradeHold?: boolean;
   commandMissing?: boolean;
-  lobosTokenCaptured?: boolean;
-  native?: NativeLobosStatus;
-  version?: LobosVersionInfo;
+  dshTokenCaptured?: boolean;
+  native?: NativeDshStatus;
+  version?: DshVersionInfo;
   upgrade?: UpgradeState;
   tasks?: unknown[];
   updatedAt?: string;
 }
 
-/** 原生 LOBOS 主干视图（后端 lobosMainView()，随 /status 下发）。
+/** 原生 DSH 主干视图（后端 dshMainView()，随 /status 下发）。
  *  ⚠ 实例/沙箱域与远程控制字段（remoteEnabled/remoteToken/frpEnabled/frpRemotePort/wanPort）已删除。 */
 export interface MainInstance {
   id: "main";
@@ -408,7 +408,7 @@ export interface EnvStatus {
  *
  *  ⚠ 2026-09-13 修正契约（此前声明了后端**从不产出**的字段）：
  *    旧声明含 latestLts / ltsName / updateAvailable，而内核
- *    `guard/supervisor/settings-view.js.nodeLtsStatus()` **明确不做远端查询**
+ *    `guard/supervisor/settings-view.js::nodeLtsStatus()` **明确不做远端查询**
  *    （避免守卫启动依赖网络），实返只有 { ok, current, major, ltsLine, suggested,
  *    fetchedAt, cached }。于是前端那两个分支恒不可达、类型声明与实现分叉。
  *    现按真实返回对齐。若产品确需「官方最新 LTS」，应另开端点或改走壳 env_status 契约。 */
@@ -434,7 +434,7 @@ export interface GenericOk { ok?: boolean; error?: string | null; [k: string]: u
 // ── /lifecycle（2026-09 归一化：统一生命周期 API）────────────────────────────
 /** 生命周期模块 id（= 守卫 LifecycleManager 实际注册项，见 src/guard/lifecycle/adapters.js）。
  *  ⚠ 已删除的模块（勿回潮）：lan（远程控制）、instances（沙箱实例）。 */
-export type LifecycleModuleId = "lobos" | "router" | "plugins";
+export type LifecycleModuleId = "dsh" | "router" | "plugins";
 export interface LifecycleModuleState {
   id: string;
   kind?: string;

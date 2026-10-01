@@ -2,7 +2,7 @@
 'use strict';
 
 // rg 平台包投放回归。钉住的历史缺陷（真机 2026-09-26 定罪）：本单元的 $PREFIX 曾来自
-// 容器环境变量，而容器从未导出过那个键 ⇒ 永久 no-op 且零日志，lobos 的 glob/grep 全灭。
+// 容器环境变量，而容器从未导出过那个键 ⇒ 永久 no-op 且零日志，dsh 的 glob/grep 全灭。
 // 现在 prefix 只从 runtime.json 契约经参数进来，缺格必须判 blocked（可见缺口），
 // 绝不再退回「静默跳过」。
 //
@@ -46,9 +46,9 @@ check('prefix 在场但该格下无 rg -> blocked', (() => {
 // ── 正常投放 ──
 const r1 = ensureRipgrepPackage(npm, { prefix });
 check('有 rg -> applied', r1.status === 'applied', JSON.stringify(r1));
-// 目录名必须由 PKG 决定：lobos 侧按 @vscode/ripgrep-<platform>-<arch> 拼名解析，
+// 目录名必须由 PKG 决定：dsh 侧按 @vscode/ripgrep-<platform>-<arch> 拼名解析，
 // 实现里若漂成别的名字，require.resolve 就找不到 —— 这条判据让它在 CI 红。
-check('投到 PKG 名下（与 lobos 的解析名同源）', fs.existsSync(link) && path.dirname(path.dirname(link)) === path.join(npm, PKG), PKG);
+check('投到 PKG 名下（与 dsh 的解析名同源）', fs.existsSync(link) && path.dirname(path.dirname(link)) === path.join(npm, PKG), PKG);
 check('package.json 带 name/version', (() => {
   const j = JSON.parse(fs.readFileSync(path.join(linkDir, 'package.json'), 'utf8'));
   return j.name === PKG && !!j.version;

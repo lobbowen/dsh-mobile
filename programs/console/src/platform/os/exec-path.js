@@ -8,7 +8,7 @@
 //
 // 已删除的 PC 遗留（勿回潮）：
 // · Windows PATHEXT 展开（npm.cmd / npm.exe / .bat）—— 安卓没有扩展名语义；
-// · %APPDATA%\npm、%LOCALAPPDATA%\Programs\lobos-supervisor —— Windows 专有安装目录；
+// · %APPDATA%\npm、%LOCALAPPDATA%\Programs\dsh-supervisor —— Windows 专有安装目录；
 // · macOS 的 /opt/homebrew/bin、/usr/local/bin —— Homebrew 专有。
 // 因此 npmBin()/npxBin() 不再需要平台分支，恒为 'npm' / 'npx'。
 // 但它只是**逻辑名/降级回退**：安卓 W^X 下容器 bin/ 里的 npm shim 不可 execve，
@@ -56,7 +56,7 @@ function inPath(base, platform, env) {
 
 /**
  * 解析可执行绝对路径。
- * @param {string} base 逻辑名（如 'lobos-supervisor'）
+ * @param {string} base 逻辑名（如 'dsh-supervisor'）
  * @param {{envVar?:string, extraDirs?:string[], platform?:string, env?:object}} [opts]
  * @returns {string|null} 绝对路径或 null
  */

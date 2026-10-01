@@ -23,11 +23,11 @@ class MainProcess {
     return native.nativeCommand(this.config, this.pluginManager);
   }
 
-  /** 回收 lobos 状态目录里持锁进程已死的孤儿锁文件（详见 _startProcess 调用点注释）。
+  /** 回收 dsh 状态目录里持锁进程已死的孤儿锁文件（详见 _startProcess 调用点注释）。
    * 安全边界：锁内容非纯数字 pid、或 pid 仍存活（含 EPERM）一律不动；单文件异常只跳过。 */
-  _reapOrphanLobosLocks() {
-    const envHome = process.env.LOBOS_HOME && process.env.LOBOS_HOME.trim();
-    const root = envHome ? envHome.trim() : path.join(process.env.HOME || os.homedir(), '.lobos');
+  _reapOrphanDshLocks() {
+    const envHome = process.env.DSH_HOME && process.env.DSH_HOME.trim();
+    const root = envHome ? envHome.trim() : path.join(process.env.HOME || os.homedir(), '.dsh');
     const reaped = [];
     const walk = (dir, depth) => {
       if (depth > 3) return;
@@ -49,7 +49,7 @@ class MainProcess {
     };
     walk(root, 0);
     for (const r of reaped) this.events.append('orphan_lock_reaped', r);
-    if (reaped.length) this.logger.warn('reaped orphan lobos locks: ' + reaped.map((r) => r.file + '(pid=' + r.pid + ')').join(' '));
+    if (reaped.length) this.logger.warn('reaped orphan dsh locks: ' + reaped.map((r) => r.file + '(pid=' + r.pid + ')').join(' '));
     return reaped;
   }
 
@@ -57,11 +57,11 @@ class MainProcess {
 
   /** 子进程 stderr 取证捕获：文件 fd 而非管道。node 对文件的写是同步的，
    * 子进程哪怕 process.exit() 急死，最后一行错误也已落盘；对管道的写是异步的，
-   * 急死会丢掉未 flush 的待发数据（真机 2026-09-22：lobos 秒退 exit:1 且屏幕零输出，
+   * 急死会丢掉未 flush 的待发数据（真机 2026-09-22：dsh 秒退 exit:1 且屏幕零输出，
    * 死因就丢在子进程自己的管道缓冲里）。每次 spawn 以 'w' 重开：本轮 stderr
    * 从零计，上一轮的死因不得顶给本轮。返回 {fd, path, readNew()}，readNew 取增量。 */
   _openStderrCapture() {
-    const p = path.join(path.dirname(this.config.lobosLogFile), 'lobos-stderr.log');
+    const p = path.join(path.dirname(this.config.dshLogFile), 'dsh-stderr.log');
     const fd = fs.openSync(p, 'w');
     let pos = 0;
     return {
@@ -123,12 +123,12 @@ class MainProcess {
     } catch { return command; }
   }
 
-  /** 非零退出取证：lobos reportStartupFailure 把完整崩溃报告写到
-   * <$LOBOS_HOME|~/.lobos>/logs/startup-<ts>-<uuid>.log。收集 mtime 晚于本轮
-   * spawn 时刻的报告尾部（含 2s 时钟粒度余量），供 lobos_exited 事件上屏。 */
+  /** 非零退出取证：dsh reportStartupFailure 把完整崩溃报告写到
+   * <$DSH_HOME|~/.dsh>/logs/startup-<ts>-<uuid>.log。收集 mtime 晚于本轮
+   * spawn 时刻的报告尾部（含 2s 时钟粒度余量），供 dsh_exited 事件上屏。 */
   _collectStartupReports(sinceMs) {
-    const envHome = process.env.LOBOS_HOME && process.env.LOBOS_HOME.trim();
-    const root = envHome ? envHome.trim() : path.join(process.env.HOME || os.homedir(), '.lobos');
+    const envHome = process.env.DSH_HOME && process.env.DSH_HOME.trim();
+    const root = envHome ? envHome.trim() : path.join(process.env.HOME || os.homedir(), '.dsh');
     const dir = path.join(root, 'logs');
     const out = [];
     let names;
@@ -149,14 +149,14 @@ class MainProcess {
   async _startProcess() {
     this._actNote('start', 'spawn'); // C3-3b G1 影子 actual 记账
     this._crashHalted = false; // 主动拉起 = 清除崩溃停靠（进入运行流程）
-    // 前置条件：原生 LOBOS 必须已安装才尝试启动。未安装 → 进入「未安装」状态：
+    // 前置条件：原生 DSH 必须已安装才尝试启动。未安装 → 进入「未安装」状态：
     // 不启动、不重试、不计数崩溃；一次性通知引导安装（与"启动失败"严格区分）。
     const nst = this.nativeManager ? this.nativeManager.status() : { installed: true };
     if (!nst.installed) {
-      this.events.append('lobos_not_installed', { bin: nst.binPath });
+      this.events.append('dsh_not_installed', { bin: nst.binPath });
       if (!this._mMissingNotified()) {
         this._mSetMissingNotified(true);
-        this.notify('未检测到 the Agent', '可在 lobos-supervisor 面板一键安装');
+        this.notify('未检测到 DeepSeek Harness', '可在 dsh-supervisor 面板一键安装');
       }
       this._mSetSpawnBlockedUntil(Date.now() + 60000); // 冷静期：装好前不再无谓重试
       this._mSetPhase('STOPPED');
@@ -164,12 +164,12 @@ class MainProcess {
       this.writeState();
       return;
     }
-    // 孤儿锁回收：此刻无存活 lobos（spawn 路径），SIGKILL 残留的 <$HOME>/.lobos/**.lock
-    // 会让 lobos 启动在 30s 锁等待后崩溃（"plugin tree failed to load"），守卫再判启动失败
-    // kill 重启 → 永不就绪的重启死循环。lobos 文档定义孤儿锁清理为 operator 动作——守卫即 operator。
-    this._reapOrphanLobosLocks();
+    // 孤儿锁回收：此刻无存活 dsh（spawn 路径），SIGKILL 残留的 <$HOME>/.dsh/**.lock
+    // 会让 dsh 启动在 30s 锁等待后崩溃（"plugin tree failed to load"），守卫再判启动失败
+    // kill 重启 → 永不就绪的重启死循环。dsh 文档定义孤儿锁清理为 operator 动作——守卫即 operator。
+    this._reapOrphanDshLocks();
     // 安卓容器形态：spawn 前幂等投放 NARB JS 垫片 + 注入 --expose-internals
-    // （lobos ≥rc.2 硬 require node-addon-require-builtin，无 android 预编译件 → 秒退）。
+    // （dsh ≥rc.2 硬 require node-addon-require-builtin，无 android 预编译件 → 秒退）。
     // PC 无契约 → _androidLaunchReady 原样返回，行为逐字不变。
     const launchCommand = this._androidLaunchReady(this.spawnCommand());
     this.events.append('spawn', { command: launchCommand });
@@ -178,9 +178,9 @@ class MainProcess {
     const spawnAt = Date.now(); // 本轮取证时间戳：晚于此的 startup-*.log 才算本轮死因
     let child;
     try {
-      // detached：独立进程组，便于按组发信号（LOBOS 派生的子进程一并收到）。
+      // detached：独立进程组，便于按组发信号（DSH 派生的子进程一并收到）。
       // 插件 --patch 覆盖层由 spawnCommand()/native.nativeCommand() 统一附加（顶层位置），此处不再重复拼接。
-      // env 注入契约 PATH：LOBOS 自身（及其派生的 npm 操作）必须与守卫同源找到 node。
+      // env 注入契约 PATH：DSH 自身（及其派生的 npm 操作）必须与守卫同源找到 node。
       // stderr 走文件 fd（见 _openStderrCapture）：管道会在子进程急死时吞掉崩溃栈。
       child = spawn(cmd, args, { stdio: ['ignore', 'pipe', cap.fd], env: runtimeContract.withPath(process.env), detached: true });
     } catch (err) {
@@ -197,22 +197,22 @@ class MainProcess {
     this._mSetAdoptPid(null);
     this._mSetPhase('STARTING');
     this._mSetStartDeadline(Date.now() + this.config.startTimeoutMs);
-    // LOBOS 输出落盘专用日志（行缓冲还原完整行），同时镜像 stderr 供 journald 收敛
-    // 先捕获令牌（原文），落盘前对启动 URL 的 ?token= 段脱敏——lobos.log/journald 不复留会话令牌明文
+    // DSH 输出落盘专用日志（行缓冲还原完整行），同时镜像 stderr 供 journald 收敛
+    // 先捕获令牌（原文），落盘前对启动 URL 的 ?token= 段脱敏——dsh.log/journald 不复留会话令牌明文
     const sanitizeToken = (l) => String(l).replace(/([?&]token=)[A-Za-z0-9_-]+/g, '$1***');
     const outBuf = new LineBuffer((line) => {
       this.tokenService.feedLine('main', line); // 唯一令牌节点：stdout 源逐行推送（最新行优先）
 
       const clean = sanitizeToken(line);
-      this.lobosWriter.write(clean);
+      this.dshWriter.write(clean);
       // 实时镜像同样走脱敏后的完整行——日志不再残留 token 明文
       // （原 raw chunk 镜像会把 ?token= 明文写进 journald）
-      process.stdout.write('[lobos] ' + clean + '\n');
+      process.stdout.write('[dsh] ' + clean + '\n');
     });
     const errLines = []; // 本轮已捕获的子进程 stderr（环形上限，退出时取尾部进事件）
     const errBuf = new LineBuffer((line) => {
       const clean = sanitizeToken('[stderr] ' + line);
-      this.lobosWriter.write(clean);
+      this.dshWriter.write(clean);
       process.stderr.write(clean + '\n');
       errLines.push(clean);
       if (errLines.length > 200) errLines.shift();
@@ -226,14 +226,14 @@ class MainProcess {
       if (this._mChild() === child && this._mPhase() === 'STARTING') {
         this._mSetChild(null);
         if (err.code === 'ENOENT') {
-          // 命令不存在（如 LOBOS 未安装）：进入冷静期，等面板一键安装，不刷崩溃。
+          // 命令不存在（如 DSH 未安装）：进入冷静期，等面板一键安装，不刷崩溃。
           // 取证恒打**本轮实际 execve 的那条命令**（launchCommand）而非 config.command：
           // 两者可不同（覆盖安装自愈只改后者），真机 12:54 因此把排查指向了错误路径。
-          this.events.append('lobos_command_missing', { command: launchCommand[0] });
+          this.events.append('dsh_command_missing', { command: launchCommand[0] });
           this.logger.warn('command missing: ' + launchCommand.join(' ') + ' — 60s 冷静期内不再尝试');
           if (!this._mMissingNotified()) {
             this._mSetMissingNotified(true);
-            this.notify('未检测到 the Agent', '可在 lobos-supervisor 面板一键安装');
+            this.notify('未检测到 DeepSeek Harness', '可在 dsh-supervisor 面板一键安装');
           }
           this._mSetSpawnBlockedUntil(Date.now() + 60000);
           this._mSetPhase('STOPPED');
@@ -250,12 +250,12 @@ class MainProcess {
       errBuf.flush();
       if (this._mChild() !== child) return; // 已被 stopProcess 接管
       const startupReports = code !== 0 ? this._collectStartupReports(spawnAt) : [];
-      this.events.append('lobos_exited', { code, signal, phase: this._mPhase(), stderrTail: errLines.slice(-40), startupReports });
+      this.events.append('dsh_exited', { code, signal, phase: this._mPhase(), stderrTail: errLines.slice(-40), startupReports });
       if (code !== 0 && errLines.length === 0) {
         // 零输出非零退出：把"没有输出"本身也记成一件事，避免下轮排查再猜；
-        // lobos 的 reportStartupFailure 会把完整崩溃报告写进 <$HOME>/.lobos/logs/startup-*.log，
+        // dsh 的 reportStartupFailure 会把完整崩溃报告写进 <$HOME>/.dsh/logs/startup-*.log，
         // 即便 stderr 全丢也能从报告取证（本轮新写者才计入，防旧报告顶缸）。
-        this.logger.warn('lobos exited code=' + code + ' with no output (lobos-stderr.log empty)'
+        this.logger.warn('dsh exited code=' + code + ' with no output (dsh-stderr.log empty)'
           + (startupReports.length ? '; startup reports: ' + startupReports.map((r) => r.file).join(' ') : '; no startup report this round'));
       }
       this._mSetChild(null);
@@ -300,28 +300,28 @@ class MainProcess {
     this.writeState();
   }
 
-  /** 原生 LOBOS 端口运行时再推导（2026-09 架构补齐）：
-   * LOBOS 端口由用户可改（config 默认 3080 只是默认）——进程真实端口以 cmdline --port 为准。
-   * 在配置端口无监听但 LOBOS 进程在跑时，找出受管 LOBOS 进程的真实端口并更正注册（lobos-main /
+  /** 原生 DSH 端口运行时再推导（2026-09 架构补齐）：
+   * DSH 端口由用户可改（config 默认 3080 只是默认）——进程真实端口以 cmdline --port 为准。
+   * 在配置端口无监听但 DSH 进程在跑时，找出受管 DSH 进程的真实端口并更正注册（dsh-main /
    * main 实例 / relay 目标 / healthUrl / 状态），让系统跟随用户改动而非卡死在旧配置。 */
-  _findManagedLobosPort() {
-    // 候选：配置 bin 精确匹配（config.command[1]）优先；兼容手动标准 LOBOS（isLobosCmdline）
+  _findManagedDshPort() {
+    // 候选：配置 bin 精确匹配（config.command[1]）优先；兼容手动标准 DSH（isDshCmdline）
     const bins = [];
     const cmd = this.config.command || [];
     if (typeof cmd[1] === 'string' && cmd[1]) bins.push(cmd[1]);
     const candidates = [];
-    const matches = pidlook.pgrepList('lobos');
+    const matches = pidlook.pgrepList('dsh');
     for (const m of matches) {
       const pid = m.pid;
       if (pid === process.pid) continue;
       const c = m.cmdline;
-      if (c.indexOf('/instances/') >= 0) continue; // 排除沙箱实例 lobos-web@inst-*
-      // 精确归属：cmdline 必须含本守卫配置的启动 bin；isLobosCmdline 兜底仅用于
+      if (c.indexOf('/instances/') >= 0) continue; // 排除沙箱实例 dsh-web@inst-*
+      // 精确归属：cmdline 必须含本守卫配置的启动 bin；isDshCmdline 兜底仅用于
       // "config bin 缺失（手动标准安装）"且 cmdline 带 ' web' 子命令特征的场景——
-      // 绝不把同机其它 lobos 实例误认作受管目标（宽匹配曾把监管端口劫持到生产实例端口）。
+      // 绝不把同机其它 dsh 实例误认作受管目标（宽匹配曾把监管端口劫持到生产实例端口）。
       const binMatch = bins.some((b) => b && c.indexOf(b) >= 0);
-      const genericLobos = !bins.length && pidlook.isLobosCmdline(pid) && /(^|\s)web(\s|$)/.test(c);
-      const owned = binMatch || genericLobos;
+      const genericDsh = !bins.length && pidlook.isDshCmdline(pid) && /(^|\s)web(\s|$)/.test(c);
+      const owned = binMatch || genericDsh;
       if (!owned) continue;
       // 复用 config.extractPortFromCommand（同一解析实现，消除 config/supervisor 双份）
       const port = extractPortFromCommand(c.split(' '));
@@ -332,30 +332,30 @@ class MainProcess {
     return candidates[0] || null;
   }
 
-  /** 应用原生 LOBOS 真实端口：更正 lobos-main 注册 / main 实例 / relay 目标 / healthUrl（五处跟随）。 */
+  /** 应用原生 DSH 真实端口：更正 dsh-main 注册 / main 实例 / relay 目标 / healthUrl（五处跟随）。 */
   _applyMainPort(newPort, pid) {
     const oldPort = this.config.targetPort;
     if (!Number.isInteger(newPort) || newPort <= 0 || newPort === oldPort) return false;
-    // lobos-main 固定注册：register 新成功后再 release 旧（避免「旧已释放、新被拒」使注册表无 lobos-main
+    // dsh-main 固定注册：register 新成功后再 release 旧（避免「旧已释放、新被拒」使注册表无 dsh-main
     // 而 config.targetPort 已改 → 注册表与配置分叉）。register 失败 → 不改配置、返回 false。
     try {
-      ports.register('lobos-main', newPort);
+      ports.register('dsh-main', newPort);
     } catch (e) {
-      this.logger.warn && this.logger.warn('register lobos-main ' + newPort + ' 失败，保留旧端口 ' + oldPort + ': ' + ((e && e.message) || e));
+      this.logger.warn && this.logger.warn('register dsh-main ' + newPort + ' 失败，保留旧端口 ' + oldPort + ': ' + ((e && e.message) || e));
       return false;
     }
     // 2026-09-13（失效模式 g）：**带 ownerId** —— 与实例域 P1-3 的修法同规。
     // 按端口号无条件释放可能删掉**他人**的记录（若 oldPort 期间被别的 owner 重新登记）。
-    // owner 必须与 ports.register('lobos-main', p) 写入的**完全一致**：那是 'system:' + role
-    // （ports.js:156），不是 'lobos-main'。写错会让释放变 no-op → 旧端口残留
+    // owner 必须与 ports.register('dsh-main', p) 写入的**完全一致**：那是 'system:' + role
+    // （ports.js:156），不是 'dsh-main'。写错会让释放变 no-op → 旧端口残留
     // （由 test/main-port-rederive-test.js 捕获）。
-    try { if (oldPort !== newPort) ports.release(oldPort, 'system:lobos-main'); } catch {}
+    try { if (oldPort !== newPort) ports.release(oldPort, 'system:dsh-main'); } catch {}
     this.config.targetPort = newPort;
     try { this.config.healthUrl = 'http://' + this.config.targetHost + ':' + newPort + '/'; } catch {}
     // 概念清分(2026-09-06)：main 不再登记于沙箱 instances——端口唯一事实源 = config.targetPort，
-    // 无 per-instance 记录可跟随；lobosMain 端口由 lobosMainView() 动态读 config.targetPort。
+    // 无 per-instance 记录可跟随；dshMain 端口由 dshMainView() 动态读 config.targetPort。
     this.events.append('main_port_adopted', { from: oldPort, to: newPort, pid });
-    this.logger.warn && this.logger.warn('[main] LOBOS 真实端口 ' + newPort + '（原配置 ' + oldPort + '），已更正注册与 relay 目标');
+    this.logger.warn && this.logger.warn('[main] DSH 真实端口 ' + newPort + '（原配置 ' + oldPort + '），已更正注册与 relay 目标');
     return true;
   }
 
@@ -369,7 +369,7 @@ class MainProcess {
     this._mSetFailStreak(0);
     this._mSetAdoptPid(pidlook.findListeningPid(this.config.targetPort));
     if (this._mAdoptPid() === null) {
-      const found = this._findManagedLobosPort();
+      const found = this._findManagedDshPort();
       if (found && found.port && found.port !== this.config.targetPort && this._applyMainPort(found.port, found.pid)) {
         this.config.targetPort = found.port;
         this._mSetAdoptPid(found.pid);
@@ -391,10 +391,10 @@ class MainProcess {
     this._mSetBackoffUntil(null);
     // 发现接管目标的 pid：使 stop/升级/存活观测对既有实例同样生效
     this._mSetAdoptPid(pidlook.findListeningPid(this.config.targetPort));
-    // 原生 LOBOS 端口可被用户改动（config 默认只是默认）→ 配置端口无监听时，从受管 LOBOS 进程
+    // 原生 DSH 端口可被用户改动（config 默认只是默认）→ 配置端口无监听时，从受管 DSH 进程
     // 推导真实端口并更正注册（2026-09 架构补齐），再以其 pid 接管。
     if (this._mAdoptPid() === null) {
-      const found = this._findManagedLobosPort();
+      const found = this._findManagedDshPort();
       if (found && found.port && found.port !== this.config.targetPort) {
         if (this._applyMainPort(found.port, found.pid)) {
           this.config.targetPort = found.port;
@@ -417,14 +417,14 @@ class MainProcess {
     this.writeState();
   }
 
-  /** 校验 pid 进程是否属于本守卫管理：cmdline 含配置的启动 bin，或符合 LOBOS 特征（兼容外部手动起的标准 LOBOS）。
-   * 精确匹配避免"路径碰巧含 lobos 就误接管"与"安装路径不含 lobos 就漏接管"。 */
+  /** 校验 pid 进程是否属于本守卫管理：cmdline 含配置的启动 bin，或符合 DSH 特征（兼容外部手动起的标准 DSH）。
+   * 精确匹配避免"路径碰巧含 dsh 就误接管"与"安装路径不含 dsh 就漏接管"。 */
   _isManagedProcess(pid) {
     const cmd = pidlook.readCmdline(pid);
     if (!cmd) return false;
     const bin = this.config.command && this.config.command[1];
     if (typeof bin === 'string' && bin && cmd.includes(bin)) return true;
-    return pidlook.isLobosCmdline(pid);
+    return pidlook.isDshCmdline(pid);
   }
 
   _beginRestart(reason, opts) {
@@ -433,7 +433,7 @@ class MainProcess {
     this._mSetLastRestartAt(new Date().toISOString());
     this.events.append('restart_triggered', { reason });
     this.logger.warn('restart triggered: ' + reason);
-    // 实例重启 = LOBOS 启动令牌轮换：清空已捕获令牌，使进入运行后统一令牌服务重新捕获新令牌
+    // 实例重启 = DSH 启动令牌轮换：清空已捕获令牌，使进入运行后统一令牌服务重新捕获新令牌
     // （旧令牌随旧进程失效，relay 若继续持有只会换取失败；先清空避免「新旧令牌混淆」）
     this.tokenService.clear('main');
     if (countCrash) {
@@ -474,7 +474,7 @@ class MainProcess {
         waitMs: this.config.backoff[d.backoffLevel],
       });
       this.logger.error('crash loop entered: level=' + d.backoffLevel + ' waitMs=' + this.config.backoff[d.backoffLevel]);
-      this.notify('LOBOS 反复崩溃', '已进入第 ' + d.backoffLevel + ' 级退避（' + Math.round(this.config.backoff[d.backoffLevel] / 1000) + 's），请查看 lobos-supervisor 面板');
+      this.notify('DSH 反复崩溃', '已进入第 ' + d.backoffLevel + ' 级退避（' + Math.round(this.config.backoff[d.backoffLevel] / 1000) + 's），请查看 dsh-supervisor 面板');
     }
   }
 
@@ -489,7 +489,7 @@ class MainProcess {
    * 为什么必须单独有这个方法：
    * 平台层早已提供 `killTree`（安卓/POSIX = 进程组信号）**且已导出**，
    * 但历史代码里**零调用点** —— 实际停止路径只用 `signalProcess`（单进程语义），
-   * 于是停止 LOBOS 只杀父进程：其派生的子进程（node / 子命令）成为**孤儿**，
+   * 于是停止 DSH 只杀父进程：其派生的子进程（node / 子命令）成为**孤儿**，
    * 继续占端口、持文件锁；守卫重启后 adopt 复用即被楔死。
    *
    * 这与 `capabilityProfile().processTreeKill` 的**声明相反** ——

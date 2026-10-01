@@ -8,7 +8,7 @@
 //   ② 提供探测实现（版本查询；node 另需达壳投放的最低门槛）。
 // 为什么原来有两份就是债：同一件事（环境里有没有这个件）在两个地方各说一遍，
 //   加一件工具要改两处、两处还会漂移（正是「一把尺子」纪律要消掉的东西）。
-// 消费方：supervisor.envStatus/lobosenvStatus/面板环境卡。
+// 消费方：supervisor.envStatus/dshenvStatus/面板环境卡。
 
 const ex = require('./exec');
 const TABLE = require('../assembler/supply-table.json');
@@ -48,11 +48,11 @@ function cachedWhichVersion(bin, args) {
  *
  * 必须与壳的 `node.rs MIN_NODE` 一致 —— 否则会出现最糟的用户体验：
  * **面板说「环境就绪 」，而壳因门槛不满足拒绝启动内核。**
- * 真实取值由壳经 `~/.lobos/supervisor/runtime.json` 的 `minNode` 字段投放（见 runtimeMeta）。
+ * 真实取值由壳经 `~/.dsh/supervisor/runtime.json` 的 `minNode` 字段投放（见 runtimeMeta）。
  */
 const MIN_NODE_DEFAULT = 'v22.12.0';
 
-/** 读取壳投放的运行时元数据（`~/.lobos/supervisor/runtime.json`，**壳写内核读**）。 */
+/** 读取壳投放的运行时元数据（`~/.dsh/supervisor/runtime.json`，**壳写内核读**）。 */
 let _runtimeMetaCache = null;
 let _runtimeMetaAt = 0;
 function runtimeMeta() {
@@ -159,10 +159,10 @@ class EnvStatus {
   // selfUpdateEntry()（内核 npm 子包 corePackageName 条目）已删：
   // 安卓内核不经 npm 分发，更新 = 容器 OTA；内核侧不报告"内核包是否配置"。
 
-  /** LOBOS 本体条目（外传判定：bin 可执行 + 已装版本）。 */
-  lobosEntry(binOk, installed, bin) {
+  /** DSH 本体条目（外传判定：bin 可执行 + 已装版本）。 */
+  dshEntry(binOk, installed, bin) {
     return {
-      label: 'LOBOS 本体',
+      label: 'DSH 本体',
       required: true,
       state: binOk ? 'ok' : 'missing',
       detail: binOk ? (installed || '已装') : ('bin 不存在: ' + (bin || '?')),
@@ -170,7 +170,7 @@ class EnvStatus {
   }
 
   /** 汇总：全部必填项状态（供面板/守卫快速判定「环境就绪」）。
-   * @param extra 附加条目（lobos）
+   * @param extra 附加条目（dsh）
    * @param sys 可选：已探测的系统条目（避免调用方已 probe 后又重 probe——2026-09 审计修复）
    * 无 sys 时探测一次（探测结果有 10s TTL 缓存）。 */
   summary(extra, sys) {

@@ -8,7 +8,7 @@ function owns(pathname) {
 function handle(ctx) {
   const { sup, req, res, pathname, identity, send, collectBody, originAllowed, tokOf } = ctx;
 
-    // 全局统一分发：镜像源配置由 DistributionManager 统一管理（LOBOS 自升级 + 反代共用）——仅 /dist/registry*。
+    // 全局统一分发：镜像源配置由 DistributionManager 统一管理（DSH 自升级 + 反代共用）——仅 /dist/registry*。
     if (req.method === 'GET' && pathname === '/dist/registry') {
       Promise.resolve(sup.dist.registryInfo()).then((r) => send(200, { ok: true, ...r })).catch((e) => send(500, { ok: false, error: e.message }));
       return;

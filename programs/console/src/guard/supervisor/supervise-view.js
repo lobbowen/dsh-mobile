@@ -14,13 +14,13 @@ const ports = require('../../guard/lifecycle/ports').shared;
 const guardian = require('../../guard/guardian/index');
 
 class SuperviseView {
-  async _lobosSuperviseOnce() {
+  async _dshSuperviseOnce() {
     try {
       if (this._stopping) return { ok: false, error: 'guard stopping' };
       if (this._sessionHalting()) return { ok: false, error: 'session halting' }; // INV-S1 全域
-      await this._lobosConverge(); // 唯一心跳驱动 main 收敛
+      await this._dshConverge(); // 唯一心跳驱动 main 收敛
     } catch (e) {
-      this.logger && this.logger.warn && this.logger.warn('[lobos] supervise 异常: ' + ((e && e.message) || e));
+      this.logger && this.logger.warn && this.logger.warn('[dsh] supervise 异常: ' + ((e && e.message) || e));
     }
     this._shadowHeartbeatBeat(); // 影子聚合（每拍对新 tick 记录记账/事件）
     // R5 游离对象自检（低频 ~60s，只告警）：目录/期望之外的受管族进程与端口
@@ -40,19 +40,19 @@ class SuperviseView {
     };
   }
 
-  /** main(lobos) 当前状态快照（tick 探测后采样；纯读零副作用）。
+  /** main(dsh) 当前状态快照（tick 探测后采样；纯读零副作用）。
    * probeOk/probeHttpOk 即本拍真实探测（与旧 tick 决策同源）——影子与 actual 用同一输入。 */
   // ── 本节已拆分 → guard/supervisor/converge-view.js（§7.6 结构性重构）──
 
-  /** 把守卫对 LOBOS 的观测状态合成到 lifecycleManager 的 lobos 项（C3-3b G5：仅视图，不驱动守卫逻辑）。
+  /** 把守卫对 DSH 的观测状态合成到 lifecycleManager 的 dsh 项（C3-3b G5：仅视图，不驱动守卫逻辑）。
    * 数据源 = registry.get('main') 目录项：desired/phase 取应然与受管相位；
    * healthy/error/lastProbeAt 由观测合成（收敛探测镜像 process.lastProbe* 优先——与心跳
    * lastObserved 同源同义：L1 端口在线 + L2 HTTP 健康），不再经观测镜像喂入。 */
-  _syncLobosLifecycleView() {
+  _syncDshLifecycleView() {
     if (!this.lifecycleManager) return;
-    const lobos = this.lifecycleManager.get('lobos');
-    if (!lobos) return;
-    const e = this._lobosEntry();
+    const dsh = this.lifecycleManager.get('dsh');
+    if (!dsh) return;
+    const e = this._dshEntry();
     const ph = String(this._mPhase() || '');
     const desiredRunning = this._mDesired() === 'running';
     const ob = (e && e.lastObserved) || null;
@@ -63,34 +63,34 @@ class SuperviseView {
     const errText = !portUp ? '端口未监听' : (httpOk ? null : 'HTTP 不健康');
     const at = (proc && proc.lastProbeAt) || (ob && ob.at) || null;
     if (desiredRunning) {
-      lobos.wantRunning();
-      lobos._monitoring = true;
-      if (at) lobos.lastProbeAt = at;
+      dsh.wantRunning();
+      dsh._monitoring = true;
+      if (at) dsh.lastProbeAt = at;
       if (ph === 'RUNNING') {
-        lobos._setPhase('running');
-        lobos.startedAt = lobos.startedAt || new Date().toISOString();
-        lobos.healthy = healthy;
-        lobos.error = errText;
+        dsh._setPhase('running');
+        dsh.startedAt = dsh.startedAt || new Date().toISOString();
+        dsh.healthy = healthy;
+        dsh.error = errText;
       } else if (ph === 'STARTING' || ph === 'RESTARTING') {
-        lobos._setPhase('starting');
-        lobos.healthy = healthy;
-        lobos.error = errText;
+        dsh._setPhase('starting');
+        dsh.healthy = healthy;
+        dsh.error = errText;
       } else if (ph === 'BACKOFF') {
-        lobos._setPhase('starting');
-        lobos.error = '启动退避中';
+        dsh._setPhase('starting');
+        dsh.error = '启动退避中';
       } else {
-        lobos._setPhase('stopped');
-        lobos.healthy = false;
-        lobos.error = errText;
+        dsh._setPhase('stopped');
+        dsh.healthy = false;
+        dsh.error = errText;
       }
     } else {
-      lobos.desired = 'stopped';
-      lobos._monitoring = false;
-      lobos._setPhase('stopped');
-      lobos.healthy = false;
+      dsh.desired = 'stopped';
+      dsh._monitoring = false;
+      dsh._setPhase('stopped');
+      dsh.healthy = false;
     }
-    // guardian 唯一来源 = A 平面(lobos-main.json)：B 平面只读同步，不持有独立守护策略（2026-09 收敛）
-    lobos.guardian = this._mGuardian();
+    // guardian 唯一来源 = A 平面(dsh-main.json)：B 平面只读同步，不持有独立守护策略（2026-09 收敛）
+    dsh.guardian = this._mGuardian();
   }
 
   /** 独立 router-daemon 是否在运行（探测 ctl 端口监听者 cmdline 是否 router-daemon，2026-09 L3）。
@@ -251,9 +251,9 @@ class SuperviseView {
    * 纯进程/端口检查（无业务探活）。守卫退出不影响 daemon；本方法只补「期望运行时的异常拉起」。 */
 
   /** adopt 令牌接管（2026-09 第四轮修复，见 CHANGELOG「adopt 令牌接管」；曾因工作区回滚丢失，2026-09-04 依回归测试重建）：
-   * 守卫重启后新守卫 _adopt() 接管的是旧守卫 spawn 的主 LOBOS——被接管进程非本守卫 spawn，
+   * 守卫重启后新守卫 _adopt() 接管的是旧守卫 spawn 的主 DSH——被接管进程非本守卫 spawn，
    * 其启动令牌只打印在旧守卫已断开的 stdout 管道里（令牌服务不落盘）→ 主令牌永久不可达 →
-   * relay 无法用令牌向回环 LOBOS 换 lobos-auth cookie → 远程控制 401。
+   * relay 无法用令牌向回环 DSH 换 dsh-auth cookie → 远程控制 401。
    * 语义（RUNNING tick 每周期调用，幂等）：
    * - 非「被接管且主令牌空置」→ 复位观察并返回（本守卫 spawn 有 child 管道 / 令牌已就绪）
    * - 观察窗（config.tokenReclaimGraceMs，默认 20s）内令牌迟到（journald/补获）→ 复位观察不干预

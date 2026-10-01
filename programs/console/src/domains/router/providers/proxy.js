@@ -272,14 +272,14 @@ class ProxyProvider extends ProviderBase {
     try { child = spawn(launch.cmd[0], launch.cmd.slice(1), { stdio: ['ignore', 'pipe', 'pipe'], env: envVars, detached: true }); }
     catch (e) { return { ok: false, error: 'spawn 失败: ' + e.message }; }
     // 捕获反代实例 stdout/stderr（2026-09 诊断增强）：
-    // - 全量落盘：stdout/stderr 写独立文件 ~/.lobos/supervisor/logs/proxy-instance-<app>-<port>.log——
+    // - 全量落盘：stdout/stderr 写独立文件 ~/.dsh/supervisor/logs/proxy-instance-<app>-<port>.log——
     // 反代内部完整处理（收到请求→转上游→上游 chunk→错误）可见，卡死/400 时定位根因（曾因只滤
     // 关键词落事件丢失 info/debug → 每次异常只能外部猜 CPU/连接/时间线）；
     // - 关键词行仍落事件（保留既有诊断摘要）。
     const logFilter = /error|streaming|idle|timeout|ECONN|abort|socket|finish|truncat/i;
     let logStream = null;
     try {
-      // D7：优先用注入的数据目录（config.stateFile 派生），杜绝测试/多实例写进真实 ~/.lobos。
+      // D7：优先用注入的数据目录（config.stateFile 派生），杜绝测试/多实例写进真实 ~/.dsh。
       const baseDir = this.stateDir || require('../../platform/state-root').supervisorDir();
       const logDir = require('node:path').join(baseDir, 'logs');
       require('node:fs').mkdirSync(logDir, { recursive: true });

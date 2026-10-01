@@ -392,7 +392,7 @@ const auxMethods = {
         }
       }
       // 全局模型定价索引：全量抓取 models.dev 所有供应商（207 provider / 7482 模型）——
-      // 反代/直连转发的任意官方模型（agent/claude/gpt 系）按模型名查价
+      // 反代/直连转发的任意官方模型（deepseek/claude/gpt 系）按模型名查价
       const index = {};
       for (const [provKey, go] of Object.entries(j || {})) {
         const models = (go && go.models) ? go.models : (go || {});

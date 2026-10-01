@@ -53,7 +53,7 @@ function httpProbe(url, timeoutMs = 3000) {
         port: u.port || (u.protocol === 'https:' ? 443 : 80),
         path: u.pathname + u.search,
         timeout: timeoutMs,
-        headers: { 'User-Agent': 'lobos-supervisor-probe' },
+        headers: { 'User-Agent': 'dsh-supervisor-probe' },
       },
       (res) => {
         // 只关心状态码，body 直接排空避免连接悬挂

@@ -5,7 +5,7 @@ import babelParser from "@babel/eslint-parser";
 
 /**
  * ============================================================================
- * lobos-supervisor 控制面板 — ESLint（flat config, ESLint 9）
+ * dsh-supervisor 控制面板 — ESLint（flat config, ESLint 9）
  * ============================================================================
  * 分工（TS7 + typescript-eslint 不兼容的现实约束，2026-09 定案）：
  *  - 类型正确性   → tsc --noEmit（strict + noUnusedLocals，独立 gate）

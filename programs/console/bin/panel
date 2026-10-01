@@ -10,7 +10,7 @@ const http = require('node:http');
 
 // 包根解析（2026-09-11 修复 off-by-one）：
 //   本文件有两种运行形态，__dirname 语义不同：
-//     源码态：node <repo>/bin/lobos-supervisor            -> __dirname = <repo>/bin
+//     源码态：node <repo>/bin/dsh-supervisor            -> __dirname = <repo>/bin
 //     发行态：esbuild 打成 core.cjs 后 require 执行      -> __dirname = <pkg>（core.cjs 旁）
 //   旧实现硬写 path.join(__dirname, '..')：源码态正确，发行态却指向**包外**，
 //   导致模板路径错位、命令入口指向不存在的文件。
@@ -26,19 +26,19 @@ function findPackageRoot(start) {
   return path.join(__dirname, '..');
 }
 const ROOT = findPackageRoot(__dirname);
-// 产品状态根（独立于 LOBOS 的 ~/.lobos）——单一事实源 = src/platform/state-root.js。
+// 产品状态根（独立于 DSH 的 ~/.dsh）——单一事实源 = src/platform/state-root.js。
 const stateRoot = require('../src/platform/state-root');
 const SUPERVISOR_DIR = stateRoot.supervisorDir();
 const USER_CONFIG = path.join(SUPERVISOR_DIR, 'config.json');
 
 // 内嵌默认配置（发行态唯一模板源）：发布物不再依赖 ROOT/config.json 外置文件（fresh-HOME 自举必需）。
-// command 用 PATH 查找的 'lobos'（用户本机路径由 install/壳写入用户配置；nativeCommand 会注入 --port）。
+// command 用 PATH 查找的 'dsh'（用户本机路径由 install/壳写入用户配置；nativeCommand 会注入 --port）。
 // 配置单一事实源 = src/infra/config.js 的 DEFAULTS；此处仅补充 DEFAULTS 未含的「模板必填项」
-// command（LOBOS 启动命令）与 healthUrl（探活地址）——避免默认配置在多处复制漂移（2026-09 收敛）。
+// command（DSH 启动命令）与 healthUrl（探活地址）——避免默认配置在多处复制漂移（2026-09 收敛）。
 const DEFAULT_CONFIG = Object.assign(
   {},
   require('../src/platform/config').DEFAULTS,
-  { command: ['node', 'lobos', 'web'], healthUrl: 'http://127.0.0.1:3080/' }
+  { command: ['node', 'dsh', 'web'], healthUrl: 'http://127.0.0.1:3080/' }
 );
 const STATE_FILE = path.join(SUPERVISOR_DIR, 'state.json');
 const EVENTS_FILE = path.join(SUPERVISOR_DIR, 'events', 'guard.events.log');
@@ -46,10 +46,10 @@ const EVENTS_FILE = path.join(SUPERVISOR_DIR, 'events', 'guard.events.log');
 // 拉起与保活归 APK 容器 / Android Service，命令行入口由容器直接提供。
 
 // ---- 配置解析 ----
-// 解析顺序：LOBOS_SUPERVISOR_CONFIG 环境变量 → -c 参数 → 用户默认配置。
+// 解析顺序：DSH_SUPERVISOR_CONFIG 环境变量 → -c 参数 → 用户默认配置。
 // 注意：只有 daemon/install 会自动从模板创建配置；status 等查询命令不产生写副作用。
 function findConfigPath() {
-  const envCfg = process.env.LOBOS_SUPERVISOR_CONFIG;
+  const envCfg = process.env.DSH_SUPERVISOR_CONFIG;
   if (envCfg) return envCfg;
   const args = process.argv.slice(3);
   if (args[0] === '-c' && args[1]) return args[1];
@@ -92,7 +92,7 @@ function logFilePaths() {
   const base = SUPERVISOR_DIR;
   return {
     supervisor: cfg.supervisorLogFile ? cfg.supervisorLogFile.replace(/^~/, os.homedir()) : path.join(base, 'log', 'guard.log'),
-    lobos: cfg.lobosLogFile ? cfg.lobosLogFile.replace(/^~/, os.homedir()) : path.join(base, 'log', 'lobos.log'),
+    dsh: cfg.dshLogFile ? cfg.dshLogFile.replace(/^~/, os.homedir()) : path.join(base, 'log', 'dsh.log'),
     upgrade: cfg.upgradeLogFile ? cfg.upgradeLogFile.replace(/^~/, os.homedir()) : path.join(base, 'log', 'upgrade.log'),
     events: cfg.logFile ? cfg.logFile.replace(/^~/, os.homedir()) : EVENTS_FILE,
   };
@@ -113,11 +113,11 @@ function cmdLogs(name, lines) {
 }
 
 function printSelfVersion() {
-  // 统一走 infra/version.guardVersion()：SEA 形态由 esbuild --define 注入 __LOBOS_VERSION__，
+  // 统一走 infra/version.guardVersion()：SEA 形态由 esbuild --define 注入 __DSH_VERSION__，
   // 任意 cwd 自报正确版本；源码形态回退读仓库 package.json。独立读 ROOT/package.json 会让
   // SEA 二进制 --version 恒报 vunknown（2026-09 实证修复）。
   const { guardVersion } = require('../src/platform/version');
-  console.log('lobos-supervisor v' + guardVersion());
+  console.log('dsh-supervisor v' + guardVersion());
 }
 
 // ---- HTTP API 调用 ----
@@ -146,12 +146,12 @@ function apiRequest(method, apiPath) {
 
 // ---- 单实例锁：O_EXCL 原子创建 + pid 存活检测 + 崩溃残留清理 ----
 // 守卫是「唯一监管者」，两个守卫并存会双写状态文件、双 tick、竞态 spawn（双实例风险）。
-// 锁文件（可用 LOBOS_SUPERVISOR_LOCK_FILE 覆盖路径，供测试隔离/多实例部署）
-// 默认 ~/.lobos/supervisor/guard.lock 内容为本进程 pid：
+// 锁文件（可用 DSH_SUPERVISOR_LOCK_FILE 覆盖路径，供测试隔离/多实例部署）
+// 默认 ~/.dsh/supervisor/guard.lock 内容为本进程 pid：
 //  - O_EXCL 创建保证原子性（并发启动只有一个成功）；
 //  - 已存在时读 pid：进程存活 → 拒绝启动并退出非零；进程已死（崩溃残留）→ 清锁重试；
 //  - SIGTERM/SIGINT/exit 统一释放；SIGKILL 无法捕获，靠下次启动的 pid 存活检测自愈。
-const LOCK_FILE = process.env.LOBOS_SUPERVISOR_LOCK_FILE || path.join(SUPERVISOR_DIR, 'guard.lock');
+const LOCK_FILE = process.env.DSH_SUPERVISOR_LOCK_FILE || path.join(SUPERVISOR_DIR, 'guard.lock');
 
 function acquireLock() {
   fs.mkdirSync(SUPERVISOR_DIR, { recursive: true });
@@ -202,7 +202,7 @@ function releaseLock() {
 
 // ---- 子命令 ----
 function cmdDaemon() {
-  // ⚠ 原「前向自愈迁移」（旧 PC 布局 ~/.lobos/supervisor → 产品状态根）已删除：
+  // ⚠ 原「前向自愈迁移」（旧 PC 布局 ~/.dsh/supervisor → 产品状态根）已删除：
   //   本仓是全新安卓内核仓，不存在需要从 PC 布局迁移的存量数据。
   if (!acquireLock()) {
     console.error('[supervisor] 已有守卫实例在运行（锁 ' + LOCK_FILE + '），本进程退出。');
@@ -296,7 +296,7 @@ function cmdStatus() {
 function printStatus(s) {
   console.log('desired:          ' + s.desired);
   console.log('phase:            ' + s.phase);
-  console.log('lobosPid:           ' + (s.lobosPid || '—') + (s.adopted ? ' (adopted)' : ''));
+  console.log('dshPid:           ' + (s.dshPid || '—') + (s.adopted ? ' (adopted)' : ''));
   console.log('guardPid:         ' + s.guardPid);
   console.log('lastProbe:        ' + (s.lastProbeAt || '—') + '  ok=' + s.lastProbeOk);
   console.log('restartCount:     ' + s.restartCount);
@@ -314,9 +314,9 @@ function printStatus(s) {
 }
 
 function cmdControl(action) {
-  // 唯一入口：main 启停经统一生命周期 /lifecycle/lobos/{start|stop|restart}。
+  // 唯一入口：main 启停经统一生命周期 /lifecycle/dsh/{start|stop|restart}。
   // ⚠ 旧 /start|/stop|/restart 路由与其"旧版 daemon 回退"兼容分支已删除（新仓无旧客户端）。
-  apiRequest('POST', '/lifecycle/lobos/' + action).then(finishControl);
+  apiRequest('POST', '/lifecycle/dsh/' + action).then(finishControl);
 }
 
 function finishControl(r) {
@@ -339,7 +339,7 @@ function cmdInstall() {
     console.log('[install] 配置文件已存在，跳过: ' + USER_CONFIG);
   }
   // 安装到此为止：服务定义、自启、命令行入口一律归 APK 容器，内核只准备自己需要的 config。
-  console.log('[install] 内核本体配置已就绪。启动由 APK 容器 / Android Service 发起：lobos-supervisor daemon');
+  console.log('[install] 内核本体配置已就绪。启动由 APK 容器 / Android Service 发起：dsh-supervisor daemon');
 }
 
 function cmdEvents() {
@@ -369,7 +369,7 @@ function cmdVersion() {
     console.log('已安装版本: ' + (v.installed || '—'));
     console.log('最新版本:   ' + (v.latest || '—'));
     console.log('上次检查:   ' + (v.lastCheckAt || '—'));
-    if (v.updateAvailable) console.log('→ 有可用更新！执行: lobos-supervisor upgrade');
+    if (v.updateAvailable) console.log('→ 有可用更新！执行: dsh-supervisor upgrade');
     else if (!v.checking) console.log('已是最新。');
   });
 }
@@ -404,7 +404,7 @@ function cmdUpgrade(requested) {
       console.log('升级未被接受:', body || 'HTTP ' + code);
       process.exit(1);
     }
-    console.log('升级已开始，跟踪进度（先停 LOBOS → 安装 → 自动拉起，需数分钟）…');
+    console.log('升级已开始，跟踪进度（先停 DSH → 安装 → 自动拉起，需数分钟）…');
     const started = Date.now();
     let lastState = '';
     const timer = setInterval(() => {
@@ -423,7 +423,7 @@ function cmdUpgrade(requested) {
         }
         if (Date.now() - started > 20 * 60000) {
           clearInterval(timer);
-          console.log('超时未结束，稍后用 lobos-supervisor status 查看。');
+          console.log('超时未结束，稍后用 dsh-supervisor status 查看。');
           process.exit(1);
         }
       });
@@ -432,21 +432,21 @@ function cmdUpgrade(requested) {
 }
 
 function usage() {
-  console.log('用法: lobos-supervisor <command> [options]');
+  console.log('用法: dsh-supervisor <command> [options]');
   console.log('');
   console.log('命令:');
   console.log('  daemon [-c <config>]      启动守护进程（由 APK 容器 / Android Service 调用）');
   console.log('  status [-c <config>]      查看当前状态');
-  console.log('  start [-c <config>]       设置 desired=running 并启动 LOBOS');
-  console.log('  stop [-c <config>]        设置 desired=stopped 并停止 LOBOS');
+  console.log('  start [-c <config>]       设置 desired=running 并启动 DSH');
+  console.log('  stop [-c <config>]        设置 desired=stopped 并停止 DSH');
   console.log('  restart [-c <config>]     立即重启一次（不改变 desired）');
   console.log('  install                   安装：准备内核本体配置（服务/自启归 APK 容器）');
   console.log('  events [N]                显示最近 N 条事件日志（默认 50）');
-  console.log('  logs [supervisor|lobos|upgrade|events] [N]');
+  console.log('  logs [supervisor|dsh|upgrade|events] [N]');
   console.log('                            查看对应运行日志末尾（默认 supervisor 50 行）');
   console.log('  version [-c <config>]     查看 已安装/最新 版本与更新状态');
   console.log('  upgrade [version]         一键升级到最新版（或指定版本），失败自动回滚');
-  console.log('环境变量 LOBOS_SUPERVISOR_CONFIG 等价于 -c。');
+  console.log('环境变量 DSH_SUPERVISOR_CONFIG 等价于 -c。');
   process.exit(1);
 }
 
@@ -481,7 +481,7 @@ switch (cmd) {
     // 发布物内核冒烟：纯逻辑自检（不依赖资产目录/网络），供构建后验证产物可自举。
     {
       const { guardVersion } = require('../src/platform/version');
-      console.log('lobos-supervisor core self-check');
+      console.log('dsh-supervisor core self-check');
       console.log('guardVersion=' + (typeof guardVersion === 'function' ? guardVersion() : 'unknown'));
       console.log('node=' + process.version);
       console.log('platform=' + process.platform + ' arch=' + process.arch);

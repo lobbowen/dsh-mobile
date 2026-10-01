@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 'use strict';
 
-// 原生件供给门禁：真机上 npm 装不到的 lobos 平台件，每一项必须有归宿；registry 现实一变就红。
+// 原生件供给门禁：真机上 npm 装不到的 dsh 平台件，每一项必须有归宿；registry 现实一变就红。
 //
-// 缺这个门禁的代价已经付过一次：lobos 的平台可选依赖按 os/cpu 过滤，真机装不到的那几项
+// 缺这个门禁的代价已经付过一次：dsh 的平台可选依赖按 os/cpu 过滤，真机装不到的那几项
 // 只存在于人脑和注释里，于是「libnode 无 RUNPATH 让 run_code 全灭」和「九个平台件没人认领」
-// 这类事只能在真机上炸。lobos 还会自升级，升级换依赖时红在 CI 是唯一能提前显形的地方。
+// 这类事只能在真机上炸。dsh 还会自升级，升级换依赖时红在 CI 是唯一能提前显形的地方。
 //
 // 双向对账（与 native-assets 同源的道理）：
 //   现场缺、表里没有   ⇒ 红：新原生件无人供给，就是下一次工具静默消失
@@ -27,8 +27,8 @@ const ROOT = path.join(__dirname, '..');
 
 /** impl 路径解析：内核内相对优先，其次仓内相对（C 的实现在 APK 侧，不在内核里）。 */
 function implPath(u) {
-  const inProgram = path.join(ROOT, u.impl);
-  if (fs.existsSync(inProgram)) return inProgram;
+  const inKernel = path.join(ROOT, u.impl);
+  if (fs.existsSync(inKernel)) return inKernel;
   return path.join(ROOT, '..', '..', u.impl);
 }const REPO_ROOT = path.join(ROOT, '..', '..');
 const NATIVE_DIR = path.join(ROOT, 'src', 'assembler');
@@ -275,7 +275,7 @@ if (table) {
   //   本体（bits）归 B 种子 / C 内容 / npm 树；落位规则与能力判据归 E（本目录的 supply-table.json）。
   const D2_DIR = path.join(ROOT, 'src', 'd2');
   check('D2 平台件库在场（pieces.json + artifacts.js）',
-    fs.existsSync(path.join(D2_DIR, 'pieces.json')) && fs.existsSync(path.join(D2_DIR, 'artifacts.js')), 'program/src/d2/');
+    fs.existsSync(path.join(D2_DIR, 'pieces.json')) && fs.existsSync(path.join(D2_DIR, 'artifacts.js')), 'kernel/src/d2/');
   check('D2 不再住 E 的目录（assembler/platform-artifacts.js 必须已迁走）',
     !fs.existsSync(path.join(NATIVE_DIR, 'platform-artifacts.js')), 'assembler/ 里还有 D2 的文件');
   let d2 = null;
@@ -304,7 +304,7 @@ if (table) {
       /require\('\.\.\/d2\/artifacts'\)/.test(mgrSrc),
     'manager 未接 D2');
 
-  // ── C 层：共享开发环境清单（与上面「lobos 的平台件差集」分开，语义不同）──
+  // ── C 层：共享开发环境清单（与上面「dsh 的平台件差集」分开，语义不同）──
   // 为什么单列：开发环境是**一层**（共享、与产品无关），它的完整度要能被机器读出来；
   // 缺件要如实登记（含到期豁免），而不是等 agent 跑到一半才发现「这台没有 git」。
   const envUnits = table.envUnits || [];
@@ -455,8 +455,8 @@ if (ref.names && host.names && table) {
   const failed = results.filter((x) => !x);
 // ── 口径对账：定稿的运行时/工具清单 ↔ 登记表每格（防「位置漂了」再发生）────────────
 // 由来（2026-09-28 用户复核）：我把 npm 摆进种子组、把 shell 写成 runtime、把 node/go/java 的 layer
-//   写成 seed —— 与 docs/contracts/layout.json 的 C.shape 明文口径冲突，且与登记表自己的 envKinds
-//   定义（supply-table.json 末段，kind 词汇表）自相矛盾。这条规则把口径变成机检：清单里每一项都必须在册、且 kind 对得上。
+//   写成 seed —— 与 docs/contracts/layout.json 的 C.shape 明文口径冲突，且与登记表自己第 386 行
+//   的定义自相矛盾。这条规则把口径变成机检：清单里每一项都必须在册、且 kind 对得上。
 // 匹配容错：文档写 python，格是 env-python3/bin=python3 —— 按前缀认，不要求逐字相同。
 try {
   const layout = JSON.parse(fs.readFileSync(path.join(ROOT, '..', '..', 'docs', 'contracts', 'layout.json'), 'utf8'));

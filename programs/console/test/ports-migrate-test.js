@@ -26,7 +26,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   fs.writeFileSync(oldF, JSON.stringify({ records: [
     { port: 28140, role: 'proxyInstance', owner: 'proxy:k1' },
     { port: 28142, role: 'providerApi', owner: 'providerApi:p1' },
-    { port: 3080, role: 'lobos-main', owner: 'system:lobos-main' },
+    { port: 3080, role: 'dsh-main', owner: 'system:dsh-main' },
     { port: 3081, role: 'user', owner: 'inst:main' },
   ] }, null, 2));
   const moved = ports.migrateRouterSegment(oldF, newF);
@@ -44,7 +44,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   // 目标已有记录时合并去重
   fs.writeFileSync(oldF, JSON.stringify({ records: [
     { port: 28141, role: 'proxyInstance', owner: 'proxy:k2' },
-    { port: 3080, role: 'lobos-main', owner: 'system:lobos-main' },
+    { port: 3080, role: 'dsh-main', owner: 'system:dsh-main' },
   ] }, null, 2));
   fs.writeFileSync(newF, JSON.stringify({ records: [{ port: 28140, role: 'proxyInstance', owner: 'proxy:k1' }] }, null, 2));
   const moved3 = ports.migrateRouterSegment(oldF, newF);

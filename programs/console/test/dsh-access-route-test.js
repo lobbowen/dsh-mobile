@@ -2,7 +2,7 @@
 'use strict';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// GET /lobos/access 行为门禁（2026-09-23 真机反馈：手机小屏面板进不了 LOBOS）
+// GET /dsh/access 行为门禁（2026-09-23 真机反馈：手机小屏面板进不了 DSH）
 //
 // 锁定不变量：
 //   X-1 回环 + 已捕获令牌 → 200 { ok, url }，url = 回环 origin + ?token=<令牌>
@@ -10,7 +10,7 @@
 //   X-3 令牌未捕获 → 409 明确报错（不返回无令牌 URL 让用户吃 401）
 //   X-4 端口跟随 config.targetPort（重推导后不返回旧端口）
 //   X-5 真实 HTTP 贯通：createServer 分派到 lifecycle 域（owns 登记生效）
-//   X-6 契约面登记：/lobos/access 在 SURFACE（api-surface 双向一致之外再钉消费者）
+//   X-6 契约面登记：/dsh/access 在 SURFACE（api-surface 双向一致之外再钉消费者）
 //   X-7 OPTIONS 预检 → 204 零 CORS 且不崩溃（shellOrigin 未声明遗留，实证曾打挂进程）
 // 依赖注入方式：ctx 形状即注入点（identity/sup/tokOf 全部构造后传入）；
 // 绝不 patch 任何模块导出（安全门禁 A）。
@@ -24,7 +24,7 @@ const lifecycle = require(path.join(ROOT, 'src', 'api', 'lifecycle.js'));
 const { SURFACE } = require(path.join(ROOT, 'src', 'api', 'surface.js'));
 const { createServer } = require(path.join(ROOT, 'src', 'api', 'index.js'));
 
-const TOKEN = 'Ab0lobosTk_-9x';
+const TOKEN = 'Ab0dshTk_-9x';
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
@@ -41,9 +41,9 @@ function callHandle({ loopback, sup, token }) {
   let out = null;
   const ctx = {
     sup,
-    req: { method: 'GET', url: '/lobos/access', headers: {} },
+    req: { method: 'GET', url: '/dsh/access', headers: {} },
     res: {},
-    pathname: '/lobos/access',
+    pathname: '/dsh/access',
     identity: { loopback: loopback !== false, trusted: loopback !== false },
     send: (code, obj) => { out = { code, obj }; },
     collectBody: () => {},
@@ -80,15 +80,15 @@ async function main() {
   await new Promise((res) => server.listen(0, '127.0.0.1', res));
   const port = server.address().port;
   const body = await new Promise((res, rej) => {
-    http.get('http://127.0.0.1:' + port + '/lobos/access', (r) => {
+    http.get('http://127.0.0.1:' + port + '/dsh/access', (r) => {
       let s = '';
       r.on('data', (d) => { s += d; });
       r.on('end', () => res({ code: r.statusCode, body: s }));
     }).on('error', rej);
   });
   const parsed = JSON.parse(body.body);
-  check('X-5 真实 HTTP GET /lobos/access → 200 + URL', body.code === 200 && parsed.ok === true && parsed.url === 'http://127.0.0.1:3080/?token=' + TOKEN, body.code + ' ' + parsed.url);
-  check('X-5 owns 登记生效', lifecycle.owns('/lobos/access') === true, 'ok');
+  check('X-5 真实 HTTP GET /dsh/access → 200 + URL', body.code === 200 && parsed.ok === true && parsed.url === 'http://127.0.0.1:3080/?token=' + TOKEN, body.code + ' ' + parsed.url);
+  check('X-5 owns 登记生效', lifecycle.owns('/dsh/access') === true, 'ok');
 
   // X-7 OPTIONS 预检不得崩溃（2026-09-23 实证：曾引用未声明的 shellOrigin → 任何预检
   // ReferenceError → uncaughtException，一个浏览器 OPTIONS 即可打挂守卫 API 进程）
@@ -102,9 +102,9 @@ async function main() {
   check('X-7 OPTIONS 零 CORS（不回 Allow-*）', opt.acao === undefined, 'clean');
   server.close();
 
-  // X-6 契约面登记（消费者 = 面板「进入 LOBOS」）
-  const e = SURFACE.find((x) => x.path === '/lobos/access');
-  check('X-6 SURFACE 登记 /lobos/access', Boolean(e) && e.methods.includes('GET') && e.consumers.some((c) => /UI/.test(c)), e && e.note);
+  // X-6 契约面登记（消费者 = 面板「进入 DSH」）
+  const e = SURFACE.find((x) => x.path === '/dsh/access');
+  check('X-6 SURFACE 登记 /dsh/access', Boolean(e) && e.methods.includes('GET') && e.consumers.some((c) => /UI/.test(c)), e && e.note);
 
   const failed = results.filter((r) => !r);
   console.log('\n结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');

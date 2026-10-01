@@ -1,6 +1,6 @@
 /**
  * 运行状态面板（Overview 右侧栏）：
- * 服务端口运行状态 —— 由 /ports 端口注册表反映各服务（LOBOS 主干/管家 API/路由 daemon/登录回调）
+ * 服务端口运行状态 —— 由 /ports 端口注册表反映各服务（DSH 主干/管家 API/路由 daemon/登录回调）
  *       真实监听状态。
  * 归属语义着色：system(核心服务) / managed(守护进程) / oauth(登录回调)。
  * ⚠ 已删除的端口段（勿回潮）：沙箱实例 inst / 局域网守护 lan —— 对应域已整体移除。
@@ -12,13 +12,13 @@ import { Card, CardTitle, Pill } from "./widgets";
 import { cn } from "../../framework/utils";
 
 function roleTone(role: string): "ok" | "boot" | "warn" | "off" {
-  if (role === "lobos-main" || role === "supervisor-api") return "boot";
+  if (role === "dsh-main" || role === "supervisor-api") return "boot";
   if (role.startsWith("managed:")) return "boot";
   return "off";
 }
 function roleLabel(r: PortRecord): string {
   const map: Record<string, string> = {
-    "lobos-main": "LOBOS 主实例",
+    "dsh-main": "DSH 主实例",
     "supervisor-api": "管家 API",
     oauthCallback: "登录回调",
     proxyInstance: "反代实例",

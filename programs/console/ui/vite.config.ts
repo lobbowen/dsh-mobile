@@ -6,7 +6,7 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig(() => ({
   plugins: [react(), tailwindcss()],
 
-  // 单一产品入口：supervisor.html（lobos-supervisor 控制面板，同源托管于 :3100）
+  // 单一产品入口：supervisor.html（dsh-supervisor 控制面板，同源托管于 :3100）
   server: {
     port: 1420,
     strictPort: true,

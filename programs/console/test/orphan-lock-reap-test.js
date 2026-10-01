@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
-// 孤儿锁回收回归（2026-09-22，真机 lobos 重启死循环根因）：
-// lobos 被 SIGKILL 后留下 <$HOME>/.lobos/**.lock（内容=持锁 pid），下次启动等锁 30s 后
+// 孤儿锁回收回归（2026-09-22，真机 dsh 重启死循环根因）：
+// dsh 被 SIGKILL 后留下 <$HOME>/.dsh/**.lock（内容=持锁 pid），下次启动等锁 30s 后
 // 抛 "plugin tree failed to load" 退出 → 守卫判失败再杀再启 → 永不就绪。
 // 守卫 spawn 前回收持锁 pid 已死的锁；活 pid / 非 pid 内容 / node_modules 内一律不动。
 
@@ -18,7 +18,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 
 (async () => {
   const { Supervisor } = require(path.join(ROOT, 'src', 'supervisor'));
-  const reap = Supervisor.prototype._reapOrphanLobosLocks;
+  const reap = Supervisor.prototype._reapOrphanDshLocks;
   check('方法已注入 Supervisor.prototype', typeof reap === 'function');
 
   const events = [];
@@ -28,7 +28,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   // 确定已死的 pid：跑一个立即退出的子进程，wait 后其 pid 不再存活
   const dead = spawnSync(process.execPath, ['-e', '']).pid;
 
-  const home = path.join(TMP, 'home', '.lobos');
+  const home = path.join(TMP, 'home', '.dsh');
   const mk = (rel, content) => { const p = path.join(home, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, content); return p; };
   const fStale = mk('.credentials.yaml.lock', dead + '\n');
   const fEmpty = mk('.empty.lock', '');
@@ -40,7 +40,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   const fNotLock = mk('.credentials.yaml', 'keep: me\n');
 
   process.env.HOME = path.join(TMP, 'home');
-  delete process.env.LOBOS_HOME;
+  delete process.env.DSH_HOME;
   const reaped = reap.call(self);
 
   check('死 pid 根级锁被回收', !fs.existsSync(fStale));
@@ -56,14 +56,14 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   check('事件带持锁 pid（空锁为 null）', events.some((e) => e.d.pid === dead) && events.some((e) => e.d.pid === null && e.d.file.endsWith('.empty.lock')));
   check('回收有 warn', warns.length === 1 && warns[0].includes('orphan'), JSON.stringify(warns));
 
-  // LOBOS_HOME 覆盖优先（与 lobos 自身 resolveLobosHome 同规则）
+  // DSH_HOME 覆盖优先（与 dsh 自身 resolveDshHome 同规则）
   const alt = path.join(TMP, 'alt-home-dir');
   fs.mkdirSync(alt, { recursive: true });
   fs.writeFileSync(path.join(alt, '.credentials.yaml.lock'), dead + '\n');
-  process.env.LOBOS_HOME = alt;
+  process.env.DSH_HOME = alt;
   const reaped2 = reap.call(self);
-  check('LOBOS_HOME 覆盖生效', reaped2.length === 1 && !fs.existsSync(path.join(alt, '.credentials.yaml.lock')));
-  check('HOME 下原锁不受 LOBOS_HOME 影响', fs.existsSync(fTooDeep)); // 上一轮未回收的仍在原位
+  check('DSH_HOME 覆盖生效', reaped2.length === 1 && !fs.existsSync(path.join(alt, '.credentials.yaml.lock')));
+  check('HOME 下原锁不受 DSH_HOME 影响', fs.existsSync(fTooDeep)); // 上一轮未回收的仍在原位
 
   // 幂等：无锁可收时空清单、零事件
   events.length = 0;

@@ -226,7 +226,7 @@ function requestHasAccessKey(req, key) {
  * GET /status → 状态摘要
  * GET /events?after=&limit=→ 增量事件
  * POST /start → desired=running
- * POST /stop → desired=stopped（停 LOBOS 并保持不拉起）
+ * POST /stop → desired=stopped（停 DSH 并保持不拉起）
  * POST /restart → 立即重启一次（不改变 desired）
  * GET /version → 已安装/最新版本
  * GET /upgrade/status → 升级状态机详情
@@ -245,9 +245,9 @@ function createServer(sup) {
       res.end(body);
     };
 
-    // 每实例的 LOBOS 访问令牌（随实例重启轮换）只有一个权威来源：唯一令牌节点
-    // LobosTokenService（原生与沙箱共用同一套获取/分发，见 src/platform/token.js）。生成直连认证 URL
-    // 时按目标查取，绝不跨实例借用（主实例令牌套到沙箱实例 → 401 “lobos web authentication required”）。
+    // 每实例的 DSH 访问令牌（随实例重启轮换）只有一个权威来源：唯一令牌节点
+    // DshTokenService（原生与沙箱共用同一套获取/分发，见 src/platform/token.js）。生成直连认证 URL
+    // 时按目标查取，绝不跨实例借用（主实例令牌套到沙箱实例 → 401 “dsh web authentication required”）。
     const tokOf = (id) => {
       try { if (sup.tokenService && typeof sup.tokenService.get === 'function') return sup.tokenService.get(id) || ''; } catch {}
       return '';
@@ -271,7 +271,7 @@ function createServer(sup) {
     // 预检方读不到任何 Allow-* 也就驱动不了写操作）。
     // 2026-09-23 实证修复：此分支曾引用**从未声明**的 `shellOrigin`（PC 壳白名单遗留）——
     // 任何 OPTIONS 请求都 ReferenceError → uncaughtException（守卫 bin 策略 3 次自杀重启），
-    // 一个浏览器预检即可打挂 API。门禁钉在 lobos-access-route-test.js（X-7）。
+    // 一个浏览器预检即可打挂 API。门禁钉在 dsh-access-route-test.js（X-7）。
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       return res.end();
@@ -323,7 +323,7 @@ function createServer(sup) {
         return serveStatic(res, 'host.html');
       }
       const file = pathname.slice(1); // 去掉前导 /
-      if (file.startsWith('assets/') || file === 'lobos-logo.svg' || file === 'host-frame.js') {
+      if (file.startsWith('assets/') || file === 'dsh-logo.svg' || file === 'host-frame.js') {
         return serveStatic(res, file);
       }
     }

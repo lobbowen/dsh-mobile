@@ -5,14 +5,14 @@
 // 运行期启动契约（壳写、内核读）门禁（2026-09-15）
 //
 // ## 解决的问题
-//   内核自身也要执行 npm（自更新 / 装 LOBOS / 插件）。旧实现用 ambient PATH 的裸 npm
+//   内核自身也要执行 npm（自更新 / 装 DSH / 插件）。旧实现用 ambient PATH 的裸 npm
 //   与 process.env；GUI/服务环境的 PATH 常不含 nvm/fnm 的 npm → 「壳能装、内核自己装不了」。
-//   现统一读壳投放的 ~/.lobos/supervisor/runtime.json（schema 2）。
+//   现统一读壳投放的 ~/.dsh/supervisor/runtime.json（schema 2）。
 //
 // ## 锁定不变量
 //   R-1  read() 解析 schema2/兼容 schema1；缺失/损坏返回 null（绝不抛）
 //   R-2  npmInvocation()/nodeBin() 契约优先、不可用退回 fallback；
-//        npmEntry（容器投 npm-cli.js）时恒为 node 代跑形态 {bin:'node', args:[entry]}
+//        npmEntry（容器投 npm-cli.js）时恒为 node 代跑形态 {bin:node, args:[entry]}
 //   R-3  withPath() 把 nodeBinDir 置于 PATH 首位（分隔符跨平台）
 //   R-4  消费点接入：dist/index.js 的 npm 与 env、env-catalog 的 minNode
 //   R-5  反向：无契约时退回 ambient（不空转）
@@ -29,7 +29,7 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  <- ' + x : '')); };
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'rtc-'));
-// 产品状态根隔离（独立于 LOBOS）：runtime.json 落在 <LOBOS_SUPERVISOR_HOME>/supervisor。
+// 产品状态根隔离（独立于 DSH）：runtime.json 落在 <LOBOS_SUPERVISOR_HOME>/supervisor。
 process.env.LOBOS_SUPERVISOR_HOME = TMP;
 const SUP = path.join(TMP, 'supervisor');
 fs.mkdirSync(SUP, { recursive: true });

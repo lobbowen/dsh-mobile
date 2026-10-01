@@ -19,8 +19,8 @@ const { guardVersion } = require('../../platform/version'); // 拆分携带：�
 function envCatalogSummary(that) {
   const cat = new EnvStatus(that.config);
   const extra = {};
-  const d = that.lobosenvStatus();
-  extra.lobos = cat.lobosEntry(d.binOk, d.installed, d.bin);
+  const d = that.dshenvStatus();
+  extra.dsh = cat.dshEntry(d.binOk, d.installed, d.bin);
   return cat.summary(extra);
 }
 
@@ -50,7 +50,7 @@ class SettingsView {
       // 此前注释已承诺该字段，但实现未暴露，导致 UI 只能在后端报错后才知道。
       capabilities: (() => { try { return require('../../platform/os/index').capabilities(); } catch { return null; } })(),
       // Android 内核：桌面壳（Tauri）已删除；`shellWatchdog` 观测快照随之移除——
-      // 现由 APK 容器 / Android Service 保活，内核侧不再持有桌面壳看护状态（见 docs/components/program-android-plan.md）。
+      // 现由 APK 容器 / Android Service 保活，内核侧不再持有桌面壳看护状态（见 docs/components/kernel-android-plan.md）。
     };
   }
 
@@ -92,7 +92,7 @@ class SettingsView {
   // 随同删除：`platform/deploy.js`（SEA/launcher/源码三形态判定）、
   // `corePackageName` 配置与 env-catalog 的 selfUpdate 条目。
 
-  /** 读磁盘上**运行位**的自报版本（A1 校验用）：spawn `--version`，解析 "lobos-supervisor v<ver>"。
+  /** 读磁盘上**运行位**的自报版本（A1 校验用）：spawn `--version`，解析 "dsh-supervisor v<ver>"。
    *
    * 用途：容器 OTA 写入新内核后、守卫尚未重启时，面板可显示「新版本已就位，待重启生效」
    * （diskVersion ≠ 进程运行版本 ⇒ updatePending）。
@@ -106,16 +106,16 @@ class SettingsView {
     if (!target) return null;
     try {
       const out = ex.runOut(target, ['--version'], { timeoutMs: 20000 });
-      // 2026-09-11 修复（K9）：原为 /lobos-supervisor v([^s]+)/ —— 字符类 [^s] 的意图
+      // 2026-09-11 修复（K9）：原为 /dsh-supervisor v([^s]+)/ —— 字符类 [^s] 的意图
       // 是「非空白」，却写成了「非字母 s」：版本串里一旦出现 s 就截断，
       // 且 \n 不在排除集内，正则会跨行吞字符。结果污染自更新状态判定。
-      const m = /lobos-supervisor v([^\s]+)/.exec(out);
+      const m = /dsh-supervisor v([^\s]+)/.exec(out);
       return m ? m[1] : null;
     } catch { return null; }
   }
 
-  // ---- LOBOS 即安即用：本体安装状态判定（命令指向的 bin 可执行 + 已管实例版本）----
-  lobosenvStatus() {
+  // ---- DSH 即安即用：本体安装状态判定（命令指向的 bin 可执行 + 已管实例版本）----
+  dshenvStatus() {
     let bin = null, binOk = false, installed = null, cmdOk = false;
     try {
       const cmd0 = Array.isArray(this.config.command) ? this.config.command : [];
@@ -128,15 +128,15 @@ class SettingsView {
     return { installed, bin: bin || null, binOk, managed: cmdOk, phase: this._mPhase() || null };
   }
 
-  // ---- 管家自身版本检查（与 LOBOS 更新解耦）：本地仓库 git 视角，配了远程才 fetch 比对 ----
+  // ---- 管家自身版本检查（与 DSH 更新解耦）：本地仓库 git 视角，配了远程才 fetch 比对 ----
   /** VCS 根解析：从**包根**上溯找最近的「外层」.git（排除自身嵌套仓）。
    *
-   * 修复（2026-09）：原实现命中 lobos-supervisor/.git 嵌套仓，其 HEAD 与真实外层仓脱节
+   * 修复（2026-09）：原实现命中 dsh-supervisor/.git 嵌套仓，其 HEAD 与真实外层仓脱节
    * （嵌套仓 06:29 早于外层 07:15 提交）→ UI 版本/commit 失真。
    * 找不到外层仓时回退包根（行为与历史一致，commit 解析失败仍为 null）。
    *
    * 二次修复（2026-09-11）：包根解析原为 `path.resolve(__dirname, '..')` 并注释
-   * 「= lobos-supervisor/」，但 §7.6 拆分把本文件从 `src/` 移到 `src/guard/supervisor/`，
+   * 「= dsh-supervisor/」，但 §7.6 拆分把本文件从 `src/` 移到 `src/guard/supervisor/`，
    * 该表达式实际得到 `src/guard/` —— **注释与行为已不符**，
    * 使「排除嵌套 .git」的判据作用在错误目录（真正的包根 .git 不再被排除）。
    * 改用 srcpath.resolvePackageRoot()（按 package.json 上溯，不受层级调整影响）。 */

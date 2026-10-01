@@ -1,23 +1,43 @@
-# Lob OS 控制面板 Program
+# dsh 控制面板 Program（本仓 programs/console 树）
 
-# 依赖：设备端由内核按 supply-table 现装，仓内不留
+# 依赖
 node_modules/
 
-# 面板前端的构建产物。program-ota.yml 打包前现场 `npm run build` 产出它，
-# 再由 container/engine/src/program-bundle.js 收进包里 —— 入库等于把某一次构建的结果钉成源码。
+# 构建产物（可重新生成，绝不入库）
+dist/release
+dist/sea
+dist/npm
+# 面板前端产物：program-ota.yml 打包前现场 `npm run build` 产出，再由 program-bundle 收进包。
 ui/dist/
+# 这里不写 `**/dist/`：本树的 `src/domains/dist/` 是**源码域**（npm 分发/镜像源测速），
+# 被 src/supervisor.js、src/assembler/manager.js、src/api/index.js 直接 require。
+# `.47` 用通配吞过它一次，测试链在 require('../dist/index') 处断裂、交接包缺件。
+# 构建产物按名字点，不许按目录名一网打尽。
 
-# *.version / 旧 C 层与 sea 打包的输出目录（可重建）
-dist/release/
-dist/sea/
-dist/npm/
+# React UI 构建产物
+ui-react/
+**/ui-react/
 
-# 不要把 `dist` 写成一条通配。本目录树里的 `src/domains/dist/` 是**活源码**
-# （被 src/supervisor.js、src/assembler/manager.js、src/api/index.js 直接 require），
-# 随 Program 包一起投出去；`.47` 那版忽略表里的一行 `**/dist/` 把它整个吞掉过，
-# 结果是内核测试链在 require('../dist/index') 处断裂、交接包里缺件。
-# 构建产物只有上面点名的这三处，按名字点，不按目录名一网打尽。
+# 测试残留/临时目录
+tmp-iso/
 
+# 系统/编辑器
+.DS_Store
 *.log
+
+# 本地运行/状态（Agent 会话等，不入库）
+.dsh/
+.memory/
+**/.dsh/
+**/.memory/
+
+# 签名密钥与密钥材料（绝不入库：私钥泄露 = 账号被接管）
+*.key
+*.key.pub
+.ssh/
+*.pem
+id_ed25519*
+id_rsa*
+
+# 临时文件
 *.tmp
-.cache/

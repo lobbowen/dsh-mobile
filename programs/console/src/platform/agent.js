@@ -20,7 +20,7 @@ const path = require('node:path');
 const stateRoot = require('./state-root');
 
 const DEFAULTS = require('./agent-defaults.json');
-const DEFAULT_ID = 'lobos';
+const DEFAULT_ID = 'dsh';
 const REQUIRED = ['id', 'npmPackage', 'entry', 'profileName', 'homeDirName'];
 let cached = null;
 
@@ -66,11 +66,11 @@ function seed(id, d) {
 
 /**
  * 载入某产品的声明。**不抛**（缺/坏一律退回默认值），用 source 如实说明来源。
- * @param {string} [id] 产品 id（缺省 LOBOS_AGENT 或 'lobos'）
+ * @param {string} [id] 产品 id（缺省 DSH_AGENT 或 'dsh'）
  * @returns {{id:string, source:string, file:string}} 声明（含诊断字段 source/file）
  */
 function load(id) {
-  const want = id || process.env.LOBOS_AGENT || DEFAULT_ID;
+  const want = id || process.env.DSH_AGENT || DEFAULT_ID;
   if (cached && cached.id === want && cached.file === instanceFile(want)) return cached;
   const file = instanceFile(want);
   let out = null;

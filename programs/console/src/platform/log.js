@@ -1,7 +1,7 @@
 'use strict';
 
 // 分级日志 + 统一轮转：工业级日志地基。
-// 三路独立文件（守卫 / LOBOS 输出 / 升级输出），同一轮转策略：
+// 三路独立文件（守卫 / DSH 输出 / 升级输出），同一轮转策略：
 // 超过 maxBytes 改名 .1 保留一代，绝不无限增长。
 // 同时镜像到 stderr —— 容器 / Android Service 侧按 logcat 收敛。
 
@@ -40,7 +40,7 @@ class Rotator {
       console.error('[logger] rotate failed:', e.message);
     }
     try {
-      // mode 仅作用于文件首次创建：日志文件（含 lobos 输出的启动令牌 URL）权限收紧为 0600，
+      // mode 仅作用于文件首次创建：日志文件（含 dsh 输出的启动令牌 URL）权限收紧为 0600，
       // 与 state.json 一致（旧实现默认 0644，同机其他用户可读会话令牌）
       fs.appendFileSync(this.file, line + '\n', { mode: 0o600 });
     } catch (e) {

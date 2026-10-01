@@ -7,11 +7,11 @@
 
 // 插件管理（**Android 内核：单一目标 = 原生主干 native**）核心行为测试：
 // - 卸载：官方 CLI + bundles 清理 + 跨层残留（home 补丁层/原生 overlay/profile 补丁层）清理
-// + 运行中原生 LOBOS 经 supervisor 回调重启；job 级核算
-// - 停用/启用：官方补丁层机制（$LOBOS_HOME/cordis.patch.yml）热载面，不动 bundles（防 reconcile 击穿），
+// + 运行中原生 DSH 经 supervisor 回调重启；job 级核算
+// - 停用/启用：官方补丁层机制（$DSH_HOME/cordis.patch.yml）热载面，不动 bundles（防 reconcile 击穿），
 // 无需重启；启用顺带清理 legacy overlay
 // - 更新：检测（registry 最高版 vs 已装版）+ 执行（update/add）+ 重启生效；本地/git 型拒绝
-// 全部用桩（stub CLI / lobosRunning 探针 / registry），profile 目录用真实临时目录验证文件级行为。
+// 全部用桩（stub CLI / dshRunning 探针 / registry），profile 目录用真实临时目录验证文件级行为。
 //
 // 已删除的场景（勿回潮）：沙箱实例目标（`inst-a` / `kind:'sandbox'` / `instances` 桩
 // `probeInstance|stopInstance|startInstance`）—— 沙箱实例域已整体移除，插件只有一个安装目标。
@@ -39,16 +39,16 @@ function initProfileDir(dir, deps, bundles) {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(dir && path.join(dir, 'package.json'), JSON.stringify({
     name: 'profile', private: true, dependencies: deps || {},
-    lobos: { profile: { bundles: bundles || ['@agent-ai/lobos-base'] } }
+    dsh: { profile: { bundles: bundles || ['@deepseek-ai/dsh-base'] } }
   }, null, 2) + String.fromCharCode(10));
 }
 
-/** 真实临时 profile 目录 + 桩 CLI / lobosRunning 探针 / registry。
+/** 真实临时 profile 目录 + 桩 CLI / dshRunning 探针 / registry。
  * opts: running/pnpmResult/pnpmError/bundlesClean/nativeRestart/distLatest */
 function makePM(opts = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-pm-'));
   const nativeProfile = path.join(tmp, 'native', 'profiles', 'web');
-  initProfileDir(nativeProfile, { '@x/p': '^1.0.0' }, ['@agent-ai/lobos-base', '@x/p']);
+  initProfileDir(nativeProfile, { '@x/p': '^1.0.0' }, ['@deepseek-ai/dsh-base', '@x/p']);
   const overlayFile = path.join(tmp, 'plugin-states.patch.yml');
   fs.writeFileSync(overlayFile, JSON.stringify([{ id: 'include:p', disabled: true }], null, 2));
 
@@ -56,11 +56,11 @@ function makePM(opts = {}) {
   const calls = [];                                  // 调用记录（替代旧 instances.calls）
   const NATIVE = { id: 'native', name: '原生实例', kind: 'native', profileDir: nativeProfile, profileName: 'web' };
   const pm = new PluginManager({
-    lobosBin: 'lobos', profileName: 'web', profileDir: nativeProfile, overlayFile,
-    lobosPort: 3080, tasks: null, logger: { info() {}, warn() {}, error() {} },
+    dshBin: 'dsh', profileName: 'web', profileDir: nativeProfile, overlayFile,
+    dshPort: 3080, tasks: null, logger: { info() {}, warn() {}, error() {} },
     events: { append: (t, d) => events.push({ t, d }) },
-    // 原生 LOBOS 运行态探针（守卫注入的等价物）
-    lobosRunning: () => opts.running !== false,
+    // 原生 DSH 运行态探针（守卫注入的等价物）
+    dshRunning: () => opts.running !== false,
     onNativeRestart: opts.nativeRestart || (() => { calls.push('native-restart'); return { ok: true }; }),
     dist: { fetchNpmLatest: async (n) => (opts.distLatest !== undefined ? opts.distLatest[n] : '2.0.0') },
   });
@@ -90,10 +90,10 @@ const eventsOf = (arr, type) => (arr || []).some((e) => e.t === type);
   // ── A. 卸载成功 + 运行中 → 经 supervisor 回调重启；bundles 移除 ──
   {
     const { pm, calls, events, nativeProfile } = makePM({ running: true, pnpmResult: true });
-    const before = (readJson(path.join(nativeProfile, 'package.json')).lobos.profile.bundles || []).slice();
+    const before = (readJson(path.join(nativeProfile, 'package.json')).dsh.profile.bundles || []).slice();
     const r = await pm.uninstall('@x/p', 'native');
     const job = await waitJob(pm, r.jobId, 3000);
-    const after = (readJson(path.join(nativeProfile, 'package.json')).lobos.profile.bundles || []);
+    const after = (readJson(path.join(nativeProfile, 'package.json')).dsh.profile.bundles || []);
     check('A1 卸载 job done', job.state === 'done', job.state);
     check('A2 运行中经回调重启', calls.includes('native-restart'), calls.join(','));
     check('A3 已发 plugin_uninstall_done', eventsOf(events, 'plugin_uninstall_done'), '');
@@ -176,7 +176,7 @@ const eventsOf = (arr, type) => (arr || []).some((e) => e.t === type);
     const { pm, calls, events, nativeProfile } = makePM({ running: true });
     const res = await pm.setBundleEnabled('@x/p', false, 'native');
     const hp = readJson(homePatchFile(nativeProfile)) || [];
-    const bundles = (readJson(path.join(nativeProfile, 'package.json')).lobos.profile.bundles || []);
+    const bundles = (readJson(path.join(nativeProfile, 'package.json')).dsh.profile.bundles || []);
     const disabledRow = hp.find((e) => e.id === '@x/p');
     check('F1.1 返回 rows=1', res.ok === true && res.rows === 1, JSON.stringify(res));
     check('F1.2 home 补丁层写入 disabled 行', !!disabledRow && disabledRow.disabled === true, JSON.stringify(hp));
@@ -217,12 +217,12 @@ const eventsOf = (arr, type) => (arr || []).some((e) => e.t === type);
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-rm-'));
     const profileDir = path.join(tmp, 'profile');
     fs.mkdirSync(profileDir, { recursive: true });
-    fs.writeFileSync(path.join(profileDir, 'package.json'), JSON.stringify({ name: 'p', lobos: { profile: { bundles: ['@agent-ai/lobos-base', '@x/p'] } } }, null, 2));
-    const pm = new PluginManager({ lobosBin: 'x', profileName: 'web', profileDir: '/nonexistent', overlayFile: '/nonexistent', lobosPort: 1, logger: console });
+    fs.writeFileSync(path.join(profileDir, 'package.json'), JSON.stringify({ name: 'p', dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@x/p'] } } }, null, 2));
+    const pm = new PluginManager({ dshBin: 'x', profileName: 'web', profileDir: '/nonexistent', overlayFile: '/nonexistent', dshPort: 1, logger: console });
     const removed = pm._removeFromProfileBundles({ profileDir }, '@x/p');
     const after = readJson(path.join(profileDir, 'package.json'));
     check('I1 bundles 移除返回 true', removed === true, String(removed));
-    check('I2 插件从 bundles 消失', !(after.lobos.profile.bundles || []).includes('@x/p'), '');
+    check('I2 插件从 bundles 消失', !(after.dsh.profile.bundles || []).includes('@x/p'), '');
     check('I3 二次移除返回 false（幂等）', pm._removeFromProfileBundles({ profileDir }, '@x/p') === false, '');
   }
   // ── J. 卸载残留清理（home 补丁层 / overlay / profile 补丁层 JSON）──

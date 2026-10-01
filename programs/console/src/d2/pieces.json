@@ -5,7 +5,7 @@
     {
       "id": "rg",
       "libName": "liblobosrg.so",
-      "upstream": "可执行名 rg（Agent 的 glob/grep 直接 exec 它）",
+      "upstream": "可执行名 rg（dsh 的 glob/grep 直接 exec 它）",
       "delivery": "apk-seed",
       "placedAt": "prefix-bin",
       "name": "rg",
@@ -14,7 +14,7 @@
     },
     {
       "id": "pty",
-      "libName": "liblobosptyprobe.so",
+      "libName": "liblobospty.so",
       "upstream": "node-pty 的 prebuilds/android-arm64/pty.node（两种落点：$PREFIX/lib 与产品树）",
       "delivery": "apk-seed",
       "placedAt": "prefix-lib",

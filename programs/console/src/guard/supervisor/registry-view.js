@@ -8,13 +8,13 @@ const path = require('node:path');
 const os = require('node:os'); // 拆分携带：_managedMainSpec 用 os.homedir() 作数据根
 
 class RegistryView {
-  // ══ 原生 LOBOS = 守卫核心服务：main 元数据自足（2026-09-06 概念清分）══
+  // ══ 原生 DSH = 守卫核心服务：main 元数据自足（2026-09-06 概念清分）══
   // main 不再登记为沙箱实例（instances.json 只含沙箱）；其元数据（只有守护开关 guardian）
-  // 落守卫核心存储 <stateDir>/lobos-main.json。进程生命周期事实源 = config.targetPort(守卫 spawn/观测)。
+  // 落守卫核心存储 <stateDir>/dsh-main.json。进程生命周期事实源 = config.targetPort(守卫 spawn/观测)。
   // 已删字段（远程控制域与公网暴露随 relay/frpc 一并下架，勿回潮）：
-  // remoteEnabled / remoteToken / frpEnabled / frpRemotePort / wanPort 及其事件 lobos_remote_changed、lobos_frp_changed。
-  _lobosMainFile() {
-    try { return path.join(path.dirname(this.config.stateFile), 'lobos-main.json'); } catch { return null; }
+  // remoteEnabled / remoteToken / frpEnabled / frpRemotePort / wanPort 及其事件 dsh_remote_changed、dsh_frp_changed。
+  _dshMainFile() {
+    try { return path.join(path.dirname(this.config.stateFile), 'dsh-main.json'); } catch { return null; }
   }
 
   /** 受管对象目录持久化文件名（按守卫 stateFile 派生，隔离同目录多守卫；生产 state.json → managed-objects.json）。 */
@@ -25,16 +25,16 @@ class RegistryView {
     } catch { return 'managed-objects.json'; }
   }
 
-  /** 读 main 元数据(无文件则默认：守护关、远程关)。结果缓存到 _lobosMainLive（LanManager 等修改后经 _persistLobosMainLive 回写）。 */
-  _readLobosMain() {
-    if (this._lobosMainLive) return this._lobosMainLive;
-    this._lobosMainLive = this._readLobosMainFile();
-    return this._lobosMainLive;
+  /** 读 main 元数据(无文件则默认：守护关、远程关)。结果缓存到 _dshMainLive（LanManager 等修改后经 _persistDshMainLive 回写）。 */
+  _readDshMain() {
+    if (this._dshMainLive) return this._dshMainLive;
+    this._dshMainLive = this._readDshMainFile();
+    return this._dshMainLive;
   }
 
-  _readLobosMainFile() {
+  _readDshMainFile() {
     try {
-      const f = this._lobosMainFile();
+      const f = this._dshMainFile();
       if (f && fs.existsSync(f)) {
         const j = JSON.parse(fs.readFileSync(f, 'utf8'));
         return { guardian: j.guardian === true };
@@ -44,14 +44,14 @@ class RegistryView {
   }
 
   /** 写 main 元数据(白名单字段，原子写 0600)。更新 live 缓存。 */
-  _writeLobosMain(meta) {
+  _writeDshMain(meta) {
     // live 稳定引用原地修改（LanManager mainOf 持有同一对象；替换引用会使其失效）
-    if (!this._lobosMainLive) this._lobosMainLive = this._readLobosMainFile();
-    Object.assign(this._lobosMainLive, meta || {});
-    const f = this._lobosMainFile();
+    if (!this._dshMainLive) this._dshMainLive = this._readDshMainFile();
+    Object.assign(this._dshMainLive, meta || {});
+    const f = this._dshMainFile();
     if (!f) return;
     try {
-      const cur = this._readLobosMain();
+      const cur = this._readDshMain();
       const merged = Object.assign({}, cur, meta || {});
       const dir = path.dirname(f);
       fs.mkdirSync(dir, { recursive: true });
@@ -59,12 +59,12 @@ class RegistryView {
       const tmp = f + '.tmp';
       fs.writeFileSync(tmp, body, { mode: 0o600 });
       fs.renameSync(tmp, f);
-    } catch (e) { this.logger && this.logger.warn && this.logger.warn('_writeLobosMain: ' + (e && e.message)); }
+    } catch (e) { this.logger && this.logger.warn && this.logger.warn('_writeDshMain: ' + (e && e.message)); }
   }
 
   /** main 的统一只读视图（守卫核心服务；端口事实源 = config.targetPort）。 */
-  lobosMainView() {
-    const m = this._readLobosMain();
+  dshMainView() {
+    const m = this._readDshMain();
     const cmd = Array.isArray(this.config.command) ? this.config.command.slice() : [];
     return {
       id: 'main',
@@ -87,32 +87,32 @@ class RegistryView {
   /** main 元数据补丁（白名单只有 guardian：守护自动拉起开关）。
    * 远程控制/公网暴露（remoteEnabled/remoteToken/frpEnabled/frpRemotePort/wanPort）已随
    * relay/frpc 域整体删除，body 里出现这些键一律**忽略**（不做兼容、不报错）。 */
-  patchLobosMain(patch) {
+  patchDshMain(patch) {
     const p = patch || {};
-    const meta = this._readLobosMain();
+    const meta = this._readDshMain();
     const prev = { ...meta };
     if (p.guardian !== undefined) meta.guardian = !!p.guardian;
-    this._writeLobosMain(meta);
+    this._writeDshMain(meta);
     // 开关变更事件（所有 main 开关记录进事件日志，可审计回放）
     try {
       if (p.guardian !== undefined && prev.guardian !== meta.guardian) {
-        this.events.append('lobos_guardian_changed', { id: 'main', name: '原生 LOBOS', enabled: meta.guardian === true });
+        this.events.append('dsh_guardian_changed', { id: 'main', name: '原生 DSH', enabled: meta.guardian === true });
       }
-    } catch (e) { this.logger && this.logger.warn && this.logger.warn('patchLobosMain event: ' + ((e && e.message) || e)); }
-    return { ok: true, main: this.lobosMainView() };
+    } catch (e) { this.logger && this.logger.warn && this.logger.warn('patchDshMain event: ' + ((e && e.message) || e)); }
+    return { ok: true, main: this.dshMainView() };
   }
 
   // ══ 控制平面 v3：受管对象申报（R1 影子阶段；注册机只登记应然+所有权，不驱动）══
-  /** main(lobos) 申报为管家注册项。 */
+  /** main(dsh) 申报为管家注册项。 */
   _managedMainSpec() {
-    const m = this._readLobosMain();
+    const m = this._readDshMain();
     return {
-      kind: 'lobos', id: 'main', name: '主实例',
+      kind: 'dsh', id: 'main', name: '主实例',
       desired: this._mDesired() === 'stopped' ? 'stopped' : 'running',
       guardian: m.guardian === true,
       ownership: {
-        ports: [{ role: 'lobos-main', port: Number(this.config.targetPort || 3080) }],
-        rootPath: path.join(os.homedir(), '.lobos'),
+        ports: [{ role: 'dsh-main', port: Number(this.config.targetPort || 3080) }],
+        rootPath: path.join(os.homedir(), '.dsh'),
         processMode: 'spawn', // main 由守卫 spawn/adopt（无系统服务管理器托管）
       },
     };
@@ -157,7 +157,7 @@ class RegistryView {
     try { reg.unregister(id); } catch (e) { this.logger && this.logger.warn && this.logger.warn('_unregisterManaged(' + id + '): ' + (e && e.message)); }
   }
 
-  // ══ C3-3b G4：main(lobos) 状态唯一存储 = 目录 main entry（this.* 并行字段已删除）══
+  // ══ C3-3b G4：main(dsh) 状态唯一存储 = 目录 main entry（this.* 并行字段已删除）══
   // 存储图（C3-3b G4）：
   // phase → entry.phase（唯一词表小写；OBSERVED 由 process.observedOnly/adopted 位合成呈现）
   // desired → entry.desired（registry.update 持久化，managed-objects.json 与 state.json 一致）
@@ -177,7 +177,7 @@ class RegistryView {
   }
 
   /** 目录 main 项（未初始化/异常 → null）。 */
-  _lobosEntry() {
+  _dshEntry() {
     if (!this.managedObjects || typeof this.managedObjects.get !== 'function') return null;
     try { return this.managedObjects.get('main') || null; } catch { return null; }
   }
@@ -186,7 +186,7 @@ class RegistryView {
   _mainFallbackEntry() {
     if (!this._fallbackEntry) {
       this._fallbackEntry = {
-        kind: 'lobos', id: 'main', name: '主实例',
+        kind: 'dsh', id: 'main', name: '主实例',
         desired: 'running', guardian: true,
         ownership: { ports: [], rootPath: null, daemonScript: null, processMode: 'spawn', meta: null },
         phase: 'stopped', lastObserved: null,

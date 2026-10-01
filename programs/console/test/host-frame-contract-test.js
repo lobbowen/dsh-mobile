@@ -45,7 +45,7 @@ check('U-2 /__host 不误入 API surface 清单', !/path:\s*'\/__host'/.test(sur
 check('U-3 host.html 存在', fs.existsSync(hostHtmlPath));
 if (fs.existsSync(hostHtmlPath)) {
   const h = fs.readFileSync(hostHtmlPath, 'utf8');
-  check('U-3 iframe 同源相对路径 src="/"', /<iframe[^>]*id="program"[^>]*src="\/"/.test(h));
+  check('U-3 iframe 同源相对路径 src="/"', /<iframe[^>]*id="kernel"[^>]*src="\/"/.test(h));
   check('U-3 不含跨源绝对地址（无 127.0.0.1:3080 等写死端口）', !/http:\/\/127\.0\.0\.1:\d+/.test(h));
   check('U-4 脚本外链 /host-frame.js', /<script[^>]*src="\/host-frame\.js"/.test(h));
   check('U-4 无内联 script（CSP 禁止）', !/<script(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/.test(h.replace(/<script[^>]*src=[^>]*><\/script>/g, '')));
@@ -61,7 +61,7 @@ if (fs.existsSync(hostJsPath)) {
   check('U-5 暴露 window.lobosDeliverResult', /window\.lobosDeliverResult\s*=/.test(j));
   check('U-5 经 LobosNative.onRequest 交原生', /LobosNative[\s\S]{0,60}onRequest/.test(j));
   // U-6 单写入者：宿主只转发，不含写内核语义
-  check('U-6 宿主帧不含内核写端点语义', !/\b(self-update|applyUpdate|installProgram)\b/.test(j));
+  check('U-6 宿主帧不含内核写端点语义', !/\b(self-update|applyUpdate|installKernel)\b/.test(j));
 }
 check('U-5 内核桥协议版本同为 1', /BRIDGE_PROTOCOL_VERSION\s*=\s*1\b/.test(bridgeTs));
 check('U-5 请求类型两侧一致', bridgeTs.includes('lobos:panel-update-request') && fs.existsSync(hostJsPath) && fs.readFileSync(hostJsPath, 'utf8').includes('lobos:panel-update-request'));

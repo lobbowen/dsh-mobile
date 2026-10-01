@@ -29,18 +29,18 @@ fs.writeFileSync(fakeNpm, [
 ].join(String.fromCharCode(10)));
 const npmInvocation = { bin: process.execPath, args: [fakeNpm] };
 
-const lobosDir = path.join(TMP, 'lobos');
-fs.mkdirSync(path.join(lobosDir, 'node_modules', 'sharp'), { recursive: true });
-fs.writeFileSync(path.join(lobosDir, 'node_modules', 'sharp', 'package.json'), '{}');
-fs.mkdirSync(path.join(lobosDir, 'node_modules', 'node-pty'), { recursive: true });
+const dshDir = path.join(TMP, 'dsh');
+fs.mkdirSync(path.join(dshDir, 'node_modules', 'sharp'), { recursive: true });
+fs.writeFileSync(path.join(dshDir, 'node_modules', 'sharp', 'package.json'), '{}');
+fs.mkdirSync(path.join(dshDir, 'node_modules', 'node-pty'), { recursive: true });
 
-const r1 = ensureSharpWasm(lobosDir, { npmInvocation, tmpdir: TMP });
+const r1 = ensureSharpWasm(dshDir, { npmInvocation, tmpdir: TMP });
 check('首次补给 -> applied', r1.status === 'applied', JSON.stringify(r1));
-check(PKG + ' 就位', fs.existsSync(path.join(lobosDir, 'node_modules', '@img', 'sharp-wasm32', 'package.json')));
-check('@emnapi 依赖一并就位', fs.existsSync(path.join(lobosDir, 'node_modules', '@emnapi', 'runtime', 'package.json')));
-check('未扰动其它依赖', fs.existsSync(path.join(lobosDir, 'node_modules', 'node-pty')));
+check(PKG + ' 就位', fs.existsSync(path.join(dshDir, 'node_modules', '@img', 'sharp-wasm32', 'package.json')));
+check('@emnapi 依赖一并就位', fs.existsSync(path.join(dshDir, 'node_modules', '@emnapi', 'runtime', 'package.json')));
+check('未扰动其它依赖', fs.existsSync(path.join(dshDir, 'node_modules', 'node-pty')));
 
-const r2 = ensureSharpWasm(lobosDir, { npmInvocation, tmpdir: TMP });
+const r2 = ensureSharpWasm(dshDir, { npmInvocation, tmpdir: TMP });
 check('二次调用幂等 -> already', r2.status === 'already', JSON.stringify(r2));
 
 const empty = path.join(TMP, 'no-sharp');

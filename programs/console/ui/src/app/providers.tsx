@@ -4,7 +4,7 @@ import { Toaster } from "../framework/ui/sonner";
 
 /**
  * ============================================================================
- * lobos-supervisor 控制面板 — Providers
+ * dsh-supervisor 控制面板 — Providers
  * ============================================================================
  * 只保留框架级 Provider：
  *  - ThemeProvider（暗色主题，attribute="class"，跟随系统）

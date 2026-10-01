@@ -29,7 +29,7 @@ const { Health } = require('./guard/health');
 const monitor = require('./guard/monitor/index');
 const guardian = require('./guard/guardian/index');
 const native = require('./assembler/index');
-const { LobosTokenService } = require('./platform/token');
+const { DshTokenService } = require('./platform/token');
 const { NativeManager } = require('./assembler/manager');
 const { LifecycleManager } = require('./guard/lifecycle/index');
 const { ManagedRegistry } = require('./guard/lifecycle/objects');
@@ -51,7 +51,7 @@ class Supervisor {
     // Unix ：chmod 0700（他人无法穿越目录 → 内部文件即使 0644 也不可达）。
     // Windows ：icacls 移除继承 (/inheritance:r) + 仅当前用户 (OI)(CI) ——
     // POSIX mode 在 Windows **被忽略**，而本目录含 config.json(lanToken)、
-    // lobos-main-token.log(LOBOS 访问令牌)、registry.json、frpc.toml 等敏感文件。
+    // dsh-main-token.log(DSH 访问令牌)、registry.json、frpc.toml 等敏感文件。
     // NTFS 继承是动态的：对父目录设置继承 ACE 会同时作用于既有子项与后续新建子项，
     // 故**无需**对每个热写文件（state.json 每拍）做 icacls——那会造成显著写放大。
     this._fileProtectStatus = null;
@@ -95,7 +95,7 @@ class Supervisor {
     // 取代旧 _explicitAction 时间窗布尔（漏消费竞态已根治）。词表见 guard/intent.js。
     this.intents = new IntentLedger();
     this._stopping = false;
-    // ── 会话生命周期（契约（docs/components/program-android-plan.md） §3）：
+    // ── 会话生命周期（契约（docs/components/kernel-android-plan.md） §3）：
     // starting → running → stopping → stopped；stopping/stopped 期间抑制一切自动拉起（INV-S1）。
     // 唯一入口 /session/stop；唯一读取口 /session/status（INV-S2/S4）。
     this._sessionState = 'starting';
@@ -114,7 +114,7 @@ class Supervisor {
     this._lastOccupiedWarn = 0;
     // ── 瞬态字段统一构造初始化（RC2.2 契约）：任何实例字段的首次赋值必须发生在此处。
     // `_maybeReclaimAdoptToken` 曾因 `_tokenReclaimAt` 未初始化（undefined !== null）
-    // 绕过观察窗，adopt 后首拍即重建 LOBOS（审计 P1-1）。──
+    // 绕过观察窗，adopt 后首拍即重建 DSH（审计 P1-1）。──
     this._tokenReclaimAt = null;     // adopt 令牌观察窗截止时刻
     this._tokenReclaimTried = false; // 本次接管是否已受控重建（防循环）
     this._lastMainPortRederive = 0;  // 端口再推导节流
@@ -127,10 +127,10 @@ class Supervisor {
     this._lastLanStateJson = null;   // lan-state 内容去重
     this._routerFacade = null;       // router ctl 门面缓存
     this._lc = null;                 // DaemonLifecycle 惰性单例表
-    this._lobosMainLive = null;        // lobos-main.json live 缓存
+    this._dshMainLive = null;        // dsh-main.json live 缓存
     this._fallbackEntry = null;      // 目录 fallback 项
     this._lastStateBody = null;
-    // ── C3-3b G1：main(lobos) 影子对比框架（并行不驱动）──
+    // ── C3-3b G1：main(dsh) 影子对比框架（并行不驱动）──
     // 旧 tick 仍为唯一驱动；影子只「纯计算应然下一步」并对比实际迁移，零行为变化。
     // 连续零 diff 拍数/累计 diff 拍数供 G3 切换判定（日志/事件观测，不进任何决策）。
     this._shadowSeq = 0;
@@ -139,12 +139,12 @@ class Supervisor {
     this._shadowLast = null;   // 最近一拍影子记录 {seq,phase,shadow,actual,diff}
     this._shadowLoggedSeq = 0; // 已记账的事件拍号（心跳聚合去重）
     // 系统日志框架（历史设计文档）：守卫经每进程唯一 LogCore 取
-    // logger/events/lobosWriter/EventHub（单例 init；消灭散落 new Events/createLogger/Rotator/EventHub）。
+    // logger/events/dshWriter/EventHub（单例 init；消灭散落 new Events/createLogger/Rotator/EventHub）。
     const logCore = require('./platform/logcore').init({
       process: 'guard',
       logFile: this.config.supervisorLogFile,
       eventFile: this.config.logFile,
-      lobosLogFile: this.config.lobosLogFile,
+      dshLogFile: this.config.dshLogFile,
       upgradeLogFile: this.config.upgradeLogFile,
       logLevel: this.config.logLevel,
       logMaxBytes: this.config.logMaxBytes,
@@ -159,24 +159,24 @@ class Supervisor {
     });
     this.events = logCore.events;
     this.logger = logCore.logger;
-    this.lobosWriter = logCore.lobosWriter;
+    this.dshWriter = logCore.dshWriter;
     // 守卫侧聚合读路径（契约 §3.6 统一读路径）：真实 hub 或 EventReader 降级适配器——**永不为 null**，
     // 消费方（api/lifecycle.js）无需再写 if(hub)…else… 双语义分支。
     this.eventHub = logCore.reader || logCore.hub;
-    // ── 唯一令牌节点：全系统 LOBOS 访问令牌的统一获取/存储/分发（原生与沙箱共用同一服务，
+    // ── 唯一令牌节点：全系统 DSH 访问令牌的统一获取/存储/分发（原生与沙箱共用同一服务，
     // 安卓内核只有一种源：spawn=stdout 推送 + 本地原文恢复文件）。任何目标的令牌变化统一
     // 经 onChange 下发消费方，不再分散接线。──
-    this.tokenService = new LobosTokenService({ logger: this.logger, events: this.events });
+    this.tokenService = new DshTokenService({ logger: this.logger, events: this.events });
     // main 统一守卫 spawn（2026-09-06 废弃 systemd 托管）；纯 stdout 源 + 本地原文恢复文件
     // （0600；守卫重启后 token.js 从文件尾恢复令牌→免重建 main 的会话中断，2026-09 修复）
-    this.tokenService.attach('main', { file: path.join(path.dirname(this.config.stateFile), 'lobos-main-token.log') });
+    this.tokenService.attach('main', { file: path.join(path.dirname(this.config.stateFile), 'dsh-main-token.log') });
     this.tokenService.onChange((id, token) => {
       // Android 内核无 relay/lan：令牌仅由内核内部（如生成直连认证 URL）直接消费，无远程代理需热换。
     });
     // OpenCode 中转：多账号 Key 轮换代理（原生实现，替代退役的 opencode-switcher）
     const swDir = path.dirname(this.config.stateFile);
     // 统一「包发布/安装/更新」领域逻辑：全局镜像源配置 + 版本检查 + 安装执行。
-    // LOBOS 自升级与反代子应用共用同一实例，镜像源配置全局一份（registry.json）。
+    // DSH 自升级与反代子应用共用同一实例，镜像源配置全局一份（registry.json）。
     this.dist = new DistributionManager({
       registries: (this.config.registries && this.config.registries.length) ? this.config.registries : ['https://registry.npmjs.org'],
       registryFile: path.join(swDir, 'registry.json'),
@@ -200,7 +200,7 @@ class Supervisor {
       dist: this.dist,
       tasks: this.tasks,
     });
-    // 端口注册表持久化与守卫状态同域（默认 ~/.lobos/supervisor/ports.json；自定义 stateFile 时跟随），
+    // 端口注册表持久化与守卫状态同域（默认 ~/.dsh/supervisor/ports.json；自定义 stateFile 时跟随），
     // 测试可经自定义 stateFile 天然隔离，绝不污染生产记录。
     try { ports.configureFile(path.join(path.dirname(this.config.stateFile), 'ports.json')); } catch (e) { this.logger.warn && this.logger.warn('ports configure: ' + e.message); }
     // 端口池规模可配置（工业标准：范围是配置项而非编译期常量）：config.portPools 覆盖默认池。
@@ -223,10 +223,10 @@ class Supervisor {
       // daemon 监督 adapter（v3 R3 C3-2）：heartbeat 驱动；节流 6 拍≈30s（原 L3 监督 tick 语义）
       if (this.managedObjects && typeof this.managedObjects.registerAdapter === 'function') {
         this.managedObjects.registerAdapter('router-daemon', { supervise: () => this._daemonSuperviseOnce('router'), tickEvery: 6, derivePhase: true });
-        // main(lobos) adapter（C3-3a observe → C3-3b G1 supervise）：heartbeat 把 main 实然写入目录
+        // main(dsh) adapter（C3-3a observe → C3-3b G1 supervise）：heartbeat 把 main 实然写入目录
         // (lastObserved)——不驱动（G3 前 tick 仍是唯一驱动）。supervise 内做影子对比（纯计算+日志），
         // 实然与 tick 同源(monitor.probe → lastProbeOk)。影子连续零 diff 后由 G3 切换接管。
-        this.managedObjects.registerAdapter('lobos', { supervise: () => this._lobosSuperviseOnce(), tickEvery: 1 });
+        this.managedObjects.registerAdapter('dsh', { supervise: () => this._dshSuperviseOnce(), tickEvery: 1 });
       }
     } catch (e) { this.logger && this.logger.warn && this.logger.warn('managed registry init: ' + (e && e.message)); }
     // Android 内核：无远程控制（relay/frpc）与沙箱实例 —— 删除 PC 端 lan/instance 桥接回调。
@@ -235,20 +235,20 @@ class Supervisor {
       logger: this.logger,
     });
     this.pluginManager = new PluginManager({
-      lobosBin: 'lobos',
-      // lobos CLI 调用形态与主干启动命令同源（安卓容器 = node 代跑绝对入口）。
+      dshBin: 'dsh',
+      // dsh CLI 调用形态与主干启动命令同源（安卓容器 = node 代跑绝对入口）。
       // 惰性取用：nativeManager 在本对象之后构造，调用发生在插件操作时。
-      resolveLobosCli: () => (this.nativeManager ? this.nativeManager.lobosCliInvocation() : null),
+      resolveDshCli: () => (this.nativeManager ? this.nativeManager.dshCliInvocation() : null),
       profileName: this.config.pluginsProfileName || AGENT.profileName,
       profileDir: path.join(os.homedir(), AGENT.homeDirName, 'profiles', this.config.pluginsProfileName || AGENT.profileName),
       overlayFile: path.join(path.dirname(this.config.stateFile), 'plugin-states.patch.yml'),
-      lobosPort: this.config.targetPort,
+      dshPort: this.config.targetPort,
       tasks: this.tasks,
       logger: this.logger,
       events: this.events,
-      dist: this.dist, // 插件安装/卸载与 LOBOS 自升级共用全局镜像源
-      // 原生 LOBOS 运行态探针：插件层据其判断「插件变更要不要触发重启」（不自行探测进程）
-      lobosRunning: () => !!this.lobosPid,
+      dist: this.dist, // 插件安装/卸载与 DSH 自升级共用全局镜像源
+      // 原生 DSH 运行态探针：插件层据其判断「插件变更要不要触发重启」（不自行探测进程）
+      dshRunning: () => !!this.dshPid,
       // 插件变更（卸载/启停）涉及原生目标时：统一走守卫生命周期重启（等价于面板重启按钮）
       onNativeRestart: () => {
         try { return this.requestRestart(); }
@@ -266,7 +266,7 @@ class Supervisor {
     this.api = null;
     this.notifyEnabled = this.config.notifyEnabled !== false;
     this.loadState();
-    // 原生 LOBOS 生命周期管理器：安装/卸载/版本检测/升级（原生 LOBOS 的唯一管理门面，单通道）
+    // 原生 DSH 生命周期管理器：安装/卸载/版本检测/升级（原生 DSH 的唯一管理门面，单通道）
     this.nativeManager = new NativeManager({
       config: this.config,
       dist: this.dist,
@@ -274,11 +274,11 @@ class Supervisor {
       logger: this.logger,
       stateDir: path.dirname(this.config.stateFile),
       tasks: this.tasks,
-      // 启动命令写回落盘（安卓容器）：装完 lobos 后 config.command 转绝对形态并持久化。
+      // 启动命令写回落盘（安卓容器）：装完 dsh 后 config.command 转绝对形态并持久化。
       persistCommand: (patch) => this.persistConfigPatch(patch),
-      // 守卫生命周期钩子：升级需停/起 LOBOS 时回调
+      // 守卫生命周期钩子：升级需停/起 DSH 时回调
       hooks: {
-        isLobosActive: () => ['STARTING', 'RUNNING', 'RESTARTING', 'BACKOFF'].includes(this._mPhase()),
+        isDshActive: () => ['STARTING', 'RUNNING', 'RESTARTING', 'BACKOFF'].includes(this._mPhase()),
         desiredRunning: () => this._mDesired() === 'running',
         stopForUpgrade: () => this._enterUpgradeHoldAsync(),
         resumeAfterUpgrade: () => this._exitUpgradeHold(true),
@@ -286,7 +286,7 @@ class Supervisor {
         notify: (t, b) => this.notify(t, b),
       },
     });
-    // 概念清分（2026-09-06）：原生 LOBOS 是主干，软件本体由 NativeManager 独立管理（/native/* + /lifecycle/lobos/*）；
+    // 概念清分（2026-09-06）：原生 DSH 是主干，软件本体由 NativeManager 独立管理（/native/* + /lifecycle/dsh/*）；
     // 沙箱实例由 InstanceManager 管理（/instances/*）。原生不挂进沙箱实例出口——不注入任何句柄/委托。
     // （EventHub 汇聚已由 LogCore.init 统一装配）；
     // this.eventHub = logCore.hub，聚合文件按 stateFile 派生唯一。）
@@ -294,14 +294,14 @@ class Supervisor {
     this._registerFixedPorts();
   }
 
-  /** 固定端口统一登记：主LOBOS / 守卫API / 中转服务。冲突即抛错（守卫启动失败，避免带病运行）。
-   * 主程序端口动态注册：用户使用场景各异（可能先装 LOBOS 并自定义端口）——
-   * 若配置端口无监听且检测到 LOBOS 进程，从进程实际参数解析端口并动态覆盖（绝不硬编码 3080）。 */
+  /** 固定端口统一登记：主DSH / 守卫API / 中转服务。冲突即抛错（守卫启动失败，避免带病运行）。
+   * 主程序端口动态注册：用户使用场景各异（可能先装 DSH 并自定义端口）——
+   * 若配置端口无监听且检测到 DSH 进程，从进程实际参数解析端口并动态覆盖（绝不硬编码 3080）。 */
   _registerFixedPorts() {
     // 端口来源以配置为准（healthUrl / command --port，normalize 已统一）。
     // 注意：不做 pgrep 启发式猜端口——同一 bin 的其它实例/残留进程会劫持监管目标
     // （实测：残留 mock 的 "--port 3901" 让守卫从 3911 被导到 3901，接管错误对象）。
-    ports.register('lobos-main', this.config.targetPort);
+    ports.register('dsh-main', this.config.targetPort);
     ports.register('supervisor-api', this.config.apiPort);
   }
 
@@ -347,7 +347,7 @@ class Supervisor {
           this.config.apiPort = port;
           if (this.configPath) this.persistConfigPatch({ apiPort: port });
         }
-        // **登记实际绑定端口**（docs/components/program-android-plan.md（端口登记））：
+        // **登记实际绑定端口**（docs/components/kernel-android-plan.md（端口登记））：
         // 壳的唯一就绪判据 =「ports.json 的 supervisor-api 实际值」；绝不能让配置期望值滞留在登记表。
         try { ports.register('supervisor-api', port); } catch (e) { this.logger.warn('ports.register(actual) 失败: ' + e.message); }
         this.events.append('api_listening', { host: this.config.apiHost, port });
@@ -365,15 +365,15 @@ class Supervisor {
         supervisor: this, pluginManager: this.pluginManager, logger: this.logger,
       });
       if (this.logger && this.logger.info) this.logger.info('[lifecycle] 已注册模块: ' + this.lifecycleManager.all().map((l) => l.id).join(','));
-      this._syncLobosLifecycleView(); // 注册后立即同步 LOBOS 视图（不等首个 tick）
+      this._syncDshLifecycleView(); // 注册后立即同步 DSH 视图（不等首个 tick）
     } catch (e) { this.logger.warn && this.logger.warn('[lifecycle] 注册失败: ' + (e && e.message)); }
     // C 层共享工具（pnpm）**启动即投放**：环境应当在启动后就完整，而不是等第一次插件操作
     // 才由调用点顺手装（那是惰性补丁）。异步、不阻塞 spawn、失败只记账；使用点仍有一道
     // await 屏障（插件域 _ensurePackageManager），保证「用之前一定在」。
     // C 层共享供给**不由内核做**：C 是共享层（服务所有产品），机制随 APK 走、Android 原生实现，
     //   由容器在启动时执行。内核只**检测**（探针读清单落点）与**触发**（发现缺件/清单前进时请容器再供）。
-    // main(lobos) 收敛驱动源（C3-3b G3 接管 → C3-5 终态）：唯一心跳（registry heartbeat →
-    // lobos supervise → _lobosConverge）是唯一周期驱动——tick 定时器不再创建；
+    // main(dsh) 收敛驱动源（C3-3b G3 接管 → C3-5 终态）：唯一心跳（registry heartbeat →
+    // dsh supervise → _dshConverge）是唯一周期驱动——tick 定时器不再创建；
     // 仅 registry 不可用（极罕见）时保留 tick 定时器兜底（保证 main 不被放养）。
     this._timer = this.managedObjects ? null : setInterval(() => this.tick(), this.config.probeIntervalMs);
     // 唯一心跳（v3 R3 C3-2/C3-3b G3）：daemon 监督(router-daemon, 节流≈30s) +
@@ -518,22 +518,22 @@ class Supervisor {
               rlc._monitoring = false; // 守卫退出不再监督该 daemon（daemon 自身继续运行）
             }
           } catch {}
-          await this.lifecycleManager.stopAll('guard-shutdown', { exclude: ['lobos'] }); // 守卫退出绝不动 LOBOS（RC2 契约）
+          await this.lifecycleManager.stopAll('guard-shutdown', { exclude: ['dsh'] }); // 守卫退出绝不动 DSH（RC2 契约）
         } else {
           // 兜底（lifecycleManager 未初始化时保持原行为防孤儿）
           try { if (this.router) await this.router.stop(); } catch (e) { this.logger.warn && this.logger.warn('router stop: ' + (e && e.message)); }
         }
       } catch (e) { this.logger.warn && this.logger.warn('lifecycle stopAll: ' + (e && e.message)); }
-      // 守护语义：守卫退出不动 LOBOS，恢复后幂等调和
+      // 守护语义：守卫退出不动 DSH，恢复后幂等调和
     })();
     return this._shutdownPromise;
   }
 
   // ---- 状态持久化 ----
   statusSummary() {
-    // 原生 LOBOS 端口自检测：端口是「实际运行态」属性，而非静态配置值——
+    // 原生 DSH 端口自检测：端口是「实际运行态」属性，而非静态配置值——
     // 仅当目标在线（有 pid）时返回其实际监听端口，未启动/离线返回 null（前端显示横杠）。
-    const lobosPidNow = this._mChild() ? this._mChild().pid : this._mAdoptPid();
+    const dshPidNow = this._mChild() ? this._mChild().pid : this._mAdoptPid();
     return {
       desired: this._mDesired(),
       phase: this._mPhase(),
@@ -545,11 +545,11 @@ class Supervisor {
         ? (this._fileProtectStatus.length > 0 && this._fileProtectStatus.every((r) => r.ok))
         : null,
       guardVersion: this.guardVersion,
-      // 原生 LOBOS 主干视图（端口/命令/守护开关/运行态）：面板「进程守护」开关的唯一数据源
+      // 原生 DSH 主干视图（端口/命令/守护开关/运行态）：面板「进程守护」开关的唯一数据源
       // （实例域删除后无 /instances 端点，main 元数据经本字段随快照下发）。
-      main: this.lobosMainView ? this.lobosMainView() : null,
-      lobosPid: lobosPidNow,
-      lobosPort: lobosPidNow ? (this.config.targetPort || null) : null,
+      main: this.dshMainView ? this.dshMainView() : null,
+      dshPid: dshPidNow,
+      dshPort: dshPidNow ? (this.config.targetPort || null) : null,
       adopted: this._mAdopted(),
       guardPid: process.pid,
       lastProbeAt: this._mLastProbeAt(),
@@ -563,7 +563,7 @@ class Supervisor {
       lastRestartAt: this._mLastRestartAt(),
       upgradeHold: this._upgradeHold,
       commandMissing: !!(this._mSpawnBlockedUntil() && Date.now() < this._mSpawnBlockedUntil()),
-      lobosTokenCaptured: !!(this.tokenService && this.tokenService.get('main')),
+      dshTokenCaptured: !!(this.tokenService && this.tokenService.get('main')),
       tasks: this.tasks ? this.tasks.running().map((t) => ({ id: t.id, kind: t.kind, action: t.action, target: t.target, state: t.state })) : [],
       native: this.nativeManager ? this.nativeManager.status() : null,
       version: this.nativeManager ? this.nativeManager.versionInfo() : null,
@@ -603,7 +603,7 @@ class Supervisor {
       }
       if (typeof raw.restartCount === 'number') this._mSetRestartCount(raw.restartCount);
       if (typeof raw.backoffLevel === 'number') this._mSetBackoffLevel(raw.backoffLevel);
-      // 崩溃窗口跨守卫重启保持（否则"LOBOS 反复崩 + 守卫被拉起"会重置退避保护）
+      // 崩溃窗口跨守卫重启保持（否则"DSH 反复崩 + 守卫被拉起"会重置退避保护）
       if (typeof raw.crashWindowStart === 'number' || raw.crashWindowStart === null) {
         this._mSetCrashWindowStart(raw.crashWindowStart);
       }
@@ -640,7 +640,7 @@ class Supervisor {
     if (this._mDesired() !== v) {
       this._mSetDesired(v);
       this.events.append('desired_changed', { desired: v });
-      // 启动/停止 LOBOS 与「进程守护开关」完全独立：desired 只改运行状态，不改守护(自动拉起)开关。
+      // 启动/停止 DSH 与「进程守护开关」完全独立：desired 只改运行状态，不改守护(自动拉起)开关。
       // 守护开关仅由用户显式操作 /instances/update {guardian} 改变；watchdog 在 desired==='stopped' 时绝不拉起。
       this.writeState();
     }
@@ -661,7 +661,7 @@ class Supervisor {
     return { ok: true };
   }
 
-  /** 把补丁合并写回守卫自己的配置文件（原子写；仅限本产品配置，绝不触碰 LOBOS）。 */
+  /** 把补丁合并写回守卫自己的配置文件（原子写；仅限本产品配置，绝不触碰 DSH）。 */
   persistConfigPatch(patch) {
     if (!this.configPath) return;
     try {
@@ -691,14 +691,14 @@ class Supervisor {
 
 
   // ---- 退出管家（2026-09 用户定稿）：完全关闭 = 停全部服务链 + 守卫自身退出 ----------------
-  /** 停掉被监管的 LOBOS 主实例（spawn/adopt 目标），并将期望状态持久化为 stopped——
+  /** 停掉被监管的 DSH 主实例（spawn/adopt 目标），并将期望状态持久化为 stopped——
    * 「退出管家」= 用户显式要求全部停止：若只杀进程不翻 desired，容器/Android Service
-   * 拉起守卫后收敛循环会按 desired=running 重新拉起 LOBOS，与服务链全停意图相悖。 */
-  _stopMainLobos() {
+   * 拉起守卫后收敛循环会按 desired=running 重新拉起 DSH，与服务链全停意图相悖。 */
+  _stopMainDsh() {
     try {
       // 退出会话 ≠ 改变用户运行意图（契约 §6：desired 仅在用户显式启停时改变）。
       // 「停后不再拉起」由 sessionState=stopping 抑制（INV-S1）；不再靠翻 desired——
-      // 旧架构翻 desired 是为防 systemd Restart=always 重拉 LOBOS，安卓内核无服务管理器，该理由已消失。
+      // 旧架构翻 desired 是为防 systemd Restart=always 重拉 DSH，安卓内核无服务管理器，该理由已消失。
       // 保留 desired=running 使「下次启动容器」可恢复运行（契约 §5 启动时序）。
       if (this._mChild() || this._mAdoptPid()) { this.stopProcess('session_stop'); }
     } catch (e) { this.logger.warn && this.logger.warn('shutdownAll stop main: ' + e.message); }
@@ -732,7 +732,7 @@ class Supervisor {
 
   /** 退出内核（契约 §4.1 冻结时序）：停全部被管对象 → 置 stopped → 回执。
    * **守卫绝不自己 stop 自己**：进程的所有者是外部（APK 容器 / Android Service），
-   * 守卫只回执「被管对象已全部停止」，由容器侧停止守卫进程（docs/components/program-android-plan.md §6）。
+   * 守卫只回执「被管对象已全部停止」，由容器侧停止守卫进程（docs/components/kernel-android-plan.md §6）。
    * 返回 { ok, sessionState } 供容器做退出握手。 */
   async shutdownAll() {
     // 幂等：已进入退出流程 → 直接回执当前态（壳可安全重试/轮询）
@@ -740,8 +740,8 @@ class Supervisor {
     this._setSessionState('stopping'); // 抑制一切自动拉起（INV-S1）
     this.logger.info('[session] 退出流程开始：停止全部被管对象…');
     this.events && this.events.append('shutdown_all', {});
-    // 1) 停 LOBOS 主实例（本守卫是被管对象的所有者，契约 §2）
-    this._stopMainLobos();
+    // 1) 停 DSH 主实例（本守卫是被管对象的所有者，契约 §2）
+    this._stopMainDsh();
     // 2) 停路由 daemon（独立进程；DaemonLifecycle.stop 串行换代语义）
     // 2026-09-12（P2-2 配套）：`stop()` 现在**会如实返回 ok:false**（进程未在超时内退出时）。
     // 此前该返回值被直接丢弃 → 孤儿 daemon 会被静默放过（与「已全部停止」的回执矛盾）。
@@ -878,21 +878,21 @@ class Supervisor {
     this._upgradeHold = false;
     this._upgradeHoldSince = null;
     // 升级完成后恢复运行 = 用户显式意图（点升级即意图）：登记后由收敛循环消费——
-    // 守护开关（guardian 默认关）不再拦截升级恢复（审计 P1-3：升级后 LOBOS 不自动拉起）。
+    // 守护开关（guardian 默认关）不再拦截升级恢复（审计 P1-3：升级后 DSH 不自动拉起）。
     if (explicit) this.intents.register('upgrade-resume');
     this.tick();
   }
 
-  // ══ C3-3b G1：main(lobos) 影子对比框架（先建，纯新增；并行不驱动）══
+  // ══ C3-3b G1：main(dsh) 影子对比框架（先建，纯新增；并行不驱动）══
   // 定位（C3-3b G1 影子框架）：旧 tick 仍是唯一驱动，
   // 本框架只按现有 tick 语义「纯计算应然下一步」并把实际迁移记入事件——绝不执行。
-  // heartbeat lobos adapter 由 observe 升级为 supervise（G3 复用同一 supervise 驱动点）；
+  // heartbeat dsh adapter 由 observe 升级为 supervise（G3 复用同一 supervise 驱动点）；
   // supervise 调 _shadowCompute() 产出 action 与旧 tick 实际 phase 迁移对比（diff 时 warn，
   // 连续 5 拍零 diff 才允许 G3 切换）。影子与 actual 对比在 tick 同步域内完成
   // （t0 快照→拍末对比），消除「双定时器异步竞态」的假 diff；心跳拍只做聚合记账/日志。
 
-  /** lobos adapter 监督单拍（C3-3b G1 observe → supervise 接管；C3-5 终态：唯一心跳驱动 main）。
-   * 每拍先调 _lobosConverge()（=原 tick 收敛段；端口再推导/hold/manualRestart/adopt令牌/假死
+  /** dsh adapter 监督单拍（C3-3b G1 observe → supervise 接管；C3-5 终态：唯一心跳驱动 main）。
+   * 每拍先调 _dshConverge()（=原 tick 收敛段；端口再推导/hold/manualRestart/adopt令牌/假死
    * 业务钩子全在收敛段内）驱动 main，再做实例聚合视图刷新与影子记账（自洽校验日志）。
    * 返回实然观测（ok 与探测同源），heartbeat 统一写入目录 lastObserved。 */
   // ── 本节已拆分 → guard/supervisor/supervise-view.js（§7.6 结构性重构）──
@@ -903,7 +903,7 @@ class Supervisor {
 
   /** 状态存储解析（唯一读写口基座）：目录 main 项，缺省回退构造期 fallback。 */
   _mStore() {
-    return this._lobosEntry() || this._mainFallbackEntry();
+    return this._dshEntry() || this._mainFallbackEntry();
   }
 
   /** 通用 entry 字段读写（变化才写）。phase/desired 走专属口（registry 事件/持久化）。
@@ -967,7 +967,7 @@ class Supervisor {
     const ph = this._legacyToEntryPhase(upper);
     const reg = this.managedObjects;
     try {
-      if (reg && typeof reg.setPhase === 'function' && this._lobosEntry() === e) {
+      if (reg && typeof reg.setPhase === 'function' && this._dshEntry() === e) {
         if (e.phase !== ph) reg.setPhase('main', ph);
       } else if (e.phase !== ph) {
         e.phase = ph;
@@ -976,10 +976,10 @@ class Supervisor {
     return this;
   }
 
-  /** 读守护开关（lobos-main.json meta.guardian；守卫内唯一 guardian 读口——与 _managedMainSpec 申报同源）。
+  /** 读守护开关（dsh-main.json meta.guardian；守卫内唯一 guardian 读口——与 _managedMainSpec 申报同源）。
    * true=运行中崩溃自动接管拉起；false=崩溃后保持停止（等用户手动启动）。 */
   _mGuardian() {
-    try { return this._readLobosMain().guardian === true; } catch { return false; }
+    try { return this._readDshMain().guardian === true; } catch { return false; }
   }
 
   /** 公开门面：main 守护开关（供 adapters/lifecycle 读取，A 平面同源）。 */
@@ -996,7 +996,7 @@ class Supervisor {
     const e = this._mStore();
     const reg = this.managedObjects;
     try {
-      if (reg && typeof reg.update === 'function' && this._lobosEntry() === e) {
+      if (reg && typeof reg.update === 'function' && this._dshEntry() === e) {
         if (e.desired !== want) reg.update('main', { desired: want });
       } else if (e.desired !== want) {
         e.desired = want;
@@ -1027,13 +1027,13 @@ class Supervisor {
   get missingNotified() { return this._mProcField('missingNotified') === true; }
   set missingNotified(v) { this._mProcField('missingNotified', v === true); }
 
-  /** 概念清分迁移（2026-09-06）：instances.json 若仍含历史 main 记录 → 元数据迁入 lobos-main.json 并剔除。 */
+  /** 概念清分迁移（2026-09-06）：instances.json 若仍含历史 main 记录 → 元数据迁入 dsh-main.json 并剔除。 */
   _migrateMainRecord() {
     // Android 内核：沙箱实例域已删除；main 记录不再寄存在 instances.json，无需迁移。
   }
 
 
-  /** 组装 LOBOS 启动命令（原生专属，交给 assembler）。 */
+  /** 组装 DSH 启动命令（原生专属，交给 assembler）。 */
   // ── 本节已拆分 → guard/supervisor/main-process.js（§7.6 结构性重构）──
 
 }

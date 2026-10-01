@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * supervisor HTTP API 客户端（同源 fetch，生产由 lobos-supervisor :3100 托管）
+ * supervisor HTTP API 客户端（同源 fetch，生产由 dsh-supervisor :3100 托管）
  * ============================================================================
  * - 唯一允许直接 fetch 的模块（页面通过 services 层间接使用）
  * - GET 纯读；写操作方法名后缀 Post/Action 显式标注
@@ -104,9 +104,9 @@ export const supervisorApi = {
   lifecycleStop: (id: LifecycleModuleId) => post<GenericOk & { ok?: boolean }>("/lifecycle/" + id + "/stop"),
   // 注：GET /lifecycle/{id} 保留为后端 REST 面（单模块查询，供脚本/curl）；UI 未使用故不设 client 方法。
 
-  // ── native LOBOS ──
-  // LOBOS 访问入口：内核拼带令牌的回环直连 URL（令牌仅回环下发，非回环 403；未捕获令牌 409）
-  lobosAccess: () => get<GenericOk & { url?: string }>("/lobos/access"),
+  // ── native DSH ──
+  // DSH 访问入口：内核拼带令牌的回环直连 URL（令牌仅回环下发，非回环 403；未捕获令牌 409）
+  dshAccess: () => get<GenericOk & { url?: string }>("/dsh/access"),
   // 后端返回 { ok, ...versionInfo() }（含 updateAvailable/latest/installed）；此前误标 GenericOk → 契约漏字段。
   nativeCheckUpdate: () => post<GenericOk & { updateAvailable?: boolean; latest?: string; installed?: string | null }>("/native/check-update"),
   nativeInstall: () => post<GenericOk>("/native/install"),
@@ -172,8 +172,8 @@ export const supervisorApi = {
   guardVersion: () => get<GuardVersion>("/guard/version"),
   /** 内核版本检查（源码形态走 git fetch 比对；安装由容器 OTA 执行，内核无写端点）。 */
   guardVersionCheck: () => post<GuardVersion & { ok?: boolean }>("/guard/version/check"),
-  // 更新日志（A4 断点修复）：/changelog 返回 text/plain（LOBOS 版本信息 + 升级指引 + Releases 链接）。
-  lobosChangelog: () => getText("/changelog"),
+  // 更新日志（A4 断点修复）：/changelog 返回 text/plain（DSH 版本信息 + 升级指引 + Releases 链接）。
+  dshChangelog: () => getText("/changelog"),
   // 管家自身更新日志：本地 CHANGELOG.md 原文。
   guardChangelog: () => getText("/guard/changelog"),
   envStatus: () => get<EnvStatus>("/env/status"),

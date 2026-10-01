@@ -55,7 +55,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   // 现改为**构造期依赖注入**（opts.npmBin），测试在结构上不可能触碰真实 npm。
   const mgr = new NativeManager({
     config: {
-      packageName: '@agent-ai/lobos',
+      packageName: '@deepseek-ai/dsh',
       uninstallTimeoutMs: 800, // ← 可注入：真实 15min 无法在测试里等待
       stateDir,
     },

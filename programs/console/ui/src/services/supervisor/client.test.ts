@@ -19,9 +19,9 @@ afterEach(() => {
 
 describe("supervisorApi http 客户端", () => {
   it("2xx 返回解析后的 JSON", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, { ok: true, lobosPid: 42 })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, { ok: true, dshPid: 42 })));
     const r = await supervisorApi.status();
-    expect(r).toEqual({ ok: true, lobosPid: 42 });
+    expect(r).toEqual({ ok: true, dshPid: 42 });
   });
 
   it("非 2xx 时优先抛后端 {error} 文案", async () => {

@@ -20,8 +20,8 @@
   var PROTOCOL_VERSION = 1;
   var REQUEST = 'lobos:panel-update-request';
 
-  function programFrame() {
-    return document.getElementById('program');
+  function kernelFrame() {
+    return document.getElementById('kernel');
   }
 
   // 面板 → 宿主：转发更新请求给原生层。
@@ -30,7 +30,7 @@
     if (!d || typeof d !== 'object') return;
     if (d.type !== REQUEST) return;
     // 仅接受来自内核面板 iframe 的消息（同源，宿主只嵌一个帧）。
-    var f = programFrame();
+    var f = kernelFrame();
     if (f && e.source && e.source !== f.contentWindow) return;
     try {
       if (window.LobosNative && typeof window.LobosNative.onRequest === 'function') {
@@ -48,7 +48,7 @@
   window.lobosDeliverResult = function (json) {
     try {
       var msg = typeof json === 'string' ? JSON.parse(json) : json;
-      var f = programFrame();
+      var f = kernelFrame();
       if (f && f.contentWindow) f.contentWindow.postMessage(msg, '*');
     } catch (err) { /* 忽略解析错误 */ }
   };

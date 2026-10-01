@@ -1,10 +1,10 @@
 {
-  "$comment": "F（产品声明）的**内核侧默认值 + schema**，不是实例。某个产品实际用的那份声明住产品侧：<状态根>/agents/<id>.json（首次缺实例时由 platform/agent.js 用本文件播种一次）。为什么实例不住内核：包名/入口/profile/数据目录/启动参数是**产品契约**，改它等于改产品行为，住内核就意味着每调一次都要发内核 OTA。npmPackage/homeDirName/protectedPackages 是**被管控载荷**自己定下的外部坐标（数据目录与包名由它写死），改名等于让面板去装一个不存在的包、找一个不存在的目录；产品标识（id/name）才是我们这一侧的说法。",
+  "$comment": "F（产品声明）的**内核侧默认值 + schema**，不是实例。某个产品实际用的那份声明住产品侧：<状态根>/agents/<id>.json（首次缺实例时由 platform/agent.js 用本文件播种一次）。为什么实例不住内核：包名/入口/profile/数据目录/启动参数是**产品契约**，改它等于改产品行为，住内核就意味着每调一次都要发内核 OTA。",
   "schema": 1,
   "products": {
-    "lobos": {
-      "id": "lobos",
-      "name": "Lob OS 智能体",
+    "dsh": {
+      "id": "dsh",
+      "name": "DeepSeek Harness",
       "npmPackage": "@deepseek-ai/dsh",
       "entry": "lib/bin.js",
       "profileName": "web",

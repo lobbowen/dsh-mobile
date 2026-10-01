@@ -85,7 +85,7 @@ class ConvergeView {
         return { action: 'none', reason: 'starting_wait' };
       }
       case 'RUNNING': {
-        // adopt 令牌重建/假死识别是守卫业务钩子（adapter 外，G3 由 _lobosConverge 保留）——纯决策不含
+        // adopt 令牌重建/假死识别是守卫业务钩子（adapter 外，G3 由 _dshConverge 保留）——纯决策不含
         if (s.adoptedPidSet && !s.adoptedAlive) return this._decideCrashRestart('adopted_exit');
         if (s.childPresent && !s.childAlive) return this._decideCrashRestart('child_exit');
         return { action: 'none', reason: 'running_steady' };
@@ -175,14 +175,14 @@ class ConvergeView {
       };
       this._shadowLast = rec;
       if (diff && this.logger && this.logger.warn) {
-        this.logger.warn('[shadow] lobos 影子 vs 实际不一致: shadow=' + rec.shadow + ' actual=' + rec.actual + '（phase ' + rec.t0phase + '→' + rec.phase + '）');
+        this.logger.warn('[shadow] dsh 影子 vs 实际不一致: shadow=' + rec.shadow + ' actual=' + rec.actual + '（phase ' + rec.t0phase + '→' + rec.phase + '）');
       }
     } catch (e) {
       this.logger && this.logger.warn && this.logger.warn('[shadow] 拍末记账异常: ' + ((e && e.message) || e));
     }
   }
 
-  /** 心跳拍聚合（lobos adapter supervise 调用）：有新 tick 记录才记账/发事件；无则不刷。
+  /** 心跳拍聚合（dsh adapter supervise 调用）：有新 tick 记录才记账/发事件；无则不刷。
    * 连续 5 拍零 diff 记 info（G3 切换门槛观测）。 */
   _shadowHeartbeatBeat() {
     try {
@@ -209,9 +209,9 @@ class ConvergeView {
         consistentBeats: this._shadowConsistentBeats,
         diffBeats: this._shadowDiffBeats,
       };
-      if (this.events && this.events.append) { try { this.events.append('shadow_lobos_action', ev); } catch {} }
+      if (this.events && this.events.append) { try { this.events.append('shadow_dsh_action', ev); } catch {} }
       if (!rec.diff && this._shadowConsistentBeats > 0 && this._shadowConsistentBeats % 5 === 0 && this.logger && this.logger.info) {
-        this.logger.info('[shadow] lobos 影子与实际迁移连续 ' + this._shadowConsistentBeats + ' 拍零 diff——满足 G3 切换门槛');
+        this.logger.info('[shadow] dsh 影子与实际迁移连续 ' + this._shadowConsistentBeats + ' 拍零 diff——满足 G3 切换门槛');
       }
     } catch (e) {
       this.logger && this.logger.warn && this.logger.warn('[shadow] 心跳记账异常: ' + ((e && e.message) || e));
@@ -221,7 +221,7 @@ class ConvergeView {
   // ---- 主循环收敛段（C3-3b G3 起由唯一心跳驱动；外部操作仍可即时触发）----
   // 单一状态机：STOPPED/STARTING/RUNNING/RESTARTING/BACKOFF。
   // 系统服务管理器托管已废弃——main 由守卫 spawn/观测统一管理。
-  async _lobosConverge() {
+  async _dshConverge() {
     if (this._ticking || this._stopping) return;
     // INV-S1（契约 §3.3）：会话退出中/已退出 → 抑制一切自动拉起，不再驱动 main 收敛。
     // 这是「退出管家」不再依赖翻 desired 防重拉的结构保证（停止由会话态而非意图态表达）。
@@ -248,7 +248,7 @@ class ConvergeView {
       this._mSetLastProbeHttpOk(healthOk);
       // C3-3b G1 影子：拍起点快照（探测后、收敛前——与旧 tick 决策同输入同源）
       t0 = this._mainStateSnapshot();
-      // C3-3b G5：lobos 健康面改由 _syncLobosLifecycleView 从目录 main entry 合成（不再经观测镜像喂入）
+      // C3-3b G5：dsh 健康面改由 _syncDshLifecycleView 从目录 main entry 合成（不再经观测镜像喂入）
       // 系统服务管理器托管已废弃（托管死分支整体移除）：main 由守卫 spawn/adopt 统一管理。
       const host = this.config.targetHost;
       const port = this.config.targetPort;
@@ -257,12 +257,12 @@ class ConvergeView {
       const adoptedAlive = this._mAdoptPid() !== null && pidlook.isAlive(this._mAdoptPid());
       const targetAlive = childAlive || adoptedAlive;
 
-      // 原生 LOBOS 端口运行时再推导兜底（2026-09）：期望运行/观测中，配置端口无监听但受管 LOBOS
+      // 原生 DSH 端口运行时再推导兜底（2026-09）：期望运行/观测中，配置端口无监听但受管 DSH
       // 进程在跑（用户改了端口等）→ 从进程真实 --port 更正（30s 节流，防 churn）。
       if (!portUp && this._mDesired() !== 'stopped' && (childAlive || adoptedAlive || this._mObservedOnly())) {
         if (!this._lastMainPortRederive || Date.now() - this._lastMainPortRederive > 30000) {
           this._lastMainPortRederive = Date.now();
-          const found = this._findManagedLobosPort();
+          const found = this._findManagedDshPort();
           if (found && found.port && found.port !== this.config.targetPort) {
             this._applyMainPort(found.port, found.pid);
             // 更正后本 tick 重探一次，让状态机立即看到新端口在线
@@ -276,7 +276,7 @@ class ConvergeView {
       // stopProcess 会因「无单元可停、无 adoptedPid 可杀」而静默无效。
       // ── 期望状态调和优先于「进程守护」开关（desired 是正交轴）──
       // 显式 start/stop 是用户意图，必须永远生效：守护开关只约束「崩溃后自动拉起」，
-      // 绝不约束用户主动点「启动 LOBOS / 停止 LOBOS」。此分支置于守护短路之前。
+      // 绝不约束用户主动点「启动 DSH / 停止 DSH」。此分支置于守护短路之前。
       if (this._mDesired() === 'stopped') {
         const managedAlive = childAlive || (adoptedAlive && !this._mObservedOnly());
         if (managedAlive) {
@@ -290,7 +290,7 @@ class ConvergeView {
           this._adoptObserved();
         } else {
           if (this._mAdoptPid() !== null && !adoptedAlive) {
-            this.events.append('lobos_exited', { code: null, signal: null, adopted: true, observed: true });
+            this.events.append('dsh_exited', { code: null, signal: null, adopted: true, observed: true });
             this._mSetAdoptPid(null);
             this._mSetObservedOnly(false);
           }
@@ -335,7 +335,7 @@ class ConvergeView {
       switch (this._mPhase()) {
         case 'STOPPED': {
           if (portUp) {
-            // 接管既有实例（校验 LOBOS cmdline；spawn 托管）
+            // 接管既有实例（校验 DSH cmdline；spawn 托管）
             this._adopt();
             this._mSetSpawnBlockedUntil(null);
             this._mSetMissingNotified(false);
@@ -362,7 +362,7 @@ class ConvergeView {
           if (portUp && healthOk) this._enterRunning();
           else if (Date.now() > this._mStartDeadline()) {
             // start_timeout 分层取证（真机 2026-09-23：SELinux 禁 /proc/net/tcp 反查，
-            // 健康的 lobos 被误判超时杀循环）：不分层上屏就无法区分
+            // 健康的 dsh 被误判超时杀循环）：不分层上屏就无法区分
             // 「没监听 / pid 不可见 / HTTP 不健康」三种死法。
             this.logger.warn('start_timeout probe detail: listening=' + probeRes.listening
               + ' pid=' + probeRes.pid + ' httpOk=' + probeRes.httpOk + ' httpStatus=' + probeRes.httpStatus);
@@ -371,14 +371,14 @@ class ConvergeView {
           break;
         }
         case 'RUNNING': {
-          // adopt 令牌接管（2026-09 第四轮）：被接管主 LOBOS 令牌不可达 → 观察窗后受控重建一次
+          // adopt 令牌接管（2026-09 第四轮）：被接管主 DSH 令牌不可达 → 观察窗后受控重建一次
           try { this._maybeReclaimAdoptToken(); } catch {}
           // spawn：只按进程存活判断，进程死了才重启，不因端口探测失败而误判
           // 守护语义（2026-09 收敛定稿，与沙箱对齐）：崩溃是否自动接管拉起看守护开关 guardian——
-          // 开=自动拉起（退避自愈）；关=回到停止态（LOBOS 是什么状态就什么状态，等用户手动启动，不做过度设计）。
+          // 开=自动拉起（退避自愈）；关=回到停止态（DSH 是什么状态就什么状态，等用户手动启动，不做过度设计）。
           const guarded = this._mGuardian();
           if (this._mAdoptPid() !== null && adoptedAlive === false) {
-            this.events.append('lobos_exited', { code: null, signal: null, phase: this._mPhase(), adopted: true });
+            this.events.append('dsh_exited', { code: null, signal: null, phase: this._mPhase(), adopted: true });
             this._mSetAdoptPid(null);
             if (guarded) this._beginRestart('adopted_exit', { countCrash: true });
             else { this._crashHalted = true; this.events.append('guardian_off_exit', { reason: 'adopted_exit 未守护，保持停止' }); this._mSetPhase('STOPPED'); }
@@ -428,16 +428,16 @@ class ConvergeView {
       // C3-3b G1 影子：拍末记账（actual vs shadow；100% 执行——不受 tick 内提前 return 影响）
       try { this._shadowTickNote(t0); } catch (e) { this.logger.warn && this.logger.warn('shadow note: ' + (e && e.message)); }
       // 统一生命周期视图同步（归一化架构）：finally 100% 执行——不受 tick 内提前 return 影响，
-      // 守卫每次调和后把自身（LOBOS）观测状态镜像到 lifecycleManager。
-      try { this._syncLobosLifecycleView(); } catch (e) { this.logger.warn && this.logger.warn('sync: ' + (e && e.message)); }
+      // 守卫每次调和后把自身（DSH）观测状态镜像到 lifecycleManager。
+      try { this._syncDshLifecycleView(); } catch (e) { this.logger.warn && this.logger.warn('sync: ' + (e && e.message)); }
     }
   }
 
-  /** tick 保留为 _lobosConverge 别名（C3-3b G3）：外部收敛触发点（start 首拍 / setDesired /
+  /** tick 保留为 _dshConverge 别名（C3-3b G3）：外部收敛触发点（start 首拍 / setDesired /
    * requestRestart / _exitUpgradeHold）调用；shadow 模式下定时器也驱动此别名。
-   * on 模式下 main 每拍收敛由 heartbeat 的 lobos supervise 调用 _lobosConverge（无独立 tick 定时器）。 */
+   * on 模式下 main 每拍收敛由 heartbeat 的 dsh supervise 调用 _dshConverge（无独立 tick 定时器）。 */
   async tick() {
-    return this._lobosConverge();
+    return this._dshConverge();
   }
 
 }

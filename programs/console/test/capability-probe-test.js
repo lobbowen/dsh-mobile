@@ -30,7 +30,7 @@ const check = (n, c, x) => {
   console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : ''));
 };
 
-const CTX = { nodeBin: '/fake/bin/node', packageDir: '/fake/lib/node_modules/@agent-ai/lobos' };
+const CTX = { nodeBin: '/fake/bin/node', packageDir: '/fake/lib/node_modules/@deepseek-ai/dsh' };
 
 /** 造一个假执行器：按脚本内容决定结局，并记录每次调用参数。 */
 function fakeRun(scriptOutcome) {
@@ -99,7 +99,7 @@ const isExcused = (u) => !!(u.verify && (u.verify.notApplicable || u.verify.defe
   check('A11 判据写法漂移（node 空白串）-> null 而非静默 true', drift.ok === null && /漂移/.test(drift.detail), drift.detail);
 }
 
-// ── B 组：调用形态（探针必须照抄 lobos 的真实启动形态）──
+// ── B 组：调用形态（探针必须照抄 dsh 的真实启动形态）──
 {
   const t = unit({ node: NODE_SCRIPT });
   const { run, calls } = fakeRun(() => okPass());
@@ -110,7 +110,7 @@ const isExcused = (u) => !!(u.verify && (u.verify.notApplicable || u.verify.defe
   check('B3 恒带 --expose-internals 且在 -e 之前（与 main-process._androidLaunchReady 同形）',
     c.args && c.args[0] === '--expose-internals' && c.args[1] === '-e', JSON.stringify(c.args && c.args.slice(0, 2)));
   check('B4 交给子进程的正是表里那段判据脚本', c.args && c.args[2] === NODE_SCRIPT);
-  check('B5 cwd = Agent 包目录（require 解析域与 lobos 一致）', c.opts && c.opts.cwd === CTX.packageDir, c.opts && c.opts.cwd);
+  check('B5 cwd = Agent 包目录（require 解析域与 dsh 一致）', c.opts && c.opts.cwd === CTX.packageDir, c.opts && c.opts.cwd);
   check('B6 默认有界超时（探针不得无限等）', c.opts && c.opts.timeoutMs === PROBE_TIMEOUT_MS && PROBE_TIMEOUT_MS > 0, String(c.opts && c.opts.timeoutMs));
   const overridden = fakeRun(() => okPass());
   probeUnit(t, CTX, Object.assign({}, overridden, { timeoutMs: 1234 }));

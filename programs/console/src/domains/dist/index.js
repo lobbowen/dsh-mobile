@@ -2,7 +2,7 @@
 
 // 统一的「包发布/安装/更新」领域逻辑。
 //
-// 核心抽象：凡是从「外部发布通道」获取并安装软件的地方（被管控 Agent 自升级、
+// 核心抽象：凡是从「外部发布通道」获取并安装软件的地方（DeepSeek Harness 自升级、
 // 反向代理子应用），都共用同一套：
 // - 全局 npm 镜像源配置（一个来源，自动适配国内网络/手动固定）
 // - 版本检查（npm registry + GitHub Releases，按 channel 抽象）
@@ -30,7 +30,7 @@ const registryContract = require('../../platform/registry-contract');
 /** 壳投放契约的重载 TTL（ms）。见 DistributionManager._reloadContractIfStale。 */
 const CONTRACT_TTL_MS = 60 * 1000;
 // 原「服务管理器抽象」（platform/os/service：systemd/launchd/windows-service Provider）
-// 已随 PC 桌面壳删除：安卓内核没有系统服务管理器，原生载荷由内核直接 spawn/adopt，
+// 已随 PC 桌面壳删除：安卓内核没有系统服务管理器，原生 DSH 由内核直接 spawn/adopt，
 // 健康验证只看**端口 + 稳定期**（见 waitPortHealthy）。
 
 // 合法 semver（含 prerelease/build），杜绝脏版本号进比较/安装链路。
@@ -92,7 +92,7 @@ function semverCompare(a, b) {
 }
 
 /** 「设备会装到哪个版本」的唯一判据：dist-tags 值全集 ∪ versions 键全集里的语义最高版。
- * 刻意不是 latest tag —— 实测被管控 Agent 那个包的 latest 落后于 next（0.1.5-rc.3 vs 0.1.7-rc.2），
+ * 刻意不是 latest tag —— 实测 @deepseek-ai/dsh 的 latest 落后于 next（0.1.5-rc.3 vs 0.1.7-rc.2），
  * 新版本发在哪个 tag 上游随时会改，取全集才不受它影响。
  * 原生件供给门禁与此共用这一处判据，不允许出现第二份实现。 */
 function pickHighestVersion(tagValues, versionKeys) {
@@ -112,7 +112,7 @@ function pickHighestVersion(tagValues, versionKeys) {
  * · `platform/config.js` `registries`
  * 任何一处增删都会漂移，且实测已造成**两侧选源不一致**（探测方法不同）。
  *
- * 现目录归壳（经 `<数据目录>/supervisor/registry.json`（数据目录取自描述符 homeDirName）的 `catalog` 投放），
+ * 现目录归壳（经 `~/.dsh/supervisor/registry.json` 的 `catalog` 投放），
  * 内核只需保证「**契约不可用时也能跑**」（不变量 C2）——
  * 故保留 2 条覆盖两种基本情形：能上网（官方）+ 中国网络（npmmirror）。
  *
@@ -215,7 +215,7 @@ class DistributionManager {
    *
    * 2026-09-12（P2 修复）：**必须保留壳写入的 v2 字段**，只覆盖本内核拥有的三项。
    *
-   * 背景：该文件（`<数据目录>/supervisor/registry.json`）的**所有者是桌面壳**
+   * 背景：该文件（`~/.dsh/supervisor/registry.json`）的**所有者是桌面壳**
    * （`platform/registry-contract.js` 明确声明；理由：装壳时机器上还没有内核）。
    * 壳写入 v2 格式：`{ schema, writtenBy, catalog, probe, selected, mode, origins, manualOrigin }`；
    * 其中 `catalog`（全集）/`probe`（探测规格）/`selected`（选择结果）是**壳的产物**。
@@ -441,7 +441,7 @@ class DistributionManager {
     if (!origin) return null; // 全部镜像不可达：明确失败（checkUpdate 据此报错而非误报最新）
     try {
       // 完整版本检测：拉包完整元数据（dist-tags + versions），取最高版本——
-      // 覆盖 latest/alpha/rc/next 全 tag（上游新版本可能发布在 alpha 而非 latest）
+      // 覆盖 latest/alpha/rc/next 全 tag（DeepSeek 新版本可能发布在 alpha 而非 latest）
       const res = await fetch(origin.replace(/\/+$/, '') + '/' + encodeURIComponent(pkg), { signal: AbortSignal.timeout(10000) });
       if (!res.ok) return null;
       const j = await res.json();
@@ -462,7 +462,7 @@ class DistributionManager {
   async fetchGithubLatest(owner, repo) {
     if (!owner || !repo) return null;
     try {
-      const res = await fetch('https://api.github.com/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/releases/latest', { signal: AbortSignal.timeout(10000), headers: { 'User-Agent': 'lobos-supervisor' } });
+      const res = await fetch('https://api.github.com/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo) + '/releases/latest', { signal: AbortSignal.timeout(10000), headers: { 'User-Agent': 'dsh-supervisor' } });
       if (!res.ok) return null;
       const j = await res.json();
       const tag = (j && typeof j.tag_name === 'string') ? j.tag_name : (j && typeof j.name === 'string' ? j.name : null);
@@ -571,8 +571,8 @@ class DistributionManager {
   }
 
   /* ═══════ 健康验证器（端口 + 稳定期）═══════
-   * 收敛原生升级后的启动验证：载荷进程可能先监听端口、随后因插件兼容
-   * 崩溃（如其某个插件引用了被移除的 API），只探测端口会误判成功——
+   * 收敛原生升级后的启动验证：DSH 进程可能先监听端口、随后因插件兼容
+   * 崩溃（如 dsh-mos 引用被移除的 API），只探测端口会误判成功——
    * 故端口就绪后仍需稳定期复检，防"延迟崩溃"。
    * @param {object} opts
    * - host: 默认 127.0.0.1

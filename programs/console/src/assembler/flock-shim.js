@@ -1,9 +1,9 @@
 'use strict';
 
-// 安卓容器 flock 垫片：@agent-ai/node-addon-system 的 flock 入口 → 原生 .so 桥。
+// 安卓容器 flock 垫片：@deepseek-ai/node-addon-system 的 flock 入口 → 原生 .so 桥。
 //
-// 根因（2026-09-23 真机定位）：lobos 会话持久化（lobos-session-persistence-jsonl 的
-// SessionWriteLease）硬依赖 `@agent-ai/node-addon-system/flock` 的 tryLockExclusive
+// 根因（2026-09-23 真机定位）：dsh 会话持久化（dsh-session-persistence-jsonl 的
+// SessionWriteLease）硬依赖 `@deepseek-ai/node-addon-system/flock` 的 tryLockExclusive
 // （真正的 flock(2) 排他锁，进程死亡由内核自动释放——O_EXCL 锁文件模拟崩溃后残留，
 // 属砍能力，不可用）。该包只发 linux(glibc/musl)/darwin 预编译件；设备
 // process.platform === 'android' ⇒ loadBinding 抛 ERR_FLOCK_UNSUPPORTED_PLATFORM，
@@ -19,13 +19,13 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const PKG_NAME = '@agent-ai/node-addon-system';
-const SHIM_MARKER = 'lobos-console-panel:flock-native-shim:v1';
-const ORIG_BASENAME = 'flock.lobos-orig.js';
+const PKG_NAME = '@deepseek-ai/node-addon-system';
+const SHIM_MARKER = 'dsh-android-kernel:flock-native-shim:v1';
+const ORIG_BASENAME = 'flock.dsh-orig.js';
 const TARGET_REL = path.join('lib', 'flock.js');
 
 function shimSource() {
-  return `/* ${SHIM_MARKER} —— 守卫投放；勿手改（重装 lobos 后会被重新覆盖）。
+  return `/* ${SHIM_MARKER} —— 守卫投放；勿手改（重装 dsh 后会被重新覆盖）。
    vendor 原始 flock.js 备份于同目录 ${ORIG_BASENAME}：
    LOBOS_FLOCK_NATIVE（APK jniLibs 里 NDK 现编的 liblobosflock.so）可加载时走真
    flock(2)，否则动态 import 原始实现逐字委派 —— 原生支持的平台语义不变。 */
@@ -70,13 +70,13 @@ export async function tryLockExclusive(fd) {
 `;
 }
 
-/** 在安装树里定位 node-addon-system 包目录：扁平 @agent-ai 处优先，
- *  @agent-ai/* 依赖下嵌套副本兜底（npm 版本冲突时的压平行为）。可多份。 */
+/** 在安装树里定位 node-addon-system 包目录：扁平 @deepseek-ai 处优先，
+ *  @deepseek-ai/* 依赖下嵌套副本兜底（npm 版本冲突时的压平行为）。可多份。 */
 function locatePackages(root) {
   const out = [];
   const direct = path.join(root, PKG_NAME);
   try { if (fs.statSync(path.join(direct, 'package.json')).isFile()) out.push(direct); } catch {}
-  const scopeDir = path.join(root, '@agent-ai');
+  const scopeDir = path.join(root, '@deepseek-ai');
   try {
     for (const e of fs.readdirSync(scopeDir, { withFileTypes: true })) {
       if (!e.isDirectory() || e.name === 'node-addon-system') continue;

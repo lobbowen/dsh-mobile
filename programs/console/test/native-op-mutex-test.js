@@ -2,7 +2,7 @@
 'use strict';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 原生 LOBOS 管理器的**操作互斥**（第九轮，2026-09-12）
+// 原生 DSH 管理器的**操作互斥**（第九轮，2026-09-12）
 //
 // ## 缺陷
 //
@@ -62,7 +62,7 @@ check('K-c uninstall 检查 busy()（升级中拒绝）', /if \(this\.busy\(\)\)
 {
   const mk = () => {
     const m = Object.create(NativeManager.prototype);
-    m.config = { packageName: '@agent-ai/lobos' };
+    m.config = { packageName: '@deepseek-ai/dsh' };
     m.logger = { warn() {}, info() {}, debug() {}, error() {} };
     m.tasks = null;      // 关键：**不注入 tasks** —— 正是缺陷会暴露的场景
     m.events = null;

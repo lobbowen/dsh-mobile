@@ -2,7 +2,7 @@
 'use strict';
 
 // 核心模块离线测试：事件日志轮转/增量读取 + API 安全边界（Host/Origin 校验、CORS 缺失）
-// + 控制端点结果透传。全部针对内存/临时对象，不触碰真实 LOBOS 与网络外部目标。
+// + 控制端点结果透传。全部针对内存/临时对象，不触碰真实 DSH 与网络外部目标。
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -10,7 +10,7 @@ const path = require('node:path');
 const http = require('node:http');
 
 const ROOT = path.join(__dirname, '..');
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'lobos-core-test-'));
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-core-test-'));
 
 // ---- Logger：级别过滤 + 轮转 + 行缓冲 ----
 function testLogger() {
@@ -75,10 +75,10 @@ function makeFakeSup() {
   return {
     config: { apiPort: 0 }, // listen 时由测试指定临时端口；Origin 校验用真实端口
     events: { seq: 7, readSince: () => [{ seq: 7, ts: '', type: 'x', data: null }] },
-    // R3 C3-5a：main 启停唯一入口 /lifecycle/lobos/{start|stop|restart} —— 路由需 lifecycleManager 注册 lobos
+    // R3 C3-5a：main 启停唯一入口 /lifecycle/dsh/{start|stop|restart} —— 路由需 lifecycleManager 注册 dsh
     lifecycleManager: {
-      get: (id) => (id === 'lobos' ? { id: 'lobos', snapshot: () => ({}) } : null),
-      // main 启停收敛（2026-09）：/lifecycle/lobos/{start|stop|restart} 经 lm 统一入口；
+      get: (id) => (id === 'dsh' ? { id: 'dsh', snapshot: () => ({}) } : null),
+      // main 启停收敛（2026-09）：/lifecycle/dsh/{start|stop|restart} 经 lm 统一入口；
       // desired=stopped 时 restart 拒绝（对齐真实语义：stopped 不可重启，需先 start）
       start: async (id) => ({ ok: true, id }),
       stop: async (id) => ({ ok: true, id }),
@@ -139,13 +139,13 @@ async function testApiSecurity() {
   // CORS：不再对任意来源开放
   check('响应不含 Access-Control-Allow-Origin:*', !r.headers['access-control-allow-origin'], String(r.headers['access-control-allow-origin']));
 
-  // Origin 校验：恶意网页的写请求被拒（R3 C3-5a：统一 /lifecycle/lobos/restart 入口同样门禁）
-  r = await req(port, 'POST', '/lifecycle/lobos/restart', { Origin: 'http://evil.example.com' });
+  // Origin 校验：恶意网页的写请求被拒（R3 C3-5a：统一 /lifecycle/dsh/restart 入口同样门禁）
+  r = await req(port, 'POST', '/lifecycle/dsh/restart', { Origin: 'http://evil.example.com' });
   check('跨站 Origin 写请求被拒 403', r.code === 403, r.code + ' ' + r.body);
-  r = await req(port, 'POST', '/lifecycle/lobos/restart', {});
+  r = await req(port, 'POST', '/lifecycle/dsh/restart', {});
   check('无 Origin（CLI/curl）放行', r.code === 409, r.code + ' ' + r.body);
   check('拒绝原因透传给客户端', r.body.includes('desired=stopped'), r.body);
-  r = await req(port, 'POST', '/lifecycle/lobos/restart', { Origin: 'http://127.0.0.1:' + port });
+  r = await req(port, 'POST', '/lifecycle/dsh/restart', { Origin: 'http://127.0.0.1:' + port });
   check('本机面板 Origin 放行（409 为业务拒绝）', r.code === 409, r.code);
   // 旧 /start|/stop|/restart 路由已删除（R3 C3-5a）
   r = await req(port, 'POST', '/restart', {});
@@ -154,7 +154,7 @@ async function testApiSecurity() {
   // CSP 与静态资源
   r = await req(port, 'GET', '/', {});
   // UI 是**构建产物**（ui/ 经 `npm run build` 落入 ui/dist，或由容器经 OTA 注入 $LOBOS_UI_DIR）。
-  // 本测试不强制依赖它存在：安卓内核的面板属后续阶段（docs/components/program-android-plan.md §10），
+  // 本测试不强制依赖它存在：安卓内核的面板属后续阶段（docs/components/kernel-android-plan.md §10），
   // CSP/nosniff 仅在「服务已构建 UI 的静态分支」时下发；UI 缺失属环境缺失而非内核逻辑回归 —— 跳过。
   // 若直接跑 `npm test` 而未先构建 UI，会得到 503「UI not built」，
   // 而旧断言只打印 `undefined`，让人误以为是 CSP 逻辑坏了。此处给出**可操作**的失败信息。

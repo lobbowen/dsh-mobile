@@ -1,6 +1,6 @@
 {
   "id": "console",
-  "name": "Lob OS 控制面板",
+  "name": "dsh-supervisor · 控制面板",
   "role": "system",
   "version": "0.1.0",
   "runtime": {
